@@ -1,9 +1,11 @@
+import { GitHubItemKey } from "@usine/core/item";
+import { StepOutputContext, StepOutputStore } from "../step-outputs/store.ts";
 import { ChangeBus } from "@usine/core/changes";
 import { type Attempt, type AttemptId, pendingProviderRetry } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { RunId } from "@usine/core/run";
-import type { StepResult } from "@usine/core/step/result";
+import type { StepCompletion } from "@usine/core/step/result";
 import type { WorkerName } from "@usine/core/worker";
 import {
   Cause,
@@ -18,6 +20,7 @@ import {
   Ref,
   Result,
   Schedule,
+  Schema,
 } from "effect";
 import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import { StepExecutor, type WorkerLease } from "../step-executor.ts";
@@ -92,7 +95,7 @@ type OpenAttempt =
   | {
       readonly _tag: "Finished";
       readonly attempt: Attempt;
-      readonly result: Result.Result<StepResult, AttemptFailure>;
+      readonly result: Result.Result<StepCompletion, AttemptFailure>;
     }
   | { readonly _tag: "Interrupted"; readonly attempt: Attempt };
 
@@ -166,6 +169,7 @@ export class RunDriver extends Context.Service<
         ]);
       const store = yield* RunStore;
       const executor = yield* StepExecutor;
+      const outputs = yield* StepOutputStore;
       const admission = yield* AttemptAdmission;
       const condition = yield* TriggerCondition;
       const items = yield* ItemProjectionWriter;
@@ -420,6 +424,31 @@ export class RunDriver extends Context.Service<
         return { lease, open: Option.isSome(reattached) ? openAttempt(runId) : found };
       });
 
+      const finishCompletion = Effect.fn("RunDriver.finishCompletion")(function* (
+        attempt: Attempt,
+        completion: Result.Result<StepCompletion, AttemptFailure>,
+        submission: Submission,
+      ) {
+        yield* Effect.annotateCurrentSpan({ attemptId: attempt.id, runId: attempt.runId });
+        if (Result.isSuccess(completion) && completion.success.outputs.length > 0) {
+          const item = Schema.decodeOption(GitHubItemKey)(submission.itemKey);
+          yield* outputs.write(
+            StepOutputContext.make({
+              attemptId: attempt.id,
+              runId: attempt.runId,
+              stepName: attempt.stepName,
+              repository: submission.repository,
+              itemNumber: Option.map(item, (key) => key[2]),
+            }),
+            completion.success.outputs,
+          );
+        }
+        return yield* store.finishAttempt(
+          attempt,
+          Result.map(completion, (value) => value.result),
+        );
+      });
+
       /**
        * Runs one Attempt of the Run of `submission` on the reserved Worker and returns the
        * resulting decision tag. `current` reads the open Attempt once the slot is held.
@@ -447,9 +476,11 @@ export class RunDriver extends Context.Service<
           }
         }
         if (Option.isSome(open) && open.value._tag === "Finished") {
-          const finished = yield* store
-            .finishAttempt(open.value.attempt, open.value.result)
-            .pipe(retryingStore(runId, "finish the attempt"));
+          const finished = yield* finishCompletion(
+            open.value.attempt,
+            open.value.result,
+            submission,
+          ).pipe(retryingStore(runId, "finish the attempt"));
           return finished._tag;
         }
         const started = yield* store
@@ -537,9 +568,11 @@ export class RunDriver extends Context.Service<
               worker,
             }),
           );
-        const finished = yield* store
-          .finishAttempt(started.execution.attempt, result)
-          .pipe(retryingStore(runId, "finish the attempt"));
+        const finished = yield* finishCompletion(
+          started.execution.attempt,
+          result,
+          submission,
+        ).pipe(retryingStore(runId, "finish the attempt"));
         return finished._tag;
       });
 

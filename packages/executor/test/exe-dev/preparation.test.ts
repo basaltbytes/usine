@@ -313,7 +313,7 @@ describe("exe.dev preparation", () => {
           transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         });
-        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.strictEqual(result.result.message, `Completed: ${request.task}`);
         yield* Scope.close(owner, Exit.void);
         ssh.state.failStop = false;
         const reconciled = ssh.state.commands.length;
@@ -493,7 +493,7 @@ describe("exe.dev preparation", () => {
         transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       });
-      assert.strictEqual(result.message, `Completed: ${request.task}`);
+      assert.strictEqual(result.result.message, `Completed: ${request.task}`);
       const json1 = jsonKey(errors);
       assert(json1.includes("worktree-directory"));
       assert(
@@ -537,7 +537,7 @@ describe("exe.dev preparation", () => {
           transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         });
-        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.strictEqual(result.result.message, `Completed: ${request.task}`);
         const issued = ssh.state.commands.slice(beforeLaunch);
         const remote = issued.map(remoteLine);
         assert(remote.some((line) => line.startsWith("exec 'sh' '-c'")));

@@ -185,6 +185,7 @@ export const subagentTool = (services: ExtensionServices) => {
       worker: request.worker,
       machine: request.machine,
       prompt: assembleChildPrompt({
+        baseCommit: spec.baseCommit,
         agent: spec.agent.name,
         persona: spec.agent.persona,
         task: spec.task,

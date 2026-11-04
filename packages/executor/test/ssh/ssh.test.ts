@@ -94,6 +94,45 @@ const workingAttempts = (attemptIds: ReadonlyArray<AttemptId>) =>
   });
 
 describe("SSH Worker", () => {
+  it.effect("collects a multiline output through the SSH checkout runner", () => {
+    const machine = fakeMachine();
+    const credentials = mintingProvider();
+    const content = { title: "Walkthrough", text: "first line\nsecond line" };
+    machine.state.outputCollection = jsonKey({
+      outputs: [
+        {
+          file: "walkthrough.json",
+          envelope: { type: "balade.walkthrough", content },
+        },
+      ],
+    });
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      const result = yield* prepared.launch({
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: () => Effect.void,
+        outOfMemory: () => Effect.void,
+        transcript: Effect.succeed([]),
+        windows: aloneOnItem(),
+      });
+      assert.lengthOf(result.result.outputs, 1);
+      assert.notProperty(result.result.outputs[0], "content");
+      assert.deepStrictEqual(result.outputs[0]?.content, content);
+      assert(
+        machine.state.calls.some(
+          ({ line }) => line.includes("info/exclude") && line.includes("/.usine/"),
+        ),
+      );
+      assert(
+        machine.state.calls.some(
+          ({ line }) => line.includes("const collect = () =>") && line.includes(WORKTREE),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
+  });
+
   it.effect(
     "runs children on the machine with the token only in a private file, removed after the Attempt",
     () => {
@@ -599,7 +638,7 @@ describe("SSH Worker", () => {
 
           yield* Deferred.succeed(done, undefined);
           const result = yield* Fiber.join(launch);
-          assert.strictEqual(result.message, `Completed: ${request.task}`);
+          assert.strictEqual(result.result.message, `Completed: ${request.task}`);
           const probed = probes();
           yield* TestClock.adjust("10 minutes");
           assert.strictEqual(probes(), probed, "probing ends with the Attempt");

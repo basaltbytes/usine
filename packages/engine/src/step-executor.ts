@@ -12,7 +12,7 @@ import { type Brand, Schema, Context, Effect, type Option, type Result } from "e
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import type { WorkerName } from "@usine/core/worker";
-import type { StepResult } from "@usine/core/step/result";
+import type { StepCompletion } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
 
 /** The saved Event, effective task and Agent, and Step of one Attempt. */
@@ -88,7 +88,10 @@ export class StepExecutor extends Context.Service<
      */
     readonly outcome: (
       attemptId: AttemptId,
-    ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
+    ) => Effect.Effect<
+      Option.Option<Result.Result<StepCompletion, AttemptFailure>>,
+      AttemptFailure
+    >;
     /**
      * Reconciles the checkout of an Attempt that no Run reattaches, recording its salvage before
      * releasing it. Stops a live parent task first, and fails, leaving the checkout, if it can't
@@ -156,6 +159,6 @@ export class StepExecutor extends Context.Service<
     readonly execute: (
       execution: StepExecution,
       io: ExecutionSink,
-    ) => Effect.Effect<StepResult, AttemptFailure>;
+    ) => Effect.Effect<StepCompletion, AttemptFailure>;
   }
 >()("@usine/engine/step-executor/StepExecutor") {}

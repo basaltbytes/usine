@@ -1,4 +1,5 @@
 import { type Brand, Effect, Schema } from "effect";
+import { StepOutput, StepOutputRef } from "./output.ts";
 import { CommitSha } from "../repository.ts";
 
 /** A commit between the workspace base and the final HEAD. */
@@ -64,4 +65,25 @@ export class StepResult extends Schema.Class<
   message: Schema.NonEmptyString,
   /** The commits and GitHub writes retained as evidence after checkout cleanup. */
   facts: Schema.Array(StepResultFact),
+  /** Output metadata; document bodies are stored separately. */
+  outputs: Schema.Array(StepOutputRef).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
 }) {}
+
+/** The executor completion persisted in durable storage before the engine commits it. */
+export class StepCompletion extends Schema.Class<
+  StepCompletion,
+  Brand.Brand<"@usine/core/step/result/StepCompletion">
+>("StepCompletion")({
+  result: StepResult,
+  outputs: Schema.Array(StepOutput),
+}) {
+  static fromResult(result: StepResult, outputs: ReadonlyArray<StepOutput> = []): StepCompletion {
+    return StepCompletion.make({
+      result: StepResult.make({ ...result, outputs: outputs.map((output) => output.ref) }),
+      outputs,
+    });
+  }
+}

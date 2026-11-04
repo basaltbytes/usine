@@ -23,7 +23,7 @@ import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import {
@@ -247,7 +247,9 @@ const executor = Layer.succeed(StepExecutor)({
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
   execute: (execution) =>
     execution.run.loop === "review-pr"
-      ? Effect.succeed(StepResult.make({ message: "Reviewed", facts: [] }))
+      ? Effect.succeed(
+          StepCompletion.fromResult(StepResult.make({ message: "Reviewed", facts: [] })),
+        )
       : Effect.fail(QuestionFailure.make({ question })),
 });
 

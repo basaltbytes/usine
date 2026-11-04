@@ -426,3 +426,7 @@ The operator HTTP contract includes identifier-only change notices, scoped navig
 Operator records and errors use nominal Schema brands. Construct `RunSummaryView` and `AttemptSummaryView` explicitly when converting full detail records to summaries. `attentionKey`, `partitionNeeds`, and `gitHubItemKey` are pure functions over validated values. `repositoryEditorEntity` is a pure function over validated configuration records.
 
 Run `pnpm --filter @usine/orchestrator check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+## Step outputs
+
+Worker compositions share the engine's `StepOutputStore` with the runtime database. Custom database layers provide both `RunDatabase` and `StepOutputStore`, allowing recovered completions to store documents before attempt success. Operator run projections continue to use output refs from the stored step result.

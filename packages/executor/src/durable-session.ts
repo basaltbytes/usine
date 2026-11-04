@@ -11,7 +11,8 @@ import {
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
-import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
+import type { Comment, StepCompletion, StepResultFact } from "@usine/core/step/result";
+import type { StepOutput } from "@usine/core/step/output";
 import {
   type AttemptReport,
   AttemptRequest,
@@ -75,6 +76,8 @@ export interface DurableCheckout {
   readonly harvest: (
     windows: AttemptWindowsRead<AttemptFailure>,
   ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
+  /** Reads validated documents through this checkout's command runner and container. */
+  readonly readOutputs: Effect.Effect<ReadonlyArray<StepOutput>, AttemptFailure>;
   /**
    * Returns only the comments, filtered as in `harvest`, for an unsuccessful Attempt. Returns none
    * if GitHub fails or the windows can't be read.
@@ -381,7 +384,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       // can overlap this one and a cancel can close this window first (#429). A failed read fails
       // the Attempt.
       const facts = yield* checkout.harvest(io.windows);
-      const harvested = harvestedResult(report, facts);
+      const outputs = yield* checkout.readOutputs;
+      const harvested = harvestedResult(report, facts, outputs);
       if (Result.isFailure(harvested)) {
         yield* Effect.logWarning(
           "The parent's last turn answered the operator and the checkout holds no facts; the Attempt fails",
@@ -392,7 +396,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       const result = harvested.success;
       yield* Effect.logInfo("The Attempt's parent task finished", {
         attemptId,
-        facts: result.facts.length,
+        facts: result.result.facts.length,
+        outputs: result.outputs.length,
         answeredOperator: report.answeredOperator,
       });
       yield* runtime.recordResult(attemptId, result).pipe(
@@ -764,7 +769,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     const finished = yield* runtime.finished(attemptId);
     const stored = Option.flatMap(
       finished,
-      (found): Option.Option<Result.Result<StepResult, AttemptFailure>> =>
+      (found): Option.Option<Result.Result<StepCompletion, AttemptFailure>> =>
         Match.valueTags(found, {
           ParentReported: () => Option.none(),
           ResultRecorded: ({ result }) => Option.some(Result.succeed(result)),

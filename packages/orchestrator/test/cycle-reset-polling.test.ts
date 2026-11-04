@@ -10,7 +10,7 @@ import { Event, EventId, DedupKey } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import type { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { LoopName } from "@usine/core/loop";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
 import { StepExecutor } from "@usine/engine/step-executor";
@@ -460,7 +460,10 @@ it.live(
         discard: () => Effect.void,
         reserve: () => Effect.succeed({ worker: WorkerName.make("test"), release: Effect.void }),
         interrupt: () => Effect.void,
-        execute: () => Effect.succeed(StepResult.make({ message: "Reviewed", facts: [] })),
+        execute: () =>
+          Effect.succeed(
+            StepCompletion.fromResult(StepResult.make({ message: "Reviewed", facts: [] })),
+          ),
       });
       const engineLayer = localEngineLayer(directory).pipe(
         Layer.provide(executor),

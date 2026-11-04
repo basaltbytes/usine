@@ -28,6 +28,7 @@ const checkout: DurableCheckout = {
   machine: Option.none(),
   environment: {},
   gatewayCredential: Effect.succeedNone,
+  readOutputs: Effect.succeed([]),
   harvest: () => Effect.die("A failed relay must not harvest a result"),
   harvestComments: () => Effect.succeed([]),
   harvestKeptComments: () => Effect.succeed([]),

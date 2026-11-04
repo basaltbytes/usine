@@ -21,7 +21,7 @@ import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine, RetryRequest, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
@@ -176,7 +176,9 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
                     }),
                   );
                   const result = yield* child.result;
-                  return StepResult.make({ message: result.message, facts: [] });
+                  return StepCompletion.fromResult(
+                    StepResult.make({ message: result.message, facts: [] }),
+                  );
                 }),
               ).pipe(
                 Effect.mapError(toAttemptFailure),

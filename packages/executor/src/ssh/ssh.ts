@@ -8,7 +8,7 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Cache, Context, Effect, FileSystem, Layer, Option, type Path } from "effect";
+import { Cache, Context, type Crypto, Effect, FileSystem, Layer, Option, type Path } from "effect";
 import type { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import {
@@ -374,6 +374,7 @@ export const layer = (
   | AttemptRuntime
   | ClaudeLoginLock
   | CredentialProvider
+  | Crypto.Crypto
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
   | HttpClient.HttpClient

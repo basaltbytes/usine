@@ -1,3 +1,4 @@
+import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
@@ -16,6 +17,7 @@ import {
 } from "@usine/core/step/harvest";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
+  Crypto,
   Effect,
   FileSystem,
   Layer,
@@ -100,6 +102,7 @@ const executorError = (
 
 const makeLocalExecutor = (options: LocalExecutorOptions) =>
   Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
     const credentials = yield* localCredentialsFor;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -230,6 +233,36 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     const workerLeftovers = yield* workerLeftoversFor(workersRoot);
 
+    const checkoutCommand =
+      (
+        operation: ExecutorOperation,
+        worktree: string,
+        credential: Effect.Success<ReturnType<typeof credentials>>,
+        environment: Record<string, string>,
+      ) =>
+      (command: string, args: ReadonlyArray<string>, maxOutputBytes?: number) =>
+        Effect.gen(function* () {
+          yield* credential.refresh();
+          const result = yield* collectCommand(
+            spawner,
+            operation,
+            command,
+            args,
+            {
+              cwd: worktree,
+              env: environment,
+              extendEnv: false,
+            },
+            maxOutputBytes,
+          );
+          const stdout = yield* requireSuccess(operation, "local", command, args, {
+            ...result,
+            stdout: credential.scrub(result.stdout),
+            stderr: credential.scrub(result.stderr),
+          });
+          return stdout;
+        });
+
     const harvestCommand =
       (
         operation: ExecutorOperation,
@@ -238,20 +271,14 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         environment: Record<string, string>,
       ) =>
       (command: "git" | "gh", args: ReadonlyArray<string>) =>
-        Effect.gen(function* () {
-          yield* credential.refresh();
-          const result = yield* collectCommand(spawner, operation, command, args, {
-            cwd: worktree,
-            env: environment,
-            extendEnv: false,
-          });
-          const stdout = yield* requireSuccess(operation, "local", command, args, {
-            ...result,
-            stdout: credential.scrub(result.stdout),
-            stderr: credential.scrub(result.stderr),
-          });
-          return stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n");
-        });
+        checkoutCommand(
+          operation,
+          worktree,
+          credential,
+          environment,
+        )(command, args).pipe(
+          Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
+        );
 
     const recoveryComments =
       (attempt: AttemptRecovery, worktree: string): PostedCommentsHarvest =>
@@ -559,6 +586,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         request.commitAuthor,
         prepared.gitHooks,
       );
+      yield* prepareOutputs(checkoutCommand("prepare", worktree, credential, environment)).pipe(
+        Effect.mapError((error) => executorError("prepare", "Can't prepare step outputs", error)),
+      );
       return {
         workspace: prepared.workspace,
         launch: (io: AttemptChannel.Sink) =>
@@ -569,6 +599,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             // Local Workers have no Gateway; every harness uses its own login.
             gatewayCredential: Effect.succeedNone,
             harvest: (windows) => harvest(prepared.workspace, credential, environment, windows),
+            readOutputs: readOutputs(
+              prepared.workspace.spec,
+              checkoutCommand("launch", worktree, credential, environment),
+              crypto,
+            ),
             harvestComments: (windows) =>
               harvestPostedComments(
                 prepared.workspace.spec,
@@ -620,6 +655,7 @@ export const layer = (
   | AttemptRuntime
   | ClaudeLoginLock
   | CredentialProvider
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
