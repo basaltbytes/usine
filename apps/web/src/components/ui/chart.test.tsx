@@ -42,6 +42,22 @@ it("uses a nested string series name when the direct name is numeric", () => {
   expect(html).toContain("value");
 });
 
+it("uses the indexed series name from a tuple-backed Scatter payload", () => {
+  const html = renderToStaticMarkup(
+    <ChartContainer config={{ ...config, "0": { label: "Fallback series" } }}>
+      <ChartTooltipContent
+        active
+        hideLabel
+        nameKey="0"
+        payload={[{ graphicalItemId: "series", value: 1200, payload: ["direct", 1200, 2400] }]}
+      />
+    </ChartContainer>,
+  );
+
+  expect(html).toContain("Direct series");
+  expect(html).not.toContain("Fallback series");
+});
+
 it("keeps array values comma-separated without locale formatting", () => {
   const html = tooltip({ graphicalItemId: "series", value: [1200, 2400] });
   expect(html).toContain(">1200,2400</span>");

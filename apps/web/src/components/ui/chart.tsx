@@ -1,7 +1,7 @@
 import * as React from "react";
 import * as RechartsPrimitive from "recharts";
 import type { TooltipValueType } from "recharts";
-import { Option, Record, Schema } from "effect";
+import { Option, Predicate, Record, Schema } from "effect";
 
 import { cn } from "~/lib/utils";
 
@@ -326,12 +326,19 @@ function getPayloadConfigFromPayload(
     return undefined;
   }
 
-  const entry = Schema.Struct({ [key]: Schema.String });
-  const direct = Option.getOrUndefined(Schema.decodeUnknownOption(entry)(payload));
-  const nested = Option.getOrUndefined(
-    Schema.decodeUnknownOption(Schema.Struct({ payload: entry }))(payload),
+  const decodeSeriesName = Schema.decodeUnknownOption(Schema.String);
+  const direct = Option.getOrUndefined(
+    decodeSeriesName(Predicate.hasProperty(payload, key) ? payload[key] : undefined),
   );
-  const configLabelKey = direct?.[key] ?? nested?.payload[key] ?? key;
+  const nestedPayload = payload.payload;
+  const nested = Option.getOrUndefined(
+    decodeSeriesName(
+      Predicate.isObjectOrArray(nestedPayload) && Predicate.hasProperty(nestedPayload, key)
+        ? nestedPayload[key]
+        : undefined,
+    ),
+  );
+  const configLabelKey = direct ?? nested ?? key;
   return configLabelKey in config ? config[configLabelKey] : config[key];
 }
 
