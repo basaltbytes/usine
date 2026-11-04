@@ -9,7 +9,7 @@ import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { BotLogin } from "@usine/core/worker";
 import { type AttemptRequest, AttemptRuntime, ParentFailed } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
@@ -336,7 +336,7 @@ describe("exe.dev launch", () => {
           GIT_COMMITTER_NAME: COMMIT_AUTHOR.login,
           GIT_COMMITTER_EMAIL: COMMIT_AUTHOR.noreplyEmail,
         });
-        assert(given.host instanceof RemoteShell);
+        assert(Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.host.destination, "remote-one.exe.xyz");
         assert.strictEqual(given.host.ssh.command, "ssh");
         assert.include(given.host.ssh.args, "BatchMode=yes");

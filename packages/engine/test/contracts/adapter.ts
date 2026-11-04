@@ -47,7 +47,7 @@ export type PersistencePorts =
 
 export interface PersistenceFixture {
   /** Opens the same store in a fresh scope, preserving committed records. */
-  readonly open: () => Layer.Layer<PersistencePorts, EnginePersistenceError>;
+  readonly open: Layer.Layer<PersistencePorts, EnginePersistenceError>;
 }
 
 export interface PersistenceAdapter {
@@ -62,5 +62,5 @@ export const withPersistence = <A, E, R>(
 ) =>
   Effect.gen(function* () {
     const fixture = yield* adapter.fixture;
-    return yield* work.pipe(Effect.provide(fixture.open()));
+    return yield* work.pipe(Effect.provide(fixture.open));
   }).pipe(Effect.scoped);

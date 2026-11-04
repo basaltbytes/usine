@@ -62,7 +62,8 @@ describe("instance lock", () => {
         assert.strictEqual(readFileSync(files.pid, "utf8").trim(), String(process.pid));
         assert.deepStrictEqual(yield* readRecord(files), Option.some(record));
         const refused = yield* holdInstance(directory, record).pipe(Effect.scoped, Effect.flip);
-        assert(refused instanceof InstanceInUseError);
+        const matchesRefused = Schema.is(InstanceInUseError)(refused);
+        assert(matchesRefused);
         assert.deepStrictEqual(refused.holder, Option.some(process.pid));
         yield* Scope.close(first, Exit.void);
         assert.isFalse(yield* lockHeld(files));
@@ -83,7 +84,8 @@ describe("instance lock", () => {
         Effect.provide(NodeServices.layer),
       ),
     );
-    assert(refused instanceof InstanceLockError);
+    const matchesRefused = Schema.is(InstanceLockError)(refused);
+    assert(matchesRefused);
   });
 
   it("records the start of a drain without changing the rest of the record", async () => {

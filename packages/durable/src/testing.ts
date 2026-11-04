@@ -48,6 +48,7 @@ import {
   Layer,
   Option,
   Queue,
+  Schema,
   Stream,
 } from "effect";
 import {
@@ -444,10 +445,9 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
               ),
             ),
           );
-          const report =
-            finished instanceof AttemptReport
-              ? finished
-              : AttemptReport.make({ message: finished });
+          const report = Schema.is(AttemptReport)(finished)
+            ? finished
+            : AttemptReport.make({ message: finished });
           yield* event(SessionFinished.make({ session }));
           yield* emit(
             AttemptChannel.Final.make({

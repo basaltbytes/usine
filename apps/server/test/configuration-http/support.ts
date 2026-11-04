@@ -36,7 +36,7 @@ import { apiRoutes } from "../../src/http.ts";
 import { configurationLoopControlLayer } from "../../src/configuration/store.ts";
 
 const parserLayer = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-export const unused = () => Effect.die("unused test service operation");
+export const unused = Effect.die("unused test service operation");
 export const agentText = "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n";
 export const loopText =
   "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement.\n";
@@ -146,12 +146,12 @@ export const harness = (
         Layer.provide(
           Layer.succeed(Executor, {
             kind: "local",
-            recover: unused,
-            isLive: unused,
-            outcome: unused,
-            prepare: unused,
-            cancel: unused,
-            intervene: unused,
+            recover: () => unused,
+            isLive: () => unused,
+            outcome: () => unused,
+            prepare: () => unused,
+            cancel: () => unused,
+            intervene: () => unused,
             sweep: Effect.void,
             preflight: (worker) =>
               Ref.getAndSet(preflightAction, Effect.void).pipe(
@@ -174,17 +174,16 @@ export const harness = (
         Layer.provide(
           Layer.succeed(GitHubApp, {
             installation: unused,
-            botAccount: () =>
-              Effect.succeed(
-                BotAccount.make({ login: BotLogin.make("test[bot]"), id: BotUserId.make(1) }),
-              ),
-            repositories: () => Effect.die("unused installation repositories"),
+            botAccount: Effect.succeed(
+              BotAccount.make({ login: BotLogin.make("test[bot]"), id: BotUserId.make(1) }),
+            ),
+            repositories: Effect.die("unused installation repositories"),
             installationToken: unused,
-            projectAccess: unused,
-            installationUrl: () => Effect.die("unused installation URL"),
+            projectAccess: () => unused,
+            installationUrl: Effect.die("unused installation URL"),
             configureWebhook: () => Effect.die("unused webhook configuration"),
             deliveries: () => Effect.die("unused webhook deliveries"),
-            workerToken: unused,
+            workerToken: () => unused,
           }),
         ),
       ),
@@ -194,8 +193,8 @@ export const harness = (
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(
           Layer.succeed(ItemProjectionReader, {
-            get: unused,
-            openIssues: unused,
+            get: () => unused,
+            openIssues: () => unused,
             list: (repository) =>
               Ref.get(projections).pipe(
                 Effect.map((items) => items.filter((item) => item.repository === repository)),
@@ -222,31 +221,31 @@ export const harness = (
     const backend = Layer.succeed(FactoryBackend, {
       configuration: current.get.pipe(Effect.flatMap(views.view)),
       overview: Effect.die("unused"),
-      detail: unused,
-      githubChanges: unused,
-      approve: unused,
-      dismissNeed: unused,
-      undoDismissNeed: unused,
-      resetCycleBudget: unused,
-      resolveFailure: unused,
-      retry: unused,
+      detail: () => unused,
+      githubChanges: () => unused,
+      approve: () => unused,
+      dismissNeed: () => unused,
+      undoDismissNeed: () => unused,
+      resetCycleBudget: () => unused,
+      resolveFailure: () => unused,
+      retry: () => unused,
       agents: Effect.die("unused"),
-      editAndRetry: unused,
-      runAgain: unused,
-      intervene: unused,
-      cancel: unused,
-      runWorkerPreflight: unused,
-      discardLeftovers: unused,
-      moveBoardItem: unused,
-      pause: unused,
-      unpause: unused,
-      task: unused,
+      editAndRetry: () => unused,
+      runAgain: () => unused,
+      intervene: () => unused,
+      cancel: () => unused,
+      runWorkerPreflight: () => unused,
+      discardLeftovers: () => unused,
+      moveBoardItem: () => unused,
+      pause: () => unused,
+      unpause: () => unused,
+      task: () => unused,
       desk: Effect.die("unused"),
-      statistics: unused,
-      runStatistics: unused,
+      statistics: () => unused,
+      runStatistics: () => unused,
     });
     const app = HttpRouter.toWebHandler(
-      apiRoutes().pipe(
+      apiRoutes.pipe(
         HttpRouter.provideRequest(
           Layer.mergeAll(backend, Layer.succeedContext(editorContext), catalog),
         ),

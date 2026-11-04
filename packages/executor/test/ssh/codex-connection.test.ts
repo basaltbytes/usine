@@ -247,37 +247,44 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
             assert.strictEqual(yield* fs.readFileString(`${directory}/original-stopped`), "yes");
         }),
       ).pipe(
-        Effect.provide(codexChildBackendLayer),
         Effect.provide(
-          failure === "before-initial-turn-exit"
-            ? Layer.effect(
-                CodexAppServer,
-                Effect.gen(function* () {
-                  const server = yield* CodexAppServer;
-                  return CodexAppServer.of({
-                    open: (client) =>
-                      server.open(client).pipe(
-                        Effect.map((connection) => ({
-                          ...connection,
-                          request: (operation, method, params) =>
-                            Effect.gen(function* () {
-                              const response = yield* connection.request(operation, method, params);
-                              if (method === "thread/start") {
-                                const recorded = yield* Stream.runDrain(
-                                  connection.notifications,
-                                ).pipe(Effect.result);
-                                assert(Result.isFailure(recorded), "process loss is recorded");
-                              }
-                              return response;
-                            }),
-                        })),
-                      ),
-                  });
-                }),
-              ).pipe(Layer.provide(codexAppServerLive))
-            : codexAppServerLive,
+          codexChildBackendLayer.pipe(
+            Layer.provideMerge(
+              failure === "before-initial-turn-exit"
+                ? Layer.effect(
+                    CodexAppServer,
+                    Effect.gen(function* () {
+                      const server = yield* CodexAppServer;
+                      return CodexAppServer.of({
+                        open: (client) =>
+                          server.open(client).pipe(
+                            Effect.map((connection) => ({
+                              ...connection,
+                              request: (operation, method, params) =>
+                                Effect.gen(function* () {
+                                  const response = yield* connection.request(
+                                    operation,
+                                    method,
+                                    params,
+                                  );
+                                  if (method === "thread/start") {
+                                    const recorded = yield* Stream.runDrain(
+                                      connection.notifications,
+                                    ).pipe(Effect.result);
+                                    assert(Result.isFailure(recorded), "process loss is recorded");
+                                  }
+                                  return response;
+                                }),
+                            })),
+                          ),
+                      });
+                    }),
+                  ).pipe(Layer.provide(codexAppServerLive))
+                : codexAppServerLive,
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
         ),
-        Effect.provide(NodeServices.layer),
       ),
     20_000,
   );

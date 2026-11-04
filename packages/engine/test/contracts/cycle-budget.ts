@@ -44,7 +44,7 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
           );
           assert(blocked.result._tag === "CycleBlocked");
           const ask = blocked.result.ask;
-          assert.deepStrictEqual(yield* budgets.asks(), [ask]);
+          assert.deepStrictEqual(yield* budgets.asks, [ask]);
           assert.strictEqual(yield* budgets.generation(first.itemKey), 0);
           const answer = Event.make({
             ...event,
@@ -55,16 +55,16 @@ export const cycleBudgetContract = (adapter: PersistenceAdapter) => {
             concurrency: "unbounded",
           });
           assert.strictEqual(yield* budgets.generation(first.itemKey), 1);
-          assert.deepStrictEqual(yield* budgets.asks(), []);
-          const [reset] = yield* budgets.pendingResets();
+          assert.deepStrictEqual(yield* budgets.asks, []);
+          const [reset] = yield* budgets.pendingResets;
           assert(reset !== undefined);
           yield* budgets.acknowledgeReset(
             CycleBudgetReset.make({ ...reset, generation: CycleGeneration.make(0) }),
           );
-          assert.deepStrictEqual(yield* budgets.pendingResets(), [reset]);
+          assert.deepStrictEqual(yield* budgets.pendingResets, [reset]);
           yield* budgets.acknowledgeReset(reset);
           yield* budgets.acknowledgeReset(reset);
-          assert.deepStrictEqual(yield* budgets.pendingResets(), []);
+          assert.deepStrictEqual(yield* budgets.pendingResets, []);
           assert.strictEqual(
             (yield* budgets.reset(ask.id, event).pipe(Effect.flip))._tag,
             "CycleBudgetResetRejectedError",

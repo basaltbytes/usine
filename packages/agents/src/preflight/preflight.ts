@@ -196,6 +196,9 @@ export const preflight = (
   host: ChildHost,
   environment: Readonly<Record<string, string>>,
 ) =>
-  verifyHarness(brain, host, environment).pipe(
-    Effect.provide(codexAppServerLive.pipe(Layer.provideMerge(piSdkLive))),
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(codexAppServerLive.pipe(Layer.provideMerge(piSdkLive)));
+      return yield* verifyHarness(brain, host, environment).pipe(Effect.provideContext(context));
+    }),
   );

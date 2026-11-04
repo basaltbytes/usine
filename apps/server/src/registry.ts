@@ -7,7 +7,7 @@ const NPM_VIEW_TIMEOUT = "30 seconds";
 export class PackageLookupError extends Schema.TaggedError<PackageLookupError>(
   "@usine/server/PackageLookupError",
 )("PackageLookupError", {
-  name: Schema.String,
+  packageName: Schema.String,
   spec: Schema.String,
   reason: Schema.String,
 }) {}
@@ -20,7 +20,8 @@ const npmView = (directory: string, name: string, spec: string, field: string) =
   runCommand("npm", ["view", `${name}@${spec}`, field, "--json"], directory, NPM_VIEW_TIMEOUT).pipe(
     Effect.mapBoth({
       onSuccess: ({ stdout }) => stdout.trim(),
-      onFailure: (error) => PackageLookupError.make({ name, spec, reason: error.reason }),
+      onFailure: (error) =>
+        PackageLookupError.make({ packageName: name, spec, reason: error.reason }),
     }),
   );
 
@@ -37,13 +38,17 @@ export const resolveVersion = Effect.fn("Registry.resolveVersion")(function* (
   const output = yield* npmView(directory, name, spec, "version");
   const decoded = yield* Schema.decodeEffect(Versions)(output).pipe(
     Effect.mapError(() =>
-      PackageLookupError.make({ name, spec, reason: "no published version matches" }),
+      PackageLookupError.make({ packageName: name, spec, reason: "no published version matches" }),
     ),
   );
   const versions = Schema.is(Schema.String)(decoded) ? [decoded] : decoded;
   const version = versions.at(-1);
   if (version === undefined) {
-    return yield* PackageLookupError.make({ name, spec, reason: "no published version matches" });
+    return yield* PackageLookupError.make({
+      packageName: name,
+      spec,
+      reason: "no published version matches",
+    });
   }
   return version;
 });
@@ -58,7 +63,7 @@ export const dependenciesOf = Effect.fn("Registry.dependenciesOf")(function* (
   if (output === "") return {};
   return yield* Schema.decodeEffect(Dependencies)(output).pipe(
     Effect.mapError((error) =>
-      PackageLookupError.make({ name, spec: version, reason: error.message }),
+      PackageLookupError.make({ packageName: name, spec: version, reason: error.message }),
     ),
   );
 });

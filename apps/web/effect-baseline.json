@@ -50,18 +50,6 @@
   "src/features/configuration/components/editor/browser-fixture.ts": {
     "nodeBuiltinImport": 2
   },
-  "src/features/configuration/components/editor/conflict.tsx": {
-    "instanceOfSchema": 1
-  },
-  "src/features/configuration/components/editor/create.tsx": {
-    "instanceOfSchema": 1
-  },
-  "src/features/configuration/components/editor/failure.tsx": {
-    "instanceOfSchema": 2
-  },
-  "src/features/configuration/components/editor/form.tsx": {
-    "instanceOfSchema": 5
-  },
   "src/features/configuration/components/forms/fields.tsx": {
     "strictBooleanExpressions": 1
   },
@@ -71,17 +59,11 @@
   "src/features/projects/components/card/face.tsx": {
     "strictBooleanExpressions": 1
   },
-  "src/features/tasks/task.page.tsx": {
-    "instanceOfSchema": 1
-  },
   "src/features/tokens/tokens.page.tsx": {
     "strictBooleanExpressions": 2
   },
   "src/hooks/projects/moves.browser.test.tsx": {
     "strictBooleanExpressions": 2
-  },
-  "src/hooks/runs/actions.ts": {
-    "instanceOfSchema": 1
   },
   "src/hooks/use-mobile.ts": {
     "strictBooleanExpressions": 1
@@ -91,14 +73,5 @@
   },
   "src/lib/runs/transcript/reader/memory.ts": {
     "schemaStructWithTag": 2
-  },
-  "src/routes/projects/$project/index.tsx": {
-    "instanceOfSchema": 1
-  },
-  "src/routes/projects/$project/tasks/$number.tsx": {
-    "instanceOfSchema": 1
-  },
-  "src/routes/projects/$project/tasks/index.tsx": {
-    "instanceOfSchema": 1
   }
 }

@@ -291,7 +291,7 @@ export class GitHubPolling extends Context.Service<
       }, retryTransientRequest);
 
       const changesPage = Effect.fn("GitHubPolling.changesPage")(function* (url: string) {
-        const token = yield* app.installationToken();
+        const token = yield* app.installationToken;
         const request = HttpClientRequest.get(url).pipe(authorized(token.value));
         const response = yield* execute("poll-repository-changes", request);
         const now = yield* Clock.currentTimeMillis;
@@ -311,7 +311,7 @@ export class GitHubPolling extends Context.Service<
         operation: GitHubOperation,
         url: string,
       ) {
-        const token = yield* app.installationToken();
+        const token = yield* app.installationToken;
         const request = HttpClientRequest.get(url).pipe(authorized(token.value));
         const response = yield* execute(operation, request);
         const now = yield* Clock.currentTimeMillis;
@@ -365,7 +365,7 @@ export class GitHubPolling extends Context.Service<
         entityTag: Option.Option<EntityTag>,
       ) {
         yield* Effect.annotateCurrentSpan({ repository });
-        const token = yield* app.installationToken();
+        const token = yield* app.installationToken;
         let request = HttpClientRequest.get(labelsUrl(repository)).pipe(authorized(token.value));
         if (Option.isSome(entityTag)) {
           request = HttpClientRequest.setHeader(request, "if-none-match", entityTag.value);
@@ -401,7 +401,7 @@ export class GitHubPolling extends Context.Service<
         repository: RepositoryName,
         cursor: PollCursor,
       ) {
-        const token = yield* app.installationToken();
+        const token = yield* app.installationToken;
         let request = HttpClientRequest.get(changesUrl(repository, cursor)).pipe(
           authorized(token.value),
         );
@@ -467,7 +467,7 @@ export class GitHubPolling extends Context.Service<
         known: Option.Option<BaseRefHead>,
       ) {
         yield* Effect.annotateCurrentSpan({ repository, baseRefName });
-        const token = yield* app.installationToken();
+        const token = yield* app.installationToken;
         let request = HttpClientRequest.get(baseRefUrl(repository, baseRefName)).pipe(
           authorized(token.value),
         );
@@ -506,7 +506,7 @@ export class GitHubPolling extends Context.Service<
         query: string,
         dataSchema: S,
       ) {
-        const token = yield* app.installationToken();
+        const token = yield* app.installationToken;
         const { name, owner } = splitRepositoryName(repository);
         return yield* queryGraphql(
           http,
@@ -627,7 +627,7 @@ export class GitHubPolling extends Context.Service<
           Arr.chunksOf(numbers, ISSUES_PER_PRESENCE_CHECK),
           (chunk) =>
             Effect.gen(function* () {
-              const token = yield* app.installationToken();
+              const token = yield* app.installationToken;
               const data = yield* queryGraphql(
                 http,
                 token,

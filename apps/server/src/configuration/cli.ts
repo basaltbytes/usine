@@ -145,7 +145,11 @@ export const runConfigCommand = Effect.fn("Cli.config")(
 );
 
 export const configCommand = (directory: InstanceDirectory, command: ConfigCommand) =>
-  runConfigCommand(directory, command).pipe(
-    Effect.provide(configurationLayer.pipe(Layer.provide(localSqliteLayer(directory)))),
-    Effect.scoped,
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(
+        configurationLayer.pipe(Layer.provide(localSqliteLayer(directory))),
+      );
+      return yield* runConfigCommand(directory, command).pipe(Effect.provideContext(context));
+    }),
   );

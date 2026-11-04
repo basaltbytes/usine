@@ -543,31 +543,30 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     holder: Held["holder"],
   ) {
     const existing = yield* byAttempt(attemptId);
-    const entry = Option.isSome(existing)
-      ? existing.value
-      : yield* Effect.gen(function* () {
-          const workerEntry = yield* options.attemptEntry(
-            worker,
-            attemptId,
-            holder === "recovery" ? "recovery" : "prepare",
-          );
-          const driver = yield* drivers.forEntry(workerEntry);
-          return yield* register({
-            worker,
-            workerEntry,
-            driver,
-            provider: driver.provider,
-            state: "unlocated",
-            uses: 0,
-            since: yield* DateTime.now,
-            id: Option.none(),
-            run: Option.none(),
-            attemptId: Option.some(attemptId),
-            machine: Option.none(),
-            holder,
-            checkout: false,
-          });
-        });
+    let entry = Option.getOrUndefined(existing);
+    if (entry === undefined) {
+      const workerEntry = yield* options.attemptEntry(
+        worker,
+        attemptId,
+        holder === "recovery" ? "recovery" : "prepare",
+      );
+      const driver = yield* drivers.forEntry(workerEntry);
+      entry = yield* register({
+        worker,
+        workerEntry,
+        driver,
+        provider: driver.provider,
+        state: "unlocated",
+        uses: 0,
+        since: yield* DateTime.now,
+        id: Option.none(),
+        run: Option.none(),
+        attemptId: Option.some(attemptId),
+        machine: Option.none(),
+        holder,
+        checkout: false,
+      });
+    }
     if (holder === "lease" && entry.holder !== "lease")
       yield* update(entry.hold, (current) => ({ ...current, holder }));
     if (entry.state === "located") return Option.some({ hold: entry.hold, machine: entry.machine });

@@ -75,8 +75,8 @@ export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
 
 export const emptyCycleBudgets: CycleBudgets["Service"] = {
   generation: () => Effect.succeed(CycleGeneration.make(0)),
-  asks: () => Effect.succeed([]),
-  pendingResets: () => Effect.succeed([]),
+  asks: Effect.succeed([]),
+  pendingResets: Effect.succeed([]),
   reset: () => Effect.die("unused cycle reset"),
   close: () => Effect.die("unused cycle ask closure"),
   acknowledgeReset: () => Effect.die("unused cycle reset acknowledgement"),
@@ -156,7 +156,7 @@ export const pollingTestLayer = (
     evaluateScalar: () => Effect.die("unused"),
   });
   const runs = Layer.succeed(RunEngine)({
-    awaitingCi: () => Effect.succeed([]),
+    awaitingCi: Effect.succeed([]),
     settleCi: () => Effect.void,
     resolveFailure: () => Effect.void,
     intervene: () => Effect.void,
@@ -164,8 +164,8 @@ export const pollingTestLayer = (
     cancel: () => Effect.die("unused"),
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
-    reconcile: () => Effect.die("unused"),
-    drain: () => Effect.void,
+    reconcile: Effect.die("unused"),
+    drain: Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
     upgradeDrain: Effect.succeedNone,

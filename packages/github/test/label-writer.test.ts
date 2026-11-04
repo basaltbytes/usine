@@ -20,19 +20,18 @@ const token = InstallationToken.make({
   scope: InstallationWide.make(),
 });
 const appLayer = Layer.succeed(GitHubApp)({
-  installation: () =>
-    Effect.succeed(
-      Installation.make({
-        id: InstallationId.make(77),
-        accountLogin: "basaltbytes",
-        appSlug: AppSlug.make("usine-basaltbytes"),
-      }),
-    ),
-  repositories: () => Effect.die("unused installation repositories"),
-  installationToken: () => Effect.succeed(token),
-  botAccount: () => Effect.die("unused"),
+  installation: Effect.succeed(
+    Installation.make({
+      id: InstallationId.make(77),
+      accountLogin: "basaltbytes",
+      appSlug: AppSlug.make("usine-basaltbytes"),
+    }),
+  ),
+  repositories: Effect.die("unused installation repositories"),
+  installationToken: Effect.succeed(token),
+  botAccount: Effect.die("unused"),
   projectAccess: () => Effect.die("unused"),
-  installationUrl: () => Effect.die("unused installation URL"),
+  installationUrl: Effect.die("unused installation URL"),
   configureWebhook: () => Effect.die("unused webhook configuration"),
   deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("unused"),

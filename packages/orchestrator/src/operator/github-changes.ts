@@ -276,7 +276,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         ),
       });
     if (snapshot.attempts.length === 0) return view(new Map());
-    const { appSlug } = yield* app.installation();
+    const { appSlug } = yield* app.installation;
     const appActor = BotLogin.make(`${appSlug}[bot]`);
     const workerActors = new Map(
       workers.map(({ name, kind }) => [name, githubBotLogin(kind, appActor)]),

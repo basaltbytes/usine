@@ -289,7 +289,7 @@ export class CiMonitor extends Context.Service<
           instance: LoadedInstance,
           repository: Option.Option<RepositoryName>,
         ) {
-          const waits = (yield* engine.awaitingCi()).filter((wait) =>
+          const waits = (yield* engine.awaitingCi).filter((wait) =>
             Option.match(repository, {
               onNone: () => true,
               onSome: (name) =>

@@ -22,7 +22,7 @@ export class RegistryStorage extends Context.Service<
 /** A sandbox's Durable Object didn't answer with its summary or a 404. */
 export class SandboxLookupFailed extends Schema.TaggedError<SandboxLookupFailed>()(
   "SandboxLookupFailed",
-  { name: SandboxName, reason: Schema.String },
+  { sandbox: SandboxName, reason: Schema.String },
 ) {}
 
 /** Reads a sandbox's current summary from its own Durable Object. */

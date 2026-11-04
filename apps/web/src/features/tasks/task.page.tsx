@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { ProjectId } from "@usine/core/project";
 import { projectTasksQuery } from "~/features/tasks/queries";
 import { RepositoryFilter } from "~/components/repository-filter";
@@ -41,7 +42,7 @@ export const TaskPage = ({ repository, number }: TaskPageProps) => {
   const navigate = useNavigate();
   const openRun = useOpenRun();
   const task = useSuspenseQuery(taskQuery(repository, number));
-  if (task.error instanceof OperatorHttpError && task.error.error === "BoardItemNotFoundError")
+  if (Schema.is(OperatorHttpError)(task.error) && task.error.error === "BoardItemNotFoundError")
     return <TaskNotFound repository={repository} number={String(number)} />;
   const failure = task.isError && (
     <ErrorAlert

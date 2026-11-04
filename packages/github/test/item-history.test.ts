@@ -10,19 +10,18 @@ import { GitHubItemHistory } from "../src/item-history.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const appLayer = Layer.succeed(GitHubApp)({
-  installation: () => Effect.die("the caller selects the actor"),
-  repositories: () => Effect.die("unused installation repositories"),
-  installationToken: () =>
-    Effect.succeed(
-      InstallationToken.make({
-        value: Redacted.make("history-token"),
-        expiresAt: DateTime.makeUnsafe("2026-10-16T22:00:00Z"),
-        scope: InstallationWide.make(),
-      }),
-    ),
-  botAccount: () => Effect.die("not used by history tests"),
+  installation: Effect.die("the caller selects the actor"),
+  repositories: Effect.die("unused installation repositories"),
+  installationToken: Effect.succeed(
+    InstallationToken.make({
+      value: Redacted.make("history-token"),
+      expiresAt: DateTime.makeUnsafe("2026-10-16T22:00:00Z"),
+      scope: InstallationWide.make(),
+    }),
+  ),
+  botAccount: Effect.die("not used by history tests"),
   projectAccess: () => Effect.die("not used by history tests"),
-  installationUrl: () => Effect.die("unused installation URL"),
+  installationUrl: Effect.die("unused installation URL"),
   configureWebhook: () => Effect.die("unused webhook configuration"),
   deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("not used by history tests"),

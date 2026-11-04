@@ -1265,7 +1265,7 @@ describe("PollingTriggers", () => {
       write: () => Effect.void,
     });
     const runs = Layer.succeed(RunEngine)({
-      awaitingCi: () => Effect.succeed([]),
+      awaitingCi: Effect.succeed([]),
       settleCi: () => Effect.void,
       resolveFailure: () => Effect.void,
       intervene: () => Effect.void,
@@ -1273,8 +1273,8 @@ describe("PollingTriggers", () => {
       cancel: () => Effect.die("unused"),
       discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
-      reconcile: () => Effect.die("unused"),
-      drain: () => Effect.void,
+      reconcile: Effect.die("unused"),
+      drain: Effect.void,
       waitForUpgrade: () => Effect.void,
       cancelUpgrade: Effect.void,
       upgradeDrain: Effect.succeedNone,
@@ -1403,7 +1403,7 @@ describe("PollingTriggers", () => {
           ),
       };
       const runs = Layer.succeed(RunEngine)({
-        awaitingCi: () => Effect.succeed([]),
+        awaitingCi: Effect.succeed([]),
         settleCi: () => Effect.void,
         resolveFailure: () => Effect.void,
         intervene: () => Effect.void,
@@ -1411,8 +1411,8 @@ describe("PollingTriggers", () => {
         cancel: () => Effect.die("unused"),
         discardLeftovers: () => Effect.die("unused"),
         inspect: () => Effect.die("unused"),
-        reconcile: () => Effect.die("unused"),
-        drain: () => Effect.void,
+        reconcile: Effect.die("unused"),
+        drain: Effect.void,
         waitForUpgrade: () => Effect.void,
         cancelUpgrade: Effect.void,
         upgradeDrain: Effect.succeedNone,
@@ -1520,7 +1520,7 @@ describe("PollingTriggers", () => {
         }),
     });
     const runs = Layer.succeed(RunEngine)({
-      awaitingCi: () => Effect.succeed([]),
+      awaitingCi: Effect.succeed([]),
       settleCi: () => Effect.void,
       resolveFailure: () => Effect.void,
       intervene: () => Effect.void,
@@ -1528,8 +1528,8 @@ describe("PollingTriggers", () => {
       cancel: () => Effect.die("unused"),
       discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
-      reconcile: () => Effect.die("unused"),
-      drain: () => Effect.void,
+      reconcile: Effect.die("unused"),
+      drain: Effect.void,
       waitForUpgrade: () => Effect.void,
       cancelUpgrade: Effect.void,
       upgradeDrain: Effect.succeedNone,

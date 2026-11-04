@@ -52,17 +52,19 @@ const request = Effect.fn("integration.request")(function* (
   init: RequestInit,
   expectedStatus: number,
 ) {
-  const response = yield* Effect.tryPromise(() =>
-    fetch(url, {
-      ...init,
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-        "x-github-api-version": "2026-03-10",
-      },
-    }),
-  );
+  const response = yield* Effect.tryPromise({
+    try: () =>
+      fetch(url, {
+        ...init,
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "x-github-api-version": "2026-03-10",
+        },
+      }),
+    catch: (cause) => RequestFailed.make({ cause }),
+  });
   if (response.status !== expectedStatus) {
     return yield* Effect.die(
       `GitHub returned ${response.status} for ${init.method ?? "GET"} ${url}`,
@@ -210,7 +212,7 @@ describe("live GitHub polling", () => {
 
       yield* Effect.gen(function* () {
         const app = yield* GitHubApp;
-        const installationToken = yield* app.installationToken();
+        const installationToken = yield* app.installationToken;
         const token = Redacted.value(installationToken.value);
         const api = repositoryApi(repository);
 
@@ -297,3 +299,8 @@ describe("live GitHub polling", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 });
+
+class RequestFailed extends Schema.TaggedError<RequestFailed, { readonly Brand: unique symbol }>()(
+  "RequestFailed",
+  { cause: Schema.Defect() },
+) {}

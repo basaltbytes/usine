@@ -14,9 +14,15 @@ export const reclaimOnceFor = <A, E>(
           Effect.gen(function* () {
             const key = keyOf(value);
             const existing = completed.get(key);
-            if (existing !== undefined) return existing;
+            if (existing !== undefined) {
+              // The caller runs the cached reclamation effect.
+              // @effect-diagnostics-next-line returnEffectInGen:off
+              return existing;
+            }
             const run = yield* Effect.cached(reclaim(value));
             completed.set(key, run);
+            // The caller runs the cached reclamation effect.
+            // @effect-diagnostics-next-line returnEffectInGen:off
             return run;
           }),
         )

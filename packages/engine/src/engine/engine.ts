@@ -41,7 +41,7 @@ import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { BoardMoves } from "../board-moves/board-moves.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { RunDriver } from "./run-driver.ts";
-import { UnconfirmedStops } from "./unconfirmed-stops.ts";
+import { UnconfirmedStop, UnconfirmedStops } from "./unconfirmed-stops.ts";
 
 /** The interval between periodic reconciles, which restart open Runs whose fiber stopped. */
 export const ReconcileInterval = Context.Reference<Duration.Input>(
@@ -134,14 +134,16 @@ const makeRunEngine = Effect.gen(function* () {
     // The stop can end the Attempt's execution, and its fiber then frees the slot, so the slot
     // moves to the Attempt first.
     if (Option.isSome(outcome.openAttempt))
-      yield* driver.holdSlot({
-        attemptId: outcome.openAttempt.value.id,
-        worker: outcome.openAttempt.value.worker,
-        runId,
-        loop: outcome.loop,
-        itemKey: outcome.itemKey,
-        reason: "cancel",
-      });
+      yield* driver.holdSlot(
+        UnconfirmedStop.make({
+          attemptId: outcome.openAttempt.value.id,
+          worker: outcome.openAttempt.value.worker,
+          runId,
+          loop: outcome.loop,
+          itemKey: outcome.itemKey,
+          reason: "cancel",
+        }),
+      );
     // Stop the Attempt before interrupting its fiber; otherwise its parent task stays live
     // waiting for a reattach.
     const handshake = Option.isSome(outcome.openAttempt)
@@ -151,14 +153,16 @@ const makeRunEngine = Effect.gen(function* () {
     // The Attempt's slot, and a checkout that startup kept for a reattach, stay kept, and the
     // queued Event's Run starts no Attempt, until the parent task is confirmed stopped.
     if (Option.isSome(outcome.openAttempt))
-      yield* driver.releaseKept({
-        attemptId: outcome.openAttempt.value.id,
-        worker: outcome.openAttempt.value.worker,
-        runId,
-        loop: outcome.loop,
-        itemKey: outcome.itemKey,
-        reason: "cancel",
-      });
+      yield* driver.releaseKept(
+        UnconfirmedStop.make({
+          attemptId: outcome.openAttempt.value.id,
+          worker: outcome.openAttempt.value.worker,
+          runId,
+          loop: outcome.loop,
+          itemKey: outcome.itemKey,
+          reason: "cancel",
+        }),
+      );
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
       return yield* AttemptCancellationError.make({
@@ -271,11 +275,11 @@ const makeRunEngine = Effect.gen(function* () {
 
   // Startup reconciliation runs here because this layer is memoized; `Layer.tap` would run it
   // once per service the engine is provided to.
-  yield* driver.recoverWorkspaces();
-  yield* driver.reconcile();
+  yield* driver.recoverWorkspaces;
+  yield* driver.reconcile;
   const interval = yield* ReconcileInterval;
   yield* Effect.sleep(interval).pipe(
-    Effect.andThen(driver.reconcile()),
+    Effect.andThen(driver.reconcile),
     Effect.tapError((error) =>
       Effect.logError("Periodic Run reconcile failed; the next one tries again", {
         errorTag: error._tag,
@@ -321,7 +325,7 @@ export class RunEngine extends Context.Service<
   RunEngine,
   {
     /** Returns persisted CI waits without reserving workers. */
-    readonly awaitingCi: () => Effect.Effect<ReadonlyArray<RunSnapshot>, EnginePersistenceError>;
+    readonly awaitingCi: Effect.Effect<ReadonlyArray<RunSnapshot>, EnginePersistenceError>;
     /** Settles this head once; stale observations leave the run unchanged. */
     readonly settleCi: (
       runId: RunId,
@@ -329,7 +333,7 @@ export class RunEngine extends Context.Service<
       resolution: CiResolution,
     ) => Effect.Effect<void, RunEngineError>;
     /** Stops admitting Attempts, including retries, and waits for admitted Attempts to finish. Admission stays closed until restart. */
-    readonly drain: () => Effect.Effect<void>;
+    readonly drain: Effect.Effect<void>;
     /** Defers reservations and new attempts while admitted attempts finish. */
     readonly waitForUpgrade: (target: ReleaseVersion) => Effect.Effect<void>;
     /** Reopens upgrade admission without reopening a process shutdown. */
@@ -373,7 +377,7 @@ export class RunEngine extends Context.Service<
      * stop starts no Attempt until a reconcile confirms it. Runs at startup and every
      * `ReconcileInterval`.
      */
-    readonly reconcile: () => Effect.Effect<void, RunEngineError>;
+    readonly reconcile: Effect.Effect<void, RunEngineError>;
     /**
      * Marks the current failed Attempt as resolved without changing its outcome. If the Attempt
      * stopped with a question or blocker, the Loop evaluates the Item's queued Events again.

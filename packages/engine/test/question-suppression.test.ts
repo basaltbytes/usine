@@ -88,7 +88,7 @@ describe("Attempts that end with an operator question", () => {
           assert.strictEqual((yield* engine.submit(posted))._tag, "Queued");
           yield* Deferred.succeed(asking, undefined);
           yield* waitFor(engine, asked.runId, ({ run }) => run.state._tag === "Failed");
-          yield* engine.reconcile();
+          yield* engine.reconcile;
           assert(yield* hasNoRun(engine, posted));
           // Polling sees the question's own comment again, which is the suppressed state.
           assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");

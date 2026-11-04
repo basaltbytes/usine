@@ -54,14 +54,16 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
     models,
     defaultModel,
   } satisfies DurableHarnessOptions;
-}, Effect.provide(NodeServices.layer));
+});
 
 /**
  * Provides the durable harness on `.usine/durable.sqlite` with Pi's configured models and
  * credentials.
  */
 export const harnessLayer = (instanceDirectory: InstanceDirectory) =>
-  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory), durableHarnessLayer));
+  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory), durableHarnessLayer)).pipe(
+    Layer.provide(NodeServices.layer),
+  );
 
 const childImplementations = Layer.mergeAll(
   claudeChildBackendLayer.pipe(Layer.provide(claudeSdkLive)),

@@ -118,7 +118,7 @@ export class GitHubApp extends Context.Service<
   GitHubApp,
   {
     /** Returns the installation page for this App, including before its first installation. */
-    readonly installationUrl: () => Effect.Effect<string, GitHubAppError>;
+    readonly installationUrl: Effect.Effect<string, GitHubAppError>;
     /** Sets the App's webhook URL and JSON encoding; the App must already have an active webhook. */
     readonly configureWebhook: (url: URL) => Effect.Effect<void, GitHubAppError>;
     /**
@@ -130,23 +130,23 @@ export class GitHubApp extends Context.Service<
       after: Option.Option<WebhookDeliveryId>,
     ) => Effect.Effect<ReadonlyArray<WebhookDelivery>, GitHubAppError>;
     /** Lists every repository accessible to the installation, following all pages. */
-    readonly repositories: () => Effect.Effect<ReadonlyArray<RepositoryName>, GitHubAppError>;
+    readonly repositories: Effect.Effect<ReadonlyArray<RepositoryName>, GitHubAppError>;
     /**
      * Returns the single active installation after checking its required permissions.
      * Shares discovery and token renewal with `installationToken`; missing, multiple, or
      * suspended installations fail with `InstallationDiscoveryError`.
      */
-    readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
+    readonly installation: Effect.Effect<Installation, GitHubAppError>;
     /**
      * Returns the App's bot account, `<slug>[bot]`, read from GitHub's users API once per App
      * slug.
      */
-    readonly botAccount: () => Effect.Effect<BotAccount, GitHubAppError>;
+    readonly botAccount: Effect.Effect<BotAccount, GitHubAppError>;
     /**
      * Returns the shared installation-wide token for orchestrator operations. Renews it when
      * five minutes or less remain, sharing one discovery and mint across concurrent callers.
      */
-    readonly installationToken: () => Effect.Effect<InstallationToken, GitHubAppError>;
+    readonly installationToken: Effect.Effect<InstallationToken, GitHubAppError>;
     /**
      * Checks `registry` against all installation repositories, matching names without case
      * sensitivity. Returns one result per registry entry in input order; an uncovered
@@ -398,7 +398,7 @@ export class GitHubApp extends Context.Service<
         Option.none<{ readonly appSlug: AppSlug; readonly account: BotAccount }>(),
       );
 
-      const botAccount = Effect.fn("GitHubApp.botAccount")(() =>
+      const botAccount = Effect.suspend(() =>
         SynchronizedRef.modifyEffect(botAccountRef, (current) =>
           Effect.gen(function* () {
             const { installation, token } = yield* lease();
@@ -428,10 +428,10 @@ export class GitHubApp extends Context.Service<
             return stored;
           }),
         ),
-      );
+      ).pipe(Effect.withSpan("GitHubApp.botAccount"));
 
       return {
-        installationUrl: Effect.fn("GitHubApp.installationUrl")(function* () {
+        installationUrl: Effect.gen(function* () {
           yield* Effect.annotateCurrentSpan({ appId: credentials.appId });
           const jwt = yield* sign();
           const app = yield* fetchJson(
@@ -440,7 +440,7 @@ export class GitHubApp extends Context.Service<
             Schema.Struct({ slug: AppSlug }),
           );
           return `https://github.com/apps/${encodeURIComponent(app.slug)}/installations/new`;
-        }),
+        }).pipe(Effect.withSpan("GitHubApp.installationUrl")),
         configureWebhook: Effect.fn("GitHubApp.configureWebhook")(function* (url: URL) {
           yield* Effect.annotateCurrentSpan({ appId: credentials.appId });
           const jwt = yield* sign();
@@ -456,7 +456,7 @@ export class GitHubApp extends Context.Service<
           });
         }),
         deliveries,
-        repositories: Effect.fn("GitHubApp.repositories")(function* () {
+        repositories: Effect.gen(function* () {
           const { token, installation } = yield* lease();
           yield* Effect.annotateCurrentSpan({ installationId: installation.id });
           const repositories = yield* installedRepositories(token);
@@ -464,14 +464,14 @@ export class GitHubApp extends Context.Service<
             count: repositories.length,
           });
           return repositories.map(({ name }) => name);
-        }),
-        installation: Effect.fn("GitHubApp.installation")(() =>
+        }).pipe(Effect.withSpan("GitHubApp.repositories")),
+        installation: Effect.suspend(() =>
           Effect.map(lease(), (current) => current.installation),
-        ),
+        ).pipe(Effect.withSpan("GitHubApp.installation")),
         botAccount,
-        installationToken: Effect.fn("GitHubApp.installationToken")(() =>
+        installationToken: Effect.suspend(() =>
           Effect.map(lease(), (current) => current.token),
-        ),
+        ).pipe(Effect.withSpan("GitHubApp.installationToken")),
         projectAccess: Effect.fn("GitHubApp.projectAccess")(function* (
           registry: ReadonlyArray<RepositoryName>,
         ) {

@@ -69,7 +69,7 @@ const delivery = (id: string, event: string, repositoryId: number | null) =>
 
 const appLayer = (deliveries: GitHubApp["Service"]["deliveries"]) =>
   Layer.mock(GitHubApp)({
-    installation: () => Effect.succeed(installation),
+    installation: Effect.succeed(installation),
     projectAccess: () => Effect.succeed([project]),
     deliveries,
   });

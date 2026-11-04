@@ -63,7 +63,7 @@ export class GitHubLabelWriter extends Context.Service<
             label: NewRepositoryLabel,
           ) {
             yield* Effect.annotateCurrentSpan({ repository, label: label.name });
-            const token = yield* app.installationToken();
+            const token = yield* app.installationToken;
             const body: CreateLabelBody = { name: label.name };
             if (Option.isSome(label.color)) body.color = label.color.value;
             if (Option.isSome(label.description)) body.description = label.description.value;

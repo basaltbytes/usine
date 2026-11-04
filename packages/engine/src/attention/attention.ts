@@ -21,10 +21,7 @@ export class AttentionAcknowledgements extends Context.Service<
      * Returns all stored dismissals in no specified order, including entries that may no longer be
      * current.
      */
-    readonly list: () => Effect.Effect<
-      ReadonlyArray<AttentionAcknowledgement>,
-      EnginePersistenceError
-    >;
+    readonly list: Effect.Effect<ReadonlyArray<AttentionAcknowledgement>, EnginePersistenceError>;
     /**
      * Records a dismissal for this entry ID and revision. Repeating it preserves the first
      * operator and time; run and ask state stay unchanged.
@@ -66,10 +63,13 @@ export class AttentionAcknowledgements extends Context.Service<
           })),
         );
       return {
-        list: Effect.fn("AttentionAcknowledgements.list")(function* () {
+        list: Effect.gen(function* () {
           const rows = yield* database.select().from(attentionAcknowledgements).execute();
           return yield* decodeRows(rows, { onExcessProperty: "error" });
-        }, persistence("read attention acknowledgements")),
+        }).pipe(
+          persistence("read attention acknowledgements"),
+          Effect.withSpan("AttentionAcknowledgements.list"),
+        ),
         prune: Effect.fn("AttentionAcknowledgements.prune")(function* (
           current: ReadonlyArray<AttentionKey>,
         ) {

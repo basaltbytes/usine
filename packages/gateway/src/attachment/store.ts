@@ -68,7 +68,7 @@ export class Attachments extends Context.Service<
     /** Removes the attachment. Returns `false` if it didn't exist. */
     readonly detach: (id: AttachmentId) => Effect.Effect<boolean, AttachmentPersistenceError>;
     /** Returns the active attachments, earliest expiry first. */
-    readonly list: () => Effect.Effect<ReadonlyArray<Attachment>>;
+    readonly list: Effect.Effect<ReadonlyArray<Attachment>>;
     /** Returns whether the attachment is active, expired, or missing. */
     readonly find: (id: AttachmentId) => Effect.Effect<AttachmentLookup>;
     /**
@@ -81,7 +81,7 @@ export class Attachments extends Context.Service<
       name: RepositoryName,
     ) => Effect.Effect<void, AttachmentPersistenceError>;
     /** Removes expired attachments and returns the number removed. */
-    readonly sweep: () => Effect.Effect<number, AttachmentPersistenceError>;
+    readonly sweep: Effect.Effect<number, AttachmentPersistenceError>;
   }
 >()("@usine/gateway/Attachments") {
   /**
@@ -168,7 +168,7 @@ export class Attachments extends Context.Service<
           return true;
         });
 
-        const list = Effect.fn("Attachments.list")(function* () {
+        const list = Effect.gen(function* () {
           const now = yield* DateTime.now;
           const current = yield* SynchronizedRef.get(entries);
           return [...current.values()]
@@ -178,7 +178,7 @@ export class Attachments extends Context.Service<
               (left, right) =>
                 DateTime.toEpochMillis(left.expiresAt) - DateTime.toEpochMillis(right.expiresAt),
             );
-        });
+        }).pipe(Effect.withSpan("Attachments.list"));
 
         const find = Effect.fn("Attachments.find")(function* (id: AttachmentId) {
           const now = yield* DateTime.now;
@@ -225,7 +225,7 @@ export class Attachments extends Context.Service<
           });
         });
 
-        const sweep = Effect.fn("Attachments.sweep")(function* () {
+        const sweep = Effect.gen(function* () {
           const now = yield* DateTime.now;
           const expired = yield* modify((current) => {
             const gone = [...current.values()]
@@ -244,11 +244,11 @@ export class Attachments extends Context.Service<
               expiredAt: DateTime.formatIso(expiresAt),
             });
           return expired.length;
-        });
+        }).pipe(Effect.withSpan("Attachments.sweep"));
 
         yield* Effect.forever(
           Effect.sleep(SWEEP_INTERVAL).pipe(
-            Effect.andThen(sweep()),
+            Effect.andThen(sweep),
             Effect.catchTag("AttachmentPersistenceError", (error) =>
               Effect.logError("Could not persist expired attachment removal; will retry", {
                 operation: error.operation,

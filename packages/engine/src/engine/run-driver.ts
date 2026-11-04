@@ -130,7 +130,7 @@ export class RunDriver extends Context.Service<
      * `releaseKept`, `recoverWorkspaces`, or the end of an Attempt couldn't confirm, then runs
      * `StepExecutor.sweep`.
      */
-    readonly reconcile: () => Effect.Effect<void, RunStoreError>;
+    readonly reconcile: Effect.Effect<void, RunStoreError>;
     /** Returns pending stops and failed stops that `reconcile` retries. */
     readonly unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>>;
     /**
@@ -139,7 +139,7 @@ export class RunDriver extends Context.Service<
      * an open Attempt whose parent task is live or unreadable, and for a closed Attempt whose
      * parent task isn't confirmed stopped. See `checkoutRecoveryFor`.
      */
-    readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
+    readonly recoverWorkspaces: Effect.Effect<void, RunStoreError>;
     /**
      * Records the pending stop and moves the run fiber's slot to the attempt, whose parent
      * task may still run, so the slot stays taken after the fiber frees it, until `releaseKept`
@@ -220,8 +220,9 @@ export class RunDriver extends Context.Service<
               root: true,
               links: Option.toArray(Option.map(launchedBy, (span) => ({ span, attributes: {} }))),
             }),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.void,
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              () => Effect.void,
             ),
           ),
           { onlyIfMissing: true },
@@ -519,14 +520,16 @@ export class RunDriver extends Context.Service<
         }
         // Before the Attempt closes, so a cancel meanwhile still finds it open and keeps its slot.
         if (Result.isFailure(result))
-          yield* confirmStopAfterFailure({
-            attemptId: started.execution.attempt.id,
-            runId,
-            loop: submission.loop,
-            itemKey: submission.itemKey,
-            reason: "failed",
-            worker,
-          });
+          yield* confirmStopAfterFailure(
+            UnconfirmedStop.make({
+              attemptId: started.execution.attempt.id,
+              runId,
+              loop: submission.loop,
+              itemKey: submission.itemKey,
+              reason: "failed",
+              worker,
+            }),
+          );
         const finished = yield* store
           .finishAttempt(started.execution.attempt, result)
           .pipe(retryingStore(runId, "finish the attempt"));
@@ -734,7 +737,7 @@ export class RunDriver extends Context.Service<
         );
       });
 
-      const recoverWorkspaces = Effect.fn("RunDriver.recoverWorkspaces")(function* () {
+      const recoverWorkspaces = Effect.gen(function* () {
         // Closed Attempts whose parent task stop wasn't confirmed before the restart.
         const unstopped = yield* checkouts.atStartup();
         yield* Effect.forEach(
@@ -745,9 +748,9 @@ export class RunDriver extends Context.Service<
             ),
           { discard: true },
         );
-      });
+      }).pipe(Effect.withSpan("RunDriver.recoverWorkspaces"));
 
-      const reconcile = Effect.fn("RunDriver.reconcile")(function* () {
+      const reconcile = Effect.gen(function* () {
         // No Run fiber retries these stops, so reconcile does, before it starts the fibers they
         // keep from starting an Attempt.
         const unstopped = [...(yield* Ref.get(unconfirmed)).values()];
@@ -790,7 +793,7 @@ export class RunDriver extends Context.Service<
         if (continuations.length === 0 && withoutFiber.length === 0 && unstopped.length === 0)
           yield* Effect.logDebug("Every Run to drive already has its fiber", fields);
         else yield* Effect.logInfo("Runs recovered from the run tables", fields);
-      });
+      }).pipe(Effect.withSpan("RunDriver.reconcile"));
 
       return {
         launch,

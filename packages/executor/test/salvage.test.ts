@@ -67,14 +67,27 @@ const fakeGit = (script: Scripted) => {
       if (command[0] === "rev-parse")
         return Effect.succeed(`${committed ? SNAPSHOT : script.head()}\n`);
       if (command[0] === "status") {
-        if (script.inspect === "fails") return Effect.fail(new Error("inspection failed"));
+        if (script.inspect === "fails")
+          return Effect.fail(
+            ExecutorOperationError.make({
+              operation: "cleanup",
+              message: "inspection failed",
+              cause: new Error("inspection failed"),
+            }),
+          );
         if (script.inspect === "fails without a cause message")
           return Effect.fail(NO_CAUSE_MESSAGE);
         return Effect.succeed(script.status);
       }
       if (command[0] === "add")
         return script.add === "fails"
-          ? Effect.fail(new Error("index.lock exists"))
+          ? Effect.fail(
+              ExecutorOperationError.make({
+                operation: "cleanup",
+                message: "index.lock exists",
+                cause: new Error("index.lock exists"),
+              }),
+            )
           : Effect.succeed("");
       if (command[0] === "reset") return Effect.succeed("");
       if (command[0] === "diff") return Effect.succeed("src/index.ts\0");
@@ -82,7 +95,14 @@ const fakeGit = (script: Scripted) => {
       if (command[0] === "ls-tree")
         return Effect.succeed(`100644 blob ${"e".repeat(40)}      42\tsrc/index.ts\0`);
       if (command.includes("commit")) {
-        if (script.commit === "fails") return Effect.fail(new Error("nothing added"));
+        if (script.commit === "fails")
+          return Effect.fail(
+            ExecutorOperationError.make({
+              operation: "cleanup",
+              message: "nothing added",
+              cause: new Error("nothing added"),
+            }),
+          );
         committed = true;
         return Effect.succeed("");
       }

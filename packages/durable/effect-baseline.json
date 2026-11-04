@@ -35,35 +35,27 @@
     "yieldInCallArgument": 1
   },
   "src/attempt/task.ts": {
-    "asyncFunction": 6,
-    "instanceOfSchema": 1
+    "asyncFunction": 6
   },
   "src/attempt/watch.ts": {
     "asyncFunction": 1,
     "newPromise": 1
   },
   "src/backup.ts": {
-    "schemaClassMissingBrand": 1,
-    "strictEffectProvide": 1
+    "schemaClassMissingBrand": 1
   },
   "src/harness.ts": {
-    "anyUnknownInErrorContext": 2,
     "deterministicKeys": 1,
     "globalDate": 3,
     "globalDateInEffect": 2,
     "schemaClassMissingBrand": 2,
-    "strictBooleanExpressions": 2,
-    "unknownInEffectCatch": 2
+    "strictBooleanExpressions": 2
   },
   "src/http-dispatcher.ts": {
     "processEnvInEffect": 2,
     "strictBooleanExpressions": 2
   },
-  "src/live.ts": {
-    "strictEffectProvide": 1
-  },
   "src/testing.ts": {
-    "instanceOfSchema": 1,
     "yieldInCallArgument": 2
   },
   "test/attempt-runtime.test.ts": {

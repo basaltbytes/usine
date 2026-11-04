@@ -5,11 +5,7 @@
   "src/pi/claude/claude.ts": {
     "asyncFunction": 1,
     "nodeBuiltinImport": 1,
-    "returnEffectInGen": 1,
     "yieldInCallArgument": 1
-  },
-  "src/pi/claude/codec.ts": {
-    "instanceOfSchema": 1
   },
   "src/pi/claude/sdk.ts": {
     "asyncFunction": 2,
@@ -23,23 +19,17 @@
     "schemaSyncInEffect": 2
   },
   "src/pi/codex/app-server.ts": {
-    "effectFnIife": 1,
-    "globalJson": 2,
-    "instanceOfSchema": 4
+    "globalJson": 2
   },
   "src/pi/codex/codec.ts": {
     "globalJson": 2,
     "schemaSync": 1
-  },
-  "src/pi/codex/codex.ts": {
-    "instanceOfSchema": 1
   },
   "src/pi/codex/connection.ts": {
     "deterministicKeys": 1
   },
   "src/pi/codex/remote.ts": {
     "globalJsonInEffect": 1,
-    "instanceOfSchema": 3,
     "schemaClassMissingBrand": 1,
     "yieldInCallArgument": 2
   },
@@ -55,11 +45,7 @@
     "schemaSync": 1
   },
   "src/pi/turns.ts": {
-    "instanceOfSchema": 1,
     "strictBooleanExpressions": 4
-  },
-  "src/preflight/preflight.ts": {
-    "strictEffectProvide": 1
   },
   "src/prompt.ts": {
     "globalJson": 1
@@ -94,10 +80,8 @@
     "yieldInCallArgument": 2
   },
   "test/pi/claude.test.ts": {
-    "abortControllerInEffect": 2,
     "asyncFunction": 4,
     "globalJson": 2,
-    "instanceOfSchema": 8,
     "newPromise": 2,
     "nodeBuiltinImport": 2,
     "schemaSync": 1,
@@ -107,21 +91,17 @@
   "test/pi/codex/app-server.test.ts": {
     "globalJson": 1,
     "globalJsonInEffect": 2,
-    "instanceOfSchema": 6,
     "yieldInCallArgument": 4
   },
   "test/pi/codex/codex.test.ts": {
     "globalJson": 1,
-    "globalJsonInEffect": 4,
-    "instanceOfSchema": 7
+    "globalJsonInEffect": 4
   },
   "test/pi/conversation.test.ts": {
-    "instanceOfSchema": 4,
     "yieldInCallArgument": 2
   },
   "test/pi/pi.test.ts": {
     "globalJson": 1,
-    "instanceOfSchema": 5,
     "newPromise": 5,
     "nodeBuiltinImport": 2,
     "processEnvInEffect": 2
@@ -133,7 +113,6 @@
     "asyncFunction": 5,
     "globalJson": 3,
     "globalJsonInEffect": 1,
-    "instanceOfSchema": 6,
     "nodeBuiltinImport": 2,
     "schemaSync": 1,
     "yieldInCallArgument": 4
@@ -142,7 +121,6 @@
     "schemaSync": 1
   },
   "test/runtime.test.ts": {
-    "instanceOfSchema": 1,
     "schemaSync": 2
   }
 }

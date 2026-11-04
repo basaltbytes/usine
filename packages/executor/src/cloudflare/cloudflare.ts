@@ -26,7 +26,7 @@ import type {
   GatewayCredentialKind,
   WorkerName,
 } from "@usine/core/worker";
-import { AttemptRuntime } from "@usine/durable/attempt-runtime";
+import { AttemptRuntime, type StoredRequest } from "@usine/durable/attempt-runtime";
 import {
   Array as Arr,
   Cache,
@@ -854,37 +854,33 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       );
 
       // A reattachment reuses its sandbox and checkout before any credential is granted.
-      const reattached = request.reattach
-        ? Option.some(
-            yield* Effect.gen(function* () {
-              const summary = yield* worker.client
-                .get(name)
-                .pipe(Effect.mapError(operationError("prepare")));
-              if (!Option.exists(summary, ({ running }) => running))
-                return yield* ExecutorOperationError.make({
-                  operation: "prepare",
-                  message:
-                    "The reattached attempt's sandbox no longer runs, so its checkout is gone",
-                  cause: new Error(name),
-                });
-              const { cwd, spec } = yield* session.storedRequest(request.attemptId);
-              if (cwd !== layout.worktree)
-                return yield* ExecutorOperationError.make({
-                  operation: "prepare",
-                  message: "The reattached attempt's checkout isn't in its cloudflare sandbox",
-                  cause: new Error(cwd),
-                });
-              if (!(yield* exists("prepare", worker, name, layout.worktree)))
-                return yield* ExecutorOperationError.make({
-                  operation: "prepare",
-                  message: "The reattached attempt's checkout no longer exists",
-                  cause: new Error(layout.worktree),
-                });
-              yield* stopCommands("prepare", worker, name);
-              return spec;
-            }),
-          )
-        : Option.none();
+      let reattached = Option.none<StoredRequest["spec"]>();
+      if (request.reattach) {
+        const summary = yield* worker.client
+          .get(name)
+          .pipe(Effect.mapError(operationError("prepare")));
+        if (!Option.exists(summary, ({ running }) => running))
+          return yield* ExecutorOperationError.make({
+            operation: "prepare",
+            message: "The reattached attempt's sandbox no longer runs, so its checkout is gone",
+            cause: new Error(name),
+          });
+        const { cwd, spec } = yield* session.storedRequest(request.attemptId);
+        if (cwd !== layout.worktree)
+          return yield* ExecutorOperationError.make({
+            operation: "prepare",
+            message: "The reattached attempt's checkout isn't in its cloudflare sandbox",
+            cause: new Error(cwd),
+          });
+        if (!(yield* exists("prepare", worker, name, layout.worktree)))
+          return yield* ExecutorOperationError.make({
+            operation: "prepare",
+            message: "The reattached attempt's checkout no longer exists",
+            cause: new Error(layout.worktree),
+          });
+        yield* stopCommands("prepare", worker, name);
+        reattached = Option.some(spec);
+      }
 
       /** Set when the sandbox must stay: its checkout is kept, or its work isn't all pushed. */
       const keep = yield* Ref.make(false);

@@ -399,7 +399,7 @@ it.live("a conflicting head without checks starts one fix before the CI deadline
         assert.include(fix.task, "CONFLICTING and no checks exist");
         assert.include(fix.task, "Merge the base branch");
         assert.include(fix.task, head);
-        yield* engine.drain();
+        yield* engine.drain;
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
         assert.strictEqual(runNeedsAttention(runView(source, new Set(), new Map()), false), false);
@@ -440,7 +440,7 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         const projected = runView(settled, new Set(), new Map());
         assert.strictEqual(runNeedsAttention(projected, false), false);
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
-        yield* engine.drain();
+        yield* engine.drain;
         const another = yield* triggerSubmission(yield* ExpressionEngine, {
           loop: LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) }),
           agent: agent.agent,
@@ -455,7 +455,7 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
           task: AttemptTask.make("Fix again"),
         });
         assert.strictEqual((yield* engine.submit(another))._tag, "CycleBlocked");
-        assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
+        assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
@@ -599,7 +599,7 @@ it.live("CI fixes from their own loop are admitted before the source hands off",
           }),
           Effect.timeout("5 seconds"),
         );
-        yield* (yield* RunEngine).drain();
+        yield* (yield* RunEngine).drain;
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
         const source = yield* (yield* RunEngine).inspect(sourceId);
         assert.strictEqual(source.run.state._tag, "HandedOff");
@@ -624,7 +624,7 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
         assert.strictEqual(source.run.state._tag, "Failed");
         const projected = runView(source, new Set(), new Map());
         assert.strictEqual(runNeedsAttention(projected, false), true);
-        assert.strictEqual((yield* (yield* CycleBudgets).asks()).length, 1);
+        assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
       }).pipe(Effect.provide(setup.runtime));
     }),
@@ -695,7 +695,7 @@ it.live.each([
           }),
           Effect.timeout("5 seconds"),
         );
-        yield* engine.drain();
+        yield* engine.drain;
         yield* Ref.set(setup.mergeable, "CONFLICTING");
         if (outcome === "admitted and pushed") {
           yield* Ref.set(

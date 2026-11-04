@@ -70,7 +70,7 @@ export const Route = createFileRoute("/projects/$project/tasks/$number")({
         context.queryClient.ensureQueryData(projectTasksQuery(projectId(project))),
       ]);
     } catch (error) {
-      if (error instanceof OperatorHttpError && error.error === "BoardItemNotFoundError")
+      if (Schema.is(OperatorHttpError)(error) && error.error === "BoardItemNotFoundError")
         throw notFound();
       throw error;
     }

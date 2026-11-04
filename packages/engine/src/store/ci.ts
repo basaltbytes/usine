@@ -21,23 +21,23 @@ import { queriesFor } from "./queries.ts";
 
 /** Durable CI waits share the run transaction and keep the attempt's session end time. */
 export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBus.Service) => ({
-  awaitingCi: Effect.fn("RunStore.awaitingCi")(
-    function* () {
-      const rows = yield* database
-        .select({ runId: runs.runId })
-        .from(runs)
-        .where(sql`${jsonExtract(runs.stateJson, "$._tag")} = 'AwaitingCi'`)
-        .execute();
-      return yield* Effect.forEach(rows, ({ runId }) =>
-        database.transaction((transaction) => queriesFor(transaction).snapshot(runId)),
-      );
-    },
+  awaitingCi: Effect.gen(function* () {
+    const rows = yield* database
+      .select({ runId: runs.runId })
+      .from(runs)
+      .where(sql`${jsonExtract(runs.stateJson, "$._tag")} = 'AwaitingCi'`)
+      .execute();
+    return yield* Effect.forEach(rows, ({ runId }) =>
+      database.transaction((transaction) => queriesFor(transaction).snapshot(runId)),
+    );
+  }).pipe(
     persistence("read CI waits"),
     Effect.catchTags({
       RunNotFoundError: Effect.die,
       RunOperationRejectedError: Effect.die,
       RunRetryBlockedError: Effect.die,
     }),
+    Effect.withSpan("RunStore.awaitingCi"),
   ),
   settleCi: Effect.fn("RunStore.settleCi")(function* (
     runId: RunId,

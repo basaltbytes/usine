@@ -145,7 +145,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
           yield* Effect.gen(function* () {
             const store = yield* RunStore;
             const reader = yield* RunReader;
-            assert.deepStrictEqual(yield* reader.latestPoolRateLimits(), []);
+            assert.deepStrictEqual(yield* reader.latestPoolRateLimits, []);
             const at = DateTime.makeUnsafe("2026-10-29T00:00:00Z");
             const session = ParentSession.make({
               id: AgentSessionId.make("pool-session"),
@@ -246,12 +246,12 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
                 }),
               );
               assert.deepStrictEqual(
-                new Set(yield* reader.latestPoolRateLimits()),
+                new Set(yield* reader.latestPoolRateLimits),
                 new Set([report, other]),
               );
             }
             assert.deepStrictEqual(new Set(logLevels), new Set(["Debug"]));
-          }).pipe(Effect.provide(fixture.open()));
+          }).pipe(Effect.provide(fixture.open));
         }).pipe(Effect.scoped),
     );
     it.live(
@@ -314,7 +314,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
               [silent],
             );
-          }).pipe(Effect.provide(fixture.open()));
+          }).pipe(Effect.provide(fixture.open));
         }).pipe(Effect.scoped),
     );
     it.live("reads each session's highest token report, wherever it sits in the transcript", () =>
@@ -384,7 +384,7 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               ["usage-child", 90, 1.25],
             ],
           );
-        }).pipe(Effect.provide(fixture.open()));
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
     it.live(

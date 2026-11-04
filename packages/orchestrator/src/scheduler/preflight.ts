@@ -314,7 +314,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     Effect.tx(
       Effect.gen(function* () {
         if ((yield* TxRef.get(blocked)).has(worker) || (yield* inFlight).has(worker))
-          yield* Effect.txRetry;
+          return yield* Effect.txRetry;
       }),
     );
 

@@ -116,9 +116,9 @@ const makeRunReader = Effect.gen(function* () {
     yield* Effect.logDebug("Read runs closed since a time", { since, runs: summaries.length });
     return summaries;
   });
-  const revision = Effect.fn("RunReader.revision")(() =>
+  const revision = Effect.suspend(() =>
     queries.revision().pipe(persistence("read projection revision")),
-  );
+  ).pipe(Effect.withSpan("RunReader.revision"));
   const forItems = Effect.fn("RunReader.forItems")(function* (itemKeys: ReadonlyArray<ItemKey>) {
     yield* Effect.annotateCurrentSpan({ itemKeys });
     const summaries = yield* snapshot
@@ -142,9 +142,9 @@ const makeRunReader = Effect.gen(function* () {
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
     queries.transcript(query).pipe(persistence("read attempt transcript")),
   );
-  const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
+  const attemptsByWorker = Effect.suspend(() =>
     leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count attempts by worker")),
-  );
+  ).pipe(Effect.withSpan("RunReader.attemptsByWorker"));
   const sightings = Effect.fn("RunReader.sightings")((itemKeys: ReadonlyArray<ItemKey>) =>
     queries.loopItems.sightings(itemKeys).pipe(persistence("read loop sightings")),
   );
@@ -162,7 +162,7 @@ const makeRunReader = Effect.gen(function* () {
     events,
     revision,
     transcript,
-    latestPoolRateLimits: () => latestPoolRateLimits(database),
+    latestPoolRateLimits: latestPoolRateLimits(database),
     attemptsByWorker,
     sightings,
   } as const;
@@ -215,18 +215,18 @@ export class RunReader extends Context.Service<
       runIds: ReadonlyArray<RunId>,
     ) => Effect.Effect<ReadonlyArray<RunEvent>, RunStoreError>;
     /** Returns the projection revision. If the row is absent, returns `None`, and every cached projection is stale. */
-    readonly revision: () => Effect.Effect<Option.Option<ProjectionRevision>, RunStoreError>;
+    readonly revision: Effect.Effect<Option.Option<ProjectionRevision>, RunStoreError>;
     /** Returns the requested part of an Attempt's transcript, in append order. */
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
     /** Returns the newest stored rate-limit event per pool, by global transcript append order. */
-    readonly latestPoolRateLimits: () => Effect.Effect<
+    readonly latestPoolRateLimits: Effect.Effect<
       ReadonlyArray<PoolRateLimitsUpdated>,
       RunStoreError
     >;
     /** Returns the Attempts that startup reconciliation visits, counted per Worker, by Worker name. */
-    readonly attemptsByWorker: () => Effect.Effect<ReadonlyArray<WorkerAttempts>, RunStoreError>;
+    readonly attemptsByWorker: Effect.Effect<ReadonlyArray<WorkerAttempts>, RunStoreError>;
     /** Returns each Loop's last sighting of the Items in `itemKeys`, one entry per Loop and Item. */
     readonly sightings: (
       itemKeys: ReadonlyArray<ItemKey>,

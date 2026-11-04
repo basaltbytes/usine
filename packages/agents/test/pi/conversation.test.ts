@@ -9,7 +9,7 @@ import {
   Release,
   Steer,
 } from "@usine/core/attempt/channel";
-import { Deferred, Effect, Exit, Fiber, Option, Queue, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Queue, Scope, Schema } from "effect";
 import { AgentBlockedError, AgentQuestionError, type OnDelivery } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/pi/session.ts";
 import { sessionConversation } from "../../src/pi/conversation.ts";
@@ -145,7 +145,8 @@ describe("session supervision", () => {
       assert.strictEqual(session.result.pollUnsafe(), undefined);
       yield* session.intervene(Release.make(), noDelivery);
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      assert(error instanceof AgentBlockedError);
+      const matchesError = Schema.is(AgentBlockedError)(error);
+      assert(matchesError);
       assert.strictEqual(error.message, "Publishing permission denied.");
     }),
   );
@@ -176,7 +177,8 @@ describe("session supervision", () => {
       const session = yield* conversation(child("same-line"));
       yield* session.finish("[usine:blocked] Repository permission denied.");
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      assert(error instanceof AgentBlockedError);
+      const matchesError = Schema.is(AgentBlockedError)(error);
+      assert(matchesError);
       assert.strictEqual(error.message, "Repository permission denied.");
     }),
   );
@@ -188,7 +190,8 @@ describe("session supervision", () => {
         "[usine:question]\nShould egress use HTTP CONNECT or a SOCKS proxy?\n\nBoth fit the gateway.",
       );
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      assert(error instanceof AgentQuestionError);
+      const matchesError = Schema.is(AgentQuestionError)(error);
+      assert(matchesError);
       assert.strictEqual(
         error.message,
         "Should egress use HTTP CONNECT or a SOCKS proxy?\n\nBoth fit the gateway.",
@@ -201,7 +204,8 @@ describe("session supervision", () => {
       const session = yield* conversation(child("no-details"));
       yield* session.finish("[usine:blocked]");
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      assert(error instanceof AgentBlockedError);
+      const matchesError = Schema.is(AgentBlockedError)(error);
+      assert(matchesError);
       assert.match(error.message, /without details/u);
     }),
   );

@@ -72,7 +72,7 @@ export const triggerConditionLayer: Layer.Layer<
           : ChangedIssue.make({ number, updatedAt: submission.event.receivedAt });
       const snapshot = yield* github.snapshot(repository.name, changed);
       if (Option.isSome(submission.ciFailureHead)) {
-        if (!(snapshot instanceof PullRequestSnapshot)) {
+        if (!Schema.is(PullRequestSnapshot)(snapshot)) {
           yield* Effect.logInfo("Queued CI fix no longer belongs to a pull request", {
             ...fields,
             head: submission.ciFailureHead.value,

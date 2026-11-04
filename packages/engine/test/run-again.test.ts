@@ -161,7 +161,7 @@ describe("Run again", () => {
 
           const blocked = yield* engine.runAgain(first.runId, request({ cycleLimit: limit }));
           assert(blocked._tag === "CycleBlocked");
-          const asks = yield* (yield* CycleBudgets).asks();
+          const asks = yield* (yield* CycleBudgets).asks;
           assert.deepStrictEqual(
             asks.map(({ id }) => id),
             [blocked.ask.id],

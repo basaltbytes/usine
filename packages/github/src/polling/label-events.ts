@@ -77,7 +77,7 @@ export const readLabelEvents = Effect.fn("GitHubPolling.labelEvents")(function* 
       pages,
       missingLabels: [...missing],
     });
-    const token = yield* services.app.installationToken();
+    const token = yield* services.app.installationToken;
     const { owner, name } = splitRepositoryName(repository);
     const data = yield* queryGraphql(
       services.http,

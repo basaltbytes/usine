@@ -81,7 +81,8 @@ describe("sandbox registry", () => {
         remove: (name) => Effect.sync(() => void recorded.delete(name)),
       }),
       Layer.succeed(SandboxLookup)({
-        get: (name) => Effect.fail(SandboxLookupFailed.make({ name, reason: "status 500" })),
+        get: (name) =>
+          Effect.fail(SandboxLookupFailed.make({ sandbox: name, reason: "status 500" })),
       }),
     );
     const web = HttpRouter.toWebHandler(registryRoutes.pipe(HttpRouter.provideRequest(services)), {

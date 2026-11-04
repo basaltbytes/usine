@@ -64,7 +64,12 @@ const open = (cursor?: number | string, grants = administratorPermissions) =>
   Effect.gen(function* () {
     const response = yield* (yield* Changes).stream(request(cursor), grants);
     assert(response.body._tag === "Stream");
-    return response.body.stream.pipe(Stream.decodeText);
+    return response.body.stream.pipe(
+      Stream.decodeText,
+      Stream.catch((cause) =>
+        Schema.is(AuthError)(cause) ? Stream.fail(cause) : Stream.die(cause),
+      ),
+    );
   });
 const live = Changes.layer.pipe(Layer.provide(instances));
 

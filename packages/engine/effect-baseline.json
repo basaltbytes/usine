@@ -1,8 +1,7 @@
 {
   "src/attention/attention.ts": {
     "deterministicKeys": 1,
-    "globalJsonInEffect": 1,
-    "lazyEffect": 1
+    "globalJsonInEffect": 1
   },
   "src/attention/model.ts": {
     "schemaClassMissingBrand": 2
@@ -19,8 +18,6 @@
   },
   "src/cycle-budget/cycle-budget.ts": {
     "deterministicKeys": 1,
-    "instanceOfSchema": 1,
-    "lazyEffect": 2,
     "schemaSync": 1,
     "schemaSyncInEffect": 1,
     "yieldInCallArgument": 2
@@ -45,7 +42,6 @@
   "src/database/local-sqlite.ts": {
     "preferBarrelImport": 1,
     "schemaClassMissingBrand": 1,
-    "strictEffectProvide": 4,
     "yieldInCallArgument": 1
   },
   "src/database/project-migration.ts": {
@@ -60,8 +56,7 @@
     "schemaStructWithTag": 3
   },
   "src/database/sqlite-reader/reader.ts": {
-    "preferBarrelImport": 2,
-    "strictEffectProvide": 1
+    "preferBarrelImport": 2
   },
   "src/database/sqlite-reader/status.ts": {
     "deterministicKeys": 1
@@ -72,7 +67,6 @@
   },
   "src/engine/admission.ts": {
     "deterministicKeys": 1,
-    "lazyEffect": 1,
     "yieldInCallArgument": 1
   },
   "src/engine/checkout-recovery.ts": {
@@ -80,9 +74,7 @@
     "yieldInCallArgument": 1
   },
   "src/engine/engine.ts": {
-    "deterministicKeys": 1,
-    "lazyEffect": 3,
-    "schemaClassObjectLiteral": 2
+    "deterministicKeys": 1
   },
   "src/engine/error.ts": {
     "schemaClassMissingBrand": 7
@@ -95,10 +87,7 @@
     "schemaClassMissingBrand": 1
   },
   "src/engine/run-driver.ts": {
-    "catchConditionalRefailToCatchIf": 1,
     "deterministicKeys": 1,
-    "lazyEffect": 2,
-    "schemaClassObjectLiteral": 1,
     "yieldInCallArgument": 3
   },
   "src/engine/shutdown.ts": {
@@ -139,8 +128,7 @@
     "schemaClassMissingBrand": 10
   },
   "src/run-reader/run-reader.ts": {
-    "deterministicKeys": 1,
-    "lazyEffect": 3
+    "deterministicKeys": 1
   },
   "src/step-executor.ts": {
     "deterministicKeys": 1,
@@ -165,7 +153,6 @@
   },
   "src/store/store.ts": {
     "deterministicKeys": 1,
-    "lazyEffect": 1,
     "schemaClassMissingBrand": 4,
     "yieldInCallArgument": 10
   },
@@ -186,8 +173,7 @@
     "yieldInCallArgument": 3
   },
   "test/contracts/adapter.ts": {
-    "deterministicKeys": 1,
-    "lazyEffect": 1
+    "deterministicKeys": 1
   },
   "test/contracts/attention.ts": {
     "yieldInCallArgument": 11
@@ -233,8 +219,6 @@
     "yieldInCallArgument": 10
   },
   "test/engine.test.ts": {
-    "anyUnknownInErrorContext": 1,
-    "globalErrorInEffectFailure": 1,
     "globalJson": 1,
     "yieldInCallArgument": 22
   },
@@ -277,7 +261,6 @@
   },
   "test/store/read-plans/benchmark.mts": {
     "asyncFunction": 3,
-    "globalConsoleInEffect": 1,
     "globalFetch": 1,
     "globalJsonInEffect": 1,
     "newPromise": 4,

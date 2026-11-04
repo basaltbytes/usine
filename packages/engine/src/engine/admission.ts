@@ -29,7 +29,7 @@ export class AttemptAdmission extends Context.Service<
       reserve: Effect.Effect<A, E, R | Scope.Scope>,
       attempt: (resource: A) => Effect.Effect<B, E2, R2>,
     ) => Effect.Effect<B, E | E2, Exclude<R, Scope.Scope> | R2>;
-    readonly drain: () => Effect.Effect<void>;
+    readonly drain: Effect.Effect<void>;
     readonly waitForUpgrade: (target: ReleaseVersion) => Effect.Effect<void>;
     readonly cancelUpgrade: Effect.Effect<void>;
     readonly upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>>;
@@ -198,7 +198,7 @@ export class AttemptAdmission extends Context.Service<
         }
       }, Effect.uninterruptible);
 
-      const drain = Effect.fn("AttemptAdmission.drain")(function* () {
+      const drain = Effect.gen(function* () {
         yield* Deferred.succeed(shutdown, undefined);
         const current = yield* Ref.get(active);
         yield* Effect.logInfo("Engine drain started; no further Attempts will be admitted", {
@@ -207,7 +207,7 @@ export class AttemptAdmission extends Context.Service<
         if (current.size === 0) yield* Deferred.succeed(empty, undefined);
         yield* Deferred.await(empty);
         yield* Effect.logInfo("Engine drain completed; all admitted Attempts settled");
-      });
+      }).pipe(Effect.withSpan("AttemptAdmission.drain"));
 
       return {
         withAttempt,

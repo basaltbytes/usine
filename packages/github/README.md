@@ -52,11 +52,13 @@ export const githubLayer = GitHubApp.layer.pipe(
 )
 ```
 
+Operations without arguments are Effect values: use `yield* app.installation`, `yield* app.installationToken`, `yield* app.botAccount`, `yield* app.repositories`, or `yield* app.installationUrl`. These values run when yielded.
+
 `GitHubApp.layer` imports the private key once, at build time, so a key that WebCrypto can't import fails composition with `AppAuthenticationError`, not the first request. Another credential source provides `GitHubCredentials` with `AppCredentials` whose key went through the `RedactedPrivateKey` schema.
 
-`installation()`, `installationToken()`, and `projectAccess()` share one lease: one installation discovery and installation-wide mint, reused until five minutes before expiry, so polling makes no App requests between renewals. `workerToken()` mints on every call, so each attempt gets its own token.
+`installation`, `installationToken`, and `projectAccess(registry)` share one lease: one installation discovery and installation-wide mint, reused until five minutes before expiry, so polling makes no App requests between renewals. `workerToken()` mints on every call, so each attempt gets its own token.
 
-`botAccount()` returns the App's bot account, `<slug>[bot]` and its user ID, which differs from the App ID. It reads `GET /users/<slug>[bot]` with the installation-wide token once per slug. Commits use the account's ID-based noreply address, `<id>+<slug>[bot]@users.noreply.github.com`.
+`botAccount` returns the App's bot account, `<slug>[bot]` and its user ID, which differs from the App ID. It reads `GET /users/<slug>[bot]` with the installation-wide token once per slug. Commits use the account's ID-based noreply address, `<id>+<slug>[bot]@users.noreply.github.com`.
 
 Call `GitHubApp.projectAccess(registry)` before scheduling. Each result is a `CoveredProject`, with the repo ID for scoped minting, or a `ProjectNotInstalledError`. A missing repo doesn't block covered ones.
 
@@ -111,7 +113,7 @@ pnpm --filter @usine/github test:integration
 
 It mints both token kinds, posts an issue comment with the repo token, checks the author against `<app>[bot]`, and deletes the comment at cleanup. `@usine/orchestrator` has a separate live polling test that creates and applies a repo label.
 
-`GitHubApp.repositories()` lists the repository names accessible to the GitHub App installation, following every page. Configuration pickers can compare these names with the registry before offering a repository to add.
+`GitHubApp.repositories` lists the repository names accessible to the GitHub App installation, following every page. Configuration pickers can compare these names with the registry before offering a repository to add.
 
 ## Webhook delivery summaries
 
@@ -123,7 +125,7 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 
 ## Setup credentials
 
-`GitHubApp.installationUrl()` returns the App's installation page, including before its first installation. It reads the authenticated App metadata and uses the same typed errors as other App requests.
+`GitHubApp.installationUrl` returns the App's installation page, including before its first installation. It reads the authenticated App metadata and uses the same typed errors as other App requests.
 
 `@usine/github/local-secrets` accepts optional `client_id`, `client_secret`, and `webhook_secret` fields alongside `app_id` and `private_key`. `loadLocalSecrets` returns `None` for an absent file and rejects invalid contents or permissions. `writeLocalSecrets` atomically replaces the runtime file with mode 0600; credential values remain redacted in memory. Legacy files with only the App ID and private key continue to load.
 

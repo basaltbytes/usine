@@ -119,7 +119,7 @@ const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(functio
     };
   }
   const detection = result.success;
-  if (!(detection instanceof RepositoryLabelCatalog)) {
+  if (!Schema.is(RepositoryLabelCatalog)(detection)) {
     const projection = yield* repositoryLabelReader.get(repository);
     if (Option.isNone(projection)) {
       // The ETag refers to a projection that is no longer stored, so drop it and fetch the full

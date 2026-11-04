@@ -358,7 +358,7 @@ const makeCodexChild = Effect.gen(function* () {
           resumed ||
           request.host._tag !== "RemoteShell" ||
           error._tag !== "SessionOperationError" ||
-          !(error.cause instanceof RemoteCodexProcessLost)
+          !Schema.is(RemoteCodexProcessLost)(error.cause)
         )
           return yield* error;
         resumed = true;

@@ -59,13 +59,13 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     },
     Effect.catchTag("PackageLookupError", (error) =>
       Effect.logInfo("Server upgrade waits for registry packages", {
-        package: error.name,
+        package: error.packageName,
         spec: error.spec,
         reason: error.reason,
       }).pipe(
         Effect.andThen(
           UpgradeError.make({
-            message: `Waiting for ${error.name}@${error.spec} on the registry: ${error.reason}`,
+            message: `Waiting for ${error.packageName}@${error.spec} on the registry: ${error.reason}`,
           }),
         ),
       ),

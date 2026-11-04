@@ -116,7 +116,7 @@ export const provisioningPausesFor = Effect.fn("WorkerScheduler.provisioningPaus
   const wait = (worker: WorkerName) =>
     Effect.tx(
       Effect.gen(function* () {
-        if ((yield* TxRef.get(paused)).get(worker)?.blocked === true) yield* Effect.txRetry;
+        if ((yield* TxRef.get(paused)).get(worker)?.blocked === true) return yield* Effect.txRetry;
       }),
     );
   return { current: TxRef.get(paused), wait, clear, pause };

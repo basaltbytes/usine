@@ -28,6 +28,8 @@ HTTPS interception needs the container to trust Cloudflare's container certifica
 
 ## The sandbox API
 
+Sandbox errors expose the sandbox identifier as `sandbox` in TypeScript and encode it as `name` in JSON responses. The error’s `name` identifies its error type.
+
 Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers of the service token that the Worker is configured with. The Worker refuses any other request with status 401.
 
 | Route | Purpose |

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { afterEach, assert, describe, it } from "vitest";
 import { InstanceIdError, instanceIdOf } from "../../src/instance/id.ts";
 import { instanceFiles } from "../../src/instance/record.ts";
@@ -44,7 +44,8 @@ describe("instance ID", () => {
       instanceIdOf(files).pipe(Effect.flip, Effect.provide(NodeServices.layer)),
     );
 
-    assert(error instanceof InstanceIdError);
+    const matchesError = Schema.is(InstanceIdError)(error);
+    assert(matchesError);
     assert.strictEqual(error.operation, "read");
     assert.strictEqual(error.path, files.id);
     assert.strictEqual(readFileSync(files.id, "utf8"), "github-app-4242\n");

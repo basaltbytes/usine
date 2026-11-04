@@ -538,7 +538,8 @@ describe("Codex child backend", () => {
               assert.strictEqual(transcript.success.at(-1)?._tag, "SessionFinished");
             } else {
               assert(Result.isFailure(outcome));
-              assert(outcome.failure instanceof AgentResultError);
+              const matchesOutcomeFailure = Schema.is(AgentResultError)(outcome.failure);
+              assert(matchesOutcomeFailure);
             }
           }).pipe(
             Effect.ensuring(Deferred.succeed(closed, undefined)),
@@ -1011,7 +1012,8 @@ describe("Codex child backend", () => {
           Effect.gen(function* () {
             const backend = yield* CodexChildBackend;
             const error = yield* Effect.flip(backend.launch(request()));
-            assert(error instanceof PoolUnavailableError);
+            const matchesError = Schema.is(PoolUnavailableError)(error);
+            assert(matchesError);
             assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
             assert(
               !calls.some(({ method }) => method === "thread/start" || method === "turn/start"),
@@ -1092,7 +1094,8 @@ describe("Codex child backend", () => {
         const backend = yield* CodexChildBackend;
         const running = yield* backend.launch(request());
         const error = yield* Effect.flip(running.result);
-        assert(error instanceof PoolUnavailableError);
+        const matchesError = Schema.is(PoolUnavailableError)(error);
+        assert(matchesError);
         const events: Array<{ readonly _tag: string }> = [];
         const streamError = yield* running.events.pipe(
           Stream.runForEach((event) =>
@@ -1102,7 +1105,8 @@ describe("Codex child backend", () => {
           ),
           Effect.flip,
         );
-        assert(streamError instanceof PoolUnavailableError);
+        const matchesStreamError = Schema.is(PoolUnavailableError)(streamError);
+        assert(matchesStreamError);
         assert(!events.some((event) => event._tag === "PoolRateLimitsUpdated"));
       }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
     );
@@ -1187,7 +1191,8 @@ describe("Codex child backend", () => {
       Effect.gen(function* () {
         const backend = yield* CodexChildBackend;
         const error = yield* Effect.flip(backend.launch(request("gpt-never-existed")));
-        assert(error instanceof UnknownModelError);
+        const matchesError = Schema.is(UnknownModelError)(error);
+        assert(matchesError);
         assert.strictEqual(error.harness, "codex");
       }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
     );
@@ -1211,7 +1216,8 @@ describe("Codex child backend", () => {
       Effect.gen(function* () {
         const backend = yield* CodexChildBackend;
         const error = yield* Effect.flip(backend.launch(request("gpt-5.6-terra", "max")));
-        assert(error instanceof UnsupportedEffortError);
+        const matchesError = Schema.is(UnsupportedEffortError)(error);
+        assert(matchesError);
         assert.strictEqual(error.effort, "max");
         assert.strictEqual(error.model, "gpt-5.6-terra");
       }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
@@ -1239,7 +1245,8 @@ describe("Codex child backend", () => {
         const backend = yield* CodexChildBackend;
         const running = yield* backend.launch(request());
         const error = yield* Effect.flip(running.result);
-        assert(error instanceof AgentResultError);
+        const matchesError = Schema.is(AgentResultError)(error);
+        assert(matchesError);
         assert.strictEqual(error.message, "the agent could not finish");
       }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
     );

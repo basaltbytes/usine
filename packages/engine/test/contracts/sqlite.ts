@@ -59,7 +59,7 @@ export const sqliteAdapter: PersistenceAdapter = {
       }),
     );
     return {
-      open: () =>
+      open: Layer.fresh(
         Layer.mergeAll(
           AttentionAcknowledgements.layer,
           BoardMoves.layer,
@@ -74,6 +74,7 @@ export const sqliteAdapter: PersistenceAdapter = {
           RunStore.layer,
           failures,
         ).pipe(Layer.provide(localSqliteLayer(directory)), Layer.provide(NodeServices.layer)),
+      ),
     };
   }).pipe(
     Effect.provide(NodeServices.layer),

@@ -488,7 +488,7 @@ const testLayer = (
       }),
     );
   const runs = Layer.succeed(RunEngine)({
-    awaitingCi: () => Effect.succeed([]),
+    awaitingCi: Effect.succeed([]),
     settleCi: () => Effect.void,
     resolveFailure: () => Effect.void,
     intervene: commands.intervene,
@@ -497,8 +497,8 @@ const testLayer = (
     cancel: commands.cancel ?? (() => Effect.void),
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.succeed(runSnapshot),
-    reconcile: () => Effect.void,
-    drain: () => Effect.void,
+    reconcile: Effect.void,
+    drain: Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
     upgradeDrain,
@@ -510,17 +510,16 @@ const testLayer = (
   });
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
-    latestPoolRateLimits: () =>
-      Effect.succeed([
-        ...new Map(
-          laterReports.flatMap(({ envelope }) => {
-            const payload = envelope.payload;
-            return payload._tag === "SessionEvent" && payload.event._tag === "PoolRateLimitsUpdated"
-              ? [[payload.event.pool, payload.event] as const]
-              : [];
-          }),
-        ).values(),
-      ]),
+    latestPoolRateLimits: Effect.sync(() => [
+      ...new Map(
+        laterReports.flatMap(({ envelope }) => {
+          const payload = envelope.payload;
+          return payload._tag === "SessionEvent" && payload.event._tag === "PoolRateLimitsUpdated"
+            ? [[payload.event.pool, payload.event] as const]
+            : [];
+        }),
+      ).values(),
+    ]),
     inspect: () => Effect.succeed(runSnapshot),
     summary: () => Effect.succeed(summarizeRun(runSnapshot)),
     evidence: () => Effect.die("unused"),
@@ -539,12 +538,11 @@ const testLayer = (
           ? [RunEvent.make({ runId: runSnapshot.run.id, event: runSnapshot.event })]
           : [],
       ),
-    revision: () => Ref.get(projectionRevision),
+    revision: Ref.get(projectionRevision),
     transcript: readTranscript,
-    attemptsByWorker: () =>
-      Effect.succeed([
-        WorkerAttempts.make({ worker: WorkerName.make("local"), attempts: 3, running: 1 }),
-      ]),
+    attemptsByWorker: Effect.succeed([
+      WorkerAttempts.make({ worker: WorkerName.make("local"), attempts: 3, running: 1 }),
+    ]),
     sightings: () => Effect.succeed([]),
   });
   const controls = Layer.succeed(LoopControl)({
@@ -679,7 +677,7 @@ const testLayer = (
   const dependencies = Layer.mergeAll(
     testAppLayer,
     Layer.succeed(AttentionAcknowledgements)({
-      list: () => Effect.sync(() => [...acknowledged]),
+      list: Effect.sync(() => [...acknowledged]),
       prune: (current) =>
         Effect.gen(function* () {
           const retained = acknowledged.filter((entry) =>
@@ -826,7 +824,7 @@ describe("Operator", () => {
               }),
             ]),
         },
-        { list: () => Effect.succeed([]) },
+        { list: Effect.succeed([]) },
         { unavailable: Effect.succeed([]), provisioning: Effect.succeed([]) },
       );
       const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
@@ -1272,14 +1270,13 @@ describe("Operator", () => {
               Layer.provide(
                 Layer.succeed(GitHubApp)({
                   ...app,
-                  installationToken: () =>
-                    Effect.succeed(
-                      InstallationToken.make({
-                        value: Redacted.make("polling-test-token"),
-                        expiresAt: DateTime.add(now, { hours: 1 }),
-                        scope: InstallationWide.make(),
-                      }),
-                    ),
+                  installationToken: Effect.succeed(
+                    InstallationToken.make({
+                      value: Redacted.make("polling-test-token"),
+                      expiresAt: DateTime.add(now, { hours: 1 }),
+                      scope: InstallationWide.make(),
+                    }),
+                  ),
                 }),
               ),
               Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
@@ -2423,8 +2420,8 @@ describe("Operator", () => {
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       const budgets = Layer.succeed(CycleBudgets)({
         generation: () => Effect.succeed(CycleGeneration.make(0)),
-        asks: () => Ref.get(asks),
-        pendingResets: () => Effect.succeed([]),
+        asks: Ref.get(asks),
+        pendingResets: Effect.succeed([]),
         acknowledgeReset: () => Effect.die("unused"),
         close: () => Effect.die("unused"),
         reset: (id, event) =>
@@ -3326,7 +3323,7 @@ it.effect("authorizes historical run actions by current repository ownership", (
       CycleBudgets,
       Effect.map(CycleBudgets, (service) => ({
         ...service,
-        asks: () => Effect.succeed([ask]),
+        asks: Effect.succeed([ask]),
         reset: () =>
           Effect.sync(() => {
             actions.push("reset");

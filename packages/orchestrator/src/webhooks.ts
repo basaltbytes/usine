@@ -31,14 +31,14 @@ export class WebhookHealth extends Context.Service<
         get startedAt() {
           return startedAt;
         },
-        reset: Effect.fn("WebhookHealth.reset")(function* () {
+        reset: Effect.gen(function* () {
           startedAt = yield* DateTime.now;
           yield* Ref.set(received, false);
           yield* arm;
           yield* changed;
           yield* Effect.logInfo("Webhook delivery health reset after configuration change");
-        })(),
-        received: Effect.fn("WebhookHealth.received")(function* () {
+        }).pipe(Effect.withSpan("WebhookHealth.reset")),
+        received: Effect.gen(function* () {
           if (!(yield* Ref.getAndSet(received, true))) {
             yield* FiberMap.remove(timers, "silence");
             yield* changed;
@@ -46,7 +46,7 @@ export class WebhookHealth extends Context.Service<
               "Received the first verified webhook delivery since endpoint activation",
             );
           }
-        })(),
+        }).pipe(Effect.withSpan("WebhookHealth.received")),
         silent: Effect.gen(function* () {
           const now = yield* DateTime.now;
           return (

@@ -25,17 +25,19 @@ const fetchJson = Effect.fn("integration.fetchJson")(function* <S extends Schema
   init: RequestInit,
   schema: S,
 ) {
-  const response = yield* Effect.tryPromise(() =>
-    fetch(url, {
-      ...init,
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-        "x-github-api-version": API_VERSION,
-      },
-    }),
-  );
+  const response = yield* Effect.tryPromise({
+    try: () =>
+      fetch(url, {
+        ...init,
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "x-github-api-version": API_VERSION,
+        },
+      }),
+    catch: (cause) => RequestFailed.make({ cause }),
+  });
   if (!response.ok) return yield* Effect.die(`GitHub returned ${response.status}`);
   return yield* Schema.decodeUnknownEffect(schema)(yield* Effect.promise(() => response.json()));
 });
@@ -45,16 +47,18 @@ const deleteComment = Effect.fn("integration.deleteComment")(function* (
   commentId: number,
   token: string,
 ) {
-  const response = yield* Effect.tryPromise(() =>
-    fetch(`https://api.github.com/repos/${repository}/issues/comments/${commentId}`, {
-      method: "DELETE",
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "x-github-api-version": API_VERSION,
-      },
-    }),
-  );
+  const response = yield* Effect.tryPromise({
+    try: () =>
+      fetch(`https://api.github.com/repos/${repository}/issues/comments/${commentId}`, {
+        method: "DELETE",
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "x-github-api-version": API_VERSION,
+        },
+      }),
+    catch: (cause) => RequestFailed.make({ cause }),
+  });
   if (response.status !== 204) return yield* Effect.die(`GitHub returned ${response.status}`);
 });
 
@@ -78,7 +82,7 @@ describe("operator-created GitHub App", () => {
 
       yield* Effect.gen(function* () {
         const app = yield* GitHubApp;
-        const installationToken = yield* app.installationToken();
+        const installationToken = yield* app.installationToken;
         assert.strictEqual(installationToken.scope._tag, "InstallationWide");
 
         const access = yield* app.projectAccess([repository]);
@@ -88,7 +92,7 @@ describe("operator-created GitHub App", () => {
         const workerToken = yield* app.workerToken(project, "read");
         assert.strictEqual(workerToken.scope._tag, "SingleRepository");
 
-        const bot = yield* app.botAccount();
+        const bot = yield* app.botAccount;
         const token = Redacted.value(workerToken.value);
         yield* Effect.acquireUseRelease(
           fetchJson(
@@ -116,3 +120,8 @@ describe("operator-created GitHub App", () => {
     }),
   );
 });
+
+class RequestFailed extends Schema.TaggedError<RequestFailed, { readonly Brand: unique symbol }>()(
+  "RequestFailed",
+  { cause: Schema.Defect() },
+) {}

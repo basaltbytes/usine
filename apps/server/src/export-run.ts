@@ -2,7 +2,18 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
 import { runReaderLayer } from "@usine/engine/local-sqlite";
 import { RunEvidence, RunReader } from "@usine/engine/run-reader";
-import { Console, DateTime, Effect, FileSystem, Match, Option, Path, Schema } from "effect";
+import {
+  Console,
+  DateTime,
+  Effect,
+  FileSystem,
+  Match,
+  Option,
+  Path,
+  Schema,
+  Layer,
+  Context,
+} from "effect";
 
 /** JSON encoding preserves timestamps, optional values, and typed Attempt outcomes. */
 export const RunEvidenceFromJson = Schema.fromJsonString(
@@ -86,8 +97,12 @@ export const exportRun = Effect.fn("Cli.exportRun")(
     yield* Effect.annotateCurrentSpan({ runId, instanceDirectory: directory, output: destination });
     const databasePath = path.join(directory, ".usine", "runtime.sqlite");
     const reader = runReaderLayer(directory);
-    const evidence = yield* Effect.flatMap(RunReader, (reader) => reader.evidence(runId)).pipe(
-      Effect.provide(reader),
+    const evidence = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(reader);
+        return yield* Context.get(context, RunReader).evidence(runId);
+      }),
+    ).pipe(
       Effect.mapError((cause) =>
         cause._tag === "RunNotFoundError"
           ? cause

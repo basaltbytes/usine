@@ -135,7 +135,7 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
             (yield* reader.closed({ limit: 2 })).map(({ run }) => run.id),
             [RunId.make("hidden-third"), RunId.make("hidden-second")],
           );
-        }).pipe(Effect.provide(fixture.open()));
+        }).pipe(Effect.provide(fixture.open));
       }).pipe(Effect.scoped),
     );
     it.effect(
@@ -219,10 +219,7 @@ export const runReaderContract = (adapter: PersistenceAdapter) => {
             assert.strictEqual(evidence.snapshot.run.state._tag, "Running");
             assert.deepStrictEqual(evidence.transcript, []);
             assert.deepStrictEqual(
-              (yield* reader.attemptsByWorker()).map(({ attempts, running }) => [
-                attempts,
-                running,
-              ]),
+              (yield* reader.attemptsByWorker).map(({ attempts, running }) => [attempts, running]),
               [[5, 1]],
             );
             assert.deepStrictEqual((yield* reader.board([], [])).items, []);

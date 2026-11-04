@@ -13,6 +13,7 @@ import {
   Predicate,
   Redacted,
   Schedule,
+  Schema,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpServerError } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
@@ -116,7 +117,9 @@ const logged = (...needles: ReadonlyArray<string>) =>
   Effect.suspend(() => {
     const line = lines.find((candidate) => needles.every((needle) => candidate.includes(needle)));
     return line === undefined
-      ? Effect.fail(new Error(`no log line contains ${needles.join(" and ")}`))
+      ? Effect.fail(
+          LogLineMissing.make({ message: `no log line contains ${needles.join(" and ")}` }),
+        )
       : Effect.succeed(line);
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
@@ -160,7 +163,7 @@ const withGateway = <A, E>(
     }).pipe(
       Effect.retry({
         while: (error) =>
-          error instanceof HttpServerError.ServeError || error instanceof EgressProxyListenError,
+          error instanceof HttpServerError.ServeError || Schema.is(EgressProxyListenError)(error),
         times: 3,
       }),
     );
@@ -430,3 +433,10 @@ describe("reloading the gateway", () => {
     ),
   );
 });
+
+class LogLineMissing extends Schema.TaggedError<
+  LogLineMissing,
+  { readonly Brand: unique symbol }
+>()("LogLineMissing", {
+  message: Schema.String,
+}) {}

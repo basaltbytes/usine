@@ -248,7 +248,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
         assert.lengthOf(yield* status.machines, 1);
         const attempt = AttemptId.make("run-1/execute/1");
         const failure = yield* steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip);
-        assert(failure instanceof InfraFailure, failure._tag);
+        assert(Schema.is(InfraFailure)(failure), failure._tag);
         assert.include(fake.calls, `create pool ${run} ${attempt}`);
         assert.include(prepared, attempt);
         const checked = (yield* status.preflights).find(({ worker }) => worker === POOL);
@@ -572,7 +572,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
 
         const refresh = workerAttentionFor(
           { transcript: unused },
-          { list: () => Effect.succeed([]) },
+          { list: Effect.succeed([]) },
           status,
         );
         const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });

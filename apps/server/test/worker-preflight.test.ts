@@ -141,13 +141,12 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
       registerWorkers: () => Effect.void,
     });
     const app = Layer.mock(GitHubApp)({
-      botAccount: () =>
-        Effect.succeed(
-          BotAccount.make({
-            login: BotLogin.make("usine-test[bot]"),
-            id: BotUserId.make(4242),
-          }),
-        ),
+      botAccount: Effect.succeed(
+        BotAccount.make({
+          login: BotLogin.make("usine-test[bot]"),
+          id: BotUserId.make(4242),
+        }),
+      ),
     });
     const scheduler = stepExecutorLayer(instance.config, [submission.agent.brain]).pipe(
       Layer.provide(MarcbachmannCelLayer),
@@ -180,7 +179,7 @@ it("runs on-demand preflight, refuses busy workers, stores failures, and restore
       const configuration = yield* OperatorConfiguration;
       const status = yield* WorkerStatus;
       const backend = liveBackendLayer({ get: Effect.succeed(instance) }, operator, configuration);
-      const server = HttpRouter.serve(apiRoutes().pipe(HttpRouter.provideRequest(backend)), {
+      const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
         disableLogger: true,
       }).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
       yield* Effect.gen(function* () {

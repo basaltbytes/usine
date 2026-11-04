@@ -1,5 +1,16 @@
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Data, Deferred, Duration, Effect, Match, Option, Ref, Schedule, Stream } from "effect";
+import {
+  Data,
+  Deferred,
+  Duration,
+  Effect,
+  Match,
+  Option,
+  Ref,
+  Schedule,
+  Stream,
+  Layer,
+} from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient, Statement } from "effect/sql";
 import type { Connection } from "effect/sql/SqlConnection";
@@ -208,6 +219,7 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
     executeValuesUnprepared: values,
     executeStream: (...args) => writer.unsafe(args[0], args[1]).stream,
   };
+  const reactivity = yield* Layer.build(Reactivity.layer);
   const routed = yield* SqlClient.make({
     driver: writer.driver,
     acquirer: Effect.succeed(connection),
@@ -216,7 +228,7 @@ export const withReadWorker = Effect.fn("LocalSqlite.withReadWorker")(function* 
     spanAttributes: [["db.system.name", "sqlite"]],
     transactionAcquirer: writer.reserve,
     transactionService: writer.transactionService,
-  }).pipe(Effect.provide(Reactivity.layer));
+  }).pipe(Effect.provideContext(reactivity));
   const readSnapshot = Effect.fn("LocalSqlite.readSnapshot")(
     <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.flatMap(Effect.serviceOption(writer.transactionService), (transaction) => {

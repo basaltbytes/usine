@@ -182,7 +182,7 @@ export const logPreflightFailure = <A, R>(
   effect: Effect.Effect<A, ExecutorError, R>,
 ): Effect.Effect<A, ExecutorError, R> =>
   Effect.tapError(effect, (error) =>
-    error instanceof WorkerCapabilityError
+    Schema.is(WorkerCapabilityError)(error)
       ? Effect.logError("Worker preflight failed", {
           error: error._tag,
           message: error.message,

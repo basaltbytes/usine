@@ -149,8 +149,9 @@ export const memberAccessLayer = Layer.effect(
         }).pipe(
           sql.withTransaction,
           Effect.provideService(SqlClient.BeginTransaction, "BEGIN IMMEDIATE"),
-          Effect.catch((error) =>
-            error instanceof AuthError ? Effect.fail(error) : unavailable(error),
+          Effect.catchIf(
+            (error) => !Schema.is(AuthError)(error),
+            (error) => unavailable(error),
           ),
         ),
       ),
@@ -163,8 +164,9 @@ export const memberAccessLayer = Layer.effect(
           Effect.provideService(ConfigurationStore, configuration),
           sql.withTransaction,
           Effect.provideService(SqlClient.BeginTransaction, "BEGIN IMMEDIATE"),
-          Effect.catch((error) =>
-            error instanceof AuthError ? Effect.fail(error) : unavailable(error),
+          Effect.catchIf(
+            (error) => !Schema.is(AuthError)(error),
+            (error) => unavailable(error),
           ),
         ),
       ),

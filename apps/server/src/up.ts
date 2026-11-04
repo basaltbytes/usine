@@ -174,10 +174,7 @@ const start = Effect.fnUntraced(function* (
   auth: AuthServices,
 ) {
   yield* reloadOnHangup(instances);
-  const credentials = yield* loadLocalCredentials(directory).pipe(
-    Effect.provide(NodeServices.layer),
-    Effect.result,
-  );
+  const credentials = yield* loadLocalCredentials(directory).pipe(Effect.result);
   const setupContext = yield* Layer.build(
     Setup.layer(
       directory,
@@ -261,16 +258,14 @@ const start = Effect.fnUntraced(function* (
       ServerUpgrades.layer({
         running: record.version,
         settings: Effect.map(instances.get, ({ config }) => config.settings),
-        platform: yield* systemUpgradePlatform(directory, record).pipe(
-          Effect.provide(NodeServices.layer),
-        ),
+        platform: yield* systemUpgradePlatform(directory, record),
         drain: engine.waitForUpgrade,
         resume: engine.cancelUpgrade,
       }),
     );
     const upgrades = Context.get(upgradeContext, ServerUpgrades);
     return {
-      drain: engine.drain(),
+      drain: engine.drain,
       running: Effect.raceFirst(
         serve({
           setup,
@@ -320,112 +315,107 @@ const start = Effect.fnUntraced(function* (
 export const up = (command: UpCommand) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { port, origin } = command;
-      yield* monitorEventLoop;
-      const directory = InstanceDirectory.make(process.cwd());
-      yield* refuseVolatileInstance(directory, command.allowVolatileInstance).pipe(
-        Effect.provide(NodeServices.layer),
+      const services = yield* Layer.build(
+        changeBusLayer.pipe(Layer.provideMerge(NodeServices.layer)),
       );
-      const record = InstanceRecord.make({
-        pid: ProcessId.make(process.pid),
-        version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
-        startedAt: yield* DateTime.now,
-        launch: yield* currentLaunch(command),
-        systemdUnit: yield* currentSystemService().pipe(Effect.provide(NodeServices.layer)),
-      });
-      // Acquired before any store opens and released after every store closes.
-      yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));
-      const instanceId = yield* instanceIdOf(instanceFiles(directory)).pipe(
-        Effect.provide(NodeServices.layer),
-      );
-      yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
-      if (process.platform === "darwin")
-        yield* warnIfSystemSleeps().pipe(Effect.provide(NodeServices.layer));
-      const databaseContext = yield* Layer.build(localSqliteLayer(directory));
-      const database = Layer.succeedContext(databaseContext);
-      const configurationContext = yield* Layer.build(
-        configurationLayer.pipe(Layer.provide(database)),
-      );
-      const initial = yield* initializeConfiguration(directory).pipe(
-        Effect.provideContext(configurationContext),
-      );
-      const current = yield* Layer.build(
-        CurrentInstance.layer(directory, initial.instance, initial.number).pipe(
-          Layer.provide(Layer.succeedContext(configurationContext)),
-        ),
-      );
-      const instances = Context.get(current, CurrentInstance);
-      const editorContext = yield* Layer.build(
-        ConfigurationEditor.layer.pipe(
-          Layer.provide(ItemProjectionReader.layer.pipe(Layer.provide(database))),
-          Layer.provide(MarcbachmannCelLayer),
-          Layer.provide(Layer.succeed(CurrentInstance, instances)),
-          Layer.provide(Layer.succeedContext(configurationContext)),
-        ),
-      );
-      const configurationEditor = Context.get(editorContext, ConfigurationEditor);
-      const { config } = yield* instances.get;
-      const authStoreContext = yield* Layer.build(sqliteAuthLayer.pipe(Layer.provide(database)));
-      const githubContext = yield* Layer.build(
-        githubSignInLayer(
-          loadLocalSecrets(directory).pipe(Effect.provide(NodeServices.layer)),
-        ).pipe(Layer.provide(FetchHttpClient.layer)),
-      );
-      const authDependencies = Layer.mergeAll(
-        Layer.succeedContext(authStoreContext),
-        Layer.succeedContext(githubContext),
-      );
-      const accessContext = yield* Layer.build(
-        memberAccessLayer.pipe(
-          Layer.provide(authDependencies),
-          Layer.provide(Layer.succeedContext(configurationContext)),
-          Layer.provide(database),
-        ),
-      );
-      yield* seedOperator(config.operator).pipe(
-        Effect.provide(
-          authDependencies.pipe(Layer.provideMerge(Layer.succeedContext(accessContext))),
-        ),
-      );
-      const localToken = yield* writeAdminToken(directory).pipe(Effect.provide(NodeServices.layer));
-      const authContext = yield* Layer.build(
-        authenticationLayer({
-          origin: Option.getOrElse(origin, () => UiOrigin.make(`http://127.0.0.1:${port}`)),
-          origins: config.auth.origins,
-          localToken,
-        }).pipe(
-          Layer.provide(authDependencies),
-          Layer.provide(Layer.succeedContext(accessContext)),
-        ),
-      );
-      const auth = {
-        authentication: Context.get(authContext, Authentication),
-        store: Context.get(authStoreContext, AuthStore),
-        github: Context.get(githubContext, GitHubSignIn),
-        sqliteReader: Context.get(databaseContext, SqliteReader),
-      };
-      // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
-      const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
-        Effect.provide(NodeServices.layer),
-      );
-      return yield* start(
-        directory,
-        instanceId,
-        instances,
-        port,
-        record,
-        database,
-        configurationEditor,
-        auth,
-      ).pipe(
-        Effect.scoped,
-        Effect.forever,
-        Effect.provideService(CurrentInstance, instances),
-        Effect.provideContext(tracer),
-        Effect.provideContext(configurationContext),
-      );
+      return yield* Effect.gen(function* () {
+        const { port, origin } = command;
+        yield* monitorEventLoop;
+        const directory = InstanceDirectory.make(process.cwd());
+        yield* refuseVolatileInstance(directory, command.allowVolatileInstance);
+        const record = InstanceRecord.make({
+          pid: ProcessId.make(process.pid),
+          version: yield* packageVersion(),
+          startedAt: yield* DateTime.now,
+          launch: yield* currentLaunch(command),
+          systemdUnit: yield* currentSystemService(),
+        });
+        // Acquired before any store opens and released after every store closes.
+        yield* holdInstance(directory, record);
+        const instanceId = yield* instanceIdOf(instanceFiles(directory));
+        yield* refuseTakenPort(port);
+        if (process.platform === "darwin") yield* warnIfSystemSleeps();
+        const databaseContext = yield* Layer.build(localSqliteLayer(directory));
+        const database = Layer.succeedContext(databaseContext);
+        const configurationContext = yield* Layer.build(
+          configurationLayer.pipe(Layer.provide(database)),
+        );
+        const initial = yield* initializeConfiguration(directory).pipe(
+          Effect.provideContext(configurationContext),
+        );
+        const current = yield* Layer.build(
+          CurrentInstance.layer(directory, initial.instance, initial.number).pipe(
+            Layer.provide(Layer.succeedContext(configurationContext)),
+          ),
+        );
+        const instances = Context.get(current, CurrentInstance);
+        const editorContext = yield* Layer.build(
+          ConfigurationEditor.layer.pipe(
+            Layer.provide(ItemProjectionReader.layer.pipe(Layer.provide(database))),
+            Layer.provide(MarcbachmannCelLayer),
+            Layer.provide(Layer.succeed(CurrentInstance, instances)),
+            Layer.provide(Layer.succeedContext(configurationContext)),
+          ),
+        );
+        const configurationEditor = Context.get(editorContext, ConfigurationEditor);
+        const { config } = yield* instances.get;
+        const authStoreContext = yield* Layer.build(sqliteAuthLayer.pipe(Layer.provide(database)));
+        const githubContext = yield* Layer.build(
+          githubSignInLayer(loadLocalSecrets(directory).pipe(Effect.provideContext(services))).pipe(
+            Layer.provide(FetchHttpClient.layer),
+          ),
+        );
+        const authDependencies = Layer.mergeAll(
+          Layer.succeedContext(authStoreContext),
+          Layer.succeedContext(githubContext),
+        );
+        const accessContext = yield* Layer.build(
+          memberAccessLayer.pipe(
+            Layer.provide(authDependencies),
+            Layer.provide(Layer.succeedContext(configurationContext)),
+            Layer.provide(database),
+          ),
+        );
+        yield* seedOperator(config.operator).pipe(
+          Effect.provideContext(
+            Context.merge(Context.merge(authStoreContext, githubContext), accessContext),
+          ),
+        );
+        const localToken = yield* writeAdminToken(directory);
+        const authContext = yield* Layer.build(
+          authenticationLayer({
+            origin: Option.getOrElse(origin, () => UiOrigin.make(`http://127.0.0.1:${port}`)),
+            origins: config.auth.origins,
+            localToken,
+          }).pipe(
+            Layer.provide(authDependencies),
+            Layer.provide(Layer.succeedContext(accessContext)),
+          ),
+        );
+        const auth = {
+          authentication: Context.get(authContext, Authentication),
+          store: Context.get(authStoreContext, AuthStore),
+          github: Context.get(githubContext, GitHubSignIn),
+          sqliteReader: Context.get(databaseContext, SqliteReader),
+        };
+        // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
+        const tracer = yield* Layer.build(tracingLayer(config.tracing));
+        return yield* start(
+          directory,
+          instanceId,
+          instances,
+          port,
+          record,
+          database,
+          configurationEditor,
+          auth,
+        ).pipe(
+          Effect.scoped,
+          Effect.forever,
+          Effect.provideService(CurrentInstance, instances),
+          Effect.provideContext(tracer),
+          Effect.provideContext(configurationContext),
+        );
+      }).pipe(Effect.provideContext(services));
     }),
-  ).pipe(
-    Effect.provide(changeBusLayer),
-    Effect.provideService(References.MinimumLogLevel, command.logLevel),
-  );
+  ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));

@@ -150,7 +150,7 @@ it.each([
   ["ran out of turns", false],
 ])("classifies harness refusal %s without retrying task failures", (message, capacity) => {
   const error = harnessFailure(Option.none(), message);
-  assert.strictEqual(error instanceof AgentCapacityError, capacity);
+  assert.strictEqual(Schema.is(AgentCapacityError)(error), capacity);
   const report = reportedOutcome(Option.none(), reportText(error));
   assert(Option.isSome(report));
   assert.strictEqual(

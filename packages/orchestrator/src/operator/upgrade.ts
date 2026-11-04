@@ -66,7 +66,7 @@ export const upgradeAttentionFor = (
       wait: drain.wait,
       deferredRuns: drain.runIds.length,
     });
-    const { needsYou, dismissedNeeds } = partitionNeeds([need], yield* acknowledgements.list());
+    const { needsYou, dismissedNeeds } = partitionNeeds([need], yield* acknowledgements.list);
     return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],

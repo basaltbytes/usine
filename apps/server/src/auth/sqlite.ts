@@ -60,8 +60,9 @@ export const sqliteAuthLayer = Layer.effect(
           yield* Effect.logInfo("Member added", { memberId: member.id, actor: member.addedBy });
         }).pipe(
           transaction,
-          Effect.catch((error) =>
-            error instanceof AuthError ? Effect.fail(error) : failure("add member")(error),
+          Effect.catchIf(
+            (error) => !Schema.is(AuthError)(error),
+            (error) => failure("add member")(error),
           ),
         ),
       ),
@@ -91,8 +92,9 @@ export const sqliteAuthLayer = Layer.effect(
           return renamed;
         }).pipe(
           transaction,
-          Effect.catch((error) =>
-            error instanceof AuthError ? Effect.fail(error) : failure("rename member")(error),
+          Effect.catchIf(
+            (error) => !Schema.is(AuthError)(error),
+            (error) => failure("rename member")(error),
           ),
         ),
       ),
@@ -106,8 +108,9 @@ export const sqliteAuthLayer = Layer.effect(
           yield* Effect.logInfo("Member removed", { memberId: id });
         }).pipe(
           transaction,
-          Effect.catch((error) =>
-            error instanceof AuthError ? Effect.fail(error) : failure("remove member")(error),
+          Effect.catchIf(
+            (error) => !Schema.is(AuthError)(error),
+            (error) => failure("remove member")(error),
           ),
         ),
       ),
@@ -119,8 +122,9 @@ export const sqliteAuthLayer = Layer.effect(
           yield* sql`INSERT INTO usine_instance_tokens (id, member_id, hash, expires_at, value) VALUES (${token.id}, ${token.memberId}, ${token.hash}, ${token.expiresAt}, ${value})`;
         }).pipe(
           transaction,
-          Effect.catch((error) =>
-            error instanceof AuthError ? Effect.fail(error) : failure("issue token")(error),
+          Effect.catchIf(
+            (error) => !Schema.is(AuthError)(error),
+            (error) => failure("issue token")(error),
           ),
         ),
       ),
@@ -174,8 +178,9 @@ export const sqliteAuthLayer = Layer.effect(
           if (rows.length === 0) return yield* authFailure("Token not found.", 403);
           yield* Effect.logInfo("Token scopes changed", { memberId: member, tokenId: id });
         }).pipe(
-          Effect.catch((error) =>
-            error instanceof AuthError ? Effect.fail(error) : failure("set token scopes")(error),
+          Effect.catchIf(
+            (error) => !Schema.is(AuthError)(error),
+            (error) => failure("set token scopes")(error),
           ),
         ),
       ),

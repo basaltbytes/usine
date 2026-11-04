@@ -33,7 +33,7 @@ export const cacheStatistics = <View, Error>(
     }
     return yield* SynchronizedRef.modifyEffect(cache, (cached) =>
       Effect.gen(function* () {
-        const current = yield* revision();
+        const current = yield* revision;
         const now = yield* Clock.currentTimeMillis;
         if (
           Option.isSome(current) &&

@@ -1,8 +1,6 @@
 {
   "src/auth/access.ts": {
-    "catchConditionalRefailToCatchIf": 2,
     "deterministicKeys": 1,
-    "instanceOfSchema": 2,
     "preferBarrelImport": 1,
     "schemaSync": 2
   },
@@ -10,9 +8,6 @@
     "cryptoRandomUUIDInEffect": 1,
     "deterministicKeys": 1,
     "yieldInCallArgument": 2
-  },
-  "src/auth/cli.ts": {
-    "instanceOfSchema": 1
   },
   "src/auth/crypto.ts": {
     "nodeBuiltinImport": 1
@@ -34,8 +29,6 @@
     "schemaClassMissingBrand": 4
   },
   "src/auth/sqlite.ts": {
-    "catchConditionalRefailToCatchIf": 5,
-    "instanceOfSchema": 5,
     "preferBarrelImport": 1
   },
   "src/auth/store.ts": {
@@ -66,28 +59,20 @@
   },
   "src/configuration/cli.ts": {
     "nodeBuiltinImport": 1,
-    "strictEffectProvide": 1,
     "yieldInCallArgument": 4
   },
   "src/configuration/command.ts": {
     "redundantSchemaTagIdentifier": 5,
     "schemaClassMissingBrand": 5
   },
-  "src/configuration/runtime.ts": {
-    "strictEffectProvide": 1
-  },
   "src/detach.ts": {
-    "anyUnknownInErrorContext": 1,
     "nodeBuiltinImport": 2,
-    "schemaClassMissingBrand": 4,
-    "unknownInEffectCatch": 1
+    "schemaClassMissingBrand": 4
   },
   "src/export-run.ts": {
-    "schemaClassMissingBrand": 1,
-    "strictEffectProvide": 1
+    "schemaClassMissingBrand": 1
   },
   "src/http.ts": {
-    "lazyEffect": 1,
     "nodeBuiltinImport": 2,
     "yieldInCallArgument": 2
   },
@@ -100,9 +85,7 @@
     "schemaClassMissingBrand": 1
   },
   "src/instance/lock.ts": {
-    "anyUnknownInErrorContext": 1,
-    "schemaClassMissingBrand": 2,
-    "unknownInEffectCatch": 1
+    "schemaClassMissingBrand": 2
   },
   "src/instance/manifest.ts": {
     "nodeBuiltinImport": 1,
@@ -136,14 +119,11 @@
     "strictBooleanExpressions": 2
   },
   "src/registry.ts": {
-    "errorPayloadShadowsName": 1,
     "schemaClassMissingBrand": 1
   },
   "src/setup/control.ts": {
     "deterministicKeys": 1,
-    "effectFnIife": 1,
     "globalJsonInEffect": 1,
-    "strictEffectProvide": 4,
     "yieldInCallArgument": 1
   },
   "src/setup/http.ts": {
@@ -160,7 +140,6 @@
   },
   "src/up.ts": {
     "nodeBuiltinImport": 2,
-    "strictEffectProvide": 14,
     "yieldInCallArgument": 1
   },
   "src/upgrade/control.ts": {
@@ -180,7 +159,6 @@
   },
   "src/webhooks.ts": {
     "nodeBuiltinImport": 1,
-    "returnEffectInGen": 2,
     "schemaClassMissingBrand": 2,
     "yieldInCallArgument": 1
   },
@@ -226,13 +204,11 @@
     "nodeBuiltinImport": 3
   },
   "test/changes.test.ts": {
-    "anyUnknownInErrorContext": 6,
     "globalJsonInEffect": 1,
     "schemaSync": 1
   },
   "test/cli.test.ts": {
     "asyncFunction": 18,
-    "instanceOfSchema": 10,
     "newPromise": 2,
     "preferBarrelImport": 1,
     "schemaSync": 1
@@ -250,8 +226,7 @@
   },
   "test/configuration-http/support.ts": {
     "asyncFunction": 1,
-    "globalJsonInEffect": 1,
-    "lazyEffect": 1
+    "globalJsonInEffect": 1
   },
   "test/configuration.test.ts": {
     "asyncFunction": 12,
@@ -274,7 +249,6 @@
   },
   "test/http.test.ts": {
     "asyncFunction": 14,
-    "effectTryWithoutCatch": 1,
     "globalFetchInEffect": 1,
     "globalJson": 8,
     "globalJsonInEffect": 4,
@@ -289,13 +263,11 @@
   },
   "test/instance/id.test.ts": {
     "asyncFunction": 2,
-    "instanceOfSchema": 1,
     "nodeBuiltinImport": 2
   },
   "test/instance/lock.test.ts": {
     "asyncFunction": 4,
     "globalJsonInEffect": 1,
-    "instanceOfSchema": 2,
     "nodeBuiltinImport": 2,
     "schemaSync": 1,
     "schemaSyncInEffect": 1,
@@ -306,7 +278,6 @@
     "globalJson": 1
   },
   "test/instance/ports.test.ts": {
-    "anyUnknownInErrorContext": 1,
     "asyncFunction": 1,
     "newPromise": 2,
     "nodeBuiltinImport": 3,

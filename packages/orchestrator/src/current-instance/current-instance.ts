@@ -224,6 +224,8 @@ export class CurrentInstance extends Context.Service<
               { agents },
             );
           }
+          // The caller applies this prepared reload after validation.
+          // @effect-diagnostics-next-line returnEffectInGen:off
           return Effect.void;
         });
 
@@ -250,6 +252,8 @@ export class CurrentInstance extends Context.Service<
                   : beforeWorkersStart(running, loaded),
               );
               const changes = instanceReload(running, loaded);
+              // The caller applies this prepared reload after validation.
+              // @effect-diagnostics-next-line returnEffectInGen:off
               return Effect.gen(function* () {
                 yield* Ref.set(observed, snapshot);
                 yield* SubscriptionRef.set(current, loaded).pipe(Effect.andThen(applyWorkers));

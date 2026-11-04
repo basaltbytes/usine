@@ -45,7 +45,7 @@ export const planResetRefresh = Effect.fn("PollingTriggers.planResetRefresh")(fu
 ) {
   yield* Effect.annotateCurrentSpan({ repository });
   const budgets = yield* CycleBudgets;
-  const resets = (yield* budgets.pendingResets()).filter(
+  const resets = (yield* budgets.pendingResets).filter(
     (reset) => canonicalRepositoryName(reset.repository) === canonicalRepositoryName(repository),
   );
   const items = Option.all(yield* Effect.forEach(resets, resetItem));

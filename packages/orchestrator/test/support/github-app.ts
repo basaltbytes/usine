@@ -22,19 +22,18 @@ export const testBotAccount = BotAccount.make({
  * read the installation and the bot account.
  */
 export const testAppLayer = Layer.succeed(GitHubApp)({
-  installation: () =>
-    Effect.succeed(
-      Installation.make({
-        id: InstallationId.make(1),
-        accountLogin: "acme",
-        appSlug: AppSlug.make("usine-test"),
-      }),
-    ),
-  botAccount: () => Effect.succeed(testBotAccount),
-  repositories: () => Effect.die("unused installation repositories"),
-  installationToken: () => Effect.die("the test App mints no installation token"),
+  installation: Effect.succeed(
+    Installation.make({
+      id: InstallationId.make(1),
+      accountLogin: "acme",
+      appSlug: AppSlug.make("usine-test"),
+    }),
+  ),
+  botAccount: Effect.succeed(testBotAccount),
+  repositories: Effect.die("unused installation repositories"),
+  installationToken: Effect.die("the test App mints no installation token"),
   projectAccess: () => Effect.die("the test App reads no project access"),
-  installationUrl: () => Effect.die("unused installation URL"),
+  installationUrl: Effect.die("unused installation URL"),
   configureWebhook: () => Effect.die("unused webhook configuration"),
   deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("the test App mints no worker token"),

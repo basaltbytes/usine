@@ -155,7 +155,7 @@ const changesOnce =
 const submissions: Array<string> = [];
 
 const claimingRuns = Layer.succeed(RunEngine)({
-  awaitingCi: () => Effect.succeed([]),
+  awaitingCi: Effect.succeed([]),
   settleCi: () => Effect.void,
   resolveFailure: () => Effect.void,
   intervene: () => Effect.void,
@@ -163,8 +163,8 @@ const claimingRuns = Layer.succeed(RunEngine)({
   cancel: () => Effect.die("unused"),
   discardLeftovers: () => Effect.die("unused"),
   inspect: () => Effect.die("unused"),
-  reconcile: () => Effect.die("unused"),
-  drain: () => Effect.void,
+  reconcile: Effect.die("unused"),
+  drain: Effect.void,
   waitForUpgrade: () => Effect.void,
   cancelUpgrade: Effect.void,
   upgradeDrain: Effect.succeedNone,

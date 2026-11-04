@@ -6,8 +6,7 @@
     "schemaClassMissingBrand": 9
   },
   "src/attachment/store.ts": {
-    "deterministicKeys": 1,
-    "lazyEffect": 2
+    "deterministicKeys": 1
   },
   "src/caller/caller.ts": {
     "deterministicKeys": 1,
@@ -47,7 +46,6 @@
   },
   "src/node/egress-proxy.ts": {
     "nodeBuiltinImport": 2,
-    "preferSchemaTaggedError": 2,
     "schemaClassMissingBrand": 3
   },
   "src/node/environment.ts": {
@@ -63,8 +61,6 @@
   },
   "src/proxy/proxy.ts": {
     "deterministicKeys": 1,
-    "multipleCatchTag": 1,
-    "preferSchemaTaggedError": 1,
     "yieldInCallArgument": 1
   },
   "src/settings.ts": {
@@ -116,7 +112,6 @@
   },
   "test/node.test.ts": {
     "asyncFunction": 1,
-    "globalErrorInEffectFailure": 1,
     "globalFetchInEffect": 1,
     "globalJson": 3,
     "globalJsonInEffect": 3,
@@ -150,9 +145,7 @@
     "yieldInCallArgument": 21
   },
   "test/reload.test.ts": {
-    "globalErrorInEffectFailure": 1,
     "globalJson": 1,
-    "instanceOfSchema": 1,
     "nodeBuiltinImport": 3,
     "yieldInCallArgument": 24
   },

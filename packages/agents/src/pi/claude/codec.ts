@@ -210,7 +210,7 @@ export const assistantFailure = (
     };
     if (error.error === "overloaded") return AgentCapacityError.make(fields);
     if (error.error === "server_error" || error.error === "unknown") {
-      return Option.exists(previous, (failure) => failure instanceof AgentCapacityError)
+      return Option.exists(previous, (failure) => Schema.is(AgentCapacityError)(failure))
         ? AgentCapacityError.make(fields)
         : harnessFailure(fields.sessionId, fields.message);
     }

@@ -1412,7 +1412,8 @@ describe("SSH Workers on reload", () => {
             'The gateway admin token for SSH worker "build-2" is missing: USINE_TEST_GATEWAY_TWO_TOKEN is not set in the orchestrator\'s environment. usine up reads only the variables that were set when it started. Set USINE_TEST_GATEWAY_TWO_TOKEN and restart usine up, or set admin_token_env to a variable that usine up already has.',
           );
           const refusal = reloadRefusal(failure, failure.message);
-          assert(refusal instanceof ReloadPreflightRefusal);
+          const matchesRefusal = Schema.is(ReloadPreflightRefusal)(refusal);
+          assert(matchesRefusal);
           assert.deepStrictEqual(refusal.cause, {
             _tag: "WorkerCapabilityError",
             worker: build2,

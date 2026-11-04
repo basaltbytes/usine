@@ -115,7 +115,7 @@ describe("cycle reset polling", () => {
       const acknowledgements: Array<CycleBudgetReset> = [];
       const budgets: CycleBudgets["Service"] = {
         ...emptyCycleBudgets,
-        pendingResets: () => Effect.sync(() => pending),
+        pendingResets: Effect.sync(() => pending),
         acknowledgeReset: (value) =>
           Effect.sync(() => {
             // Cursor progress must already be durable when the reset is acknowledged.
@@ -184,7 +184,7 @@ describe("cycle reset polling", () => {
     const acknowledgements: Array<CycleBudgetReset> = [];
     const budgets: CycleBudgets["Service"] = {
       ...emptyCycleBudgets,
-      pendingResets: () => Effect.sync(() => pending),
+      pendingResets: Effect.sync(() => pending),
       acknowledgeReset: (value) =>
         Effect.sync(() => {
           acknowledgements.push(value);
@@ -272,7 +272,7 @@ describe("cycle reset polling", () => {
     const acknowledgements: Array<CycleBudgetReset> = [];
     const budgets: CycleBudgets["Service"] = {
       ...emptyCycleBudgets,
-      pendingResets: () => Effect.sync(() => pending),
+      pendingResets: Effect.sync(() => pending),
       acknowledgeReset: (value) =>
         Effect.sync(() => {
           acknowledgements.push(value);
@@ -484,10 +484,7 @@ it.live(
             }),
           );
         const attention = Effect.gen(function* () {
-          return partitionNeeds(
-            (yield* budgets.asks()).map(needFor),
-            yield* acknowledgements.list(),
-          );
+          return partitionNeeds((yield* budgets.asks).map(needFor), yield* acknowledgements.list);
         });
         yield* dismiss(blocked.ask);
         yield* polling.poll(withLoop(loop));
@@ -526,7 +523,7 @@ it.live(
         yield* Deferred.succeed(release, undefined);
         const stale = yield* Fiber.join(inFlight);
         assert.strictEqual(stale.submissions[0]?._tag, "Ignored");
-        assert.strictEqual((yield* budgets.pendingResets()).length, 1);
+        assert.strictEqual((yield* budgets.pendingResets).length, 1);
         const updated = yield* makeLoop("Updated task {{ item.number }}.", "required");
         const noMatch = yield* polling.poll(withLoop(updated));
         assert.deepStrictEqual(noMatch.submissions, []);
@@ -542,7 +539,7 @@ it.live(
           yield* Effect.sleep("10 millis");
         }
         assert.strictEqual((yield* engine.inspect(admitted.runId)).run.state._tag, "Waiting");
-        assert.deepStrictEqual(yield* budgets.asks(), []);
+        assert.deepStrictEqual(yield* budgets.asks, []);
       }).pipe(Effect.provide(runtime));
     }).pipe(
       Effect.provide(

@@ -24,7 +24,7 @@ import {
   SettingsInForce,
   UpstreamBase,
 } from "@usine/gateway";
-import { DateTime, Deferred, Effect, Fiber, Option, Redacted, Layer } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Option, Redacted, Layer, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../../src/remote/commands.ts";
@@ -70,7 +70,7 @@ const sink = {
 
 /** Returns the caller token that a child host sends to the machine. */
 const callerTokenOf = (request: AttemptRequest | undefined): string => {
-  assert(request !== undefined && request.host instanceof RemoteShell);
+  assert(request !== undefined && Schema.is(RemoteShell)(request.host));
   const token = request.host.sshEnvironment.GH_ENTERPRISE_TOKEN;
   assert(token !== undefined, "the child host sends the caller token");
   return token;
@@ -153,7 +153,7 @@ describe("SSH Worker behind a Gateway", () => {
         const callerToken = callerTokenOf(given);
         const claims = yield* claimsOf(callerToken);
         assert.strictEqual(claims.attachment, attached.id);
-        assert(given?.host instanceof RemoteShell);
+        assert(Schema.is(RemoteShell)(given?.host));
         assert.include(
           given.host.ssh.args,
           "SendEnv=GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN",
@@ -1108,7 +1108,7 @@ describe("SSH Worker behind a Gateway", () => {
         const prepared = yield* executor.prepare(codexRequest);
         yield* prepared.launch(sink);
         const callerToken = callerTokenOf(given);
-        assert(given?.host instanceof RemoteShell);
+        assert(Schema.is(RemoteShell)(given?.host));
         assert.include(
           given.host.ssh.args,
           "SendEnv=GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN USINE_GATEWAY_TOKEN",

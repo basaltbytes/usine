@@ -59,7 +59,7 @@ describe("encrypted attachments", () => {
         );
         yield* Effect.gen(function* () {
           const store = yield* Attachments;
-          assert.strictEqual((yield* store.list()).length, 2);
+          assert.strictEqual((yield* store.list).length, 2);
           const found = yield* store.find(ATTACHMENT);
           assert(found._tag === "LiveAttachment");
           assert.isTrue(found.serves(RepositoryName.make("acme/renamed")));
@@ -70,7 +70,7 @@ describe("encrypted attachments", () => {
         yield* TestClock.adjust("3 minutes");
         yield* Effect.gen(function* () {
           const store = yield* Attachments;
-          assert.deepStrictEqual(yield* store.list(), []);
+          assert.deepStrictEqual(yield* store.list, []);
           assert.strictEqual((yield* store.find(ATTACHMENT))._tag, "MissingAttachment");
           assert.strictEqual((yield* store.find(OTHER_ATTACHMENT))._tag, "MissingAttachment");
         }).pipe(Effect.provide(persisted(path)));

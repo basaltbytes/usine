@@ -288,8 +288,8 @@ const makeOperatorObservation = Effect.gen(function* () {
       [
         reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }),
         controls.states,
-        budgets.asks(),
-        reader.attemptsByWorker(),
+        budgets.asks,
+        reader.attemptsByWorker,
       ] as const,
       { concurrency: "unbounded" },
     );
@@ -616,7 +616,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     }
-    const saved = yield* acknowledgements.list();
+    const saved = yield* acknowledgements.list;
     const { needsYou: visible, dismissedNeeds } = partitionNeeds(needsYou, saved);
     const overview = ReadyOverview.make({
       projects: projectAttention(projects, visible),
@@ -673,7 +673,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         const [revision, latestPoll, latestSchedule, unconfirmedStops, provisioning] =
           yield* Effect.all(
             [
-              reader.revision(),
+              reader.revision,
               polling.latest,
               schedules.latest,
               stops.list,
@@ -1339,7 +1339,7 @@ const makeOperator = Effect.gen(function* () {
     instance: LoadedInstance,
     askId: CycleBudgetAskId,
   ) {
-    const ask = (yield* budgets.asks()).find((ask) => ask.id === askId);
+    const ask = (yield* budgets.asks).find((ask) => ask.id === askId);
     yield* requirePermission(
       "operate",
       ask === undefined ? InstanceScope.make() : repositoryScope(instance, ask.repository),

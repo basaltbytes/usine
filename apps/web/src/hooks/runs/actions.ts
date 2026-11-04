@@ -5,7 +5,7 @@ import {
   useMutationState,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { type AttemptId, AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import {
@@ -47,7 +47,7 @@ const withoutRunNeeds = (overview: FactoryOverview, runId: RunId): FactoryOvervi
  * example approving a Run that another screen already approved.
  */
 export const isRunOperationRejected = (error: Error): boolean =>
-  error instanceof OperatorHttpError && error.error === "RunOperationRejectedError";
+  Schema.is(OperatorHttpError)(error) && error.error === "RunOperationRejectedError";
 
 const useRefreshRun = () => {
   const queryClient = useQueryClient();

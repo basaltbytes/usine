@@ -53,7 +53,7 @@ describe("engine drain", () => {
           yield* Deferred.await(started);
           const queued = submission({ number: 43 });
           assert.strictEqual((yield* first.submit(queued))._tag, "Queued");
-          const draining = yield* Effect.forkScoped(first.drain(), { startImmediately: true });
+          const draining = yield* Effect.forkScoped(first.drain, { startImmediately: true });
           const next = submission({ number: 44, item: "another-item" });
           yield* first.submit(next);
           yield* Deferred.succeed(finish, undefined);
@@ -112,7 +112,7 @@ describe("engine drain", () => {
             ),
             RunEngine,
           );
-          yield* second.drain();
+          yield* second.drain;
           assert.strictEqual((yield* second.inspect(accepted.runId)).attempts.length, 1);
           assert.strictEqual((yield* Ref.get(plans)).length, 1);
           yield* Scope.close(secondScope, Exit.void);
@@ -155,7 +155,7 @@ describe("engine drain", () => {
           const accepted = yield* first.submit(submission({ number: 45 }));
           assert(accepted._tag === "Claimed");
           yield* Deferred.await(started);
-          const draining = yield* Effect.forkScoped(first.drain(), { startImmediately: true });
+          const draining = yield* Effect.forkScoped(first.drain, { startImmediately: true });
           yield* Deferred.succeed(finish, undefined);
           yield* Fiber.join(draining);
           assert.strictEqual((yield* first.inspect(accepted.runId)).attempts.length, 1);

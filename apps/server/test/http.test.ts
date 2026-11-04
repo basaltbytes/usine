@@ -397,7 +397,7 @@ const backend = needsSetupBackendLayer(
   observation,
   configuration,
   {
-    list: () => Effect.succeed(dismissed),
+    list: Effect.succeed(dismissed),
     prune: () => Effect.die("unused"),
     dismiss: (acknowledgement) =>
       Effect.sync(() => {
@@ -412,7 +412,7 @@ const backend = needsSetupBackendLayer(
       }),
   },
 );
-const app = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(backend)), {
+const app = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
   disableLogger: true,
 });
 
@@ -437,7 +437,7 @@ it("publishes a valid OpenAPI document for every API route and protects non-publ
       );
       const secured = HttpRouter.toWebHandler(
         Layer.mergeAll(
-          apiRoutes().pipe(Layer.provide(auth.guard.layer)),
+          apiRoutes.pipe(Layer.provide(auth.guard.layer)),
           auth.routes,
           setup.protected.pipe(Layer.provide(auth.guard.layer)),
           setup.callback,
@@ -659,7 +659,7 @@ describe("operator HTTP API", () => {
     });
     const auth = await Effect.runPromise(authFixture().pipe(Effect.scoped));
     const upgradeApp = HttpRouter.toWebHandler(
-      apiRoutes().pipe(
+      apiRoutes.pipe(
         Layer.provide(authenticatedRoutes(auth).guard.layer),
         HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
       ),
@@ -927,7 +927,7 @@ describe("operator HTTP API", () => {
       runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
     });
     const rejectingApp = HttpRouter.toWebHandler(
-      apiRoutes().pipe(HttpRouter.provideRequest(rejecting)),
+      apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
       { disableLogger: true },
     );
     try {
@@ -1155,7 +1155,7 @@ describe("operator HTTP API", () => {
       statistics: (window) => Effect.succeed(statisticsOf(window)),
       runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
     });
-    const server = HttpRouter.serve(apiRoutes().pipe(HttpRouter.provideRequest(live))).pipe(
+    const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
       Layer.provideMerge(NodeHttpServer.layerTest),
     );
     await Effect.runPromise(
@@ -1340,7 +1340,7 @@ describe("operator HTTP API", () => {
       writeFile(join(assets, "app.css"), ":root { color-scheme: dark; }"),
     ]);
     const web = HttpRouter.toWebHandler(
-      Layer.mergeAll(apiRoutes(), staticRoutes(webRoot)).pipe(
+      Layer.mergeAll(apiRoutes, staticRoutes(webRoot)).pipe(
         HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
       ),
       { disableLogger: true },
@@ -1403,7 +1403,10 @@ describe("operator HTTP API", () => {
       });
       const webRoot = await mkdtemp(join(tmpdir(), "usine-web-"));
       const overview = (host: string) =>
-        Effect.tryPromise(() => fetch(`http://${host}:${port}/api/overview`)).pipe(
+        Effect.tryPromise({
+          try: () => fetch(`http://${host}:${port}/api/overview`),
+          catch: (cause) => RequestFailed.make({ cause }),
+        }).pipe(
           Effect.map((response) => {
             assert.equal(response.headers.get("x-frame-options"), "DENY");
             assert.equal(response.headers.get("strict-transport-security"), "max-age=31536000");
@@ -1428,7 +1431,7 @@ describe("operator HTTP API", () => {
 
 it("returns a typed server error when statistics cannot read worker configuration history", async () => {
   const failing = HttpRouter.toWebHandler(
-    apiRoutes().pipe(
+    apiRoutes.pipe(
       HttpRouter.provideRequest(
         Layer.mock(FactoryBackend)({
           runStatistics: () =>
@@ -1468,7 +1471,7 @@ it("checks the declared permission for every operator route and each role", asyn
           : ProjectScope.make({ project: ProjectId.make("alpha") }),
     });
     const secured = HttpRouter.toWebHandler(
-      apiRoutes().pipe(
+      apiRoutes.pipe(
         HttpRouter.provideRequest(
           Layer.merge(backend, Layer.succeed(RequestPermissions, binding.permissions)),
         ),
@@ -1569,7 +1572,7 @@ it("retains all linked card membership when the board read omits settled cards",
       overview: Effect.succeed(ReadyOverview.make({ ...overview, projects: [project] })),
     })),
   ).pipe(Layer.provide(backend));
-  const boardApp = HttpRouter.toWebHandler(apiRoutes().pipe(HttpRouter.provideRequest(read)), {
+  const boardApp = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(read)), {
     disableLogger: true,
   });
   try {
@@ -1602,7 +1605,7 @@ it("streams small changes and replays missed revisions without payloads", async 
         const bus = Context.get(context, ChangeBus);
         yield* Effect.promise(async () => {
           const streamApp = HttpRouter.toWebHandler(
-            apiRoutes().pipe(
+            apiRoutes.pipe(
               Layer.provide(Layer.succeed(ChangeBus, bus)),
               HttpRouter.provideRequest(backend),
             ),
@@ -1658,3 +1661,8 @@ it("streams small changes and replays missed revisions without payloads", async 
     ),
   );
 });
+
+class RequestFailed extends Schema.TaggedError<RequestFailed, { readonly Brand: unique symbol }>()(
+  "RequestFailed",
+  { cause: Schema.Defect() },
+) {}
