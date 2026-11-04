@@ -137,7 +137,7 @@ All subpaths are platform-free except the Node adapter `@usine/engine/local-sqli
 import { Effect, Layer, Option } from "effect"
 import { WorkerName } from "@usine/core/worker"
 import { InstanceDirectory } from "@usine/core/instance"
-import { StepResult } from "@usine/core/step/result"
+import { StepCompletion, StepResult } from "@usine/core/step/result"
 import { StepExecutor } from "@usine/engine/step-executor"
 import { TriggerCondition } from "@usine/engine/trigger-condition"
 import { layer } from "@usine/engine/local-sqlite"
@@ -154,10 +154,10 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
     worker: WorkerName.make("local"),
     release: Effect.void,
   }),
-  execute: ({ event }) => Effect.succeed(new StepResult({
+  execute: ({ event }) => Effect.succeed(StepCompletion.fromResult(new StepResult({
     message: `Handled ${event.id}`,
     facts: [],
-  })),
+  }))),
   interrupt: () => Effect.void,
 })
 
@@ -253,3 +253,9 @@ The domain services are the persistence boundary. `RunDatabase` is the current S
 Engine records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Persistence encoding and decoding run inside Effects. Invalid stored data fails with `EnginePersistenceError`; internal encoding failures are defects.
 
 Run `pnpm --filter @usine/engine check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+## Step outputs
+
+`StepOutputStore` (`/step-outputs`) writes full documents idempotently by attempt and name. `/step-outputs/sqlite` provides the SQL adapter on the application's `SqlClient`, with gzip bodies and a separate migration ledger. `/step-outputs/memory` provides the same contract with an injected attempt-success reader. `list` reads metadata by repository, item, and optional opaque type; `read` returns a document by attempt and name. Both expose only succeeded attempts. Lists use binary order by attempt ID, then output name.
+
+The local database composition provides `StepOutputStore` alongside `RunDatabase`. `layerWithDatabase` requires both ports. The engine writes documents before `finishAttempt`; replay preserves one row per output. Run reads and exports include only `StepResult.outputs` refs.

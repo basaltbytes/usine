@@ -89,6 +89,10 @@ const defaultResponse = (
   const [command = "", ...args] = words;
   const last = args.at(-1) ?? "";
   switch (command) {
+    case "node":
+      return args.some((arg) => arg.includes("const collect = () =>"))
+        ? ok('{"outputs":[]}')
+        : ok();
     case "mkdir":
       for (const path of args.filter((arg) => !arg.startsWith("-"))) sandbox.paths.add(path);
       return ok();

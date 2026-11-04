@@ -228,6 +228,21 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             });
             yield* succeeds(host, {
               ...inWorktree,
+              command: "node",
+              args: [
+                "-e",
+                `require('node:fs').writeFileSync('.usine/outputs/walkthrough.json', JSON.stringify({ type: 'balade.walkthrough', content: { title: 'SSH walkthrough' } }))`,
+              ],
+            });
+            yield* succeeds(host, { ...inWorktree, command: "git", args: ["add", "-A"] });
+            const observed1 = yield* succeeds(host, {
+              ...inWorktree,
+              command: "git",
+              args: ["ls-files", ".usine/"],
+            });
+            assert.strictEqual(observed1, "");
+            yield* succeeds(host, {
+              ...inWorktree,
               command: "git",
               args: ["commit", "--allow-empty", "-m", "ssh worker integration"],
             });
@@ -322,6 +337,9 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             "700\n700\n600\n600",
             "only the SSH user can read the Attempt's credential",
           );
+          assert(Option.isSome(finished.step.result));
+          assert.strictEqual(finished.step.result.value.outputs[0]?.type, "balade.walkthrough");
+          assert.notProperty(finished.step.result.value.outputs[0], "content");
           const facts = Option.match(finished.step.result, {
             onNone: () => [],
             onSome: (result) => result.facts,

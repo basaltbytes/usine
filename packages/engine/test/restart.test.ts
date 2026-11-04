@@ -1,3 +1,11 @@
+import {
+  StepOutput,
+  StepOutputName,
+  StepOutputType,
+  StepOutputSha256,
+} from "@usine/core/step/output";
+import { StepOutputContext, StepOutputStore } from "../src/step-outputs/store.ts";
+import { StepCompletion } from "@usine/core/step/result";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import type { Attempt, AttemptId, StopReason } from "@usine/core/attempt";
@@ -202,7 +210,11 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
       }),
     outcome: (attemptId) =>
       Ref.get(state.stored).pipe(
-        Effect.map((results) => Option.fromUndefinedOr(results.get(attemptId))),
+        Effect.map((results) =>
+          Option.map(Option.fromUndefinedOr(results.get(attemptId)), (result) =>
+            Result.map(result, StepCompletion.fromResult),
+          ),
+        ),
       ),
     recover: (attempt, record) =>
       Effect.gen(function* () {
@@ -244,7 +256,7 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
           yield* Ref.update(state.acquired, (ids) => new Set(ids).add(id));
           return yield* Effect.never;
         }
-        return stepResult("resumed from the salvage");
+        return StepCompletion.fromResult(stepResult("resumed from the salvage"));
       }),
   });
   return { ...state, executor };
@@ -407,7 +419,9 @@ describe("engine restart", () => {
                   ? Ref.update(live, (ids) => new Set([...ids, execution.attempt.id])).pipe(
                       Effect.andThen(Effect.never),
                     )
-                  : Effect.succeed(stepResult("finished by the reattached parent")),
+                  : Effect.succeed(
+                      StepCompletion.fromResult(stepResult("finished by the reattached parent")),
+                    ),
               ),
             ),
         });
@@ -569,7 +583,7 @@ describe("engine restart", () => {
                   yield* Ref.update(reattached, (ids) => [...ids, execution.attempt.id]);
                   yield* Deferred.await(finish);
                 }
-                return stepResult("finished after the restart");
+                return StepCompletion.fromResult(stepResult("finished after the restart"));
               }),
           });
           const secondScope = yield* Scope.make();
@@ -648,9 +662,17 @@ describe("engine restart", () => {
         Effect.gen(function* () {
           const succeeding = submission({ number: 56, item: "stored-success" });
           const failing = submission({ number: 57, item: "stored-failure" });
+          const document = StepOutput.make({
+            name: StepOutputName.make("walkthrough"),
+            type: StepOutputType.make("balade.walkthrough"),
+            commit: Option.none(),
+            content: { title: "Saved before engine commit" },
+            size: 38,
+            sha256: StepOutputSha256.make("a".repeat(64)),
+          });
           const executions = yield* Ref.make(0);
           const stored = yield* Ref.make<
-            ReadonlyMap<AttemptId, Result.Result<ReturnType<typeof stepResult>, AgentFailure>>
+            ReadonlyMap<AttemptId, Result.Result<StepCompletion, AgentFailure>>
           >(new Map());
           const executor = Layer.succeed(StepExecutor)({
             workers: Effect.succeed([WorkerName.make("local")]),
@@ -690,7 +712,11 @@ describe("engine restart", () => {
                     new Map(results).set(
                       execution.attempt.id,
                       execution.task === succeeding.task
-                        ? Result.succeed(stepResult("finished before the restart"))
+                        ? Result.succeed(
+                            StepCompletion.fromResult(stepResult("finished before the restart"), [
+                              document,
+                            ]),
+                          )
                         : Result.fail(AgentFailure.make({ message: "blocked before the restart" })),
                     ),
                   ),
@@ -710,6 +736,20 @@ describe("engine restart", () => {
             until: (results) => results.size === 2,
             schedule: Schedule.spaced("10 millis"),
           });
+          const beforeCrash = yield* firstEngine.inspect(succeeded.runId);
+          const pendingAttempt = beforeCrash.attempts[0];
+          assert(pendingAttempt !== undefined);
+          // Simulates a crash after writing bodies but before finishAttempt commits.
+          yield* Context.get(services, StepOutputStore).write(
+            StepOutputContext.make({
+              attemptId: pendingAttempt.id,
+              runId: succeeded.runId,
+              stepName: pendingAttempt.stepName,
+              repository: succeeding.repository,
+              itemNumber: Option.none(),
+            }),
+            [document],
+          );
           yield* Scope.close(firstScope, Exit.void);
 
           const secondScope = yield* Scope.make();
@@ -739,6 +779,13 @@ describe("engine restart", () => {
             [POSTED_COMMENT],
           );
           assert.deepStrictEqual(success.attempts[0]?.comments, []);
+          assert.deepStrictEqual(success.step.result.value.outputs, [document.ref]);
+          const outputStore = Context.get(currentServices, StepOutputStore);
+          const recoveredDocument = yield* outputStore.read(pendingAttempt.id, document.name);
+          assert.deepStrictEqual(recoveredDocument, Option.some(document));
+          yield* secondEngine.reconcile;
+          const reconciledDocument = yield* outputStore.read(pendingAttempt.id, document.name);
+          assert.deepStrictEqual(reconciledDocument, Option.some(document));
           const executionsState = yield* Ref.get(executions);
           assert.strictEqual(executionsState, 2);
           yield* Scope.close(secondScope, Exit.void);

@@ -1,6 +1,7 @@
 import { ProviderTargets } from "./providers/targets.ts";
 import { ProviderLogins } from "./providers/control.ts";
 import { providerLoginRunnerLayer } from "./providers/runner.ts";
+import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { changeBusLayer } from "@usine/core/changes";
 import { startupListener, type StartupListener } from "./listener.ts";
 // The Node server adapter requires native HTTP server and connection types.
@@ -176,7 +177,7 @@ const start = Effect.fnUntraced(function* (
   instances: CurrentInstance["Service"],
   port: Port,
   record: InstanceRecord,
-  database: Layer.Layer<RunDatabase, EnginePersistenceError>,
+  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError>,
   configurationEditor: ConfigurationEditor["Service"],
   auth: AuthServices,
 ) {

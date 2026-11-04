@@ -284,3 +284,11 @@ Authored YAML keys are snake_case; domain fields are camelCase. The parser uses 
 The CLI writes directly to the store. A saved revision that needs a restart or fails worker preflight remains stored, while the running snapshot stays unchanged. The API prepares changes against the running instance before committing, so it can refuse them without saving. See [Live changes and restart requirements](https://docs.usine.dev/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and recovery steps.
 
 `SIGHUP` explicitly rereads the database. It does not import edited files or reread `.env`. Configuration changes create revisions, not git commits.
+
+## Step outputs
+
+Step output storage adds the behavior described in [ADR 0034](../adr/0034-step-outputs.md). Agents write JSON envelopes to `.usine/outputs/<name>.json` in the attempt's checkout. Preparation adds `/.usine/` to Git's exclude file. Local, SSH, exe.dev, and Cloudflare executors read whole documents through the same checkout runner and container as fact harvesting.
+
+The durable completion includes validated documents. Before recording attempt success, the engine writes each body idempotently by attempt and name to `usine_step_outputs`, preserving its creation time on replay. The SQL adapter uses `SqlClient` and the `usine_step_output_migrations` ledger. Bodies use gzip; metadata contains the run, step, repository, item number, optional commit, content size, SHA-256, and creation time. The in-memory adapter follows the same contract with an injected attempt-success reader.
+
+Output queries expose only documents of succeeded attempts. Run snapshots, listings, and `usine export-run` include output refs from `StepResult.outputs`; these reads do not fetch bodies. Each output file is limited to 8 MiB, with at most ten outputs per attempt. Invalid JSON, envelope fields, names, and commit mismatches fail the attempt with a file-specific `AgentFailure`, preserving ordinary salvage behavior.

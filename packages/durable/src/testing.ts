@@ -37,7 +37,7 @@ import {
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import {
   type Cause,
   Context,
@@ -316,7 +316,11 @@ export type StubParent = (
 
 type StubTaskState =
   | { readonly _tag: "live" }
-  | { readonly _tag: "finished"; readonly report: AttemptReport; result: Option.Option<StepResult> }
+  | {
+      readonly _tag: "finished";
+      readonly report: AttemptReport;
+      result: Option.Option<StepCompletion>;
+    }
   | { readonly _tag: "canceled" };
 
 interface StubTask {

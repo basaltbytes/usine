@@ -11,7 +11,7 @@ import { DedupKey } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryRevision } from "@usine/core/repository";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
 import { layer, observationLayer } from "@usine/engine/local-sqlite";
@@ -40,7 +40,8 @@ const executor = Layer.succeed(StepExecutor)({
   sweep: Effect.void,
   discard: () => Effect.void,
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
-  execute: () => Effect.succeed(StepResult.make({ message: "Completed", facts: [] })),
+  execute: () =>
+    Effect.succeed(StepCompletion.fromResult(StepResult.make({ message: "Completed", facts: [] }))),
 });
 const parser = ConfigParser.layer.pipe(Layer.provideMerge(MarcbachmannCelLayer));
 

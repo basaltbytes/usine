@@ -1,3 +1,4 @@
+import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
@@ -13,7 +14,7 @@ import {
   harvestPostedComments,
 } from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Deferred, Effect, Exit, Option, Schema, Scope, SynchronizedRef } from "effect";
+import { Crypto, Deferred, Effect, Exit, Option, Schema, Scope, SynchronizedRef } from "effect";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
 import {
   type AttemptWorkspace,
@@ -106,6 +107,7 @@ interface CheckoutHost {
  */
 export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<M>) =>
   Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
     const { commands, label } = worker;
     const span = (name: string) => `${worker.spanPrefix}.${name}`;
     const fetches = yield* keyedLockFor<RepositoryName>();
@@ -299,17 +301,29 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         );
       };
 
-    const harvestCommand =
+    const checkoutCommand =
       (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
-      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+      (command: string, args: ReadonlyArray<string>, maxOutputBytes?: number) =>
         access.refresh.pipe(
           Effect.andThen(
             commands.run(operation, shell, command, args, {
+              maxOutputBytes,
               cwd: worktree,
               environment: access.environment,
               scrub: access.scrub,
             }),
           ),
+        );
+
+    const harvestCommand =
+      (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
+      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+        checkoutCommand(
+          operation,
+          worktree,
+          access,
+          shell,
+        )(command, args).pipe(
           Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
         );
 
@@ -938,6 +952,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       }
 
       const prepared = provisioned.workspace;
+      const outputShell = yield* checkoutHost.shell;
+      yield* prepareOutputs(checkoutCommand("prepare", worktree, access, outputShell));
       yield* Effect.logInfo(`${label} Attempt workspace ready`, {
         attemptId: request.attemptId,
         worker: request.worker,
@@ -998,6 +1014,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 ),
                 gatewayCredential,
                 harvest: (windows) => harvest(prepared, access, shell, windows),
+                readOutputs: readOutputs(
+                  prepared.spec,
+                  checkoutCommand("launch", worktree, access, shell),
+                  crypto,
+                ),
                 harvestComments: (windows) =>
                   harvestPostedComments(
                     prepared.spec,

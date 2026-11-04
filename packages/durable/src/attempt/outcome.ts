@@ -6,7 +6,7 @@ import {
   DefectFailure,
   InfraFailure,
 } from "@usine/core/attempt/failure";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { Match, Option, Result, Schema } from "effect";
 import {
   AttemptReport,
@@ -114,11 +114,18 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
   }
 };
 
-const resultJson = Schema.fromJsonString(StepResult);
+const resultJson = Schema.fromJsonString(StepCompletion);
 
 /** Encodes a harvested result for `AttemptRecord.result`. */
 export const encodeResult = Schema.encodeEffect(resultJson);
-const decodeHarvested = Schema.decodeUnknownOption(resultJson);
+const decodeHarvested = (value: string) =>
+  Schema.decodeOption(resultJson)(value).pipe(
+    Option.orElse(() =>
+      Schema.decodeOption(Schema.fromJsonString(StepResult))(value).pipe(
+        Option.map((result) => StepCompletion.make({ result, outputs: [] })),
+      ),
+    ),
+  );
 
 /**
  * Returns the final state of a finished Attempt. Returns `None` before the terminal envelope is

@@ -1,3 +1,4 @@
+import { StepCompletion } from "@usine/core/step/result";
 import { assert, describe, it } from "@effect/vitest";
 import type { AttemptId, AttemptWindows } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
@@ -66,7 +67,7 @@ describe("an Attempt's windows", () => {
             const currentWindows = yield* io.windows;
             yield* harvest(execution.attempt.id, currentWindows);
             if (execution.run.loop === "fix") yield* Deferred.succeed(fixHarvested, undefined);
-            return stepResult("Harvested");
+            return StepCompletion.fromResult(stepResult("Harvested"));
           }),
         );
         yield* Effect.gen(function* () {

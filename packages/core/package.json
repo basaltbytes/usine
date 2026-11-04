@@ -138,6 +138,10 @@
     "./json-key": {
       "types": "./dist/json-key.d.ts",
       "default": "./dist/json-key.js"
+    },
+    "./step/output": {
+      "types": "./dist/step/output.d.ts",
+      "default": "./dist/step/output.js"
     }
   },
   "publishConfig": {
