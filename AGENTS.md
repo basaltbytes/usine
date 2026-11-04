@@ -1,6 +1,6 @@
 # usine
 
-usine runs loops against many repositories from one headless orchestrator. A loop is a file in git that defines a trigger and the agent run it starts, with any coding-agent harness. The spec is `CONTEXT.md` and the ADRs in `docs/adr/`, indexed by the wayfinder map [#1](https://github.com/basaltbytes/usine/issues/1).
+usine runs loops against many repositories from one headless orchestrator. A loop is a file in git that defines a trigger and the agent run it starts, with any coding-agent harness. The spec is `CONTEXT.md`. The ADRs in `docs/adr/` record why past decisions were made, indexed by the wayfinder map [#1](https://github.com/basaltbytes/usine/issues/1).
 
 Before you name a concept, read the glossary in `CONTEXT.md`.
 
@@ -14,7 +14,7 @@ Issues are in GitHub Issues on `basaltbytes/usine`; use the `gh` CLI. See `docs/
 
 The repo has one context: `CONTEXT.md` and `docs/adr/` at the root. See `docs/agents/domain.md`.
 
-`CONTEXT.md` defines each term in one or two sentences. Put behavior rules in ADRs and code, not in the glossary.
+`CONTEXT.md` defines each term in one or two sentences. Put behavior rules in code and tests, not in the glossary. ADRs record why a decision was taken; they never block a change. When a change contradicts an ADR, make the change and amend the ADR's reasons in the same pull request.
 
 `docs/architecture/index.mdx` maps what is built: packages, processes, storage, workers, and gaps. Each page states the commit it describes.
 
