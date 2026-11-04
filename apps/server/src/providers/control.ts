@@ -73,11 +73,7 @@ export class ProviderLogins extends Context.Service<
           lock.withPermit(
             Effect.gen(function* () {
               yield* Effect.annotateCurrentSpan({ target, provider });
-              const available = yield* targets.list;
-              if (!available.some((item) => item.target === target))
-                return yield* ProviderCredentialError.make({
-                  message: "Choose a configured credential destination.",
-                });
+              yield* targets.get(target);
               for (const [id, session] of sessions) {
                 if (session.view.target !== target || session.view.provider !== provider) continue;
                 if (active(session)) {

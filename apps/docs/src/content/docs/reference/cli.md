@@ -54,6 +54,8 @@ usine logout chatgpt --target usine-gateway
 
 `--target <SSH destination>` selects one gateway when several are configured. With one gateway, usine selects it automatically. With none, it stores credentials where the local Claude Code and Codex harnesses read them, honoring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
 
+Local preflight and attempt children use the same credential directories. If one gateway is unavailable, Settings shows its error while other gateways remain usable. `--target` can select a healthy gateway independently.
+
 Subscription sign-in uses the installed Claude Code `setup-token` command or Codex `login --device-auth` command in a private temporary directory. Claude requires `script` and a code from its authorization page. Codex displays a device code for authorization in another browser. `--api-key` reads a masked key from the terminal. Ctrl+C cancels subscription sign-in. Failed or cancelled authorization preserves the previous login.
 
 Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.

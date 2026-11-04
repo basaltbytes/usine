@@ -49,13 +49,18 @@ export const ProviderLoginView = Schema.Struct({
   state: ProviderLoginState,
 });
 export type ProviderLoginView = typeof ProviderLoginView.Type;
+export const ProviderTarget = Schema.Struct({
+  target: Schema.String,
+  label: Schema.String,
+  providers: Schema.Array(ProviderConnection),
+});
+export type ProviderTarget = typeof ProviderTarget.Type;
 export const ProviderStatus = Schema.Struct({
   targets: Schema.Array(
-    Schema.Struct({
-      target: Schema.String,
-      label: Schema.String,
-      providers: Schema.Array(ProviderConnection),
-    }),
+    Schema.Union([
+      ProviderTarget,
+      Schema.Struct({ target: Schema.String, label: Schema.String, error: Schema.String }),
+    ]),
   ),
   logins: Schema.Array(ProviderLoginView),
 });

@@ -3,6 +3,7 @@ export {
   ProviderCredentialError,
   ProviderConnection,
   ProviderConnections,
+  ProviderTarget,
   credentialProvider,
 } from "./model.ts";
 export { ProviderCredentials } from "./store.ts";

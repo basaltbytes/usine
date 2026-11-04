@@ -25,25 +25,32 @@ export const ProviderConnections = () => {
           {refreshProviders}
         </Button>
       ) : (
-        data.targets.map(({ target, label, providers }) => (
-          <div key={target}>
-            <p className="pb-2 text-xs text-muted-foreground">{targetLabel(label)}</p>
-            {providers.map((connection) => {
-              const provider = connection.provider === "anthropic" ? "claude" : "chatgpt";
-              return (
-                <ProviderConnectionRow
-                  key={provider}
-                  target={target}
-                  provider={provider}
-                  connection={connection}
-                  login={data.logins.find(
-                    (login) => login.target === target && login.provider === provider,
-                  )}
-                />
-              );
-            })}
-          </div>
-        ))
+        data.targets.map((destination) => {
+          const { target, label } = destination;
+          return (
+            <div key={target}>
+              <p className="pb-2 text-xs text-muted-foreground">{targetLabel(label)}</p>
+              {"error" in destination ? (
+                <ErrorAlert message={destination.error} />
+              ) : (
+                destination.providers.map((connection) => {
+                  const provider = connection.provider === "anthropic" ? "claude" : "chatgpt";
+                  return (
+                    <ProviderConnectionRow
+                      key={provider}
+                      target={target}
+                      provider={provider}
+                      connection={connection}
+                      login={data.logins.find(
+                        (login) => login.target === target && login.provider === provider,
+                      )}
+                    />
+                  );
+                })
+              )}
+            </div>
+          );
+        })
       )}
     </section>
   );

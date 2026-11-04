@@ -64,12 +64,18 @@ it.each([
       if (url.endsWith("/key")) {
         state = {
           ...state,
-          targets: state.targets.map((target) => ({
-            ...target,
-            providers: target.providers.map((provider) =>
-              provider.provider === "anthropic" ? { ...provider, credential: "api-key" } : provider,
-            ),
-          })),
+          targets: state.targets.map((target) =>
+            "error" in target
+              ? target
+              : {
+                  ...target,
+                  providers: target.providers.map((provider) =>
+                    provider.provider === "anthropic"
+                      ? { ...provider, credential: "api-key" }
+                      : provider,
+                  ),
+                },
+          ),
         };
         return Response.json({ ok: true });
       }
@@ -93,6 +99,19 @@ it.each([
       await document.fonts.ready;
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
       await commands.configurationEditorScreenshot(`960-providers-${device}`);
+      state = {
+        ...state,
+        targets: [
+          {
+            target: "unavailable",
+            label: "Unavailable gateway",
+            error: "Check gateway SSH access.",
+          },
+          ...state.targets,
+        ],
+      };
+      await client.invalidateQueries();
+      await expect.element(page.getByText("Check gateway SSH access.")).toBeVisible();
       await page.getByRole("button", { name: "Connect Claude", exact: true }).click();
       await expect.element(page.getByRole("button", { name: "Open sign-in page" })).toBeVisible();
       await expect.element(page.getByLabelText("Code from Claude")).toBeVisible();

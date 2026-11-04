@@ -35,6 +35,8 @@ import {
 import { memoryConfigurationLayer } from "@usine/config/memory";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ProviderTargets } from "../src/providers/targets.ts";
+import { ProviderLogins } from "../src/providers/control.ts";
+import { ProviderLoginRunner } from "../src/providers/runner.ts";
 
 it.live(
   "hands credentials to the gateway admin API and updates routing; uses native files without a gateway",
@@ -72,6 +74,14 @@ it.live(
 operator: operator
 repos: []
 workers:
+  - name: unavailable
+    kind: ssh
+    destination: unavailable-worker
+    root: /srv/usine
+    gateway:
+      domain: unavailable.test
+      destination: unavailable-gateway
+      admin_token_env: MISSING_GATEWAY_ADMIN_TOKEN
   - name: remote
     kind: ssh
     destination: worker
@@ -147,11 +157,43 @@ workers:
             }),
           ),
         );
-        assert.equal(connected[0]?.providers[0]?.credential, "api-key");
+        assert.include(connected[0], {
+          target: "unavailable-gateway",
+          error: "Set MISSING_GATEWAY_ADMIN_TOKEN to the gateway admin token.",
+        });
+        const healthy = connected[1];
+        assert(healthy !== undefined && "providers" in healthy);
+        assert.equal(healthy.providers[0]?.credential, "api-key");
+        const loginContext = yield* Layer.build(
+          ProviderLogins.layer.pipe(
+            Layer.provide(Layer.succeed(ProviderTargets, targets)),
+            Layer.provide(
+              Layer.succeed(ProviderLoginRunner, {
+                start: () =>
+                  Effect.succeed({
+                    prompt: Effect.never,
+                    result: Effect.never,
+                    submit: () => Effect.void,
+                  }),
+              }),
+            ),
+          ),
+        );
+        const logins = Context.get(loginContext, ProviderLogins);
+        const login = yield* logins.begin("test-gateway", "claude").pipe(
+          Effect.provideService(
+            ConfigProvider.ConfigProvider,
+            ConfigProvider.fromUnknown({
+              TEST_GATEWAY_ADMIN_TOKEN: Redacted.value(settings.adminToken),
+            }),
+          ),
+        );
+        assert.equal(login.target, "test-gateway");
+        yield* logins.cancel(login.id);
         const snapshot = yield* store.read;
         assert.isTrue(Option.isSome(snapshot.instance));
         if (Option.isSome(snapshot.instance)) {
-          const worker = snapshot.instance.value.config.workers[0];
+          const worker = snapshot.instance.value.config.workers[1];
           assert(worker?.kind === "ssh" && Option.isSome(worker.gateway));
           assert.deepEqual(worker.gateway.value.llmProviders, ["anthropic"]);
         }
@@ -177,7 +219,9 @@ workers:
             }),
           ),
         );
-        assert.equal(removed[0]?.providers[0]?.credential, null);
+        const disconnected = removed[1];
+        assert(disconnected !== undefined && "providers" in disconnected);
+        assert.equal(disconnected.providers[0]?.credential, null);
         const localContext = yield* Layer.build(
           ProviderTargets.layer(Effect.succeed([])).pipe(
             Layer.provide(Layer.succeed(ConfigurationStore, store)),
@@ -211,8 +255,10 @@ workers:
         yield* local.disconnect("local", "anthropic");
         yield* local.disconnect("local", "openai");
         const empty = yield* local.list;
+        const localTarget = empty[0];
+        assert(localTarget !== undefined && "providers" in localTarget);
         assert.deepEqual(
-          empty[0]?.providers.map(({ credential }) => credential),
+          localTarget.providers.map(({ credential }) => credential),
           [null, null],
         );
       }),

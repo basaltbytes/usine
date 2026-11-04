@@ -61,6 +61,7 @@ it.live(
             }),
             Layer.succeed(ProviderTargets, {
               list: Effect.succeed([{ target: "local", label: "Local harnesses", providers: [] }]),
+              get: (target) => Effect.succeed({ target, label: "Local harnesses", providers: [] }),
               replace: (_target, credential) => Ref.update(saved, (all) => [...all, credential]),
               disconnect: () => Effect.void,
             }),

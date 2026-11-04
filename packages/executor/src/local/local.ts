@@ -86,6 +86,8 @@ const isExecutorError = Schema.is(ExecutorError);
 /** The only process variables passed to an Attempt's git and gh commands (ADR 0011). */
 const HOST_ENVIRONMENT_ALLOWLIST = [
   "HOME",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
   "LANG",
   "LC_ALL",
   "PATH",

@@ -875,6 +875,8 @@ describe("local worker", () => {
               // the App private key (ADR 0011).
               const allowed = new Set([
                 "HOME",
+                "CLAUDE_CONFIG_DIR",
+                "CODEX_HOME",
                 "LANG",
                 "LC_ALL",
                 "PATH",

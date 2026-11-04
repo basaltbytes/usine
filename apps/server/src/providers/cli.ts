@@ -38,7 +38,7 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
       )
       .pipe(
         Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
-        Effect.timeout("35 seconds"),
+        Effect.timeout("45 seconds"),
         Effect.mapError(() =>
           authFailure(
             "Provider connection failed. Check the instance and gateway service logs, then try again.",
@@ -59,6 +59,7 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
       "Choose one destination with --target <gateway SSH destination>. Run this command once for each gateway.",
       400,
     );
+  if ("error" in target) return yield* authFailure(target.error, 503);
   const body = { target: target.target, provider: command.provider };
   const ok = Schema.Struct({ ok: Schema.Boolean });
   if (command.action === "logout") {

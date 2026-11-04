@@ -27,6 +27,7 @@ import {
   credentialProvider,
   ProviderCredential,
   type ProviderStatus,
+  type ProviderTarget,
 } from "@usine/gateway/credentials";
 
 const quoteCurl = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
@@ -285,25 +286,46 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       ),
     ),
   );
+  const get = Effect.fn("ProviderTargets.get")(function* (target: string) {
+    yield* Effect.annotateCurrentSpan({ target });
+    if (target === "local") {
+      if ((yield* gateways).size > 0)
+        return yield* failed("Choose the configured gateway for this instance.");
+      return { target, label: "Local harnesses", providers: yield* localStatus };
+    }
+    const gateway = yield* selected(target);
+    const text = yield* Effect.scoped(remote(gateway, "GET", ""));
+    const { providers } = yield* Schema.decodeEffect(Schema.fromJsonString(ProviderConnections))(
+      text,
+    ).pipe(Effect.mapError(() => failed("Upgrade the gateway to enable provider connections.")));
+    return { target, label: gateway.destination, providers };
+  });
   return {
+    get,
     list: Effect.gen(function* () {
       const configured = yield* gateways;
-      if (configured.size === 0)
-        return [{ target: "local", label: "Local harnesses", providers: yield* localStatus }];
-      return yield* Effect.forEach([...configured], ([target, gateway]) =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const text = yield* remote(gateway, "GET", "");
-            const { providers } = yield* Schema.decodeEffect(
-              Schema.fromJsonString(ProviderConnections),
-            )(text).pipe(
-              Effect.mapError(() => failed("Upgrade the gateway to enable provider connections.")),
-            );
-            return { target, label: gateway.destination, providers };
-          }),
-        ),
+      const targets = configured.size === 0 ? ["local"] : [...configured.keys()];
+      return yield* Effect.forEach(
+        targets,
+        (target) =>
+          get(target).pipe(
+            Effect.catchTag("ProviderCredentialError", (error) =>
+              Effect.gen(function* () {
+                yield* Effect.logWarning("Provider destination status unavailable", {
+                  target,
+                  message: error.message,
+                });
+                return {
+                  target,
+                  label: target === "local" ? "Local harnesses" : target,
+                  error: error.message,
+                };
+              }),
+            ),
+          ),
+        { concurrency: "unbounded" },
       );
-    }),
+    }).pipe(Effect.withSpan("ProviderTargets.list")),
     replace: Effect.fn("ProviderTargets.replace")(function* (
       target: string,
       credential: ProviderCredential,
@@ -361,6 +383,7 @@ export class ProviderTargets extends Context.Service<
   ProviderTargets,
   {
     readonly list: Effect.Effect<ProviderStatus["targets"], ProviderCredentialError>;
+    readonly get: (target: string) => Effect.Effect<ProviderTarget, ProviderCredentialError>;
     readonly replace: (
       target: string,
       credential: ProviderCredential,
