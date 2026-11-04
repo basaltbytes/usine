@@ -56,7 +56,7 @@ A keepalive alarm keeps the container running for two hours after the last creat
 
 When Cloudflare restarts a host or replaces an instance, it sends the container SIGTERM and stops it up to 15 minutes later. The image's init (`image/init.sh`) writes the time to `/home/usine/.usine/draining` and keeps the container running, and each sandbox summary reports `draining` while the file exists. The executor then drains the Attempt: it salvages the checkout and destroys the sandbox before the container stops.
 
-The sandbox image installs Codex 0.164.0 and Claude Code 2.1.311. Redeploy the Worker to rebuild its image when upgrading these pins.
+The sandbox image installs the worker packages from the harness descriptors in `@usine/agents/harness`. Run `pnpm worker-image:generate` at the repository root after changing those packages, then redeploy the Worker to rebuild its image.
 
 ## Deploy
 

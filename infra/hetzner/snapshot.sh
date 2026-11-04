@@ -25,8 +25,8 @@ Environment:
   IMAGE          base image, default debian-13
   NETWORK        the gateway's network; builds the snapshot behind the gateway
   GATEWAY_SSH    the gateway's SSH destination, such as its Host alias; required with NETWORK
-  ATTEMPT_IMAGE  the attempt image to pull, default ATTEMPT_IMAGE in
-                 packages/executor/src/ssh/container.ts
+  ATTEMPT_IMAGE  the attempt image to pull, default ghcr.io/basaltbytes/usine-worker
+                 with the generated ../worker-image/tag.txt
   USINE_CONTAINER_RUNTIME  podman (default) or docker
   DESCRIPTION    the snapshot's description, default usine-worker-<runtime>-<attempt image tag>
   SERVER_NAME    name of the temporary server, default usine-snapshot-<time>
@@ -46,7 +46,7 @@ SERVER_TYPE=${SERVER_TYPE:-cx23}
 IMAGE=${IMAGE:-debian-13}
 NETWORK=${NETWORK:-}
 SERVER_NAME=${SERVER_NAME:-usine-snapshot-$(date -u +%Y%m%d%H%M%S)}
-ATTEMPT_IMAGE=${ATTEMPT_IMAGE:-$(grep -o 'ghcr\.io/basaltbytes/usine-worker:[A-Za-z0-9._-]*' "$here/../../packages/executor/src/ssh/container.ts" | head -n 1)}
+ATTEMPT_IMAGE=${ATTEMPT_IMAGE:-ghcr.io/basaltbytes/usine-worker:$(cat "$here/../worker-image/tag.txt")}
 USINE_CONTAINER_RUNTIME=${USINE_CONTAINER_RUNTIME:-podman}
 export USINE_CONTAINER_RUNTIME
 case "$USINE_CONTAINER_RUNTIME" in podman|docker) ;; *) echo "Invalid USINE_CONTAINER_RUNTIME" >&2; exit 64 ;; esac
