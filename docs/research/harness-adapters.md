@@ -409,7 +409,7 @@ Grouped for asking two or three at a time. Each has a recommendation.
 7. OpenCode targets 2.x, pinned exactly.
 8. Claude Code versions stay unpinned: preflight accepts any installed version, against the recommendation above. Step 6 generates image inputs from descriptors without adding a Claude Code version check.
 9. Pi children get persistent sessions after #941.
-10. The supervisor runs on a worker behind the gateway.
+10. The supervisor runs on the orchestrator host, next to the server, not on a worker. Its logins live on the orchestrator host, and the `supervisor` role admits the `orchestrator` placement.
 
 ## Rough edges found
 
