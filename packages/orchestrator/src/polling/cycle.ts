@@ -103,6 +103,15 @@ export const repositoryFailureLogFields = (error: RepositoryPollError) => {
   return common;
 };
 
+export type RepositoryCycle = {
+  readonly changedItems: number;
+  readonly submissions: ReadonlyArray<SubmissionResult>;
+  readonly revokedRuns: number;
+  readonly failures: ReadonlyArray<RepositoryPollFailure>;
+  readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
+  readonly nextPollAt: Option.Option<DateTime.Utc>;
+} & ({ readonly _tag: "Polled" } | { readonly _tag: "RateLimited" });
+
 /** A cycle whose preflight finished but whose repository poll failed. */
 export interface InterruptedRepositoryCycle {
   readonly _tag: "InterruptedRepositoryCycle";
