@@ -65,6 +65,10 @@ SQLite storage fixtures use `tooling/test/sqlite.mts` to select writable `/dev/s
 
 Set `VITEST_MAX_WORKERS=1 pnpm test` to limit Vitest concurrency on a busy worker. Turbo forwards this variable and includes it in the test cache key. To repeat the tests without reading cached results, run `TURBO_CACHE=local:w pnpm test`.
 
+CI runs static checks and root script tests alongside four package test groups: web, server, engine/orchestrator/durable, and the remaining packages. The `ci` check aggregates their results. Each group runs packages serially, and only the web group installs Playwright. Pull request pushes cancel earlier runs for the same branch; pushes to `main` finish independently. Turbo caches restore per group and Node version, and only `main` saves them.
+
+The PR suite checks overview response size, task detail, and concurrent overview and desk reads. The fixed 500 ms read budget runs in a separate job on `main`. Local `pnpm test` includes both functional and latency tests. After building, run `pnpm --filter @usine/server exec vitest run --project=server` for the functional suite or `--project=latency` for the timing check.
+
 ## Releases
 
 [Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change. CI opens a **Version Packages** PR. Merging it stages the changed versions for npm's `latest` dist-tag; an npm maintainer approves them before they become installable. 0.x APIs change without notice.
