@@ -512,10 +512,11 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         worktree: string,
         access: SandboxAccess,
       ) =>
-      (command: string, args: ReadonlyArray<string>) =>
+      (command: string, args: ReadonlyArray<string>, maxOutputBytes?: number) =>
         access.refresh.pipe(
           Effect.andThen(
             commands.run(operation, worker.shellFor(name), command, args, {
+              maxOutputBytes,
               cwd: worktree,
               environment: sandboxEnvironment(worker),
               scrub: access.scrub,

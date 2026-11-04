@@ -11,8 +11,17 @@ import {
 } from "@usine/core/step/output";
 import { type Crypto, Effect, Option, Schema } from "effect";
 import { Hex } from "effect/encoding";
+import { CommandOutputLimitExceeded } from "./child-command.ts";
+import { ExecutorOperationError } from "./executor.ts";
 
-type OutputCommand<E> = (command: string, args: ReadonlyArray<string>) => Effect.Effect<string, E>;
+type OutputCommand<E> = (
+  command: string,
+  args: ReadonlyArray<string>,
+  maxOutputBytes?: number,
+) => Effect.Effect<string, E>;
+
+// Each content body can be 8 MiB; allow bounded envelope and collection metadata.
+const MAX_COLLECTION_BYTES = MAX_STEP_OUTPUTS * (MAX_STEP_OUTPUT_BYTES + 4096);
 
 const prepareScript = `
 const fs = require('node:fs');
@@ -34,6 +43,7 @@ const collect = () => {
   let files;
   try { files = fs.readdirSync(root).sort(); }
   catch (error) {
+    if (error.code === 'ENOTDIR') return reject(root, 'expected a directory');
     if (error.code !== 'ENOENT') throw error;
     files = [];
   }
@@ -42,16 +52,26 @@ const collect = () => {
   for (const file of files) {
     const location = root + file;
     if (!file.endsWith('.json')) return reject(location, 'expected a .json file');
-    if (!fs.lstatSync(location).isFile()) return reject(location, 'expected a regular file');
-    if (fs.statSync(location).size > ${MAX_STEP_OUTPUT_BYTES}) return reject(location, 'exceeds ${MAX_STEP_OUTPUT_BYTES} bytes (8 MiB)');
     let envelope;
-    try { envelope = JSON.parse(fs.readFileSync(location, 'utf8')); }
-    catch { return reject(location, 'invalid JSON'); }
-    const content = JSON.stringify(envelope?.content);
-    if (content === undefined) return reject(location, 'content is required');
-    outputs.push({ file, envelope });
+    try {
+      if (!fs.lstatSync(location).isFile()) return reject(location, 'expected a regular file');
+      if (fs.statSync(location).size > ${MAX_STEP_OUTPUT_BYTES}) return reject(location, 'exceeds ${MAX_STEP_OUTPUT_BYTES} bytes (8 MiB)');
+      envelope = JSON.parse(fs.readFileSync(location, 'utf8'));
+    } catch (error) {
+      if (error instanceof SyntaxError) return reject(location, 'invalid JSON');
+      if (['ENOENT', 'ENOTDIR', 'EISDIR', 'EACCES', 'ELOOP'].includes(error.code)) return reject(location, 'expected a readable regular file');
+      throw error;
+    }
+    if (envelope?.content === undefined) return reject(location, 'content is required');
+    try {
+      const content = JSON.stringify(envelope.content);
+      if (Buffer.byteLength(content, 'utf8') > ${MAX_STEP_OUTPUT_BYTES}) return reject(location, 'content exceeds ${MAX_STEP_OUTPUT_BYTES} bytes (8 MiB)');
+      outputs.push(JSON.stringify({ file, envelope }));
+    } catch {
+      return reject(location, 'content cannot be serialized as JSON');
+    }
   }
-  process.stdout.write(JSON.stringify({ outputs }));
+  process.stdout.write('{"outputs":[' + outputs.join(',') + ']}');
 };
 collect();
 `;
@@ -82,71 +102,101 @@ export const prepareOutputs = Effect.fn("Executor.prepareOutputs")(function* <E>
 });
 
 /** Collects output documents through the checkout's command runner. */
-export const readOutputs = Effect.fn("Executor.readOutputs")(function* <E>(
-  spec: Pick<RunSpec, "attemptId" | "baseCommit">,
-  run: OutputCommand<E>,
-  crypto: Crypto.Crypto,
-) {
-  yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, baseCommit: spec.baseCommit });
-  const collected = yield* run("node", ["-e", readScript]).pipe(
-    Effect.mapError((cause) => InfraFailure.make({ message: "Can't read step outputs", cause })),
-    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Collection))),
-    Effect.catchTag("SchemaError", (cause) =>
-      Effect.fail(InfraFailure.make({ message: "Can't decode the output collection", cause })),
-    ),
-  );
-  if ("error" in collected)
-    return yield* AgentFailure.make({
-      message: `${collected.error.file}: ${collected.error.reason}`,
-    });
-  const outputs = yield* Effect.forEach(collected.outputs, (entry) =>
-    Effect.gen(function* () {
-      const file = `.usine/outputs/${entry.file}`;
-      const name = yield* Schema.decodeEffect(StepOutputName)(entry.file.slice(0, -5)).pipe(
-        Effect.mapError(() =>
-          AgentFailure.make({ message: `${file}: name must be a lowercase file-name slug` }),
-        ),
-      );
-      const envelope = yield* Schema.decodeUnknownEffect(Envelope)(entry.envelope, {
-        onExcessProperty: "error",
-      }).pipe(
-        Effect.mapError(() =>
-          AgentFailure.make({
-            message: `${file}: invalid envelope; expected a non-empty type, optional full commit, and JSON content`,
-          }),
-        ),
-      );
-      if (Option.isSome(envelope.commit) && envelope.commit.value !== spec.baseCommit)
-        return yield* AgentFailure.make({
-          message: `${file}: commit must equal ${spec.baseCommit}`,
-        });
-      const content = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(
-        envelope.content,
-      ).pipe(
-        Effect.mapError((cause) =>
-          InfraFailure.make({ message: "Can't encode step output content", cause }),
-        ),
-      );
-      const bytes = new TextEncoder().encode(content);
-      const digest = yield* crypto
-        .digest("SHA-256", bytes)
-        .pipe(
-          Effect.mapError((cause) =>
-            InfraFailure.make({ message: "Can't hash step output content", cause }),
+export const readOutputs = Effect.fn("Executor.readOutputs")(
+  function* <E>(
+    spec: Pick<RunSpec, "attemptId" | "baseCommit">,
+    run: OutputCommand<E>,
+    crypto: Crypto.Crypto,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, baseCommit: spec.baseCommit });
+    const response = yield* run("node", ["-e", readScript], MAX_COLLECTION_BYTES).pipe(
+      Effect.mapError((cause) =>
+        Schema.is(ExecutorOperationError)(cause) &&
+        Schema.is(CommandOutputLimitExceeded)(cause.cause)
+          ? AgentFailure.make({
+              message: `.usine/outputs/: collection exceeds ${MAX_COLLECTION_BYTES} bytes`,
+            })
+          : InfraFailure.make({ message: "Can't read step outputs", cause }),
+      ),
+    );
+    if (new TextEncoder().encode(response).byteLength > MAX_COLLECTION_BYTES)
+      return yield* AgentFailure.make({
+        message: `.usine/outputs/: collection exceeds ${MAX_COLLECTION_BYTES} bytes`,
+      });
+    const collected = yield* Schema.decodeEffect(Schema.fromJsonString(Collection))(response).pipe(
+      Effect.catchTag("SchemaError", (cause) =>
+        Effect.fail(InfraFailure.make({ message: "Can't decode the output collection", cause })),
+      ),
+    );
+    if ("error" in collected)
+      return yield* AgentFailure.make({
+        message: `${collected.error.file}: ${collected.error.reason}`,
+      });
+    if (collected.outputs.length > MAX_STEP_OUTPUTS)
+      return yield* AgentFailure.make({
+        message: `.usine/outputs/${collected.outputs[MAX_STEP_OUTPUTS]?.file}: at most ${MAX_STEP_OUTPUTS} outputs are allowed`,
+      });
+    const outputs = yield* Effect.forEach(collected.outputs, (entry) =>
+      Effect.gen(function* () {
+        const file = `.usine/outputs/${entry.file}`;
+        if (!entry.file.endsWith(".json"))
+          return yield* AgentFailure.make({ message: `${file}: expected a .json file` });
+        const name = yield* Schema.decodeEffect(StepOutputName)(entry.file.slice(0, -5)).pipe(
+          Effect.mapError(() =>
+            AgentFailure.make({ message: `${file}: name must be a lowercase file-name slug` }),
           ),
         );
-      return StepOutput.make({
-        name,
-        ...envelope,
-        size: bytes.byteLength,
-        sha256: StepOutputSha256.make(Hex.encode(digest)),
-      });
-    }),
-  );
-  yield* Effect.logInfo("Collected step outputs", {
-    attemptId: spec.attemptId,
-    outputs: outputs.length,
-    bytes: outputs.reduce((total, output) => total + output.size, 0),
-  });
-  return outputs;
-});
+        const envelope = yield* Schema.decodeUnknownEffect(Envelope)(entry.envelope, {
+          onExcessProperty: "error",
+        }).pipe(
+          Effect.mapError(() =>
+            AgentFailure.make({
+              message: `${file}: invalid envelope; expected a non-empty type of at most 128 characters, optional full commit, and JSON content`,
+            }),
+          ),
+        );
+        if (Option.isSome(envelope.commit) && envelope.commit.value !== spec.baseCommit)
+          return yield* AgentFailure.make({
+            message: `${file}: commit must equal ${spec.baseCommit}`,
+          });
+        const content = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(
+          envelope.content,
+        ).pipe(
+          Effect.mapError(() =>
+            AgentFailure.make({ message: `${file}: content cannot be serialized as JSON` }),
+          ),
+        );
+        const bytes = new TextEncoder().encode(content);
+        if (bytes.byteLength > MAX_STEP_OUTPUT_BYTES)
+          return yield* AgentFailure.make({
+            message: `${file}: content exceeds ${MAX_STEP_OUTPUT_BYTES} bytes (8 MiB)`,
+          });
+        const digest = yield* crypto
+          .digest("SHA-256", bytes)
+          .pipe(
+            Effect.mapError((cause) =>
+              InfraFailure.make({ message: "Can't hash step output content", cause }),
+            ),
+          );
+        return StepOutput.make({
+          name,
+          ...envelope,
+          size: bytes.byteLength,
+          sha256: StepOutputSha256.make(Hex.encode(digest)),
+        });
+      }),
+    );
+    yield* Effect.logInfo("Collected step outputs", {
+      attemptId: spec.attemptId,
+      outputs: outputs.length,
+      bytes: outputs.reduce((total, output) => total + output.size, 0),
+    });
+    return outputs;
+  },
+  (effect) =>
+    effect.pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Step output collection failed", { message: error.message }),
+      ),
+    ),
+);

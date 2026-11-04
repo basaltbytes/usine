@@ -240,14 +240,21 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         credential: Effect.Success<ReturnType<typeof credentials>>,
         environment: Record<string, string>,
       ) =>
-      (command: string, args: ReadonlyArray<string>) =>
+      (command: string, args: ReadonlyArray<string>, maxOutputBytes?: number) =>
         Effect.gen(function* () {
           yield* credential.refresh();
-          const result = yield* collectCommand(spawner, operation, command, args, {
-            cwd: worktree,
-            env: environment,
-            extendEnv: false,
-          });
+          const result = yield* collectCommand(
+            spawner,
+            operation,
+            command,
+            args,
+            {
+              cwd: worktree,
+              env: environment,
+              extendEnv: false,
+            },
+            maxOutputBytes,
+          );
           const stdout = yield* requireSuccess(operation, "local", command, args, {
             ...result,
             stdout: credential.scrub(result.stdout),

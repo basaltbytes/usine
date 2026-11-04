@@ -10,8 +10,10 @@ export const StepOutputName = Schema.String.check(
 ).pipe(Schema.brand("StepOutputName"));
 export type StepOutputName = typeof StepOutputName.Type;
 
-/** An opaque, non-empty type supplied by the agent. */
-export const StepOutputType = Schema.NonEmptyString.pipe(Schema.brand("StepOutputType"));
+/** An opaque, non-empty type of at most 128 UTF-16 code units supplied by the agent. */
+export const StepOutputType = Schema.NonEmptyString.check(Schema.isMaxLength(128)).pipe(
+  Schema.brand("StepOutputType"),
+);
 export type StepOutputType = typeof StepOutputType.Type;
 
 /** The SHA-256 of the UTF-8 JSON encoding of `content`. */

@@ -152,4 +152,4 @@ Run `pnpm --filter @usine/agents check` after building dependencies to check Typ
 
 ## Step outputs
 
-Parent and child completion instructions describe `.usine/outputs/<name>.json`: a non-empty opaque `type`, optional pinned-base `commit`, and JSON `content`. Agents leave child outputs in place and keep `.usine/` out of commits. The limit is ten outputs per attempt and 8 MiB per file.
+Parent and child completion instructions describe `.usine/outputs/<name>.json`: a non-empty opaque `type` of at most 128 UTF-16 code units, optional pinned-base `commit`, and JSON `content`. Both prompts include the pinned base commit, even when the checkout resumes from salvage. Agents leave child outputs in place and keep `.usine/` out of commits. The limit is ten outputs per attempt and 8 MiB per file and per compact JSON content body.

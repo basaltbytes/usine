@@ -3,12 +3,13 @@ import { AWAITING_CI_MARKER } from "@usine/core/ci";
 import { githubSignature, type AgentPersona, type AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
-import type { RepositoryName } from "@usine/core/repository";
+import type { CommitSha, RepositoryName } from "@usine/core/repository";
 
 import { BLOCKED_MARKER, QUESTION_MARKER } from "./runtime.ts";
 
 /** The trigger context, agent instructions, and task for the parent prompt. */
 export interface PromptParts {
+  readonly baseCommit: CommitSha;
   /** The managed repository named in the parent's run context. */
   readonly repository: RepositoryName;
   /** The trigger payload snapshot, serialized as JSON in the parent prompt. */
@@ -27,6 +28,7 @@ export interface PromptParts {
 
 /** The agent instructions and delegated task for a child prompt. */
 export interface ChildPromptParts {
+  readonly baseCommit: CommitSha;
   /** The agent name used in the required GitHub content signature (ADR 0011). */
   readonly agent: AgentName;
   /** The agent's standing instructions, included before the task. */
@@ -37,10 +39,10 @@ export interface ChildPromptParts {
   readonly context: string;
 }
 
-const completionInstructions: ReadonlyArray<string> = [
+const completionInstructions = (baseCommit: CommitSha): ReadonlyArray<string> => [
   "# Task completion",
   "",
-  'To return a step output, write .usine/outputs/<name>.json as { "type": "your.type", "commit": "<pinned base commit>", "content": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type. The commit is optional; when set, it must equal the checkout base supplied by usine, which is the PR head for a PR run. Each file must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child\'s outputs in place so usine can collect them after the parent returns.',
+  `To return a step output, write .usine/outputs/<name>.json as { "type": "your.type", "commit": "${baseCommit}", "content": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal ${baseCommit}, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.`,
   "",
   "Run gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.",
   "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
@@ -95,7 +97,7 @@ export const assemblePrompt = (parts: PromptParts): string =>
     "",
     parts.task,
     "",
-    ...completionInstructions,
+    ...completionInstructions(parts.baseCommit),
     "",
     ...githubInstructions(parts.agent),
   ].join("\n");
@@ -117,7 +119,7 @@ export const assembleChildPrompt = (parts: ChildPromptParts): string =>
     "",
     parts.task,
     "",
-    ...completionInstructions,
+    ...completionInstructions(parts.baseCommit),
     "",
     ...githubInstructions(parts.agent),
   ].join("\n");

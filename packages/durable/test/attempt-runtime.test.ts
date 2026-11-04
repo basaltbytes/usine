@@ -173,6 +173,7 @@ describe("durable AttemptRuntime", () => {
         assert.strictEqual(child.request.cwd, "/workspace/usine");
         assert.deepStrictEqual(child.request.host, LocalProcess.make());
         assert.include(child.request.prompt, `# Delegated task\n\n${task}\n`);
+        assert.include(child.request.prompt, `"commit": "${request.spec.baseCommit}"`);
         assert.include(
           child.request.prompt,
           "Manage labels precisely. Run required gates foreground.",

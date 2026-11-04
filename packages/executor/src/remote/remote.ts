@@ -303,10 +303,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
 
     const checkoutCommand =
       (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
-      (command: string, args: ReadonlyArray<string>) =>
+      (command: string, args: ReadonlyArray<string>, maxOutputBytes?: number) =>
         access.refresh.pipe(
           Effect.andThen(
             commands.run(operation, shell, command, args, {
+              maxOutputBytes,
               cwd: worktree,
               environment: access.environment,
               scrub: access.scrub,

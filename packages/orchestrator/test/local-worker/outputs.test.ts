@@ -36,34 +36,31 @@ describe("local step outputs", () => {
     );
   });
 
-  it.live(
-    "fails with an infrastructure error when the output directory is replaced by a file",
-    () => {
-      const parent: StubParent = ({ request }) =>
+  it.live("fails once with an agent error when the output directory is replaced by a file", () => {
+    const parent: StubParent = ({ request }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.remove(`${request.cwd}/.usine/outputs`, { recursive: true });
+        yield* fs.writeFileString(`${request.cwd}/.usine/outputs`, "not a directory");
+        return "Completed with an unreadable output directory";
+      }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+    return withLocalEngine(
+      { attemptRuntime: stubAttemptRuntime(new StubStorage(), parent) },
+      ({ engine }) =>
         Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          yield* fs.remove(`${request.cwd}/.usine/outputs`, { recursive: true });
-          yield* fs.writeFileString(`${request.cwd}/.usine/outputs`, "not a directory");
-          return "Completed with an unreadable output directory";
-        }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
-      return withLocalEngine(
-        { attemptRuntime: stubAttemptRuntime(new StubStorage(), parent) },
-        ({ engine }) =>
-          Effect.gen(function* () {
-            const accepted = yield* engine.submit(submission(6));
-            assert(accepted._tag === "Claimed");
-            const finished = yield* waitFor(engine, accepted.runId, "Failed");
-            assert.isNotEmpty(finished.attempts);
-            for (const attempt of finished.attempts) {
-              assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Failed");
-              const failure = attempt.outcome.value.failure;
-              assert(failure._tag === "InfraFailure");
-              assert.strictEqual(failure.message, "Can't read step outputs");
-            }
-          }),
-      );
-    },
-  );
+          const accepted = yield* engine.submit(submission(6));
+          assert(accepted._tag === "Claimed");
+          const finished = yield* waitFor(engine, accepted.runId, "Failed");
+          assert.lengthOf(finished.attempts, 1);
+          for (const attempt of finished.attempts) {
+            assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Failed");
+            const failure = attempt.outcome.value.failure;
+            assert(failure._tag === "AgentFailure");
+            assert.strictEqual(failure.message, ".usine/outputs/: expected a directory");
+          }
+        }),
+    );
+  });
 
   it.live("stores a document with its ref and excludes it from the attempt's commit", () => {
     let committed = "";
@@ -173,7 +170,7 @@ describe("local step outputs", () => {
     );
   });
 
-  it.live("accepts a bounded file whose normalized JSON content exceeds 8 MiB", () => {
+  it.live("rejects a bounded file whose normalized JSON content exceeds 8 MiB", () => {
     const body = `{"type":"numeric.example","content":[${"1e20,".repeat(400_000)}1e20]}`;
     assert.isBelow(new TextEncoder().encode(body).byteLength, MAX_STEP_OUTPUT_BYTES);
     const parent: StubParent = ({ request }) =>
@@ -188,20 +185,15 @@ describe("local step outputs", () => {
         Effect.gen(function* () {
           const accepted = yield* engine.submit(submission(4));
           assert(accepted._tag === "Claimed");
-          const finished = yield* waitFor(engine, accepted.runId, "Succeeded");
-          assert(Option.isSome(finished.step.result));
-          const ref = finished.step.result.value.outputs[0];
-          assert(ref !== undefined);
-          assert.isAbove(ref.size, MAX_STEP_OUTPUT_BYTES);
-          const store = yield* StepOutputStore;
+          const finished = yield* waitFor(engine, accepted.runId, "Failed");
+          assert.lengthOf(finished.attempts, 1);
           const attempt = finished.attempts[0];
-          assert(attempt !== undefined);
-          const document = yield* store.read(attempt.id, ref.name);
-          assert(Option.isSome(document));
-          assert.deepStrictEqual(
-            document.value.content,
-            Array.from({ length: 400_001 }, () => 1e20),
-          );
+          assert(attempt !== undefined && Option.isSome(attempt.outcome));
+          assert(attempt.outcome.value._tag === "Failed");
+          const failure = attempt.outcome.value.failure;
+          assert(failure._tag === "AgentFailure");
+          assert.include(failure.message, ".usine/outputs/numbers.json");
+          assert.include(failure.message, "8 MiB");
         }),
     );
   });
@@ -211,6 +203,11 @@ describe("local step outputs", () => {
     ["commit must equal", jsonKey({ type: "balade.walkthrough", commit: "f".repeat(40), content })],
     ["8 MiB", " ".repeat(MAX_STEP_OUTPUT_BYTES + 1)],
     ["type", jsonKey({ type: "", content })],
+    ["128 characters", jsonKey({ type: "x".repeat(129), content })],
+    [
+      "cannot be serialized",
+      `{"type":"nested","content":${"[".repeat(200_000)}0${"]".repeat(200_000)}}`,
+    ],
   ] as const) {
     it.live(`fails the attempt and salvages its work when walkthrough.json has ${reason}`, () => {
       const parent: StubParent = ({ request }) =>

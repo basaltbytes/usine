@@ -21,6 +21,7 @@ import type { ExecutorOperation, ExecutorOperationError } from "../executor.ts";
  * result.
  */
 export interface RemoteContext extends Pick<HostInvocation, "cwd" | "environment"> {
+  readonly maxOutputBytes?: number | undefined;
   readonly scrub?: (text: string) => string;
 }
 
@@ -124,12 +125,20 @@ export const remoteCommandsFor = Effect.gen(function* () {
     command: string,
     args: ReadonlyArray<string>,
     clientEnvironment: Readonly<Record<string, string>>,
+    maxOutputBytes?: number,
   ) {
     yield* Effect.annotateCurrentSpan({ host, operation });
-    return yield* collectCommand(spawner, operation, command, args, {
-      env: { ...clientEnvironment },
-      extendEnv: false,
-    });
+    return yield* collectCommand(
+      spawner,
+      operation,
+      command,
+      args,
+      {
+        env: { ...clientEnvironment },
+        extendEnv: false,
+      },
+      maxOutputBytes,
+    );
   });
 
   const local = Effect.fn("RemoteExecutor.local")(function* (
@@ -175,6 +184,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
       shell.ssh.command,
       sshArgs,
       shell.sshEnvironment,
+      context.maxOutputBytes,
     );
     const scrub = context.scrub ?? ((text: string) => text);
     return yield* requireSuccess(operation, shell.destination, shell.ssh.command, sshArgs, {
