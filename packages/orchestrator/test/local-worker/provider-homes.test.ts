@@ -8,7 +8,7 @@ import { WorkerName } from "@usine/core/worker";
 import { completes, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { claudeLoginLockLayer, CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
-import { ConfigProvider, Effect, FileSystem, Layer, Option } from "effect";
+import { Config, ConfigProvider, Effect, FileSystem, Layer, Option } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { testBotAccount } from "../support/github-app.ts";
 import {
@@ -26,6 +26,7 @@ it.live(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const runnerPath = yield* Config.String("PATH").pipe(Effect.orDie);
         const root = yield* fs.makeTempDirectoryScoped();
         const remote = yield* makeRemote(root);
         const claudeHome = `${root}/claude-login`;
@@ -78,7 +79,7 @@ fi
               ConfigProvider.fromEnv({
                 env: {
                   HOME: root,
-                  PATH: `${root}:/usr/bin:/bin`,
+                  PATH: `${root}:${runnerPath}`,
                   CLAUDE_CONFIG_DIR: claudeHome,
                   CODEX_HOME: codexHome,
                 },
