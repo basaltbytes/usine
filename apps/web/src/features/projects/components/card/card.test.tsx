@@ -6,7 +6,7 @@ import { CiHandoff } from "@usine/core/ci";
 import { CommitSha } from "@usine/core/repository";
 import { RunLine } from "./run-line";
 import { boardTaskRuns, boardRunSummary, MachineQuotaWait } from "@usine/orchestrator/operator";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptNumber, AttemptId } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
@@ -62,7 +62,7 @@ import { WithRouter } from "~/lib/testing/memory-router";
 import { taskUsageOf } from "~/lib/projects/fixture";
 
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });

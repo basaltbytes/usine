@@ -1,4 +1,4 @@
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -133,7 +133,7 @@ const makeCodexChild = Effect.gen(function* () {
       if (catalogModel === undefined) {
         yield* Effect.logError("Codex child rejected an unknown model", { model: requestedModel });
         return yield* UnknownModelError.make({
-          harness: "codex",
+          harness: Harness.make("codex"),
           model: requestedModel,
           message: `Codex has no model "${requestedModel}"`,
         });
@@ -151,7 +151,7 @@ const makeCodexChild = Effect.gen(function* () {
           supported: supportedEfforts.map((option) => option.reasoningEffort),
         });
         return yield* UnsupportedEffortError.make({
-          harness: "codex",
+          harness: Harness.make("codex"),
           model: requestedModel,
           effort: request.session.brain.effort,
           message: `Codex model "${requestedModel}" doesn't support effort ${effort}`,
@@ -192,7 +192,7 @@ const makeCodexChild = Effect.gen(function* () {
         parentId: request.session.parentId,
         agent: request.session.agent,
         brain: BrainSpec.make({
-          harness: "codex",
+          harness: Harness.make("codex"),
           model: ModelId.make(thread.model),
           effort: request.session.brain.effort,
         }),

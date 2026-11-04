@@ -1,4 +1,7 @@
-import type { Harness } from "@usine/core/agent/brain";
+import { resumeDetailsLoading } from "~/lib/runs/strings";
+import { useQuery } from "@tanstack/react-query";
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
+import { ErrorAlert } from "~/components/error-alert";
 import type { AttemptView, WorkerAccess } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { CodeBlock, CodeBlockHeader, CodeBlockTitle } from "~/components/ai-elements/code-block";
@@ -8,19 +11,6 @@ import type { TranscriptSession } from "~/lib/runs/transcript/model";
 
 // Returns the value single-quoted for a POSIX shell, with apostrophes escaped.
 const shellArgument = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
-
-interface ResumeCommand {
-  readonly command: string;
-  /** The variable that points the harness at a saved session's `home`. */
-  readonly homeVariable: Option.Option<string>;
-}
-
-/** The resume command per harness; `None` for Pi, which has no resumable session. */
-const RESUME_COMMANDS = {
-  claude: Option.some({ command: "claude --resume", homeVariable: Option.none() }),
-  codex: Option.some({ command: "codex resume --", homeVariable: Option.some("CODEX_HOME") }),
-  pi: Option.none(),
-} satisfies Record<Harness, Option.Option<ResumeCommand>>;
 
 /**
  * Returns `command` for the operator's terminal: unchanged for a local, provisioned, or undeclared
@@ -39,8 +29,14 @@ type SessionHandoffProps = {
 
 /** Renders the command that resumes a child session from the operator's terminal on its Worker. */
 export const SessionHandoff = ({ session, attempt }: SessionHandoffProps) => {
+  const capabilities = useQuery(capabilitiesQuery());
+  if (capabilities.isPending) return <p role="status">{resumeDetailsLoading}</p>;
+  if (capabilities.isError) return <ErrorAlert message={capabilities.error.message} />;
   const handoff = Option.all({
-    resume: RESUME_COMMANDS[session.session.brain.harness],
+    resume: Option.fromNullishOr(
+      capabilities.data.harnessDetails.find(({ id }) => id === session.session.brain.harness)
+        ?.handoff,
+    ),
     saved: session.harnessSession,
   });
   if (Option.isNone(handoff))
@@ -56,7 +52,7 @@ export const SessionHandoff = ({ session, attempt }: SessionHandoffProps) => {
         accepts no terminal and is destroyed at attempt cleanup
       </p>
     );
-  const home = Option.match(Option.all([resume.homeVariable, saved.home]), {
+  const home = Option.match(Option.all([Option.fromNullishOr(resume.homeVariable), saved.home]), {
     onNone: () => "",
     onSome: ([variable, directory]) => `${variable}=${shellArgument(directory)} `,
   });

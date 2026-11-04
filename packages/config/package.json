@@ -99,6 +99,7 @@
     "db:generate": "drizzle-kit generate && node scripts/embed-migrations.mjs"
   },
   "dependencies": {
+    "@usine/agents": "workspace:*",
     "@usine/core": "workspace:*",
     "@usine/expression": "workspace:*",
     "drizzle-orm": "catalog:",

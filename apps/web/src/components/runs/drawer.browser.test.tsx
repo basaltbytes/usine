@@ -15,7 +15,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -81,7 +81,7 @@ const loop = LoopName.make("implement");
 const failure = AgentFailureView.make({ message: "Work was completed separately" });
 const run = RunView.make({
   agentBrain: BrainSpec.make({
-    harness: "codex",
+    harness: Harness.make("codex"),
     model: ModelId.make("test-model"),
     effort: "high",
   }),
@@ -101,7 +101,11 @@ const run = RunView.make({
       number: AttemptNumber.make(1),
       worker: WorkerName.make("local"),
       workerAccess: LocalWorkerAccess.make(),
-      brain: BrainSpec.make({ harness: "codex", model: ModelId.make("test"), effort: "high" }),
+      brain: BrainSpec.make({
+        harness: Harness.make("codex"),
+        model: ModelId.make("test"),
+        effort: "high",
+      }),
       task: AttemptTask.make("Complete the issue"),
       agent,
       operatorIntervened: false,

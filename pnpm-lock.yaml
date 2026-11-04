@@ -175,6 +175,9 @@ importers:
       '@effect/platform-node-shared':
         specifier: 'catalog:'
         version: 4.0.6(effect@4.0.6)
+      '@usine/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
       '@usine/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -360,6 +363,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
+      '@usine/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
       '@usine/engine':
         specifier: workspace:*
         version: link:../../packages/engine
@@ -476,6 +482,9 @@ importers:
 
   packages/config:
     dependencies:
+      '@usine/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@usine/core':
         specifier: workspace:*
         version: link:../core

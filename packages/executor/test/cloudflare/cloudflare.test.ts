@@ -7,7 +7,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell, sshArguments } from "@usine/agents/child-host";
 import { codexConfigArgs } from "@usine/agents/codex";
 import { unsupportedCodexVersion } from "@usine/agents/preflight";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Agent } from "@usine/core/agent";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -103,7 +103,7 @@ const sink = {
   windows: aloneOnItem(),
 };
 
-const brain = (harness: "claude" | "codex" | "pi") =>
+const brain = (harness: Harness) =>
   Agent.make({
     ...request.agent,
     brain: BrainSpec.make({ harness, model: ModelId.make("model"), effort: "high" }),
@@ -585,9 +585,11 @@ describe("cloudflare Worker", () => {
       yield* Effect.gen(function* () {
         const cloudflare = yield* Executor;
         const codex = yield* cloudflare
-          .prepare(CheckoutRequest.make({ ...request, agent: brain("codex") }))
+          .prepare(CheckoutRequest.make({ ...request, agent: brain(Harness.make("codex")) }))
           .pipe(Effect.flip);
-        const pi = yield* cloudflare.preflight(WORKER, [brain("pi").brain], 1).pipe(Effect.flip);
+        const pi = yield* cloudflare
+          .preflight(WORKER, [brain(Harness.make("pi")).brain], 1)
+          .pipe(Effect.flip);
         assert(Schema.is(WorkerCapabilityError)(codex) && Schema.is(WorkerCapabilityError)(pi));
         assert.strictEqual(codex.capability, "harness-login");
         assert.include(codex.message, "openai");
@@ -602,7 +604,7 @@ describe("cloudflare Worker", () => {
     Effect.gen(function* () {
       const worker = yield* fakeWorker;
       const credentials = mintingProvider();
-      const codex = CheckoutRequest.make({ ...request, agent: brain("codex") });
+      const codex = CheckoutRequest.make({ ...request, agent: brain(Harness.make("codex")) });
       const probes: Array<{ sandbox: string; words: ReadonlyArray<string> }> = [];
       worker.state.respond = (sandbox, words) => {
         if (words[0] === "codex") probes.push({ sandbox: sandbox.name, words });

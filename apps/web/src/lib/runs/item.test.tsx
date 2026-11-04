@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { overviewQuery } from "~/lib/overview";
 import { LaneName, type SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -88,7 +88,11 @@ import { WithRouter } from "~/lib/testing/memory-router";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
-const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-5"), effort: "high" });
+const brain = BrainSpec.make({
+  harness: Harness.make("codex"),
+  model: ModelId.make("gpt-5"),
+  effort: "high",
+});
 const attemptId = AttemptId.make("attempt-1");
 const attempt = (outcome: AttemptView["outcome"], salvage: AttemptView["salvage"] = null) =>
   AttemptView.make({
@@ -385,7 +389,11 @@ describe("Run work facts", () => {
   const parentSession = ParentSession.make({
     id: AgentSessionId.make("parent"),
     agent: AgentName.make("developer"),
-    brain: BrainSpec.make({ harness: "pi", model: ModelId.make("openai/gpt-5.5"), effort: "high" }),
+    brain: BrainSpec.make({
+      harness: Harness.make("pi"),
+      model: ModelId.make("openai/gpt-5.5"),
+      effort: "high",
+    }),
   });
   const cost = (usd: number, estimate: boolean) =>
     UsageCostView.make({ usd: UsdAmount.make(usd), estimate });
@@ -418,14 +426,14 @@ describe("Run work facts", () => {
       }),
       SessionUsageView.make({
         attemptId,
-        session: childSession("claude", "developer", "claude", "claude-opus-4-7"),
+        session: childSession("claude", "developer", Harness.make("claude"), "claude-opus-4-7"),
         pool: "claudePlan",
         tokens: TokenCount.make(20000),
         cost: cost(1.25, true),
       }),
       SessionUsageView.make({
         attemptId: second,
-        session: childSession("codex", "reviewer", "codex", "gpt-5.6-sol"),
+        session: childSession("codex", "reviewer", Harness.make("codex"), "gpt-5.6-sol"),
         pool: "chatgptPlan",
         tokens: TokenCount.make(5800),
         cost: cost(0.4, true),

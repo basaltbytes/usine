@@ -2,7 +2,7 @@ import { projectQuery } from "~/features/projects/queries";
 import { projectTasksQuery } from "~/features/tasks/queries";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
@@ -66,7 +66,7 @@ const approvalReason =
   "Approval required: condition evaluated to true. Label ready-for-agent was set by usine-phildl (Bot)";
 const waiting = RunView.make({
   agentBrain: BrainSpec.make({
-    harness: "codex",
+    harness: Harness.make("codex"),
     model: ModelId.make("test-model"),
     effort: "high",
   }),

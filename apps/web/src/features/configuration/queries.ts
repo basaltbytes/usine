@@ -168,13 +168,6 @@ export const useConfigurationWrite = () => {
   });
 };
 
-export const capabilitiesQuery = () =>
-  queryOptions({
-    queryKey: [...configurationEditorKeys, "capabilities"],
-    queryFn: () => api((client) => client.configurationCapabilities({})),
-    staleTime: Infinity,
-  });
-
 export const installationRepositoriesQuery = () =>
   queryOptions({
     queryKey: [...configurationEditorKeys, "installation-repositories"],

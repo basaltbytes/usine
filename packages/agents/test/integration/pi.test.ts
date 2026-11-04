@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Config, Effect, Schema, Layer } from "effect";
 import { PiChildBackend } from "../../src/runtime.ts";
 import { piChildBackendLayer, piSdkLive } from "../../src/harness/pi/pi.ts";
@@ -10,7 +10,7 @@ const brain = Effect.gen(function* () {
   const decodedValue2 = yield* Config.String("USINE_PI_INTEGRATION_MODEL");
   const decodedValue1 = yield* Schema.decodeEffect(ModelId)(decodedValue2);
   return BrainSpec.make({
-    harness: "pi",
+    harness: Harness.make("pi"),
     model: decodedValue1,
     effort: "low",
   });

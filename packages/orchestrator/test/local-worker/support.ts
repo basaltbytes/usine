@@ -3,7 +3,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { type AttemptId, AttemptTask, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -62,7 +62,7 @@ export const harnessReady: HarnessProbe = (brain) =>
 export const testAgent = Agent.make({
   name: AgentName.make("developer"),
   brain: BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),

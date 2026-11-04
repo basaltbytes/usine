@@ -4,7 +4,7 @@ import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptContext, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
@@ -86,7 +86,7 @@ describe("durable run engine", () => {
               name: AgentName.make("reviewer"),
               persona: AgentPersona.make("Review the amended task"),
               brain: BrainSpec.make({
-                harness: "codex",
+                harness: Harness.make("codex"),
                 model: ModelId.make("gpt-5.6-terra"),
                 effort: "medium",
               }),

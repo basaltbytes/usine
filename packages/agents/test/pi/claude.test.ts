@@ -134,7 +134,7 @@ const request = (
       parentId: AgentSessionId.make("parent:attempt-1"),
       agent: AgentName.make("developer"),
       brain: BrainSpec.make({
-        harness: "claude",
+        harness: Harness.make("claude"),
         model: ModelId.make(model),
         effort: "high",
         ...options,

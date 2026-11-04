@@ -42,6 +42,8 @@ export const harnessCredentialGap = (
           return missing("Codex", "openai", "a ChatGPT login");
         case "pi":
           return `Pi children run only on local workers, not on provisioned worker "${worker}".`;
+        default:
+          return `No provisioned worker credential for harness "${harness}".`;
       }
     })();
     return Option.some(

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
@@ -21,7 +21,11 @@ const child = (id: string) =>
     id: AgentSessionId.make(id),
     parentId: AgentSessionId.make("parent"),
     agent: AgentName.make("developer"),
-    brain: BrainSpec.make({ harness: "pi", model: ModelId.make("openai/model"), effort: "high" }),
+    brain: BrainSpec.make({
+      harness: Harness.make("pi"),
+      model: ModelId.make("openai/model"),
+      effort: "high",
+    }),
   });
 const first = child("first");
 const second = child("second");

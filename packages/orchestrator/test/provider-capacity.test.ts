@@ -10,7 +10,7 @@ import {
   toAttemptFailure,
 } from "@usine/agents/runtime";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AttemptTask, pendingProviderRetry } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
@@ -32,7 +32,11 @@ import { TestClock } from "effect/testing";
 import { runView } from "../src/operator/projection.ts";
 
 const capacityMessage = "Selected model is at capacity. Please try a different model.";
-const brain = BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-test"), effort: "high" });
+const brain = BrainSpec.make({
+  harness: Harness.make("codex"),
+  model: ModelId.make("gpt-test"),
+  effort: "high",
+});
 const agent = Agent.make({
   name: AgentName.make("developer"),
   brain,

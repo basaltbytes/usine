@@ -12,7 +12,7 @@ import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
 import { PullRequestTrigger } from "@usine/config/trigger";
 import { AgentName, AgentPersona } from "@usine/core/agent";
-import { ModelId } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { runView } from "../src/operator/projection.ts";
 import { runNeedsAttention } from "../src/board/items.ts";
@@ -65,7 +65,7 @@ const repository = RepositoryName.make("basaltbytes/usine");
 const head = CommitSha.make("a".repeat(40));
 const agent = AgentFile.make({
   name: AgentName.make("developer"),
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-6.1-sol"),
   effort: "high",
   parentModel: Option.none(),

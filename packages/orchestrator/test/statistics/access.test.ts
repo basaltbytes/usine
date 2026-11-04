@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { WorkerStatus } from "../../src/worker-status.ts";
 import { MachineStarts } from "@usine/executor";
 import { WorkerName } from "@usine/core/worker";
@@ -28,7 +29,7 @@ const time = DateTime.makeUnsafe("2026-11-01T00:00:00Z");
 const summary = Effect.gen(function* () {
   const decodedValue1 = yield* Schema.decodeEffect(Agent)({
     name: "developer",
-    brain: { harness: "codex", model: "test", effort: "high" },
+    brain: { harness: Harness.make("codex"), model: "test", effort: "high" },
     parentModel: null,
     persona: "Work.",
   });

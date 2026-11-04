@@ -11,7 +11,7 @@ import { PermissionsContext } from "~/lib/permissions";
 import { CommandPalette } from "~/components/command-palette/palette";
 import { PageCommandsProvider } from "~/components/command-palette/context";
 import { WithRouter } from "~/lib/testing/memory-router";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { AgentSessionId } from "@usine/core/agent/session";
@@ -56,7 +56,7 @@ const runId = RunId.make("intervention-test");
 const attemptId = AttemptId.make("attempt-2");
 const failedRun = RunView.make({
   agentBrain: BrainSpec.make({
-    harness: "codex",
+    harness: Harness.make("codex"),
     model: ModelId.make("test-model"),
     effort: "high",
   }),
@@ -205,7 +205,7 @@ it("describes the saved retry brain and offers the current definition without ch
   const run = RunView.make({
     ...failedRun,
     agentBrain: BrainSpec.make({
-      harness: "claude",
+      harness: Harness.make("claude"),
       model: ModelId.make("claude-opus-4-7"),
       effort: "high",
     }),

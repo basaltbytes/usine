@@ -1,3 +1,4 @@
+import { capabilitiesQuery } from "~/lib/configuration/capabilities";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { ProjectDetail } from "~/features/configuration/components/projects/detail";
@@ -25,12 +26,14 @@ import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import {
   configurationFixture,
+  capabilitiesFixture,
   configurationJson,
   emptyConfiguration,
 } from "~/lib/configuration/fixture";
 
 const render = async (page: () => ReactNode): Promise<string> => {
   const queryClient = new QueryClient();
+  queryClient.setQueryData(capabilitiesQuery().queryKey, capabilitiesFixture());
   const router = createRouter({
     routeTree: createRootRoute({
       component: page,

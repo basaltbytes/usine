@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { assert } from "@effect/vitest";
 import { type ChildHost, LocalProcess } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { type AgentSessionEvent, ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -21,7 +21,7 @@ import { PARENT_MODEL } from "../src/testing.ts";
 const agent = Agent.make({
   name: AgentName.make("developer"),
   brain: BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),

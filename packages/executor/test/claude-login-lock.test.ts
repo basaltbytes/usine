@@ -4,7 +4,7 @@ import { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeSdk, claudeChildLayer } from "@usine/agents/claude";
 import { ChildBackend, ChildRequest, WorkingDirectory } from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Cause, Effect, Fiber, Layer, Option, Queue, type Schema, Stream } from "effect";
@@ -21,7 +21,7 @@ const claudeChild = (machine: string, attempt: string, child: number) =>
       parentId: AgentSessionId.make(`parent:${attempt}`),
       agent: AgentName.make("developer"),
       brain: BrainSpec.make({
-        harness: "claude",
+        harness: Harness.make("claude"),
         model: ModelId.make("claude-sonnet-4-6"),
         effort: "high",
       }),

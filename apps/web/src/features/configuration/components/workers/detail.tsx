@@ -1,3 +1,4 @@
+import { useHarnessLabel } from "~/lib/configuration/capabilities";
 import { PreflightAction } from "./action";
 import { preflightTiming } from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
@@ -15,7 +16,6 @@ import {
 import { SlotCells } from "~/features/configuration/components/workers/slots";
 import { WorkerFacts } from "~/features/configuration/components/workers/facts";
 import {
-  harnessLabel,
   plural,
   provisionedHarnessCheckDescription,
   workerKindLabel,
@@ -30,6 +30,7 @@ type WorkerDetailProps = {
 };
 
 export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
+  const harnessLabel = useHarnessLabel();
   const worker = configuration.workers.find((candidate) => candidate.name === name);
   if (worker === undefined)
     return (
@@ -59,7 +60,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
           },
         ]),
     ...worker.harnesses.map(({ harness, check }) => ({
-      subject: harnessLabel[harness],
+      subject: harnessLabel(harness),
       detail: "Harness installed and logged in",
       check,
     })),

@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import {
@@ -83,7 +84,7 @@ it.live("applies committed agent brains and webhook settings live", () =>
           before: agent.after,
           after: Option.map(agentAfter, (value) => ({
             ...value,
-            harness: "claude",
+            harness: Harness.make("claude"),
           })),
         }),
       ],

@@ -6,6 +6,8 @@ The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Co
 
 The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the parent in `@usine/durable`.
 
+`/harness` exports the platform-free `catalog` and descriptor schemas. Each harness defines its display label, worker installation and accepted versions, login files and hosts, credential provider, token price table, and terminal resume command. `catalog.harness` validates registered IDs; `catalog.get` reads a descriptor. Importing this subpath loads no vendor SDK or Node adapter.
+
 ## Compose the child backends
 
 `/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `childDispatcherLayer` (`/children`) picks a backend from the agent's `harness`. Provide its three backends from `/claude`, `/codex`, and `/pi`, which also export their SDK contracts and production SDK layers. `@usine/durable/live` composes them:

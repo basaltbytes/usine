@@ -7,7 +7,7 @@ import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -89,7 +89,11 @@ const submission = Submission.make({
   task: AttemptTask.make("Implement the issue"),
   agent: Agent.make({
     name: AgentName.make("developer"),
-    brain: BrainSpec.make({ harness: "codex", model: ModelId.make("gpt-6-sol"), effort: "high" }),
+    brain: BrainSpec.make({
+      harness: Harness.make("codex"),
+      model: ModelId.make("gpt-6-sol"),
+      effort: "high",
+    }),
     parentModel: Option.none(),
     parentEffort: Option.none(),
     persona: AgentPersona.make("Implement the issue"),

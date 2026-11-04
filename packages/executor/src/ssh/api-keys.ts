@@ -1,6 +1,6 @@
-import type { Harness } from "@usine/core/agent/brain";
+import { catalog } from "@usine/agents/harness";
+import { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
-import type { GatewayLlmProvider } from "@usine/core/worker";
 import { Effect, Option, Redacted } from "effect";
 import type { ExecutorOperation } from "../executor.ts";
 import { type RemoteCommands, sendingShell } from "../remote/commands.ts";
@@ -8,13 +8,6 @@ import type { RemoteAccess } from "../remote/machine.ts";
 import type { CodexHomes } from "./codex-homes.ts";
 import { writeMachineFiles } from "./gateway/attachments.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress } from "./model.ts";
-
-/** The provider each harness needs a credential from. Pi children run only on local Workers. */
-const PROVIDER_OF_HARNESS = {
-  claude: Option.some("anthropic"),
-  codex: Option.some("openai"),
-  pi: Option.none(),
-} as const satisfies Record<Harness, Option.Option<GatewayLlmProvider>>;
 
 /** The variable with the OpenAI API key that Codex's `model_provider` reads (`env_key`). */
 const OPENAI_KEY_VARIABLE = "OPENAI_API_KEY";
@@ -38,8 +31,11 @@ const CODEX_API_KEY_CONFIG = [
 /** Returns whether the Gateway holds a credential for `harness`'s provider. */
 export const gatewayHolds = (gateway: Option.Option<MachineGateway>, harness: Harness): boolean =>
   Option.exists(gateway, ({ settings }) =>
-    Option.exists(PROVIDER_OF_HARNESS[harness], (provider) =>
-      settings.llmProviders.includes(provider),
+    Option.exists(
+      Option.flatMap(catalog.get(harness), (descriptor) =>
+        Option.map(descriptor.worker.credential, ({ provider }) => provider),
+      ),
+      (provider) => settings.llmProviders.includes(provider),
     ),
   );
 
@@ -55,7 +51,9 @@ export const provisionedApiKey = (
   const { machine } = worker.address;
   if (machine._tag !== "Provisioned" || gatewayHolds(worker.gateway, harness)) return Option.none();
   return Option.flatMap(
-    PROVIDER_OF_HARNESS[harness],
+    Option.flatMap(catalog.get(harness), (descriptor) =>
+      Option.map(descriptor.worker.credential, ({ provider }) => provider),
+    ),
     (provider) => machine.provisioner.apiKeys[provider],
   );
 };
@@ -73,8 +71,8 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
   access: RemoteAccess,
   operation: ExecutorOperation,
 ) {
-  const anthropic = provisionedApiKey(machine, "claude");
-  const openai = provisionedApiKey(machine, "codex");
+  const anthropic = provisionedApiKey(machine, Harness.make("claude"));
+  const openai = provisionedApiKey(machine, Harness.make("codex"));
   const secrets = Object.fromEntries([
     ...Option.toArray(Option.map(anthropic, (key) => ["ANTHROPIC_API_KEY", key] as const)),
     ...Option.toArray(Option.map(openai, (key) => [OPENAI_KEY_VARIABLE, key] as const)),

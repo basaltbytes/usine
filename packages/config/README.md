@@ -8,6 +8,8 @@ Stores versioned configuration and imports and exports the files of a [usine](ht
 
 `updateYaml` and `updateFrontmatter` change one path in the YAML tree and keep comments, key order, and the Markdown body. Files use snake_case keys (`poll_interval`, `max_concurrent_attempts`); decoded types use camelCase (`pollInterval`, `maxConcurrentAttempts`). The schema does the rename, so edits keep snake_case.
 
+Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster.
+
 ## Labels and lanes
 
 Declare the labels that loops and lanes use once. usine creates missing labels in every managed repo and never edits or deletes labels:

@@ -2,7 +2,7 @@ import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady } from "@usine/core/agent/capability";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Option, Sink, Stream } from "effect";
@@ -15,7 +15,11 @@ import {
   verifyHarnessReadiness,
 } from "../src/harness-preflight.ts";
 
-const claude = BrainSpec.make({ harness: "claude", model: ModelId.make("sonnet"), effort: "low" });
+const claude = BrainSpec.make({
+  harness: Harness.make("claude"),
+  model: ModelId.make("sonnet"),
+  effort: "low",
+});
 const host = RemoteShell.make({
   ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
   sshEnvironment: { PATH: "/usr/bin:/bin", SSH_AUTH_SOCK: "/tmp/agent.sock" },
@@ -124,7 +128,7 @@ describe("harness readiness on a Worker", () => {
           const check: HarnessProbe = () =>
             Deferred.succeed(entered, undefined).pipe(
               Effect.andThen(Deferred.await(release)),
-              Effect.as(HarnessReady.make({ harness: "claude" })),
+              Effect.as(HarnessReady.make({ harness: Harness.make("claude") })),
             );
           return { entered, release, check };
         });

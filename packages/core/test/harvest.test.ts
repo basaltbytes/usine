@@ -2,7 +2,7 @@ import { jsonKey } from "../src/json-key.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Logger, Option, Schema } from "effect";
 import { Agent, AgentName, AgentPersona } from "../src/agent/agent.ts";
-import { BrainSpec, ModelId } from "../src/agent/brain.ts";
+import { Harness, BrainSpec, ModelId } from "../src/agent/brain.ts";
 import { AttemptId, AttemptWindow, AttemptWindows } from "../src/attempt/attempt.ts";
 import { CommitSha, RepositoryName, RepositoryRevision } from "../src/repository.ts";
 import {
@@ -29,7 +29,7 @@ const spec: HarvestSpec = {
   agent: Agent.make({
     name: AgentName.make("developer"),
     brain: BrainSpec.make({
-      harness: "claude",
+      harness: Harness.make("claude"),
       model: ModelId.make("claude-sonnet-4-6"),
       effort: "high",
     }),

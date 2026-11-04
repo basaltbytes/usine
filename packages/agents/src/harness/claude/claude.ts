@@ -8,7 +8,7 @@ import {
 // The Node process boundary uses native process handles and synchronous subprocess operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawn } from "node:child_process";
-import { ModelId } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
   HarnessSession,
   HarnessSessionId,
@@ -394,7 +394,7 @@ const makeClaudeChild = Effect.gen(function* () {
       if (!modelExists(models, request.session.brain.model)) {
         yield* Effect.logError("Claude child rejected an unknown model");
         return yield* UnknownModelError.make({
-          harness: "claude",
+          harness: Harness.make("claude"),
           model: request.session.brain.model,
           message: `Claude has no model "${request.session.brain.model}"`,
         });

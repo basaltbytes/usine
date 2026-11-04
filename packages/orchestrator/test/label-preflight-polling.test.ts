@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ModelId } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
@@ -35,7 +35,7 @@ import { memoryCursorStore, pollingTestLayer, unmovedBaseRefHead } from "./suppo
 const repository = RepositoryName.make("basaltbytes/usine");
 const agent = AgentFile.make({
   name: AgentName.make("developer"),
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
   parentModel: Option.none(),

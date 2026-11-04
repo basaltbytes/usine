@@ -6,6 +6,8 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version.
 
+Operator usage reads use each harness descriptor’s token price table when the session reports a token breakdown without its own USD cost. The configuration capabilities API includes harness display labels and saved-session resume commands from the same catalog.
+
 ## Conditional approval
 
 Loop approval accepts `required`, `none`, or a boolean CEL condition over the event

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, ParentSession } from "@usine/core/agent/session";
 import {
   Interrupt,
@@ -17,7 +17,11 @@ import { sessionConversation } from "../../src/harness/conversation.ts";
 const parent = ParentSession.make({
   id: AgentSessionId.make("parent"),
   agent: AgentName.make("developer"),
-  brain: BrainSpec.make({ harness: "pi", model: ModelId.make("openai/model"), effort: "medium" }),
+  brain: BrainSpec.make({
+    harness: Harness.make("pi"),
+    model: ModelId.make("openai/model"),
+    effort: "medium",
+  }),
 });
 const child = (id: string) =>
   ChildSession.make({

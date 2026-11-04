@@ -3,7 +3,7 @@ import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -95,7 +95,7 @@ export const TOKEN_PREFIX = "ghs_ssh-worker-test-token-";
 export const TEST_AGENT = Agent.make({
   name: AgentName.make("developer"),
   brain: BrainSpec.make({
-    harness: "claude",
+    harness: Harness.make("claude"),
     model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),

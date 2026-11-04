@@ -3,7 +3,7 @@ import { webRequest } from "../../../../tooling/test/http.mts";
 import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { ModelId } from "@usine/core/agent/brain";
+import { Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -87,7 +87,7 @@ const makeInstance = (repository: RepositoryName, label: string) =>
     });
     const agent = AgentFile.make({
       name: AgentName.make("integration-agent"),
-      harness: "codex",
+      harness: Harness.make("codex"),
       model: ModelId.make("gpt-5.6-sol"),
       effort: "high",
       parentModel: Option.none(),

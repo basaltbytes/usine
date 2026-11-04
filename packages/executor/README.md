@@ -4,6 +4,8 @@ Worker execution for [usine](https://github.com/basaltbytes/usine). The platform
 
 0.x APIs can change. Supply `effect` at the workspace's pinned version.
 
+Harness credential providers, login mounts, and login egress hosts come from the platform-free `@usine/agents/harness` catalog. Worker preflight and credential preparation use the same descriptor data.
+
 ## Attempt lifetime
 
 Call `Executor.prepare(request)` inside `Effect.scoped`, then `prepared.launch(io)` once. The `PreparedAttempt` owns the checkout and repo access. Its `workspace`, an `AttemptWorkspace` with the worker, run spec, and worktree path, serializes without credentials or live handles.

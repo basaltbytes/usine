@@ -1,3 +1,4 @@
+import { Harness } from "@usine/core/agent/brain";
 import { InstanceScope } from "@usine/core/access";
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -1601,7 +1602,7 @@ describe("Worker status", () => {
                       capability: "harness-login",
                       message: "Claude Code is not logged in",
                       cause: HarnessUnavailableError.make({
-                        harness: "claude",
+                        harness: Harness.make("claude"),
                         capability: "login",
                         message: "Claude Code is not logged in",
                       }),

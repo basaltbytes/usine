@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, type ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
@@ -494,7 +494,7 @@ describe("SSH Worker with Docker", () => {
         agent: Agent.make({
           ...TEST_AGENT,
           brain: BrainSpec.make({
-            harness: "codex",
+            harness: Harness.make("codex"),
             model: ModelId.make("gpt-5.6-sol"),
             effort: "low",
           }),

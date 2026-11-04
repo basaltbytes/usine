@@ -8,7 +8,7 @@ import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { IssueTrigger } from "@usine/config/trigger";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -71,7 +71,7 @@ const itemKey = (number: number) =>
   // @effect-diagnostics-next-line schemaSync:off
   Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]);
 const brain = BrainSpec.make({
-  harness: "codex",
+  harness: Harness.make("codex"),
   model: ModelId.make("gpt-6-astra"),
   effort: "medium",
 });

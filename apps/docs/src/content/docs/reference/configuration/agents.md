@@ -5,6 +5,8 @@ description: Agent harnesses, models, reasoning effort, personas, and preflight 
 
 Manage agents in **Configuration > Agents**, or edit an existing agent with `usine config edit agent developer`. An agent combines a brain spec and a persona. Loops reference its name. Saved edits apply to new runs after preflight; use **Edit and retry** to update a failed run's agent definition.
 
+Harness IDs use kebab case and must match an entry in the server’s harness catalog. The catalog contains `claude`, `codex`, and `pi`. An unregistered ID fails agent schema validation.
+
 ## Agent
 
 | Field | Type | Default | Description |
