@@ -149,3 +149,7 @@ Remote Codex children run under a detached Node supervisor. Preflight checks tha
 Session records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Codex request serialization is pure over validated parameters. Child backends decode responses inside Effects and report invalid responses through session operation errors.
 
 Run `pnpm --filter @usine/agents check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+## Step outputs
+
+Parent and child completion instructions describe `.usine/outputs/<name>.json`: a non-empty opaque `type`, optional pinned-base `commit`, and JSON `content`. Agents leave child outputs in place and keep `.usine/` out of commits. The limit is ten outputs per attempt and 8 MiB per file.

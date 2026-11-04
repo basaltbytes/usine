@@ -1,3 +1,4 @@
+import { StepCompletion } from "@usine/core/step/result";
 import { jsonKey } from "@usine/core/json-key";
 import { EnginePersistenceError } from "../src/engine/error.ts";
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
@@ -119,7 +120,7 @@ describe("durable run engine", () => {
                     message: "Link lost",
                     cause: new Error("offline"),
                   });
-                return stepResult("Amended work completed");
+                return StepCompletion.fromResult(stepResult("Amended work completed"));
               }),
           });
           const runtime = engineLayer(directory, executor);
@@ -936,7 +937,8 @@ describe("durable run engine", () => {
             execute: (execution, io) =>
               Effect.gen(function* () {
                 yield* io.checkoutAcquired;
-                if (execution.task !== unstoppable.task) return stepResult("ran in the freed slot");
+                if (execution.task !== unstoppable.task)
+                  return StepCompletion.fromResult(stepResult("ran in the freed slot"));
                 yield* Deferred.await(stopRequested);
                 return yield* InfraFailure.make({
                   message: "The Attempt's execution stopped",
@@ -1348,7 +1350,7 @@ const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
         },
       });
     }),
-  ).pipe(Layer.provide(localSqliteLayer(directory)));
+  ).pipe(Layer.provideMerge(localSqliteLayer(directory)));
 
 /** Returns the engine on `flakyDatabase` with `executor`; every queued Event's trigger still matches. */
 const flakyEngineLayer = (

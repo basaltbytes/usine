@@ -146,6 +146,7 @@ interface FakeForward {
 }
 
 interface FakeMachineState {
+  outputCollection: string;
   readonly calls: Array<RemoteCall>;
   /** The token in each credential directory on the machine, by path. */
   readonly credentials: Map<string, string>;
@@ -321,6 +322,7 @@ const standardInput = (command: ChildProcess.StandardCommand): Effect.Effect<str
 /** Returns a fake local SSH client and the Linux machine that every SSH Worker command runs on. */
 export const fakeMachine = () => {
   const state: FakeMachineState = {
+    outputCollection: '{"outputs":[]}',
     calls: [],
     credentials: new Map(),
     reachable: true,
@@ -639,6 +641,7 @@ export const fakeMachine = () => {
       }
       return oneShotHandle("", 0);
     }
+    if (line.includes("const collect = () =>")) return oneShotHandle(state.outputCollection, 0);
     if (line === "exec 'git' '--version'") return oneShotHandle("git version 2.47.3\n", 0);
     if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
     if (line === "exec 'node' '--version'") return oneShotHandle("v24.11.0\n", 0);

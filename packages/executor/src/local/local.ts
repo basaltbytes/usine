@@ -1,3 +1,4 @@
+import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
@@ -230,14 +231,14 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     const workerLeftovers = yield* workerLeftoversFor(workersRoot);
 
-    const harvestCommand =
+    const checkoutCommand =
       (
         operation: ExecutorOperation,
         worktree: string,
         credential: Effect.Success<ReturnType<typeof credentials>>,
         environment: Record<string, string>,
       ) =>
-      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+      (command: string, args: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           yield* credential.refresh();
           const result = yield* collectCommand(spawner, operation, command, args, {
@@ -250,8 +251,25 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             stdout: credential.scrub(result.stdout),
             stderr: credential.scrub(result.stderr),
           });
-          return stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n");
+          return stdout;
         });
+
+    const harvestCommand =
+      (
+        operation: ExecutorOperation,
+        worktree: string,
+        credential: Effect.Success<ReturnType<typeof credentials>>,
+        environment: Record<string, string>,
+      ) =>
+      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+        checkoutCommand(
+          operation,
+          worktree,
+          credential,
+          environment,
+        )(command, args).pipe(
+          Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
+        );
 
     const recoveryComments =
       (attempt: AttemptRecovery, worktree: string): PostedCommentsHarvest =>
@@ -559,6 +577,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         request.commitAuthor,
         prepared.gitHooks,
       );
+      yield* prepareOutputs(checkoutCommand("prepare", worktree, credential, environment)).pipe(
+        Effect.mapError((error) => executorError("prepare", "Can't prepare step outputs", error)),
+      );
       return {
         workspace: prepared.workspace,
         launch: (io: AttemptChannel.Sink) =>
@@ -569,6 +590,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             // Local Workers have no Gateway; every harness uses its own login.
             gatewayCredential: Effect.succeedNone,
             harvest: (windows) => harvest(prepared.workspace, credential, environment, windows),
+            readOutputs: readOutputs(
+              prepared.workspace.spec,
+              checkoutCommand("launch", worktree, credential, environment),
+            ),
             harvestComments: (windows) =>
               harvestPostedComments(
                 prepared.workspace.spec,

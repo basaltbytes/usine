@@ -101,8 +101,12 @@ _Avoid_: execution, job, workflow run
 The interval after an agent session ends during which a run waits for checks on its recorded pull request head.
 
 **Step**:
-A named unit of a run with a stored result. In v1, each run has one step: the agent action.
+A named unit of a run with a stored result and step outputs. In v1, each run has one step: the agent action.
 _Avoid_: stage, node, activity
+
+**Step output**:
+A typed JSON document that an attempt writes in its checkout and the orchestrator stores with the step result.
+_Avoid_: artifact, attachment, file
 
 **Attempt**:
 One try of a step on a worker. A retry creates a new attempt in the same run.

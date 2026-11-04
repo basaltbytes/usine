@@ -63,3 +63,21 @@ Preflight checks tools and credentials; it does not install harnesses. Startup c
 For local and SSH subscription workers, Claude Code must report a first-party subscription login, and Codex must report a ChatGPT login. Gateway-injected providers need the harness binary and a configured gateway credential. Pi requires a local worker and a usable API-key credential. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
 
 Every GitHub comment, issue, pull request, and review written by an agent ends with `— usine agent: <name>`. Agents share the App identity, so this signature attributes their work to an attempt. Commits use the App's bot identity.
+
+## Step outputs
+
+An agent returns a JSON document by writing `.usine/outputs/<name>.json` in its checkout. Use a lowercase slug containing letters and digits separated by hyphens or underscores. For example, write `.usine/outputs/walkthrough.json`:
+
+```json
+{
+  "type": "balade.walkthrough",
+  "content": {
+    "title": "Change walkthrough",
+    "sections": []
+  }
+}
+```
+
+`type` is any non-empty string. `content` is any JSON value. An optional `commit` must equal the attempt's pinned base commit, which is the pull request head for a pull request run. The limit is ten output files per attempt and 8 MiB per file, including the envelope. Invalid outputs fail the attempt with the file path and reason; unfinished repository work follows the usual salvage procedure.
+
+Keep a child's output documents in place until the parent returns. Preparation excludes `.usine/` from commits and salvage. The checkout environment needs Node.js on its command path, including inside the attempt container. The orchestrator collects outputs on local, SSH, exe.dev, and Cloudflare workers, stores document bodies separately, and includes refs in the step result. Refs contain the name, type, optional commit, compact JSON content's UTF-8 byte count, and SHA-256. Output reads return documents from succeeded attempts.

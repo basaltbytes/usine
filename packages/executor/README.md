@@ -345,3 +345,9 @@ Remote Codex children keep their app-server running when SSH disconnects. Reconn
 Executor records and errors use nominal Schema brands. Use their schema constructors for typed values. Worker protocol encoding runs inside Effects and reports failures through the operation’s existing error type.
 
 Run `pnpm --filter @usine/executor check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+## Step outputs
+
+Preparation creates `.usine/outputs/` and excludes `.usine/` from Git commits and salvage. After the parent reports, all worker adapters collect whole JSON documents through the checkout command runner and attempt container. Each envelope contains a non-empty opaque `type`, JSON `content`, and an optional `commit` matching `RunSpec.baseCommit`. Invalid output files fail with a file-specific `AgentFailure` and ordinary salvage still runs.
+
+`PreparedAttempt.launch` and `Executor.outcome` return `StepCompletion`, whose `result` contains output refs and whose `outputs` contains the full documents. Durable storage records both before checkout cleanup. Collection allows at most ten files of at most 8 MiB each.

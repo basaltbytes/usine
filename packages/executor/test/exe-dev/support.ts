@@ -226,6 +226,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         return oneShotHandle(json1, 0);
       }
       if (line === "exec 'printenv' 'HOME'") return oneShotHandle("/home/exedev\n", 0);
+      if (line.includes("const collect = () =>")) return oneShotHandle('{"outputs":[]}', 0);
       if (line === "exec 'git' '--version'") {
         return oneShotHandle("git version 2.50.1\n", 0);
       }

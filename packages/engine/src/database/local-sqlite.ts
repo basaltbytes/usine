@@ -1,3 +1,5 @@
+import { StepOutputStore } from "../step-outputs/store.ts";
+import { sqliteStepOutputLayer } from "../step-outputs/sqlite.ts";
 import { type SqlError, SqlClient } from "effect/sql";
 import { AttentionAcknowledgements } from "../attention/attention.ts";
 import { NodeServices } from "@effect/platform-node";
@@ -145,7 +147,7 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
       return drizzle;
     }).pipe(Effect.mapError((cause) => startupError("initialize local database", cause))),
   );
-  return database.pipe(Layer.provideMerge(sqlClient));
+  return Layer.merge(database, sqliteStepOutputLayer).pipe(Layer.provideMerge(sqlClient));
 };
 
 /**
@@ -156,7 +158,9 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
-  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
+  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
+    instanceDirectory,
+  ),
 ): Layer.Layer<
   | AttentionAcknowledgements
   | BoardMoves
@@ -169,6 +173,7 @@ export const layer = (
   | RepositoryLabelProjectionWriter
   | RunEngine
   | RunReader
+  | StepOutputStore
   | UnconfirmedStops,
   RunEngineError,
   StepExecutor | TriggerCondition
@@ -182,7 +187,9 @@ export const layer = (
  */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
-  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
+  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
+    instanceDirectory,
+  ),
 ): Layer.Layer<
   | AttentionAcknowledgements
   | CycleBudgets
@@ -190,6 +197,7 @@ export const observationLayer = (
   | LoopControl
   | RepositoryLabelProjectionReader
   | RunReader
+  | StepOutputStore
   | UnconfirmedStops,
   RunEngineError
 > =>
@@ -200,7 +208,7 @@ export const observationLayer = (
     LoopControl.layer,
     RepositoryLabelProjectionReader.layer,
     RunReader.layer,
-  ).pipe(Layer.provide(database), Layer.merge(UnconfirmedStops.empty));
+  ).pipe(Layer.provideMerge(database), Layer.merge(UnconfirmedStops.empty));
 
 const readableRuntimeStore = Effect.fn("LocalSqlite.readableRuntimeStore")(function* (
   filename: string,

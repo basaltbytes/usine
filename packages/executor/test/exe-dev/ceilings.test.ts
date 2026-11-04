@@ -352,7 +352,7 @@ describe("exe.dev ceilings across a restart", () => {
           CheckoutRequest.make({ ...tokens, reattach: true }),
         );
         const result = yield* prepared.launch(sink);
-        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.strictEqual(result.result.message, `Completed: ${request.task}`);
       }).pipe(
         Effect.scoped,
         Effect.provide(runtime(ssh.layer, completes, storage, unreadableTime)),

@@ -71,6 +71,18 @@
     "./attention": {
       "types": "./dist/attention/attention.d.ts",
       "default": "./dist/attention/attention.js"
+    },
+    "./step-outputs": {
+      "types": "./dist/step-outputs/store.d.ts",
+      "default": "./dist/step-outputs/store.js"
+    },
+    "./step-outputs/memory": {
+      "types": "./dist/step-outputs/memory.d.ts",
+      "default": "./dist/step-outputs/memory.js"
+    },
+    "./step-outputs/sqlite": {
+      "types": "./dist/step-outputs/sqlite.d.ts",
+      "default": "./dist/step-outputs/sqlite.js"
     }
   },
   "publishConfig": {

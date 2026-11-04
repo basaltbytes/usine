@@ -1,3 +1,4 @@
+import type { StepOutputStore } from "@usine/engine/step-outputs";
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
@@ -21,7 +22,9 @@ export const workerEngineLayer = (
   instanceId: InstanceId,
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
-  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
+  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
+    instanceDirectory,
+  ),
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {

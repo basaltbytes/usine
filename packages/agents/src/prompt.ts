@@ -40,6 +40,8 @@ export interface ChildPromptParts {
 const completionInstructions: ReadonlyArray<string> = [
   "# Task completion",
   "",
+  'To return a step output, write .usine/outputs/<name>.json as { "type": "your.type", "commit": "<pinned base commit>", "content": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type. The commit is optional; when set, it must equal the checkout base supplied by usine, which is the PR head for a PR run. Each file must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child\'s outputs in place so usine can collect them after the parent returns.',
+  "",
   "Run gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.",
   "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
   `When the task configures a CI handoff, push the final head and return ${AWAITING_CI_MARKER} on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.`,

@@ -1,3 +1,9 @@
+import {
+  StepOutput,
+  StepOutputName,
+  StepOutputType,
+  StepOutputSha256,
+} from "@usine/core/step/output";
 import { jsonKey } from "@usine/core/json-key";
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
@@ -18,7 +24,7 @@ import {
 } from "@usine/core/attempt/failure";
 import { CommitSha } from "@usine/core/repository";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
-import { Commit, StepResult } from "@usine/core/step/result";
+import { Commit, StepCompletion, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { ChildBackend, SessionOperationError } from "@usine/agents/runtime";
 import {
@@ -247,7 +253,19 @@ describe("durable AttemptRuntime", () => {
       // After a restart, the report, the harvested result, and the unsupervised time are still
       // readable.
       const attemptId = attemptRequest("run/step/1").spec.attemptId;
-      const harvested = StepResult.make({ message: "Fixed it.", facts: [] });
+      const harvested = StepCompletion.fromResult(
+        StepResult.make({ message: "Fixed it.", facts: [] }),
+        [
+          StepOutput.make({
+            name: StepOutputName.make("walkthrough"),
+            type: StepOutputType.make("balade.walkthrough"),
+            commit: Option.none(),
+            content: { title: "Stored across restart" },
+            size: 33,
+            sha256: StepOutputSha256.make("a".repeat(64)),
+          }),
+        ],
+      );
       const finished = yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const reported = yield* runtime.finished(attemptId);
@@ -276,6 +294,11 @@ describe("durable AttemptRuntime", () => {
         finished.recorded,
         Option.some(ResultRecorded.make({ result: harvested })),
       );
+      const reopened = yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        return yield* runtime.finished(attemptId);
+      }).pipe(Effect.provide(layer({ database, parent: [] })));
+      assert.deepStrictEqual(reopened, Option.some(ResultRecorded.make({ result: harvested })));
     }).pipe(Effect.scoped),
   );
 
@@ -1313,7 +1336,9 @@ describe("durable AttemptRuntime", () => {
           assert.isFalse(report.answeredOperator);
           assert.deepStrictEqual(
             harvestedResult(report, []),
-            Result.succeed(StepResult.make({ message: report.message, facts: [] })),
+            Result.succeed(
+              StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [] })),
+            ),
           );
         }).pipe(
           Effect.provide(
@@ -1398,7 +1423,25 @@ describe("durable AttemptRuntime", () => {
     });
     assert.deepStrictEqual(
       harvestedResult(report, [commit]),
-      Result.succeed(StepResult.make({ message: report.message, facts: [commit] })),
+      Result.succeed(
+        StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [commit] })),
+      ),
+    );
+    const output = StepOutput.make({
+      name: StepOutputName.make("answer"),
+      type: StepOutputType.make("example.answer"),
+      commit: Option.none(),
+      content: null,
+      size: 4,
+      sha256: StepOutputSha256.make("a".repeat(64)),
+    });
+    assert.deepStrictEqual(
+      harvestedResult(report, [], [output]),
+      Result.succeed(
+        StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [] }), [
+          output,
+        ]),
+      ),
     );
   });
 

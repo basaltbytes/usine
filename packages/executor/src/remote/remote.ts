@@ -1,3 +1,4 @@
+import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
@@ -299,9 +300,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         );
       };
 
-    const harvestCommand =
+    const checkoutCommand =
       (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
-      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+      (command: string, args: ReadonlyArray<string>) =>
         access.refresh.pipe(
           Effect.andThen(
             commands.run(operation, shell, command, args, {
@@ -310,6 +311,17 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               scrub: access.scrub,
             }),
           ),
+        );
+
+    const harvestCommand =
+      (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
+      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+        checkoutCommand(
+          operation,
+          worktree,
+          access,
+          shell,
+        )(command, args).pipe(
           Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
         );
 
@@ -938,6 +950,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       }
 
       const prepared = provisioned.workspace;
+      const outputShell = yield* checkoutHost.shell;
+      yield* prepareOutputs(checkoutCommand("prepare", worktree, access, outputShell));
       yield* Effect.logInfo(`${label} Attempt workspace ready`, {
         attemptId: request.attemptId,
         worker: request.worker,
@@ -998,6 +1012,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 ),
                 gatewayCredential,
                 harvest: (windows) => harvest(prepared, access, shell, windows),
+                readOutputs: readOutputs(
+                  prepared.spec,
+                  checkoutCommand("launch", worktree, access, shell),
+                ),
                 harvestComments: (windows) =>
                   harvestPostedComments(
                     prepared.spec,

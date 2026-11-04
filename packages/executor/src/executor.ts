@@ -18,7 +18,7 @@ import {
   WorkerName,
   WorkerKind,
 } from "@usine/core/worker";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion } from "@usine/core/step/result";
 import {
   type Brand,
   Context,
@@ -302,7 +302,7 @@ export interface PreparedAttempt {
    * returning. Cleanup failures are logged without changing the result. Fails with an
    * infrastructure `AttemptFailure` if called again or after release.
    */
-  readonly launch: (io: AttemptChannel.Sink) => Effect.Effect<StepResult, AttemptFailure>;
+  readonly launch: (io: AttemptChannel.Sink) => Effect.Effect<StepCompletion, AttemptFailure>;
 }
 
 /**
@@ -377,7 +377,10 @@ export class Executor extends Context.Service<
      */
     readonly outcome: (
       attemptId: AttemptId,
-    ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
+    ) => Effect.Effect<
+      Option.Option<Result.Result<StepCompletion, AttemptFailure>>,
+      AttemptFailure
+    >;
     /**
      * Verifies Git, enough memory for `maxConcurrentAttempts` concurrent Attempts, and each brain
      * in `brains`. Never installs tools or logs in; an SSH Worker pulls its Attempt image.

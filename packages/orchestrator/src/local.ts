@@ -1,3 +1,4 @@
+import type { StepOutputStore } from "@usine/engine/step-outputs";
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import type { BrainSpec } from "@usine/core/agent/brain";
@@ -19,7 +20,9 @@ export const layer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: Omit<LocalExecutorOptions, "instanceDirectory">,
-  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
+  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
+    instanceDirectory,
+  ),
 ) => {
   const executor = localExecutorLayer({ ...options, instanceDirectory }).pipe(
     Layer.provide(NodeServices.layer),
