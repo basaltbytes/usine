@@ -1,3 +1,7 @@
+// Fetch and agent SDK interfaces require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";

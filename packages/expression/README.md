@@ -24,3 +24,5 @@ The 0.x APIs can change between minor releases.
 ## Schema contracts
 
 Environment descriptors and expression errors use nominal Schema brands. Use the exported schema constructors for typed values and `Schema.decodeUnknownEffect` for untrusted input.
+
+Run `pnpm --filter @usine/expression check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

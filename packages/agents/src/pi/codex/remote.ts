@@ -21,6 +21,10 @@ const Frame = Schema.Union([
   Schema.Struct({ offset: Schema.Int, exitCode: Schema.Int }),
   Schema.Struct({ offset: Schema.Int, ready: Schema.Literal(true) }),
 ]);
+const InputFrame = Schema.Union([
+  Schema.Struct({ sequence: Schema.Int, data: Schema.String }),
+  Schema.Struct({ sequence: Schema.Int, eof: Schema.Literal(true) }),
+]);
 const decodeFrame = Schema.decodeUnknownEffect(Schema.fromJsonString(Frame));
 const encoder = new TextEncoder();
 
@@ -44,7 +48,10 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
 
   const send = (frame: { readonly data: string } | { readonly eof: true }) =>
     Effect.gen(function* () {
-      const line = JSON.stringify({ ...frame, sequence: history.length + 1 });
+      const line = yield* Schema.encodeEffect(Schema.fromJsonString(InputFrame))({
+        ...frame,
+        sequence: history.length + 1,
+      }).pipe(Effect.orDie);
       history.push(line);
       yield* Queue.offer(outgoing, line);
     });

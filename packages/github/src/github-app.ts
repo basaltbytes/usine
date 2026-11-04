@@ -165,7 +165,7 @@ export class GitHubApp extends Context.Service<
       permissions: LoopPermissions,
     ) => Effect.Effect<InstallationToken, GitHubAppError>;
   }
->()("@usine/github/GitHubApp") {
+>()("@usine/github/github-app/GitHubApp") {
   /**
    * Provides App operations using the supplied credentials and HTTP client. Imports the signing
    * key during construction, which can fail with `AppAuthenticationError`; installation

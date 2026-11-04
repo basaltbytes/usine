@@ -11,7 +11,7 @@ export class WebhookHealth extends Context.Service<
     readonly received: Effect.Effect<void>;
     readonly silent: Effect.Effect<boolean>;
   }
->()("@usine/orchestrator/WebhookHealth") {
+>()("@usine/orchestrator/webhooks/WebhookHealth") {
   static readonly layer = Layer.effect(
     WebhookHealth,
     Effect.gen(function* () {

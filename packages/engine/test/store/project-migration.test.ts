@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { expect, it } from "@effect/vitest";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey, Event, EventId } from "@usine/core/event";
@@ -32,14 +33,16 @@ it.effect(
         );
         const submissions: Array<Submission> = [];
         for (const { repository } of projects) {
-          const key = JSON.stringify(["implement", repository, 1, "hash"]);
+          const json1 = jsonKey(["implement", repository, 1, "hash"]);
+          const key = json1;
+          const json2 = jsonKey(["github", repository, 1]);
           const submission = Submission.make({
             ...lifecycleSubmission,
             repository,
             loop: LoopName.make("implement"),
             approval: "required",
             cycleLimit: Option.some(CycleLimit.make(1)),
-            itemKey: ItemKey.make(JSON.stringify(["github", repository, 1])),
+            itemKey: ItemKey.make(json2),
             event: Event.make({
               ...lifecycleSubmission.event,
               id: EventId.make(key),
@@ -58,7 +61,8 @@ it.effect(
             limit: 1,
             counts: [{ loop: "implement", admitted: 1, completed: 0 }],
           };
-          yield* sql`UPDATE usine_item_cycle_budgets SET ask_json = ${JSON.stringify(ask)} WHERE item_key = ${submission.itemKey}`;
+          const json3 = jsonKey(ask);
+          yield* sql`UPDATE usine_item_cycle_budgets SET ask_json = ${json3} WHERE item_key = ${submission.itemKey}`;
           const need = {
             id: `cycle-budget:${submission.event.id}`,
             _tag: "CycleBudgetNeed",
@@ -66,7 +70,8 @@ it.effect(
             itemLabel: "item",
             itemUrl: "url",
           };
-          yield* sql`INSERT INTO usine_attention_acknowledgements (id, revision, dismissed_at) VALUES (${need.id}, ${JSON.stringify(need)}, '2026-10-29T00:00:00Z')`;
+          const json4 = jsonKey(need);
+          yield* sql`INSERT INTO usine_attention_acknowledgements (id, revision, dismissed_at) VALUES (${need.id}, ${json4}, '2026-10-29T00:00:00Z')`;
         }
         yield* sql`INSERT INTO usine_loop_runtime (loop_name, paused) VALUES ('implement', 1), ('review', 1)`;
         yield* migrateProjectLoops(projects).pipe(sql.withTransaction);
@@ -87,7 +92,8 @@ it.effect(
           const asks =
             yield* sql`SELECT json_extract(ask_json, '$.loop') AS loop, json_extract(ask_json, '$.counts[0].loop') AS participant FROM usine_item_cycle_budgets WHERE item_key = ${submission.itemKey}`;
           expect(asks).toEqual([{ loop: name, participant: name }]);
-          const dedupKey = DedupKey.make(JSON.stringify([name, submission.repository, 1, "hash"]));
+          const json5 = jsonKey([name, submission.repository, 1, "hash"]);
+          const dedupKey = DedupKey.make(json5);
           const repeated = yield* store.recordAndClaim(
             Submission.make({
               ...submission,

@@ -138,3 +138,5 @@ A loop can set `ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }` to require
 ## Schema contracts
 
 Configuration records use nominal Schema brands. `configurationEntities`, `formatAgent`, and `formatLoop` are pure functions over validated values. Configuration operations report decoding failures through `ConfigurationInvalid` or `ConfigFileError`.
+
+Run `pnpm --filter @usine/config check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

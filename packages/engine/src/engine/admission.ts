@@ -34,7 +34,7 @@ export class AttemptAdmission extends Context.Service<
     readonly cancelUpgrade: Effect.Effect<void>;
     readonly upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>>;
   }
->()("@usine/engine/AttemptAdmission") {
+>()("@usine/engine/engine/admission/AttemptAdmission") {
   static readonly layer = Layer.effect(
     AttemptAdmission,
     Effect.gen(function* () {
@@ -122,7 +122,7 @@ export class AttemptAdmission extends Context.Service<
                       reserve.pipe(
                         Effect.flatMap((resource) =>
                           Effect.acquireRelease(enter(runId), (admitted) =>
-                            admitted ? leave(runId) : Effect.void,
+                            (admitted ? leave(runId) : Effect.void).pipe(Effect.orDie),
                           ).pipe(
                             Effect.map((admitted) =>
                               admitted ? Option.some(resource) : Option.none<A>(),

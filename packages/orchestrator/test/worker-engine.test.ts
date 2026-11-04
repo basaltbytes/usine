@@ -1,3 +1,5 @@
+// Fetch and agent SDK interfaces require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { configurationLayer } from "./support/configuration.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";

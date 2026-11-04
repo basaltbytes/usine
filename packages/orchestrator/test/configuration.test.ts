@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -424,7 +425,7 @@ describe("Configuration view", () => {
       });
       assert.deepStrictEqual(view.removedWorkers, [{ name: "retired", running: 1 }]);
 
-      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(view);
+      const encoded = jsonKey(view);
       assert.include(encoded, "USINE_GATEWAY_ADMIN_TOKEN");
       assert.notInclude(encoded, '"adminToken"');
     }),

@@ -26,7 +26,7 @@ import { serverLayer } from "../src/http.ts";
 import { FactoryBackend } from "../src/backend.ts";
 import { Port } from "../src/cli.ts";
 import { authFixture } from "./auth/fixture.ts";
-import { assert, it } from "vitest";
+import { assert, it } from "@effect/vitest";
 import { committedBeforeCrash, submission } from "../../../packages/engine/test/support.ts";
 import {
   ADDRESS,
@@ -40,8 +40,9 @@ import {
 import { startupListener } from "../src/listener.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 
-it("answers the version while recovering 400 finished attempts without per-attempt remote commands", async () => {
-  await Effect.runPromise(
+it.live(
+  "answers the version while recovering 400 finished attempts without per-attempt remote commands",
+  () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fs.makeTempDirectoryScoped({
@@ -177,5 +178,5 @@ it("answers the version while recovering 400 finished attempts without per-attem
       Effect.scoped,
       Effect.provide(NodeHttpServer.layerTest.pipe(Layer.provideMerge(NodeServices.layer))),
     ),
-  );
-}, 30_000);
+  30_000,
+);

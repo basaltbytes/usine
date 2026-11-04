@@ -1,3 +1,4 @@
+import { Migrator, SqlClient } from "effect/sql";
 import {
   ConfigurationStore,
   ConfigurationChange,
@@ -13,8 +14,7 @@ import {
 } from "@usine/core/access";
 import { requestActor, localActor } from "@usine/core/operator";
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { SqlClient } from "effect/sql";
-import { make as makeMigrator, fromRecord } from "effect/sql/Migrator";
+
 import { AuthStore } from "./store.ts";
 import { AuthError, authFailure, type Member } from "./model.ts";
 
@@ -27,7 +27,7 @@ export class MemberAccess extends Context.Service<
     readonly remove: (member: GitHubUserId) => Effect.Effect<void, AuthError>;
     readonly enroll: (member: Member) => Effect.Effect<void, AuthError>;
   }
->()("@usine/server/MemberAccess") {}
+>()("@usine/server/auth/access/MemberAccess") {}
 
 const grantAdministrators = Effect.fn("MemberAccess.grantAdministrators")(function* (
   members: ReadonlyArray<Member>,
@@ -85,9 +85,9 @@ export const memberAccessLayer = Layer.effect(
     const configuration = yield* ConfigurationStore;
     const store = yield* AuthStore;
     const sql = yield* SqlClient.SqlClient;
-    yield* makeMigrator({})({
+    yield* Migrator.make({})({
       table: "usine_access_migrations",
-      loader: fromRecord({
+      loader: Migrator.fromRecord({
         "0001_role_bindings": Effect.flatMap(store.members, grantAdministrators).pipe(
           Effect.provideService(ConfigurationStore, configuration),
         ),

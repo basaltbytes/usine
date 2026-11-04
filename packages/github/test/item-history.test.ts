@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { ItemNumber } from "@usine/core/item";
 import { BotLogin } from "@usine/core/worker";
@@ -52,7 +53,9 @@ const variablesOf = (request: HttpClientRequest.HttpClientRequest) =>
 const respond = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
+    new Response(jsonKey(body), {
+      headers: { "content-type": "application/json" },
+    }),
   );
 
 const label = (name: string, color: string) => ({ name, color, description: null });

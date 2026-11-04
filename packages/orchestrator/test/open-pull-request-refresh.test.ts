@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -409,7 +410,7 @@ describe("open pull request refresh", () => {
       const readable = baseBranches();
       const warnings: Array<string> = [];
       const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+        if (logLevel === "Warn") warnings.push(jsonKey(message));
       });
       const { github, poll } = fakeRepository(
         new Map([

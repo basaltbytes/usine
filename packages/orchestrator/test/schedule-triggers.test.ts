@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -281,10 +282,7 @@ describe("ScheduleTriggers", () => {
             DateTime.formatIso(submission.event.receivedAt),
             "2026-08-31T08:45:30.000Z",
           );
-          const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-            "github",
-            submission.repository.toLowerCase(),
-          ]);
+          const decodedValue1 = jsonKey(["github", submission.repository.toLowerCase()]);
           assert.strictEqual(submission.itemKey, decodedValue1);
         }
         assert(

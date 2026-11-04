@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, it } from "@effect/vitest";
 import { ContainerMemoryMib, ContainerScratchMib } from "@usine/core/worker";
 import { Effect, Layer, Option } from "effect";
@@ -30,7 +31,7 @@ it.effect.each(
   const machine = fakeMachine();
   if (entry.runtime === "docker") machine.state.docker = "running";
   else
-    machine.state.podmanInfo = JSON.stringify({
+    machine.state.podmanInfo = jsonKey({
       version: { Version: "5.4.2" },
       host: {
         security: { rootless: true },

@@ -1,8 +1,12 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { jsonKey } from "@usine/core/json-key";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
+import { NodeServices, NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import {
   ConfigProvider,
@@ -14,6 +18,7 @@ import {
   Redacted,
   Schedule,
   Schema,
+  FileSystem,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpServerError } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
@@ -72,12 +77,22 @@ const anthropicStandIn = Effect.gen(function* () {
  */
 const gatewayFiles = Effect.gen(function* () {
   const directory = yield* Effect.acquireRelease(
-    Effect.promise(() => mkdtemp(join(tmpdir(), "usine-gateway-reload-"))),
-    (path) => Effect.promise(() => rm(path, { recursive: true, force: true })),
+    Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.makeTempDirectory({
+        directory: dirname(join(tmpdir(), "usine-gateway-reload-")),
+        prefix: basename(join(tmpdir(), "usine-gateway-reload-")),
+      }),
+    ),
+    (path) =>
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.remove(path, { recursive: true, force: true }),
+      ).pipe(Effect.orDie),
   );
   const path = (name: string) => join(directory, name);
   const write = (name: string, lines: ReadonlyArray<string>) =>
-    Effect.promise(() => writeFile(path(name), `${lines.join("\n")}\n`));
+    Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.writeFileString(path(name), `${lines.join("\n")}\n`),
+    );
   return { path, write };
 });
 
@@ -108,7 +123,7 @@ const secretsLines = (anthropicKey: string) => [
 const lines: Array<string> = [];
 const recordLogs = Logger.layer([
   Logger.make(({ logLevel, message }) => {
-    lines.push(JSON.stringify({ level: logLevel, message }));
+    lines.push(jsonKey({ level: logLevel, message }));
   }),
 ]);
 
@@ -140,7 +155,11 @@ const withGateway = <A, E>(
       readonly settings: ReadonlyArray<string>;
       readonly anthropic: ReadonlyArray<string>;
     },
-  ) => Effect.Effect<A, E, GatewayAddresses | GatewayReload | HttpClient.HttpClient>,
+  ) => Effect.Effect<
+    A,
+    E,
+    GatewayAddresses | GatewayReload | HttpClient.HttpClient | FileSystem.FileSystem
+  >,
 ) =>
   Effect.gen(function* () {
     const anthropic = yield* anthropicStandIn;
@@ -279,7 +298,7 @@ describe("reloading the gateway", () => {
           assert.include(reloaded, '"rules":2');
           assert.include(reloaded, '"changed":[]');
         }),
-      ),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   it.live("a broken allowlist keeps the previous one and the attachment", () =>
@@ -305,7 +324,7 @@ describe("reloading the gateway", () => {
         const loggedMessages = yield* logged("Reloaded the gateway settings");
         assert.include(loggedMessages, '"allowlist":"kept"');
       }),
-    ),
+    ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   it.live("a new API key is sent on the next request, and the log names it without its value", () =>
@@ -326,7 +345,7 @@ describe("reloading the gateway", () => {
         assert.notInclude(lines.join("\n"), FIRST_KEY);
         assert.notInclude(lines.join("\n"), SECOND_KEY);
       }),
-    ),
+    ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   it.live(
@@ -349,7 +368,7 @@ describe("reloading the gateway", () => {
           ]);
           assert.notInclude(lines.join("\n"), SUBSCRIPTION_TOKEN);
         }),
-      ),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   it.live(
@@ -409,7 +428,7 @@ describe("reloading the gateway", () => {
           for (const secret of [OPENAI_KEY, CHATGPT_REFRESH, access])
             assert.notInclude(lines.join("\n"), secret);
         }),
-      ),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   it.live("settings that need a restart are logged and left as they are", () =>
@@ -434,7 +453,7 @@ describe("reloading the gateway", () => {
         assert.include(restart, '"USINE_GATEWAY_DOMAIN"');
         assert.include(restart, '"USINE_GATEWAY_ADMIN_PORT"');
       }),
-    ),
+    ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   it.live("SIGHUP runs the reload", () =>
@@ -449,7 +468,7 @@ describe("reloading the gateway", () => {
         const currentConnectionResponse = yield* connect(egress, "registry.npmjs.org:443");
         assert.deepStrictEqual(currentConnectionResponse, refused);
       }),
-    ),
+    ).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 });
 

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, PoolLogin, TokenBreakdown } from "@usine/core/agent/session";
@@ -351,10 +352,12 @@ describe("Codex child backend", () => {
               noDelivery,
             );
             assert.strictEqual(messages.length, 2);
-            assert.include(JSON.stringify(messages[1]), "Continue with my correction");
+            const json1 = jsonKey(messages[1]);
+            assert.include(json1, "Continue with my correction");
           }
           if (state !== "idle") {
-            const recoveredInput = JSON.stringify(messages[1]);
+            const json2 = jsonKey(messages[1]);
+            const recoveredInput = json2;
             for (const message of guidance) assert.include(recoveredInput, message);
             assert(recoveredInput.indexOf(guidance[0]) < recoveredInput.indexOf(guidance[1]));
           }
@@ -394,8 +397,10 @@ describe("Codex child backend", () => {
               noDelivery,
             );
             assert.strictEqual(messages.length, 3);
-            assert.include(JSON.stringify(messages[2]), "Continue again");
-            for (const message of guidance) assert.notInclude(JSON.stringify(messages[2]), message);
+            const json3 = jsonKey(messages[2]);
+            assert.include(json3, "Continue again");
+            const json4 = jsonKey(messages[2]);
+            for (const message of guidance) assert.notInclude(json4, message);
             assert.strictEqual(reads.length, guidance.length, "guidance is delivered only once");
             finalTurn = "turn-3";
           }
@@ -718,7 +723,7 @@ describe("Codex child backend", () => {
       ];
       const warnings: Array<string> = [];
       const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+        if (logLevel === "Warn") warnings.push(jsonKey(message));
       });
       const server = connectionLayer(
         successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),

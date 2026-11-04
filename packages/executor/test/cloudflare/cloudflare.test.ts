@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { AttemptConnections } from "../../src/executor.ts";
 import type { CloudflareWorkerAddress } from "../../src/cloudflare/model.ts";
 import type { AttemptId } from "@usine/core/attempt";
@@ -257,9 +258,12 @@ describe("cloudflare Worker", () => {
         );
         const currentGatewayCredential = yield* given.gatewayCredential;
         assert.isTrue(Option.contains(currentGatewayCredential, "api-key"));
-        assert.notInclude(JSON.stringify(given.environment), TOKEN_PREFIX);
-        assert.notInclude(JSON.stringify(given.environment), "sk-ant-test-key");
-        assert.notInclude(JSON.stringify([...worker.state.sandboxes.values()]), "sk-ant");
+        const json1 = jsonKey(given.environment);
+        assert.notInclude(json1, TOKEN_PREFIX);
+        const json2 = jsonKey(given.environment);
+        assert.notInclude(json2, "sk-ant-test-key");
+        const json3 = jsonKey([...worker.state.sandboxes.values()]);
+        assert.notInclude(json3, "sk-ant");
       }).pipe(Effect.scoped),
   );
 
@@ -670,6 +674,7 @@ describe("sandbox shell", () => {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const handle = yield* spawner.spawn(
         ChildProcess.make(process.execPath, ["--no-warnings", SHELL, SANDBOX, "--", line], {
+          stdin: Stream.empty,
           env: {
             [SHELL_ENVIRONMENT.workerUrl]: url.origin,
             [SHELL_ENVIRONMENT.accessClientId]: ACCESS_CLIENT_ID,
@@ -720,6 +725,23 @@ describe("sandbox shell", () => {
       assert.strictEqual(gone.exitCode, 255);
       assert.include(gone.stderr, SANDBOX);
     }).pipe(Effect.scoped),
+  );
+
+  it.live("exits 255 without exposing credentials when WebSocket startup fails", () =>
+    Effect.gen(function* () {
+      const result = yield* run(
+        new URL("https://worker.example.test"),
+        "exec 'true'",
+        "secret-before-newline\nsecret-after-newline",
+      );
+
+      assert.strictEqual(result.exitCode, 255);
+      assert.strictEqual(result.stdout, "");
+      assert.include(result.stderr, "usine sandbox shell:");
+      assert.notInclude(result.stderr, "secret-before-newline");
+      assert.notInclude(result.stderr, "secret-after-newline");
+      assert.notInclude(result.stderr, ACCESS_CLIENT_ID);
+    }),
   );
 });
 

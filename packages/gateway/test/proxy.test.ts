@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Context, DateTime, Effect, Layer, Logger, Option, Redacted, Ref, Stream } from "effect";
@@ -88,7 +89,7 @@ const renamedRepository =
 class Upstream extends Context.Service<
   Upstream,
   { readonly sent: Ref.Ref<ReadonlyArray<Sent>>; readonly answer: Answer }
->()("test/Upstream") {
+>()("@usine/gateway/test/proxy.test/Upstream") {
   static readonly answering = (answer: Answer) =>
     Layer.effect(
       Upstream,
@@ -119,7 +120,7 @@ const fakeClient = Layer.effect(
 const lines: Array<string> = [];
 const captureLogs = Logger.layer([
   Logger.make(({ message }) => {
-    lines.push(JSON.stringify(message));
+    lines.push(jsonKey(message));
   }),
 ]);
 
@@ -215,7 +216,10 @@ describe("GatewayProxy", () => {
       yield* send("http://git.gw.test/api/v3/repos/acme/demo/pulls", {
         authorization: `token ${caller}`,
       });
-      const query = JSON.stringify({ query: "{ viewer { login } }" });
+      const json1 = jsonKey({
+        query: "{ viewer { login } }",
+      });
+      const query = json1;
       yield* send(
         "http://git.gw.test/api/graphql",
         {

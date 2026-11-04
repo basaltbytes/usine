@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { OperatorLogin } from "@usine/core/operator";
 import { fileURLToPath } from "node:url";
@@ -44,7 +45,8 @@ const seedPendingRun = (runId: RunId) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const valueDecoded1 = yield* Schema.encodeEffect(Agent)(testAgent);
-    const agent = JSON.stringify(valueDecoded1);
+    const json1 = jsonKey(valueDecoded1);
+    const agent = json1;
     const eventId = lifecycleSubmission.event.id;
     yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
       VALUES (${eventId}, ${lifecycleSubmission.event.dedupKey}, '{}', '2026-10-01T00:00:00.000Z')`;
@@ -94,7 +96,8 @@ describe("Attempt migrations", () => {
           const sql = yield* SqlClient.SqlClient;
           const valueDecoded2 = yield* Schema.encodeEffect(Agent)(testAgent);
           // Seeds the old schema directly, because the current store writes columns from later migrations.
-          const agent = JSON.stringify(valueDecoded2);
+          const json2 = jsonKey(valueDecoded2);
+          const agent = json2;
           const eventId = lifecycleSubmission.event.id;
           yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
             VALUES (${eventId}, 'upgrade-event', '{}', '2026-09-12T00:00:00.000Z')`;
@@ -104,9 +107,10 @@ describe("Attempt migrations", () => {
             VALUES (${runId}, ${eventId}, ${lifecycleSubmission.loop}, '{"_tag":"Pending"}', '2026-09-12T00:00:00.000Z', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
           yield* sql`INSERT INTO usine_steps (run_id, step_name) VALUES (${runId}, ${lifecycleSubmission.step})`;
           const decodedValue1 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
+          const json3 = jsonKey(decodedValue1);
           yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at)
-        VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${JSON.stringify(decodedValue1)}, '2026-09-12T00:00:00.000Z')`;
-          const envelope = JSON.stringify({
+        VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${json3}, '2026-09-12T00:00:00.000Z')`;
+          const json4 = jsonKey({
             _tag: "OutboundEnvelope",
             version: 4,
             attemptId: id,
@@ -114,10 +118,11 @@ describe("Attempt migrations", () => {
             sentAt: "2026-09-12T00:00:00.000Z",
             payload: { _tag: "Started", parentModel: "openai/model" },
           });
+          const envelope = json4;
           yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 1, ${envelope}, '2026-09-12T00:00:00.000Z')`;
           // v7 changed only the unstored `Start` frame; bumping the envelope literal alone once made
           // every v6 transcript unreadable.
-          const previousVersion = JSON.stringify({
+          const json5 = jsonKey({
             _tag: "OutboundEnvelope",
             version: 6,
             attemptId: id,
@@ -125,6 +130,7 @@ describe("Attempt migrations", () => {
             sentAt: "2026-09-12T00:00:01.000Z",
             payload: { _tag: "Final", result: { message: "done", facts: [] } },
           });
+          const previousVersion = json5;
           yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 2, ${previousVersion}, '2026-09-12T00:00:01.000Z')`;
         }).pipe(Effect.provide(oldDatabase)),
       );
@@ -326,13 +332,15 @@ describe("Attempt salvage check migration", () => {
         );
         const runId = RunId.make("salvage-check-run");
         const id = "salvage-check-attempt";
-        const salvage = JSON.stringify({
+        const json6 = jsonKey({
           _tag: "Pushed",
           ref: "usine/salvage/salvage-check-run/1",
           commit: "0123456789abcdef0123456789abcdef01234567",
         });
+        const salvage = json6;
         const valueDecoded3 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
-        const brain = JSON.stringify(valueDecoded3);
+        const json7 = jsonKey(valueDecoded3);
+        const brain = json7;
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* seedPendingRun(runId);
@@ -407,7 +415,8 @@ describe("Attempt start migration", () => {
         );
         const runId = RunId.make("attempt-start-run");
         const valueDecoded4 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
-        const brain = JSON.stringify(valueDecoded4);
+        const json8 = jsonKey(valueDecoded4);
+        const brain = json8;
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* seedPendingRun(runId);
@@ -595,7 +604,8 @@ describe("Run close time migration", () => {
       );
       const runId = RunId.make("closed-before-upgrade");
       const valueDecoded5 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
-      const brain = JSON.stringify(valueDecoded5);
+      const json9 = jsonKey(valueDecoded5);
+      const brain = json9;
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* seedPendingRun(runId);
@@ -663,7 +673,8 @@ describe("Transcript read model migration", () => {
             yield* seedPendingRun(runId);
             const at = DateTime.makeUnsafe("2026-11-01T00:00:00.000Z");
             const valueDecoded6 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
-            const brain = JSON.stringify(valueDecoded6);
+            const json10 = jsonKey(valueDecoded6);
+            const brain = json10;
             for (const attempt of [1, 2]) {
               const attemptId = AttemptId.make(`transcript-upgrade-${attempt}`);
               yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json)
@@ -730,7 +741,8 @@ describe("Transcript read model migration", () => {
                     payload: AttemptChannel.SessionEvent.make({ event }),
                   }),
                 );
-                const envelope = JSON.stringify(valueDecoded7);
+                const json11 = jsonKey(valueDecoded7);
+                const envelope = json11;
                 yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)
               VALUES (${attemptId}, 'outbound', ${i + 1}, ${envelope}, '2026-11-01T00:00:00.000Z')`;
                 yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)

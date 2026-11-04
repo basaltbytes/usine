@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { ConfigProvider, Effect, Option, Redacted, Schema } from "effect";
@@ -53,9 +54,7 @@ it.effect(
       assert.isTrue(Option.isNone(provisioner.apiKeys.openai));
       assert(Option.isSome(provisioner.tailnet));
       assert.strictEqual(Redacted.value(provisioner.tailnet.value.clientSecret), "client-secret");
-      const decodedValue1 = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        worker,
-      );
+      const decodedValue1 = jsonKey(worker);
       assert.notInclude(decodedValue1, "client-secret");
     }),
 );

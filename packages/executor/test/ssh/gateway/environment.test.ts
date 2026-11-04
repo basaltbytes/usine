@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { GatewayDomain, type GatewayLlmProvider } from "@usine/core/worker";
 import { Redacted } from "effect";
@@ -67,7 +68,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     const { exported, sent } = environmentFor([]);
     assert.deepStrictEqual(exported, WITHOUT_LLM);
     assert.deepStrictEqual(sent, SENT_WITHOUT_LLM);
-    assert.notInclude(JSON.stringify(exported), CALLER_TOKEN);
+    assert.notInclude(jsonKey(exported), CALLER_TOKEN);
   });
 
   it("points Claude Code at the Gateway only when the Gateway holds the Anthropic credential", () => {
@@ -109,6 +110,6 @@ describe("An Attempt's environment behind a Gateway", () => {
       withCodex["/home/usine/.usine/workers/eu-one/codex/config.toml"],
       CODEX_CONFIG,
     );
-    assert.notInclude(JSON.stringify(withCodex), CALLER_TOKEN);
+    assert.notInclude(jsonKey(withCodex), CALLER_TOKEN);
   });
 });

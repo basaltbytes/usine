@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { ItemProjectionReader, ItemProjection } from "@usine/engine/item-projection";
 import { NodeServices } from "@effect/platform-node";
@@ -261,13 +262,13 @@ export const harness = (
     );
     yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
     const request = (method: string, path: string, body?: Schema.Json) =>
-      Effect.promise(async () => {
+      Effect.gen(function* () {
         const options: RequestInit = { method };
-        if (body !== undefined) options.body = JSON.stringify(body);
-        const response = await app.handler(
-          new Request(`http://localhost/api/configuration${path}`, options),
+        if (body !== undefined) options.body = jsonKey(body);
+        const response = yield* Effect.promise(() =>
+          app.handler(new Request(`http://localhost/api/configuration${path}`, options)),
         );
-        const value: unknown = await response.json();
+        const value: unknown = yield* Effect.promise(() => response.json());
         return { status: response.status, body: value };
       });
     return {

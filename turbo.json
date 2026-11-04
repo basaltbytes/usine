@@ -8,13 +8,7 @@
     },
     "check": {
       "dependsOn": ["^build"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!README.md",
-        "!CHANGELOG.md",
-        "$TURBO_ROOT$/tooling/test/**",
-        "$TURBO_ROOT$/scripts/effect-diagnostics/*.mjs"
-      ]
+      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md", "$TURBO_ROOT$/tooling/test/**"]
     },
     "test": {
       "dependsOn": ["^build"],
@@ -25,10 +19,6 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/server/src/**"],
       "outputs": ["dist/**", "public/openapi.json"]
-    },
-    "effect:baseline": {
-      "dependsOn": ["^build"],
-      "cache": false
     }
   }
 }

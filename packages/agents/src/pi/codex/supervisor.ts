@@ -1,3 +1,9 @@
+import { Schema } from "effect";
+
+// The supervisor program embeds its source in a synchronous string replacement callback.
+// @effect-diagnostics-next-line schemaSync:off
+const quoteSource = Schema.encodeSync(Schema.fromJsonString(Schema.String));
+
 /** Remote Node program: a detached app-server supervisor and a replaceable SSH relay. */
 const source = String.raw`
 const fs = require('node:fs');
@@ -140,5 +146,5 @@ if (mode === 'stop') {
 `;
 
 export const CODEX_SUPERVISOR = source.replace("null /* supervisor source */", () =>
-  JSON.stringify(source),
+  quoteSource(source),
 );

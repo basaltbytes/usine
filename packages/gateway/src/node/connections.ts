@@ -1,3 +1,5 @@
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import type { Server } from "node:http";
 import type { Socket } from "node:net";
 import { Effect } from "effect";

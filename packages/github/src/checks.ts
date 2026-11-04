@@ -82,7 +82,7 @@ export class GitHubChecks extends Context.Service<
       head: CommitSha,
     ) => Effect.Effect<CheckFailureEvidence, GitHubAppError>;
   }
->()("@usine/github/GitHubChecks") {
+>()("@usine/github/checks/GitHubChecks") {
   static readonly layer = Layer.effect(
     GitHubChecks,
     Effect.gen(function* () {

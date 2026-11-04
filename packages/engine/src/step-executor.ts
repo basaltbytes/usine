@@ -158,4 +158,4 @@ export class StepExecutor extends Context.Service<
       io: ExecutionSink,
     ) => Effect.Effect<StepResult, AttemptFailure>;
   }
->()("@usine/engine/StepExecutor") {}
+>()("@usine/engine/step-executor/StepExecutor") {}

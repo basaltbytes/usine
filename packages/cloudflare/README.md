@@ -102,3 +102,5 @@ The Sandbox SDK 1.0 needs the `durable_object` scheduling policy, which rejects 
 ## Schema contracts
 
 API records use nominal Schema brands. `encodeClientMessage` encodes synchronously for WebSocket callbacks. `encodeServerMessage` returns an Effect that fails with `SchemaError`; yield it before sending a server message. Their JSON wire format is unchanged.
+
+Run `pnpm --filter @usine/cloudflare check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.

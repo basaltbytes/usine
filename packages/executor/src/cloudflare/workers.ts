@@ -1,3 +1,4 @@
+import { allowlistedEnvironment } from "../child-command.ts";
 import type { AttemptId } from "@usine/core/attempt";
 import { attemptConnectionsFor } from "../attempt-connections.ts";
 import { RemoteShell, type SshCommand } from "@usine/agents/child-host";
@@ -20,7 +21,7 @@ export class CloudflareWorkers extends Context.Service<
      */
     readonly removeWorker: (worker: WorkerName) => Effect.Effect<void>;
   }
->()("@usine/executor/CloudflareWorkers") {}
+>()("@usine/executor/cloudflare/workers/CloudflareWorkers") {}
 
 export interface CloudflareWorker {
   readonly address: CloudflareWorkerAddress;
@@ -63,13 +64,7 @@ export const cloudflareWorkersFor = (options: CloudflareExecutorOptions, shell: 
         Effect.provideService(HttpClient.HttpClient, http),
       );
       const sshEnvironment = {
-        ...Object.fromEntries(
-          ["HOME", "PATH", "TMPDIR"].flatMap((name) =>
-            Option.toArray(
-              Option.map(Option.fromNullishOr(process.env[name]), (value) => [name, value]),
-            ),
-          ),
-        ),
+        ...(yield* allowlistedEnvironment(["HOME", "PATH", "TMPDIR"])),
         [SHELL_ENVIRONMENT.workerUrl]: address.workerUrl.origin,
         [SHELL_ENVIRONMENT.accessClientId]: Redacted.value(address.accessClientId),
         [SHELL_ENVIRONMENT.accessClientSecret]: Redacted.value(address.accessClientSecret),

@@ -1,3 +1,5 @@
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
 
 const cloudInit = readFileSync(

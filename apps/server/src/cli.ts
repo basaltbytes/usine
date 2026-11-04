@@ -1,10 +1,12 @@
+import type { HttpServerError } from "effect/http";
 import { UiOrigin } from "@usine/config/factory";
 import { UpgradeChannel } from "@usine/core/upgrade";
 import { ConfigCommand, parseConfigCommand } from "./configuration/command.ts";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
+// volatileRoots and volatileRoot synchronously normalize paths for CLI validation.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import { RunId } from "@usine/core/run";
 import {
   type Brand,
@@ -14,10 +16,10 @@ import {
   Effect,
   FileSystem,
   Option,
+  Path,
   Schema,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import type { ServeError } from "effect/http/HttpServerError";
 
 export const DEFAULT_PORT = 7_331;
 /** The address that the HTTP server listens on and the port check probes. */
@@ -321,21 +323,21 @@ const upCommand = (
         if (value === undefined) return yield* usageError();
         port = Option.some(value);
         index += 1;
-      } else if (arg?.startsWith("--port=")) {
+      } else if (arg?.startsWith("--port=") === true) {
         port = Option.some(arg.slice("--port=".length));
       } else if (arg === "--origin") {
         const value = args[index + 1];
         if (value === undefined) return yield* usageError();
         origin = Option.some(value);
         index += 1;
-      } else if (arg?.startsWith("--origin=")) {
+      } else if (arg?.startsWith("--origin=") === true) {
         origin = Option.some(arg.slice("--origin=".length));
       } else if (arg === "--log-level") {
         const value = args[index + 1];
         if (value === undefined) return yield* usageError();
         logLevel = Option.some(value);
         index += 1;
-      } else if (arg?.startsWith("--log-level=")) {
+      } else if (arg?.startsWith("--log-level=") === true) {
         logLevel = Option.some(arg.slice("--log-level=".length));
       } else if (arg === ALLOW_VOLATILE_FLAG) {
         allowVolatileInstance = true;
@@ -550,7 +552,10 @@ const PackageMetadataFromJson = Schema.fromJsonString(
 
 export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const packagePath = fileURLToPath(new URL("../package.json", import.meta.url));
+  const path = yield* Path.Path;
+  const packagePath = yield* path
+    .fromFileUrl(new URL("../package.json", import.meta.url))
+    .pipe(Effect.mapError((cause) => CliVersionError.make({ cause })));
   const source = yield* fileSystem
     .readFileString(packagePath)
     .pipe(Effect.mapError((cause) => CliVersionError.make({ cause })));
@@ -563,7 +568,7 @@ export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
 const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE") });
 
 /** Returns `PortInUseError` for `EADDRINUSE`, otherwise `ServerStartError`. */
-export const serverStartError = (port: Port, error: ServeError) =>
+export const serverStartError = (port: Port, error: HttpServerError.ServeError) =>
   Schema.is(AddressInUse)(error.cause)
     ? PortInUseError.make({ port, holder: Option.none() })
     : ServerStartError.make({ port, cause: error.cause });

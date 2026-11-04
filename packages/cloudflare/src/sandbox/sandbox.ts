@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { CloudflareImageName } from "@usine/core/worker";
 import { DateTime, Duration, Effect, Layer, Option, Schema, Semaphore } from "effect";
 import { HttpServer } from "effect/http";

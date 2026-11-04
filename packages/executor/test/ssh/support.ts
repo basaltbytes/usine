@@ -1,3 +1,5 @@
+import { jsonKey } from "@usine/core/json-key";
+import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
@@ -42,10 +44,10 @@ import {
   Redacted,
   Sink,
   Stream,
+  Schema,
 } from "effect";
 import { HttpClient } from "effect/http";
-import { ChildProcessSpawner } from "effect/process";
-import type { StandardCommand } from "effect/process/ChildProcess";
+
 import {
   CheckoutRequest,
   claudeLoginLockLayer,
@@ -109,7 +111,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 interface RemoteCall {
-  readonly command: StandardCommand;
+  readonly command: ChildProcess.StandardCommand;
   readonly line: string;
   readonly input: string;
   /** The container that ran the command, if it ran through `docker exec`. */
@@ -133,7 +135,7 @@ interface FakeContainer {
 
 /** A fake SSH client that forwards a local port to a Gateway's admin API. */
 interface FakeForward {
-  readonly command: StandardCommand;
+  readonly command: ChildProcess.StandardCommand;
   readonly port: number;
   /** Whether the client is running. */
   live: boolean;
@@ -281,7 +283,7 @@ const meminfo = (memoryGib: number, swapGib: number): string => {
 };
 
 /** Returns the remote command line after `--` in an SSH invocation. */
-const remoteLine = (command: StandardCommand): string => {
+const remoteLine = (command: ChildProcess.StandardCommand): string => {
   const separator = command.args.indexOf("--");
   return separator < 0 ? "" : (command.args[separator + 1] ?? "");
 };
@@ -295,7 +297,7 @@ const remoteWords = (line: string): Array<string> =>
   );
 
 /** Returns the variables an SSH invocation sends to the machine that have a value in its environment. */
-export const sentVariables = (command: StandardCommand): Array<string> => {
+export const sentVariables = (command: ChildProcess.StandardCommand): Array<string> => {
   const option = command.args.find((arg) => arg.startsWith("SendEnv="));
   const names = option === undefined ? [] : option.slice("SendEnv=".length).split(" ");
   return names.filter((name) => command.options.env?.[name] !== undefined);
@@ -305,7 +307,7 @@ export const sentVariables = (command: StandardCommand): Array<string> => {
 export const KILL_CHILDREN = `exec 'sh' '-c' ${quote(CHILD_KILL_SCRIPT)} 'sh' '${WORKTREE}'`;
 
 /** Returns the decoded bytes that the executor streams to a command's stdin. */
-const standardInput = (command: StandardCommand): Effect.Effect<string> => {
+const standardInput = (command: ChildProcess.StandardCommand): Effect.Effect<string> => {
   const stdin = command.options.stdin;
   if (!Stream.isStream(stdin)) return Effect.succeed("");
   return Stream.runCollect(stdin).pipe(
@@ -537,7 +539,7 @@ export const fakeMachine = () => {
     }
     return undefined;
   };
-  const respond = (command: StandardCommand, line: string, input: string) => {
+  const respond = (command: ChildProcess.StandardCommand, line: string, input: string) => {
     const configIndex = command.args.indexOf("-F");
     const config = state.localFiles.get(command.args[configIndex + 1] ?? "") ?? "";
     const destination = command.args[command.args.indexOf("--") - 1] ?? "";
@@ -647,7 +649,7 @@ export const fakeMachine = () => {
       return oneShotHandle(`${state.codexVersion}\n`, 0);
     if (line === "exec 'claude' 'auth' 'status' '--json'")
       return oneShotHandle(
-        JSON.stringify({
+        jsonKey({
           loggedIn: state.claudeLoggedIn,
           authMethod: "claude.ai",
           apiProvider: "firstParty",
@@ -696,7 +698,9 @@ export const fakeMachine = () => {
     return oneShotHandle("", 0);
   };
   // Behaves like `ssh -N -L 127.0.0.1:<port>:127.0.0.1:<admin port> <gateway>`: prints its LocalCommand output once listening, then runs until dropped or killed.
-  const startForward = Effect.fn("FakeMachine.startForward")(function* (command: StandardCommand) {
+  const startForward = Effect.fn("FakeMachine.startForward")(function* (
+    command: ChildProcess.StandardCommand,
+  ) {
     if (!state.gatewayAcceptsSsh)
       return oneShotHandle(
         "",
@@ -869,12 +873,16 @@ export const fails: StubParent = () =>
 export const writesCredential = (line: string) => line.includes("IFS= read -r token");
 
 /** Returns a logger that collects every log message and its fields as text. */
+export const CapturedLog = Schema.fromJsonString(
+  Schema.Tuple([Schema.Unknown, Schema.Record(Schema.String, Schema.Unknown)]),
+);
+
 export const capturedLogs = () => {
   const lines: Array<string> = [];
   const warnings: Array<string> = [];
   const infos: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ message, logLevel }) => {
-    const line = JSON.stringify(message);
+    const line = jsonKey(message);
     lines.push(line);
     if (logLevel === "Warn") warnings.push(line);
     if (logLevel === "Info") infos.push(line);

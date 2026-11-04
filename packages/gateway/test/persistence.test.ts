@@ -1,9 +1,12 @@
-import { mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { jsonKey } from "@usine/core/json-key";
+import { NodeFileSystem } from "@effect/platform-node";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
-import { DateTime, Effect, Layer, Redacted } from "effect";
+import { DateTime, Effect, Layer, Redacted, FileSystem } from "effect";
 import { TestClock } from "effect/testing";
 import { Attachment, InstallationCredential } from "../src/attachment/attachment.ts";
 import { Attachments } from "../src/attachment/store.ts";
@@ -29,8 +32,16 @@ const attachment = (id = ATTACHMENT, minutes = 60, token = TOKEN) =>
   });
 
 const directory = Effect.acquireRelease(
-  Effect.promise(() => mkdtemp(join(tmpdir(), "gateway-attachments-"))),
-  (path) => Effect.promise(() => rm(path, { recursive: true, force: true })),
+  Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+    fileSystem.makeTempDirectory({
+      directory: dirname(join(tmpdir(), "gateway-attachments-")),
+      prefix: basename(join(tmpdir(), "gateway-attachments-")),
+    }),
+  ),
+  (path) =>
+    Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.remove(path, { recursive: true, force: true }),
+    ).pipe(Effect.orDie),
 );
 const persisted = (path: string) =>
   fileAttachmentsLayer(path).pipe(Layer.provide(settingsLayer(NO_PROVIDERS)));
@@ -51,11 +62,15 @@ describe("encrypted attachments", () => {
           yield* store.attach(attachment(ATTACHMENT, 120, `${TOKEN}-renewed`));
           yield* store.learnNewName(ATTACHMENT, RepositoryName.make("acme/renamed"));
         }).pipe(Effect.provide(persisted(path)));
-        const bytes = yield* Effect.promise(() => readFile(join(path, "attachments.enc")));
+        const bytes = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFile(join(path, "attachments.enc")).pipe(Effect.map(Buffer.from)),
+        );
         assert.isFalse(bytes.includes(TOKEN));
         assert.strictEqual(
-          (yield* Effect.promise(() => stat(join(path, "attachments.enc")))).mode & 0o777,
-          0o600,
+          (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.stat(join(path, "attachments.enc")),
+          )).mode & 511,
+          384,
         );
         yield* Effect.gen(function* () {
           const store = yield* Attachments;
@@ -76,7 +91,7 @@ describe("encrypted attachments", () => {
           assert.strictEqual((yield* store.find(ATTACHMENT))._tag, "MissingAttachment");
           assert.strictEqual((yield* store.find(OTHER_ATTACHMENT))._tag, "MissingAttachment");
         }).pipe(Effect.provide(persisted(path)));
-      }).pipe(Effect.scoped),
+      }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
   it.effect("a failed write neither changes the live credential nor acknowledges a detach", () =>
@@ -87,15 +102,20 @@ describe("encrypted attachments", () => {
       yield* Effect.gen(function* () {
         const store = yield* Attachments;
         yield* store.attach(attachment());
-        yield* Effect.promise(async () => {
-          await rename(state, `${state}-saved`);
-          await writeFile(state, "not a directory");
-        });
+        {
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.rename(state, `${state}-saved`),
+          );
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.writeFileString(state, "not a directory"),
+          );
+        }
         const failedRenewal = yield* store
           .attach(attachment(ATTACHMENT, 120, "replacement-secret"))
           .pipe(Effect.flip);
         assert.strictEqual(failedRenewal._tag, "AttachmentPersistenceError");
-        assert.notInclude(JSON.stringify(failedRenewal), TOKEN);
+        const json1 = jsonKey(failedRenewal);
+        assert.notInclude(json1, TOKEN);
         const failedDetach = yield* store.detach(ATTACHMENT).pipe(Effect.flip);
         assert.strictEqual(failedDetach._tag, "AttachmentPersistenceError");
         const found = yield* store.find(ATTACHMENT);
@@ -104,10 +124,12 @@ describe("encrypted attachments", () => {
             found.attachment.credential._tag === "InstallationCredential",
         );
         assert.strictEqual(Redacted.value(found.attachment.credential.token), TOKEN);
-        yield* Effect.promise(async () => {
-          await rm(state);
-          await rename(`${state}-saved`, state);
-        });
+        {
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.remove(state));
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.rename(`${state}-saved`, state),
+          );
+        }
       }).pipe(Effect.provide(persisted(state)));
       yield* Effect.gen(function* () {
         const found = yield* (yield* Attachments).find(ATTACHMENT);
@@ -117,7 +139,7 @@ describe("encrypted attachments", () => {
         );
         assert.strictEqual(Redacted.value(found.attachment.credential.token), TOKEN);
       }).pipe(Effect.provide(persisted(state)));
-    }).pipe(Effect.scoped),
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 
   it.effect(
@@ -130,25 +152,33 @@ describe("encrypted attachments", () => {
           Effect.provide(persisted(path)),
         );
         const snapshot = join(path, "attachments.enc");
-        const original = yield* Effect.promise(() => readFile(snapshot));
+        const original = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFile(snapshot).pipe(Effect.map(Buffer.from)),
+        );
         const wrongKey = fileAttachmentsLayer(path).pipe(
           Layer.provide(settingsLayer(NO_PROVIDERS, "changed-caller-key-01234567890123456789")),
         );
         const error = yield* Effect.void.pipe(Effect.provide(wrongKey), Effect.flip);
         assert.strictEqual(error._tag, "AttachmentPersistenceError");
-        const responseBody = yield* Effect.promise(() => readFile(snapshot));
+        const responseBody = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFile(snapshot).pipe(Effect.map(Buffer.from)),
+        );
         assert.deepStrictEqual(responseBody, original);
         for (const bytes of [
           Buffer.alloc(0),
           Buffer.from("invalid snapshot"),
           Buffer.from(original).fill(original.readUInt8(28) ^ 1, 28, 29),
         ]) {
-          yield* Effect.promise(() => writeFile(snapshot, bytes));
+          yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.writeFile(snapshot, bytes),
+          );
           const corrupt = yield* Effect.void.pipe(Effect.provide(persisted(path)), Effect.flip);
           assert.strictEqual(corrupt._tag, "AttachmentPersistenceError");
-          const currentResponseBody = yield* Effect.promise(() => readFile(snapshot));
+          const currentResponseBody = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFile(snapshot).pipe(Effect.map(Buffer.from)),
+          );
           assert.deepStrictEqual(currentResponseBody, bytes);
         }
-      }).pipe(Effect.scoped),
+      }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
   );
 });

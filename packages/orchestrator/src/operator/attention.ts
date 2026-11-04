@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { InstanceScope } from "@usine/core/access";
 import type { ChangeAudience } from "@usine/core/changes";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
@@ -39,7 +40,7 @@ export const attentionKey = (need: NeedView): AttentionKey => {
       : encodeNeed(need);
   return AttentionKey.make({
     id: need.id,
-    revision: AttentionRevision.make(JSON.stringify(content)),
+    revision: AttentionRevision.make(jsonKey(content)),
   });
 };
 
@@ -121,14 +122,12 @@ export const partitionNeeds = (
   needs: ReadonlyArray<NeedView>,
   acknowledgements: ReadonlyArray<Pick<AttentionKey, "id" | "revision">>,
 ) => {
-  const dismissed = new Set(
-    acknowledgements.map(({ id, revision }) => JSON.stringify([id, revision])),
-  );
+  const dismissed = new Set(acknowledgements.map(({ id, revision }) => jsonKey([id, revision])));
   const needsYou: Array<NeedView> = [];
   const dismissedNeeds: Array<NeedView> = [];
   for (const need of needs) {
     const { id, revision } = attentionKey(need);
-    (dismissed.has(JSON.stringify([id, revision])) ? dismissedNeeds : needsYou).push(need);
+    (dismissed.has(jsonKey([id, revision])) ? dismissedNeeds : needsYou).push(need);
   }
   return { needsYou, dismissedNeeds };
 };

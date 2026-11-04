@@ -1,33 +1,35 @@
+import { NodeFileSystem } from "@effect/platform-node";
+import { Effect, FileSystem } from "effect";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawnSync } from "node:child_process";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import { join } from "node:path";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { assert, expect, it } from "vitest";
+import { assert, expect, it } from "@effect/vitest";
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
-const test = it.extend<{ directory: string }>({
-  directory: async ({ task }, use) => {
-    const directory = await realpath(
-      await mkdtemp(join(sqliteTempDirectory(), `usine-backup-${task.id}-`)),
-    );
-    try {
-      await use(directory);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  },
+const directoryFixture = Effect.gen(function* () {
+  const directory = yield* Effect.acquireRelease(
+    Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.makeTempDirectory({
+        directory: dirname(join(sqliteTempDirectory(), "usine-backup-")),
+        prefix: basename(join(sqliteTempDirectory(), "usine-backup-")),
+      }),
+    ).pipe(
+      Effect.flatMap((directory) =>
+        Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.realPath(directory)),
+      ),
+    ),
+    (directory) =>
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.remove(directory, { recursive: true, force: true }),
+      ).pipe(Effect.orDie),
+  );
+  return directory;
 });
 
 const runBackup = (directory: string, output: string) =>
@@ -58,39 +60,66 @@ const evidence = (filename: string) => {
   }
 };
 
-test.for([
+it.live.each([
   { kind: "missing", reason: /NotFound/ },
   { kind: "corrupt", reason: /not a database/ },
   { kind: "directory", reason: /regular SQLite file/ },
 ])(
   "reports an unusable $kind source without creating a backup",
+  ({ kind, reason }) =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const runtime = join(directory, ".usine");
+      const filename = join(runtime, "runtime.sqlite");
+      if (kind !== "missing") {
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.makeDirectory(runtime),
+        );
+        // The durable storage is copied first; the failed runtime copy must remove it again.
+        openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176).close();
+      }
+      if (kind === "directory")
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.makeDirectory(filename),
+        );
+      if (kind === "corrupt")
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.writeFileString(filename, "not SQLite"),
+        );
+      const originalEntries = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readDirectory(directory),
+      );
+      const output = join(directory, "backup.sqlite");
+
+      const result = runBackup(directory, output);
+
+      assert.strictEqual(result.status, 1, result.stderr);
+      assert.include(result.stderr, filename);
+      assert.match(result.stderr, reason);
+      if (kind === "corrupt") assert.include(result.stderr, output);
+      const actual1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readDirectory(directory),
+      );
+      assert.deepStrictEqual(actual1, originalEntries);
+      if (kind === "missing") {
+        const missingFile1 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(runtime),
+        ).pipe(Effect.flip);
+        expect(missingFile1.reason.cause).toMatchObject({
+          code: "ENOENT",
+        });
+      }
+      if (kind === "corrupt") {
+        const actual2 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(filename),
+        );
+        assert.strictEqual(actual2, "not SQLite");
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
   slowCli,
-  async ({ kind, reason }, { directory }) => {
-    const runtime = join(directory, ".usine");
-    const filename = join(runtime, "runtime.sqlite");
-    if (kind !== "missing") {
-      await mkdir(runtime);
-      // The durable storage is copied first; the failed runtime copy must remove it again.
-      openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176).close();
-    }
-    if (kind === "directory") await mkdir(filename);
-    if (kind === "corrupt") await writeFile(filename, "not SQLite");
-    const originalEntries = await readdir(directory);
-    const output = join(directory, "backup.sqlite");
-
-    const result = runBackup(directory, output);
-
-    assert.strictEqual(result.status, 1, result.stderr);
-    assert.include(result.stderr, filename);
-    assert.match(result.stderr, reason);
-    if (kind === "corrupt") assert.include(result.stderr, output);
-    assert.deepStrictEqual(await readdir(directory), originalEntries);
-    if (kind === "missing") await expect(stat(runtime)).rejects.toMatchObject({ code: "ENOENT" });
-    if (kind === "corrupt") assert.strictEqual(await readFile(filename, "utf8"), "not SQLite");
-  },
 );
 
-test.for([
+it.live.each([
   { outputName: "backup.sqlite", durableName: "backup.durable.sqlite" },
   { outputName: "backup.db", durableName: "backup.durable.db" },
   {
@@ -100,33 +129,41 @@ test.for([
   { outputName: "nightly", durableName: "nightly.durable.sqlite" },
 ])(
   "copies open stores to $outputName and $durableName",
+  ({ outputName, durableName }) =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const runtime = join(directory, ".usine");
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeDirectory(runtime),
+      );
+      const open = [
+        openWithUncheckpointedRow(join(runtime, "runtime.sqlite"), 183),
+        openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176),
+      ];
+      try {
+        const output = join(directory, outputName);
+
+        const result = runBackup(directory, output);
+
+        assert.strictEqual(result.status, 0, result.stderr);
+        const durable = join(directory, durableName);
+        assert.include(result.stdout, output);
+        assert.include(result.stdout, durable);
+        assert.deepStrictEqual(evidence(output), [{ value: 183 }]);
+        assert.deepStrictEqual(evidence(durable), [{ value: 176 }]);
+        assert.strictEqual(
+          (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.stat(durable)))
+            .mode & 0o777,
+          0o600,
+        );
+      } finally {
+        for (const database of open) database.close();
+      }
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
   slowCli,
-  async ({ outputName, durableName }, { directory }) => {
-    const runtime = join(directory, ".usine");
-    await mkdir(runtime);
-    const open = [
-      openWithUncheckpointedRow(join(runtime, "runtime.sqlite"), 183),
-      openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176),
-    ];
-    try {
-      const output = join(directory, outputName);
-
-      const result = runBackup(directory, output);
-
-      assert.strictEqual(result.status, 0, result.stderr);
-      const durable = join(directory, durableName);
-      assert.include(result.stdout, output);
-      assert.include(result.stdout, durable);
-      assert.deepStrictEqual(evidence(output), [{ value: 183 }]);
-      assert.deepStrictEqual(evidence(durable), [{ value: 176 }]);
-      assert.strictEqual((await stat(durable)).mode & 0o777, 0o600);
-    } finally {
-      for (const database of open) database.close();
-    }
-  },
 );
 
-test.for([
+it.live.each([
   { kind: "existing", output: "backup.sqlite", reason: "AlreadyExists" },
   { kind: "source", output: ".usine/runtime.sqlite", reason: "AlreadyExists" },
   { kind: "symlink", output: "backup.sqlite", reason: "AlreadyExists" },
@@ -134,34 +171,72 @@ test.for([
   { kind: "long filename", output: `${"b".repeat(256)}.sqlite`, reason: "ENAMETOOLONG" },
 ])(
   "reports a $kind destination and preserves existing files",
+  ({ kind, output, reason }) =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const runtime = join(directory, ".usine");
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeDirectory(runtime),
+      );
+      const filename = join(runtime, "runtime.sqlite");
+      const database = new DatabaseSync(filename);
+      try {
+        database.exec("CREATE TABLE evidence (value); INSERT INTO evidence VALUES (74)");
+      } finally {
+        database.close();
+      }
+      const original = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFile(filename).pipe(Effect.map(Buffer.from)),
+      );
+      const destination = join(directory, output);
+      if (kind === "existing")
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.writeFileString(destination, "previous backup"),
+        );
+      if (kind === "symlink")
+        yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.symlink(filename, destination),
+        );
+      const originalEntries = (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readDirectory(directory),
+      )).sort();
+      const originalRuntimeEntries = (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readDirectory(runtime),
+      )).sort();
+
+      const result = runBackup(directory, destination);
+
+      assert.strictEqual(result.status, 1, result.stderr);
+      assert.include(result.stderr, destination);
+      assert.include(result.stderr, reason);
+      const actual3 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFile(filename).pipe(Effect.map(Buffer.from)),
+      );
+      assert.deepStrictEqual(actual3, original);
+      if (kind === "existing") {
+        const actual4 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(destination),
+        );
+        assert.strictEqual(actual4, "previous backup");
+      }
+      if (kind === "symlink") {
+        const actual5 = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.realPath(destination),
+        );
+        assert.strictEqual(actual5, filename);
+      }
+      assert.deepStrictEqual(
+        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readDirectory(directory),
+        )).sort(),
+        originalEntries,
+      );
+      assert.deepStrictEqual(
+        (yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readDirectory(runtime),
+        )).sort(),
+        originalRuntimeEntries,
+      );
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
   slowCli,
-  async ({ kind, output, reason }, { directory }) => {
-    const runtime = join(directory, ".usine");
-    await mkdir(runtime);
-    const filename = join(runtime, "runtime.sqlite");
-    const database = new DatabaseSync(filename);
-    try {
-      database.exec("CREATE TABLE evidence (value); INSERT INTO evidence VALUES (74)");
-    } finally {
-      database.close();
-    }
-    const original = await readFile(filename);
-    const destination = join(directory, output);
-    if (kind === "existing") await writeFile(destination, "previous backup");
-    if (kind === "symlink") await symlink(filename, destination);
-    const originalEntries = (await readdir(directory)).sort();
-    const originalRuntimeEntries = (await readdir(runtime)).sort();
-
-    const result = runBackup(directory, destination);
-
-    assert.strictEqual(result.status, 1, result.stderr);
-    assert.include(result.stderr, destination);
-    assert.include(result.stderr, reason);
-    assert.deepStrictEqual(await readFile(filename), original);
-    if (kind === "existing")
-      assert.strictEqual(await readFile(destination, "utf8"), "previous backup");
-    if (kind === "symlink") assert.strictEqual(await realpath(destination), filename);
-    assert.deepStrictEqual((await readdir(directory)).sort(), originalEntries);
-    assert.deepStrictEqual((await readdir(runtime)).sort(), originalRuntimeEntries);
-  },
 );

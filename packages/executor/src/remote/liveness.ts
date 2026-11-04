@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import {
@@ -306,7 +307,7 @@ export const workerWatchesFor = (
     // Boat sandboxes can share a destination host while using different forwarded ports.
     const watched = new Map<string, Watched>();
     const keyOf = (watch: WorkerWatch) =>
-      `${watch.worker} ${Option.getOrElse(watch.machine, () => `${watch.shell.destination} ${JSON.stringify(watch.shell.ssh)}`)}`;
+      `${watch.worker} ${Option.getOrElse(watch.machine, () => `${watch.shell.destination} ${jsonKey(watch.shell.ssh)}`)}`;
 
     const join = (watch: WorkerWatch) =>
       Semaphore.withPermit(
@@ -381,6 +382,6 @@ export const workerWatchesFor = (
       );
 
     return {
-      watch: (watch) => Effect.acquireRelease(join(watch), () => leave(watch)),
+      watch: (watch) => Effect.acquireRelease(join(watch), () => leave(watch).pipe(Effect.orDie)),
     } satisfies WorkerWatches;
   });

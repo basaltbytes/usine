@@ -1,3 +1,7 @@
+import { jsonKey } from "@usine/core/json-key";
+import { webRequest } from "../../../tooling/test/http.mts";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, request, type RequestListener } from "node:http";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -41,7 +45,7 @@ const gatewayRecordingLogs = gateway.pipe(
     Logger.layer(
       [
         Logger.make(({ logLevel, message }) => {
-          gatewayLines.push(JSON.stringify({ level: logLevel, message }));
+          gatewayLines.push(jsonKey({ level: logLevel, message }));
         }),
       ],
       { mergeWithExisting: true },
@@ -74,7 +78,7 @@ const relayToUpstream = (handler: RequestListener) =>
     const messages: Array<string> = [];
     const logs = Logger.layer([
       Logger.make(({ message }) => {
-        messages.push(JSON.stringify(message));
+        messages.push(jsonKey(message));
       }),
     ]);
     const upstream = createServer(handler);
@@ -164,8 +168,8 @@ describe("the Node gateway", () => {
     return Effect.gen(function* () {
       const { proxy, admin } = yield* GatewayAddresses;
       for (const listener of [proxy, admin]) {
-        yield* Effect.promise(async () => {
-          const response = await fetch(`http://${listener.host}:${listener.port}/`, {
+        {
+          const response = yield* webRequest(`http://${listener.host}:${listener.port}/`, {
             headers: {
               host: "git.gw.test",
               "x-usine-gateway-token": "synthetic-caller-secret",
@@ -174,15 +178,16 @@ describe("the Node gateway", () => {
               cookie: "synthetic-cookie-secret",
             },
           });
-          await response.text();
-        });
+          yield* Effect.promise(() => response.text());
+        }
       }
       assert.isTrue(spans.some((span) => span.name === "GatewayProxy.handle"));
       for (const span of spans)
         assert.isFalse(
           [...span.attributes.keys()].some((name) => name.startsWith("http.request.header.")),
         );
-      assert.notInclude(JSON.stringify(spans.map((span) => [...span.attributes])), "synthetic-");
+      const json1 = jsonKey(spans.map((span) => [...span.attributes]));
+      assert.notInclude(json1, "synthetic-");
     }).pipe(Effect.provide(gateway), Effect.provideService(Tracer.Tracer, tracer));
   });
 
@@ -192,7 +197,7 @@ describe("the Node gateway", () => {
       const messages: Array<string> = [];
       const logs = Logger.layer([
         Logger.make(({ message }) => {
-          const line = JSON.stringify(message);
+          const line = jsonKey(message);
           messages.push(line);
           if (line.includes('"error":"UpstreamBodyFailure"'))
             Deferred.doneUnsafe(failed, Effect.void);
@@ -320,8 +325,13 @@ describe("the Node gateway", () => {
               HttpClientRequest.bodyText(json, "application/json"),
             ),
           );
-        assert.strictEqual((yield* attach(JSON.stringify(body))).status, 200);
-        assert.strictEqual((yield* attach(JSON.stringify({ ...body, typo: true }))).status, 400);
+        const json2 = jsonKey(body);
+        assert.strictEqual((yield* attach(json2)).status, 200);
+        const json3 = jsonKey({
+          ...body,
+          typo: true,
+        });
+        assert.strictEqual((yield* attach(json3)).status, 400);
       }).pipe(Effect.provide(gatewayRecordingLogs)),
   );
 

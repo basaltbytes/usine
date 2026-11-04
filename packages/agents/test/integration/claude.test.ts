@@ -1,7 +1,8 @@
+import { Crypto, Config, Effect, type FileSystem, Layer, type Path, Schema } from "effect";
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { Config, Effect, type FileSystem, Layer, type Path, Schema } from "effect";
+
 import { ClaudeChildBackend, ClaudeLoginLock } from "../../src/runtime.ts";
 import { claudeChildBackendLayer, claudeSdkLive } from "../../src/pi/claude/claude.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
@@ -20,7 +21,11 @@ const brain = Effect.gen(function* () {
 const noLoginLock = Layer.succeed(ClaudeLoginLock)({ withLock: () => (effect) => effect });
 
 const live = <A, E>(
-  effect: Effect.Effect<A, E, ClaudeChildBackend | FileSystem.FileSystem | Path.Path>,
+  effect: Effect.Effect<
+    A,
+    E,
+    ClaudeChildBackend | FileSystem.FileSystem | Path.Path | Crypto.Crypto
+  >,
 ) =>
   effect.pipe(
     Effect.provide(

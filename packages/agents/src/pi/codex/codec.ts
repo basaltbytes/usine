@@ -2,14 +2,9 @@ import { AgentSessionId, RateLimitWindow as CoreRateLimitWindow } from "@usine/c
 import { DateTime, Effect, Option, Schema } from "effect";
 import {
   type ErrorNotification,
-  type ModelListParams,
   type RateLimitWindow,
-  type ThreadStartParams,
   type ToolItem,
-  type TurnInterruptParams,
   type TurnCompleted,
-  type TurnStartParams,
-  type TurnSteerParams,
   type UserMessageItem,
   UserTextInput,
 } from "../../protocol/codex.ts";
@@ -20,23 +15,6 @@ import {
   SessionOperationError,
 } from "../../runtime.ts";
 import { type CodexClient, operationError } from "./app-server.ts";
-
-type CodexRequestPayload =
-  | ModelListParams
-  | ThreadStartParams
-  | TurnStartParams
-  | TurnSteerParams
-  | TurnInterruptParams;
-
-/** Returns typed Codex request parameters as JSON for the app-server transport. */
-export const json = (value: CodexRequestPayload): Schema.Json => {
-  // The request parameters are already validated.
-  // @effect-diagnostics-next-line schemaSync:off
-  const encoded = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(value);
-  // The serialized request contains already validated values.
-  // @effect-diagnostics-next-line schemaSync:off
-  return Schema.decodeSync(Schema.fromJsonString(Schema.Json))(encoded);
-};
 
 /** Returns the text of a recorded user message as the executor sent it. */
 export const userMessageText = (item: typeof UserMessageItem.Type): string =>

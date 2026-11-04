@@ -62,8 +62,12 @@ export const configureHarnessHttp = Effect.fn("DurableHarness.configureHttp")(fu
   const replacedFetch = yield* Effect.try({
     try: () => {
       const proxy = httpProxy?.trim();
-      if (proxy) {
+      if (proxy !== undefined && proxy !== "") {
+        // The vendor proxy agent reads the host environment; Config has no environment setter.
+        // @effect-diagnostics-next-line processEnvInEffect:off
         process.env.HTTP_PROXY ??= proxy;
+        // The vendor proxy agent reads the host environment; Config has no environment setter.
+        // @effect-diagnostics-next-line processEnvInEffect:off
         process.env.HTTPS_PROXY ??= proxy;
       }
       const dispatcher = withErrorListener(

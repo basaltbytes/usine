@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { WorkerStatus } from "../../src/worker-status.ts";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { configurationLayer } from "../support/configuration.ts";
@@ -200,7 +201,8 @@ describe("Statistics cache", () => {
         const reader = yield* RunReader;
         const input = submission(1);
         const valueDecoded1 = yield* Schema.encodeEffect(Agent)(input.agent);
-        const agent = JSON.stringify(valueDecoded1);
+        const json1 = jsonKey(valueDecoded1);
+        const agent = json1;
         yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
           VALUES (${input.event.id}, ${input.event.dedupKey}, '{}', '2026-10-25T00:00:00.000Z')`;
         yield* sql`INSERT INTO usine_trigger_events (event_id, item_key, loop_name, step_name, approval, repository, revision, task, agent_json)
@@ -208,7 +210,8 @@ describe("Statistics cache", () => {
         const valueDecoded2 = yield* Schema.encodeEffect(RunState.RunState)(
           RunState.Pending.make(),
         );
-        const pending = JSON.stringify(valueDecoded2);
+        const json2 = jsonKey(valueDecoded2);
+        const pending = json2;
         yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
           VALUES ('cached-run', ${input.event.id}, ${input.loop}, ${pending}, '2026-10-25T00:00:00.000Z', ${input.repository}, ${input.revision}, ${input.task}, ${agent})`;
         yield* sql`INSERT INTO usine_steps (run_id, step_name) VALUES ('cached-run', ${input.step})`;
@@ -225,7 +228,8 @@ describe("Statistics cache", () => {
         }
         assert.strictEqual(reads, 3);
         const valueDecoded3 = yield* Schema.encodeEffect(RunState.RunState)(RunState.Failed.make());
-        const failed = JSON.stringify(valueDecoded3);
+        const json3 = jsonKey(valueDecoded3);
+        const failed = json3;
         yield* sql`UPDATE usine_runs SET state_json = ${failed}, closed_at = '2026-10-25T01:00:00.000Z' WHERE run_id = 'cached-run'`;
         for (const window of ["7d", "30d", "all"] as const) {
           const nextStatistics = yield* cached(fixtureInstance, window);

@@ -1,5 +1,9 @@
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { mkdtempSync, rmSync } from "node:fs";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { assert } from "@effect/vitest";
 import { type ChildHost, LocalProcess } from "@usine/agents/child-host";

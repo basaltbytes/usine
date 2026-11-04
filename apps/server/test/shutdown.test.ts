@@ -1,3 +1,5 @@
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assert, describe, it } from "vitest";

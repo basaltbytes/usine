@@ -93,7 +93,7 @@ export class LabelReconciler extends Context.Service<
       existing: ReadonlyArray<StoredRepositoryLabel>,
     ) => Effect.Effect<LabelReconciliation>;
   }
->()("@usine/orchestrator/LabelReconciler") {
+>()("@usine/orchestrator/label-reconciler/LabelReconciler") {
   /** Provides label reconciliation using `GitHubLabelWriter`. */
   static readonly layer = Layer.effect(
     LabelReconciler,

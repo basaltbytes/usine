@@ -1,3 +1,5 @@
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import type { Context as ChordContext } from "@earendil-works/chord";
 import type { DocumentWatch, JsonObject } from "@earendil-works/pi-durable";
 
@@ -10,6 +12,8 @@ export const firstAccepted = <T extends JsonObject>(
   accept: (value: Readonly<T>) => boolean,
   context: ChordContext,
 ): Promise<Readonly<T>> =>
+  // The durable SDK accepts a Promise and calls the watch callback outside Effect.
+  // @effect-diagnostics-next-line newPromise:off
   new Promise((resolve, reject) => {
     const signal = context.abortSignal;
     const settle = (finish: () => void) => {

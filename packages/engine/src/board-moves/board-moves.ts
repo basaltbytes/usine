@@ -92,7 +92,7 @@ export class BoardMoves extends Context.Service<
       since: DateTime.Utc,
     ) => Effect.Effect<ReadonlyArray<BoardMoveRecord>, EnginePersistenceError>;
   }
->()("@usine/engine/BoardMoves") {
+>()("@usine/engine/board-moves/board-moves/BoardMoves") {
   /** Stores board moves in the supplied runtime database for attribution of label changes. */
   static readonly layer = Layer.effect(BoardMoves, makeBoardMoves);
 }

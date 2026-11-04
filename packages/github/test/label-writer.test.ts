@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
@@ -52,7 +53,7 @@ describe("GitHubLabelWriter", () => {
         HttpClientResponse.fromWeb(
           request,
           new Response(
-            JSON.stringify({
+            jsonKey({
               name: "ready-for-agent",
               color: "A2EEEF",
               description: "Ready for an agent to claim",
@@ -84,9 +85,10 @@ describe("GitHubLabelWriter", () => {
       assert.strictEqual(sent.headers.authorization, "Bearer label-writer-token");
       assert.strictEqual(sent.body._tag, "Uint8Array");
       if (sent.body._tag !== "Uint8Array") return;
-      const valueDecoded1 = yield* Schema.decodeUnknownEffect(RequestBody)(
-        JSON.parse(new TextDecoder().decode(sent.body.body)),
-      );
+      const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
+        new TextDecoder().decode(sent.body.body),
+      ).pipe(Effect.orDie);
+      const valueDecoded1 = yield* Schema.decodeUnknownEffect(RequestBody)(json1);
       assert.deepStrictEqual(valueDecoded1, {
         name: "ready-for-agent",
         color: "A2EEEF",

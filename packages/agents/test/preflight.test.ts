@@ -1,10 +1,17 @@
+import { jsonKey } from "@usine/core/json-key";
+// Fetch and agent SDK interfaces require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import { Deferred, Effect, Fiber, Layer, Option, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { TestClock } from "effect/testing";
+// The Node process boundary uses native process handles and synchronous subprocess operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFileSync } from "node:child_process";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
@@ -203,11 +210,7 @@ describe("worker harness readiness", () => {
           assert(matchesError);
           assert.strictEqual(error.capability, result.capability);
           assert.strictEqual(server.opened(), 0);
-          assert(
-            !(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(error)).includes(
-              "credential-shaped",
-            ),
-          );
+          assert(!jsonKey(error).includes("credential-shaped"));
         }).pipe(
           Effect.provide(
             commands({ [codexVersionCommand]: result }).pipe(
@@ -314,7 +317,7 @@ describe("worker harness readiness", () => {
           Effect.provide(
             claudeCommands({
               "claude auth status --json": {
-                stdout: JSON.stringify(status.auth),
+                stdout: jsonKey(status.auth),
                 exitCode: status.exitCode,
               },
             }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
@@ -327,7 +330,10 @@ describe("worker harness readiness", () => {
   for (const status of [
     { stdout: "", exitCode: 1 },
     { stdout: "not a status", exitCode: 1 },
-    { stdout: JSON.stringify({ loggedIn: false }), exitCode: 2 },
+    {
+      stdout: jsonKey({ loggedIn: false }),
+      exitCode: 2,
+    },
   ])
     it.effect(
       `reports a Claude login check exiting ${status.exitCode} with ${status.stdout === "" ? "no output" : "unexpected output"} as a failed command`,
@@ -438,7 +444,7 @@ describe("worker harness readiness", () => {
               exitCode: 0,
             },
             [overSsh("exec 'claude' 'auth' 'status' '--json'")]: {
-              stdout: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+              stdout: jsonKey({
                 loggedIn: true,
                 authMethod: "claude.ai",
                 apiProvider: "firstParty",

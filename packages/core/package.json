@@ -134,6 +134,10 @@
     "./changes": {
       "types": "./dist/changes.d.ts",
       "default": "./dist/changes.js"
+    },
+    "./json-key": {
+      "types": "./dist/json-key.d.ts",
+      "default": "./dist/json-key.js"
     }
   },
   "publishConfig": {
@@ -141,8 +145,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "check": "node ../../scripts/effect-diagnostics/check.mjs tsconfig.check.json",
-    "effect:baseline": "node ../../scripts/effect-diagnostics/check.mjs --update tsconfig.check.json",
+    "check": "effect-tsgo tsc -p tsconfig.check.json",
     "test": "vitest run"
   },
   "devDependencies": {

@@ -1,3 +1,5 @@
+// The tmpfs probe requires statfsSync; Effect FileSystem has no filesystem-capacity API.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { accessSync, constants, statfsSync } from "node:fs";
 import { tmpdir } from "node:os";
 

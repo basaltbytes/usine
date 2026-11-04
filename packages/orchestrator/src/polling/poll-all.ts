@@ -1,5 +1,6 @@
 import type { ManagedRepo } from "@usine/config/factory";
 import type { ScopedChange } from "@usine/core/changes";
+import { jsonKey } from "@usine/core/json-key";
 import { canonicalRepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Option, Ref, Result } from "effect";
 import type { CiMonitor } from "../ci.ts";
@@ -169,7 +170,7 @@ export const pollAll = Effect.fn("PollingTriggers.pollAll")(function* <
     watched.flatMap(({ repository }) => {
       const audience = { _tag: "Repository", repository: repository.name } as const;
       const findings = (value: PollCycle | undefined) =>
-        JSON.stringify([
+        jsonKey([
           (value?.failures ?? []).filter(
             (failure) =>
               canonicalRepositoryName(failure.repository) ===

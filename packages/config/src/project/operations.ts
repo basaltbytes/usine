@@ -1,15 +1,19 @@
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
-import { Array as Arr, Option, Result } from "effect";
+import { Array as Arr, Option, Result, Schema } from "effect";
 import { ManagedRepo, UsineConfig } from "../factory.ts";
 import { LoadedInstance } from "../instance/instance.ts";
 import { LoopFile } from "../loop.ts";
 import { DeclaredLabel, canonicalLabelName } from "../label.ts";
 import { ConfigurationInvalid } from "../configuration/model.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
-import { matchesSelector } from "../selector.ts";
+import { Selector, matchesSelector } from "../selector.ts";
 import { Project } from "./project.ts";
+
+// migrateProjects returns validation errors synchronously, including each selector's JSON.
+// @effect-diagnostics-next-line schemaSync:off
+const formatSelector = Schema.encodeSync(Schema.fromJsonString(Schema.OptionFromNullOr(Selector)));
 
 export { Project } from "./project.ts";
 
@@ -70,15 +74,7 @@ export const migrateProjects = (
         file: InstancePath.make(`loops/${loop.name}.md`),
         stage: "reference",
         expression: Option.none(),
-        message: `Cannot migrate loop ${loop.name}: selector ${JSON.stringify(
-          Option.match(loop.selector, {
-            onNone: () => null,
-            onSome: ({ repos, tags }) => ({
-              repos: Option.getOrUndefined(repos),
-              tags: Option.getOrUndefined(tags),
-            }),
-          }),
-        )} matches no registered repository. Register a matching repository or remove the loop before migrating.`,
+        message: `Cannot migrate loop ${loop.name}: selector ${formatSelector(loop.selector)} matches no registered repository. Register a matching repository or remove the loop before migrating.`,
       }),
     );
   if (Arr.isArrayNonEmpty(problems)) return Result.fail(ConfigurationInvalid.make({ problems }));

@@ -232,7 +232,7 @@ export class RunReader extends Context.Service<
       itemKeys: ReadonlyArray<ItemKey>,
     ) => Effect.Effect<ReadonlyArray<LoopSighting>, RunStoreError>;
   }
->()("@usine/engine/RunReader") {
+>()("@usine/engine/run-reader/run-reader/RunReader") {
   /** Reads the supplied runtime database without starting run recovery or execution. */
   static readonly layer = Layer.effect(RunReader, makeRunReader);
 }

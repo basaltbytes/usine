@@ -1,3 +1,5 @@
+// This synchronous Node crypto boundary requires native key and cipher operations.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import type { GitHubApp } from "@usine/github/github-app";

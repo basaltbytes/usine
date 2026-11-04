@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { ManagedRepo } from "@usine/config/factory";
@@ -104,7 +105,7 @@ for (const scenario of [
   it.live(scenario.name, () => {
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      if (logLevel === "Warn") warnings.push(jsonKey(message));
     });
     return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

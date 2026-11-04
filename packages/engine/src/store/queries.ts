@@ -2,7 +2,6 @@ import type { RecordChange } from "./changes.ts";
 import { CiPolicy } from "@usine/core/ci";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import type { Agent } from "@usine/core/agent";
 import type { ModelId } from "@usine/core/agent/brain";
 import {
   Attempt,
@@ -199,10 +198,6 @@ const attemptSummarySelection = Struct.omit(attemptSelection, ["task", "comments
 const storedStateTag = jsonExtract(runs.stateJson, "$._tag");
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
-// The explicit JSON return type lets tsc emit a portable declaration for `queriesFor`.
-const storedAgent = (agent: Agent): Effect.Effect<Schema.Json, Schema.SchemaError> =>
-  encodeAgent(agent);
-
 export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) => {
   const changedRun = (runId: RunId) =>
     Effect.gen(function* () {
@@ -820,7 +815,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     context: AttemptContext,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, agent: context.agent.name });
-    const agentJson = yield* storedAgent(context.agent);
+    const agentJson = yield* encodeAgent(context.agent);
     yield* database
       .update(runs)
       .set({
@@ -935,7 +930,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
       .onConflictDoNothing()
       .execute();
     const stateJson = yield* encodeRunState(RunState.Pending.make());
-    const agentJson = yield* storedAgent(submission.agent);
+    const agentJson = yield* encodeAgent(submission.agent);
     yield* database
       .insert(runs)
       .values({
@@ -1072,7 +1067,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
         onNone: () => Effect.succeed(null),
         onSome: Schema.encodeEffect(CiPolicy),
       }).pipe(Effect.orDie);
-      const agentJson = yield* storedAgent(submission.agent);
+      const agentJson = yield* encodeAgent(submission.agent);
       yield* database
         .insert(triggerEvents)
         .values({

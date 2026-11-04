@@ -29,7 +29,7 @@ export class Orchestrator extends Context.Service<
      */
     readonly run: Effect.Effect<never>;
   }
->()("@usine/orchestrator/Orchestrator") {
+>()("@usine/orchestrator/orchestrator") {
   /**
    * Provides the trigger coordinator, including webhook delivery hints, using the supplied current
    * instance and trigger services.

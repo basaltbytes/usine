@@ -5,6 +5,7 @@ import {
   ConfigProvider,
   Effect,
   type FileSystem,
+  type Path,
   Layer,
   Option,
   Schema,
@@ -81,7 +82,11 @@ const exportClientLayer = (collector: string) =>
  */
 export const tracingLayer = (
   tracing: Option.Option<Tracing>,
-): Layer.Layer<never, CliVersionError | ResourceAttributesError, FileSystem.FileSystem> =>
+): Layer.Layer<
+  never,
+  CliVersionError | ResourceAttributesError,
+  FileSystem.FileSystem | Path.Path
+> =>
   Option.match(tracing, {
     onNone: () =>
       Layer.effectDiscard(

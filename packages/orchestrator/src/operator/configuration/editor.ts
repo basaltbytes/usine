@@ -136,7 +136,7 @@ export class ConfigurationEditor extends Context.Service<
       input: ConfigurationWrite,
     ) => Effect.Effect<ConfigurationRevision, ConfigurationEditorError>;
   }
->()("@usine/orchestrator/ConfigurationEditor") {
+>()("@usine/orchestrator/operator/configuration/editor/ConfigurationEditor") {
   /**
    * Provides revision reads and validated edits using the configuration store, parser, and current
    * instance.

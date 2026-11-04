@@ -1,4 +1,8 @@
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { renameSync, writeFileSync } from "node:fs";
+// instanceFiles synchronously builds paths for signal listeners and CLI callers.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { type Brand, DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { UiOrigin } from "@usine/config/factory";
@@ -111,13 +115,10 @@ export const instanceFiles = (directory: string): InstanceFiles => {
   };
 };
 
-const formatRecord = (record: typeof InstanceRecord.Encoded): string =>
-  `${JSON.stringify(record, null, 2)}\n`;
+const RecordFromJson = Schema.fromJsonString(InstanceRecord, { space: 2 });
 
 const encodeRecord = (record: InstanceRecord) =>
-  Schema.encodeEffect(InstanceRecord)(record).pipe(Effect.map(formatRecord));
-
-const RecordFromJson = Schema.fromJsonString(InstanceRecord);
+  Schema.encodeEffect(RecordFromJson)(record).pipe(Effect.map((json) => `${json}\n`));
 
 /**
  * Writes the record through a temporary file and a rename, so that readers never see a partial
@@ -147,8 +148,8 @@ export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): 
   });
   // The signal listener writes the already validated record synchronously.
   // @effect-diagnostics-next-line schemaSync:off
-  const encoded = Schema.encodeSync(InstanceRecord)(stopping);
-  writeFileSync(staging, formatRecord(encoded), { mode: 0o600 });
+  const encoded = Schema.encodeSync(RecordFromJson)(stopping);
+  writeFileSync(staging, `${encoded}\n`, { mode: 0o600 });
   renameSync(staging, files.record);
 };
 

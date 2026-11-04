@@ -1,4 +1,5 @@
 import {
+  Crypto,
   type Brand,
   Context,
   DateTime,
@@ -14,6 +15,7 @@ import {
   Semaphore,
   SynchronizedRef,
 } from "effect";
+
 import { HttpClient, HttpClientRequest } from "effect/http";
 import type { ChatGptAccess, ChatGptLogin } from "../llm/llm.ts";
 import {
@@ -212,15 +214,17 @@ export class ChatGptLogins extends Context.Service<
      */
     readonly reload: (login: ChatGptLogin) => Effect.Effect<void, ChatGptAuthFileError>;
   }
->()("@usine/gateway/ChatGptLogins") {
+>()("@usine/gateway/chatgpt/logins/ChatGptLogins") {
   /**
    * Creates a scoped login cache with serialized refreshes and reloads. Requires a file system
-   * for auth files and an HTTP client for OAuth refreshes; reads each login on first use.
+   * for auth files, an HTTP client for OAuth refreshes, and Crypto for temporary file names.
+   * Reads each login on first use.
    */
   static readonly layer = Layer.effect(
     ChatGptLogins,
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
+      const crypto = yield* Crypto.Crypto;
       const client = yield* HttpClient.HttpClient;
       const scope = yield* Effect.scope;
       const states = yield* Ref.make<ReadonlyMap<string, LoginState>>(new Map());
@@ -264,6 +268,7 @@ export class ChatGptLogins extends Context.Service<
         if (Option.isSome(current)) return current.value;
         const tokens = yield* readAuthFile(login.authFile).pipe(
           Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Crypto.Crypto, crypto),
           Effect.tapError((error) =>
             Effect.logError("Could not read the ChatGPT login", {
               authFile: login.authFile,
@@ -389,6 +394,7 @@ export class ChatGptLogins extends Context.Service<
           holds(state, inFile),
         ).pipe(
           Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Crypto.Crypto, crypto),
           Effect.flatMap((written) =>
             written
               ? Effect.logInfo("Wrote the refreshed ChatGPT login to its auth file", {
@@ -500,6 +506,7 @@ export class ChatGptLogins extends Context.Service<
         yield* Effect.annotateCurrentSpan({ authFile: login.authFile });
         const tokens = yield* readAuthFile(login.authFile).pipe(
           Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Crypto.Crypto, crypto),
         );
         const all = yield* Ref.get(states);
         const read = Redacted.value(tokens.refreshToken);

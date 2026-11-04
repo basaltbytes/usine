@@ -44,7 +44,7 @@ export class GitHubItemWriter extends Context.Service<
       mutation: ItemLabelMutation,
     ) => Effect.Effect<ReadonlyArray<string>, GitHubAppError>;
   }
->()("@usine/github/GitHubItemWriter") {
+>()("@usine/github/item-writer/GitHubItemWriter") {
   /** Provides item label writes through the HTTP client with the App's installation-wide token. */
   static readonly layer: Layer.Layer<GitHubItemWriter, never, GitHubApp | HttpClient.HttpClient> =
     Layer.effect(

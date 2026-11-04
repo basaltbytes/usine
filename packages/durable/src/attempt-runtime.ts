@@ -180,4 +180,4 @@ export class AttemptRuntime extends Context.Service<
       notice: AttemptChannel.WorkerNotice,
     ) => Effect.Effect<void>;
   }
->()("@usine/durable/AttemptRuntime") {}
+>()("@usine/durable/attempt-runtime/AttemptRuntime") {}

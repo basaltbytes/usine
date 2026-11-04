@@ -1,5 +1,4 @@
 import { localActor } from "@usine/core/operator";
-import { resolve } from "node:path";
 import {
   StaleRevision,
   ConfigurationStore,
@@ -19,13 +18,14 @@ import {
 import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
-import { Config, Console, DateTime, Effect, FileSystem, Layer, Option } from "effect";
+import { Config, Console, DateTime, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { ConfigCommand, ConfigCommandError } from "./command.ts";
 import { configurationLayer, initializeConfiguration } from "./runtime.ts";
 
 export const runConfigCommand = Effect.fn("Cli.config")(
   function* (directory: InstanceDirectory, command: ConfigCommand) {
+    const path = yield* Path.Path;
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
     const { instance, number } = yield* initializeConfiguration(directory);
@@ -67,10 +67,12 @@ export const runConfigCommand = Effect.fn("Cli.config")(
       });
     switch (command._tag) {
       case "ConfigExportCommand":
-        yield* folder.export(InstanceDirectory.make(resolve(command.folder)), instance);
-        return yield* Console.log(`Exported revision ${number} to ${resolve(command.folder)}.`);
+        yield* folder.export(InstanceDirectory.make(path.resolve(command.folder)), instance);
+        return yield* Console.log(
+          `Exported revision ${number} to ${path.resolve(command.folder)}.`,
+        );
       case "ConfigImportCommand": {
-        const imported = yield* folder.load(InstanceDirectory.make(resolve(command.folder)));
+        const imported = yield* folder.load(InstanceDirectory.make(path.resolve(command.folder)));
         const before = configurationEntities(instance);
         const after = configurationEntities(imported);
         return yield* save(number, configurationDiff(before, after), command.message);

@@ -1,8 +1,12 @@
-import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { jsonKey } from "@usine/core/json-key";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { NodeFileSystem } from "@effect/platform-node";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join, dirname, basename } from "node:path";
+import { NodeFileSystem, NodeCrypto } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import {
   Context,
@@ -18,6 +22,7 @@ import {
   Ref,
   Schema,
   Stream,
+  FileSystem,
 } from "effect";
 import { TestClock } from "effect/testing";
 import {
@@ -68,7 +73,7 @@ type Answer = (sent: Sent) => Effect.Effect<Response>;
 class Upstreams extends Context.Service<
   Upstreams,
   { readonly sent: Ref.Ref<ReadonlyArray<Sent>>; readonly answer: Ref.Ref<Answer> }
->()("test/ChatGptUpstreams") {
+>()("@usine/gateway/test/chatgpt.test/Upstreams") {
   static readonly layer = Layer.effect(
     Upstreams,
     Effect.all({
@@ -79,7 +84,10 @@ class Upstreams extends Context.Service<
 }
 
 const json = (status: number, body: Schema.Json) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  new Response(jsonKey(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 
 const decoder = new TextDecoder();
 
@@ -142,13 +150,21 @@ const refreshing =
 const authFile = (accessExpiresIn: Duration.Input, refresh = "refresh-first") =>
   Effect.gen(function* () {
     const directory = yield* Effect.acquireRelease(
-      Effect.promise(() => mkdtemp(join(tmpdir(), "usine-chatgpt-"))),
-      (path) => Effect.promise(() => rm(path, { recursive: true, force: true })),
+      Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.makeTempDirectory({
+          directory: dirname(join(tmpdir(), "usine-chatgpt-")),
+          prefix: basename(join(tmpdir(), "usine-chatgpt-")),
+        }),
+      ),
+      (path) =>
+        Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.remove(path, { recursive: true, force: true }),
+        ).pipe(Effect.orDie),
     );
     const path = join(directory, "auth.json");
     const now = yield* DateTime.now;
-    yield* Effect.promise(() =>
-      writeFile(
+    yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.writeFileString(
         path,
         authFileText({
           access: chatGptAccessToken(DateTime.addDuration(now, accessExpiresIn)),
@@ -169,8 +185,8 @@ const authFile = (accessExpiresIn: Duration.Input, refresh = "refresh-first") =>
 /** Rewrites the auth file at `path` with a new login. */
 const replaceAuthFile = (path: string, refresh: string, accessExpiresIn: Duration.Input) =>
   Effect.flatMap(DateTime.now, (now) =>
-    Effect.promise(() =>
-      writeFile(
+    Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      fileSystem.writeFileString(
         path,
         authFileText({
           access: chatGptAccessToken(DateTime.addDuration(now, accessExpiresIn), refresh),
@@ -196,14 +212,14 @@ const WrittenAuthFile = Schema.fromJsonString(
 );
 
 const readWritten = (path: string) =>
-  Effect.promise(() => readFile(path, "utf8")).pipe(
+  Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(path)).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(WrittenAuthFile)),
   );
 
 const logins = ChatGptLogins.layer.pipe(
   Layer.provide(fakeClient),
   Layer.provideMerge(Upstreams.layer),
-  Layer.provide(NodeFileSystem.layer),
+  Layer.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer)),
 );
 
 const accessToken = (login: ChatGptLogin) =>
@@ -225,14 +241,16 @@ describe("ChatGptLogins", () => {
         assert.strictEqual(nonceOf(currentToken), "first");
         const requests = yield* tokenRequests;
         assert.lengthOf(requests, 0);
-
         yield* TestClock.adjust("2 minutes");
         const nextToken = yield* accessToken(login);
         assert.strictEqual(nonceOf(nextToken), "second");
         const [refresh] = yield* tokenRequests;
         assert(refresh !== undefined);
         assert.strictEqual(refresh.method, "POST");
-        assert.deepStrictEqual(JSON.parse(refresh.body), {
+        const json1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
+          refresh.body,
+        ).pipe(Effect.orDie);
+        assert.deepStrictEqual(json1, {
           client_id: CODEX_CLIENT_ID,
           grant_type: "refresh_token",
           refresh_token: "refresh-first",
@@ -245,7 +263,7 @@ describe("ChatGptLogins", () => {
         assert.strictEqual(nonceOf(updatedToken), "second");
         const currentRequests = yield* tokenRequests;
         assert.lengthOf(currentRequests, 1);
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect(
@@ -264,11 +282,15 @@ describe("ChatGptLogins", () => {
         assert.isNull(written.OPENAI_API_KEY);
         const currentNow = yield* DateTime.now;
         assert.strictEqual(written.last_refresh, DateTime.formatIso(currentNow));
-        const { mode } = yield* Effect.promise(() => stat(path));
-        assert.strictEqual(mode & 0o777, 0o600);
-        const responseBody = yield* Effect.promise(() => readdir(directory));
+        const { mode } = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.stat(path),
+        );
+        assert.strictEqual(mode & 511, 384);
+        const responseBody = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readDirectory(directory),
+        );
         assert.deepStrictEqual(responseBody, ["auth.json"]);
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect("concurrent requests share one refresh", () =>
@@ -294,7 +316,7 @@ describe("ChatGptLogins", () => {
       assert.deepStrictEqual(new Set(tokens.map(nonceOf)), new Set(["second"]));
       const currentRequests = yield* tokenRequests;
       assert.lengthOf(currentRequests, 1);
-    }).pipe(Effect.provide(logins)),
+    }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect(
@@ -313,18 +335,16 @@ describe("ChatGptLogins", () => {
         }
         const requests = yield* tokenRequests;
         assert.lengthOf(requests, 1, "the waiting requests share one refresh");
-
         yield* setAnswer(refreshing());
         assert.strictEqual((yield* Effect.flip(accessToken(login))).reason, "refresh-failed");
         const currentRequests = yield* tokenRequests;
         assert.lengthOf(currentRequests, 1, "a request during the backoff calls nothing");
-
         yield* TestClock.adjust("10 seconds");
         const token = yield* accessToken(login);
         assert.strictEqual(nonceOf(token), "second");
         const nextRequests = yield* tokenRequests;
         assert.lengthOf(nextRequests, 2);
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect("keeps the token endpoint's error text out of messages unless it's an error code", () =>
@@ -336,7 +356,7 @@ describe("ChatGptLogins", () => {
       const failed = yield* Effect.flip(accessToken(login));
       assert.strictEqual(failed.reason, "refresh-rejected");
       assert.notInclude(failed.message, "rt-leaked-in-an-error");
-    }).pipe(Effect.provide(logins)),
+    }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   for (const status of [408, 429, 500, 503])
@@ -345,7 +365,7 @@ describe("ChatGptLogins", () => {
         const { login } = yield* authFile("1 minute");
         yield* setAnswer(() => Effect.succeed(json(status, { error: "try_again" })));
         assert.strictEqual((yield* Effect.flip(accessToken(login))).reason, "refresh-failed");
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
     );
 
   it.effect(
@@ -367,13 +387,12 @@ describe("ChatGptLogins", () => {
         yield* Deferred.await(arrived);
         yield* Fiber.interrupt(caller);
         yield* Deferred.succeed(release, undefined);
-
         const token = yield* accessToken(login);
         assert.strictEqual(nonceOf(token), "second");
         const requests = yield* tokenRequests;
         assert.lengthOf(requests, 1);
         assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-second");
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect("a 401 right after a refresh doesn't refresh again until a minute has passed", () =>
@@ -387,13 +406,12 @@ describe("ChatGptLogins", () => {
       assert.strictEqual(nonceOf(token), "second");
       const requests = yield* tokenRequests;
       assert.lengthOf(requests, 1);
-
       yield* TestClock.adjust("1 minute");
       yield* service.refused(login, refreshed);
       yield* accessToken(login);
       const currentRequests = yield* tokenRequests;
       assert.lengthOf(currentRequests, 2);
-    }).pipe(Effect.provide(logins)),
+    }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect("accepts null optional fields in the refresh answer, as Codex does", () =>
@@ -411,7 +429,7 @@ describe("ChatGptLogins", () => {
       const token = yield* accessToken(login);
       assert.strictEqual(nonceOf(token), "second");
       assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-first");
-    }).pipe(Effect.provide(logins)),
+    }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect(
@@ -420,19 +438,21 @@ describe("ChatGptLogins", () => {
       Effect.gen(function* () {
         const { path, login } = yield* authFile("1 minute");
         const answer = refreshing();
+        const fileSystem = yield* FileSystem.FileSystem;
         yield* setAnswer((sent) =>
           replaceAuthFile(path, "refresh-operator", "60 minutes").pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.orDie,
             Effect.andThen(answer(sent)),
           ),
         );
         const token = yield* accessToken(login);
         assert.strictEqual(nonceOf(token), "second");
         assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-operator");
-
         yield* (yield* ChatGptLogins).reload(login);
         const currentToken = yield* accessToken(login);
         assert.strictEqual(nonceOf(currentToken), "refresh-operator");
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect(
@@ -451,7 +471,7 @@ describe("ChatGptLogins", () => {
         assert.strictEqual(nonceOf(currentToken), "second");
         const requests = yield* tokenRequests;
         assert.lengthOf(requests, 1);
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect.skipIf(process.getuid?.() === 0)(
@@ -460,13 +480,16 @@ describe("ChatGptLogins", () => {
       Effect.gen(function* () {
         const { directory, path } = yield* authFile("60 minutes");
         yield* Effect.acquireRelease(
-          Effect.promise(() => chmod(directory, 0o500)),
-          () => Effect.promise(() => chmod(directory, 0o700)),
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.chmod(directory, 0o500)),
+          () =>
+            Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+              fileSystem.chmod(directory, 0o700),
+            ).pipe(Effect.orDie),
         );
         const failed = yield* Effect.flip(checkAuthFileWritable(path));
         assert.strictEqual(failed.operation, "write");
         assert.include(failed.message, "can't write next to");
-      }).pipe(Effect.provide(NodeFileSystem.layer)),
+      }).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer))),
   );
 
   for (const [status, body] of [
@@ -476,7 +499,7 @@ describe("ChatGptLogins", () => {
     [403, {}],
   ] as const)
     it.effect(
-      `a refresh rejected with ${String(status)} ${JSON.stringify(body)} stops refreshing until a reload reads a new login`,
+      `a refresh rejected with ${String(status)} ${jsonKey(body)} stops refreshing until a reload reads a new login`,
       () =>
         Effect.gen(function* () {
           const { path, login } = yield* authFile("1 minute");
@@ -488,14 +511,13 @@ describe("ChatGptLogins", () => {
           assert.strictEqual(again.reason, "refresh-rejected");
           const requests = yield* tokenRequests;
           assert.lengthOf(requests, 1);
-
           yield* replaceAuthFile(path, "refresh-new", "60 minutes");
           yield* (yield* ChatGptLogins).reload(login);
           const token = yield* accessToken(login);
           assert.strictEqual(nonceOf(token), "refresh-new");
           const currentRequests = yield* tokenRequests;
           assert.lengthOf(currentRequests, 1);
-        }).pipe(Effect.provide(logins)),
+        }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
     );
 
   it.effect(
@@ -507,35 +529,37 @@ describe("ChatGptLogins", () => {
         yield* setAnswer(refreshing());
         const token = yield* accessToken(login);
         assert.strictEqual(nonceOf(token), "second");
-
         yield* service.reload(login);
         const currentToken = yield* accessToken(login);
         assert.strictEqual(nonceOf(currentToken), "second");
-
         yield* replaceAuthFile(path, "refresh-first", "60 minutes");
         yield* service.reload(login);
         const nextToken = yield* accessToken(login);
         assert.strictEqual(nonceOf(nextToken), "second");
-
         yield* replaceAuthFile(path, "refresh-other", "60 minutes");
         yield* service.reload(login);
         const updatedToken = yield* accessToken(login);
         assert.strictEqual(nonceOf(updatedToken), "refresh-other");
         const requests = yield* tokenRequests;
         assert.lengthOf(requests, 1);
-      }).pipe(Effect.provide(logins)),
+      }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 
   it.effect("an auth file without ChatGPT tokens is reported without its contents", () =>
     Effect.gen(function* () {
       const { path, login } = yield* authFile("60 minutes");
-      yield* Effect.promise(() =>
-        writeFile(path, JSON.stringify({ OPENAI_API_KEY: "sk-proj-secretForTests" })),
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(
+          path,
+          jsonKey({
+            OPENAI_API_KEY: "sk-proj-secretForTests",
+          }),
+        ),
       );
       const unreadable = yield* Effect.flip(accessToken(login));
       assert.strictEqual(unreadable.reason, "unreadable");
       assert.notInclude(unreadable.message, "sk-proj-secretForTests");
-    }).pipe(Effect.provide(logins)),
+    }).pipe(Effect.provide(Layer.provideMerge(logins, NodeFileSystem.layer))),
   );
 });
 
@@ -552,7 +576,7 @@ const proxyFor = (login: ChatGptLogin) =>
     Layer.provide(fakeClient),
     Layer.provideMerge(Upstreams.layer),
     Layer.provideMerge(settingsLayer(chatGptProviders(login))),
-    Layer.provide(NodeFileSystem.layer),
+    Layer.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer)),
   );
 
 /** Attaches the test repository and returns the caller token. */
@@ -634,9 +658,10 @@ describe("GatewayProxy with a ChatGPT login", () => {
           assert.deepStrictEqual(header("chatgpt-account-id"), Option.some(CHATGPT_ACCOUNT));
           assert.deepStrictEqual(header("originator"), Option.some("codex_exec"));
           assert.deepStrictEqual(header("session-id"), Option.some("session-for-tests"));
-          assert.notInclude(JSON.stringify(forwarded.headers), caller);
+          const json2 = jsonKey(forwarded.headers);
+          assert.notInclude(json2, caller);
         }).pipe(Effect.provide(proxyFor(login)));
-      }),
+      }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   it.effect(
@@ -664,7 +689,7 @@ describe("GatewayProxy with a ChatGPT login", () => {
           const currentRequests = yield* tokenRequests;
           assert.lengthOf(currentRequests, 0);
         }).pipe(Effect.provide(proxyFor(login)));
-      }),
+      }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   for (const [token, status, outcome] of [
@@ -692,7 +717,7 @@ describe("GatewayProxy with a ChatGPT login", () => {
             const requests = yield* backendRequests;
             assert.lengthOf(requests, 0);
           }).pipe(Effect.provide(proxyFor(login)));
-        }),
+        }).pipe(Effect.provide(NodeFileSystem.layer)),
     );
 
   it.effect("refreshes before the next request when the backend refuses the access token", () =>
@@ -720,21 +745,21 @@ describe("GatewayProxy with a ChatGPT login", () => {
         const currentRequests = yield* tokenRequests;
         assert.lengthOf(currentRequests, 1);
       }).pipe(Effect.provide(proxyFor(login)));
-    }),
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 });
 
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
 /** A stand-in ChatGPT backend that sends one event, waits for `release`, then sends another. */
-const streamingBackend = (release: Promise<void>) =>
+const streamingBackend = (onReady: (finish: () => void) => void) =>
   Effect.acquireRelease(
     Effect.callback<{ origin: string; close: () => void }>((resume) => {
       const server = createServer((incoming, response) => {
         incoming.resume();
         response.writeHead(200, { "content-type": "text/event-stream" });
         response.write("event: response.created\ndata: {}\n\n");
-        void release.then(() => response.end("event: response.completed\ndata: {}\n\n"));
+        onReady(() => response.end("event: response.completed\ndata: {}\n\n"));
       });
       server.listen(0, "127.0.0.1", () => {
         const address = server.address();
@@ -758,10 +783,9 @@ describe("the Node gateway with a ChatGPT login", () => {
     Effect.gen(function* () {
       const { login } = yield* authFile("60 minutes");
       let open: () => void = () => {};
-      const release = new Promise<void>((resolve) => {
-        open = resolve;
+      const backend = yield* streamingBackend((finish) => {
+        open = finish;
       });
-      const backend = yield* streamingBackend(release);
       const providers: LlmProviders = {
         ...NO_PROVIDERS,
         openai: Option.some(
@@ -810,6 +834,6 @@ describe("the Node gateway with a ChatGPT login", () => {
           ),
         ),
       );
-    }),
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 });

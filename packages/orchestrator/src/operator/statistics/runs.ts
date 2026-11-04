@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { BillingPool } from "@usine/core/agent/session";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import type { AttemptSummary } from "@usine/engine/run-reader";
@@ -200,7 +201,7 @@ const brainGroups = (
       })),
   );
   const groups = EffectArray.groupBy(ended, ({ attempt: { brain } }) =>
-    JSON.stringify([brain.harness, brain.model, brain.effort]),
+    jsonKey([brain.harness, brain.model, brain.effort]),
   );
   return Object.values(groups)
     .map((members) =>
@@ -408,7 +409,7 @@ export const runStatisticsView = ({
 
   return RunStatisticsView.make({
     window,
-    from: new Date(from).toISOString(),
+    from: DateTime.formatIso(DateTime.makeUnsafe(from)),
     to: DateTime.formatIso(now),
     bucket,
     runs: outcomeCounts(closed.map(runOutcome)),

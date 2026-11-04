@@ -1,6 +1,5 @@
-import { join } from "node:path";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { type Brand, ConfigProvider, Effect, FileSystem, Option, Schema } from "effect";
+import { type Brand, ConfigProvider, Effect, FileSystem, Option, Path, Schema } from "effect";
 
 /** The instance folder's file of `KEY=value` lines that `usine` reads at startup. */
 const ENVIRONMENT_FILE = ".env";
@@ -59,7 +58,8 @@ export const instanceEnvironment = Effect.fn("Instance.environment")(function* (
   environment: ConfigProvider.ConfigProvider,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
-  const path = join(directory, ENVIRONMENT_FILE);
+  const paths = yield* Path.Path;
+  const path = paths.join(directory, ENVIRONMENT_FILE);
   const contents = yield* fileSystem.readFileString(path).pipe(
     Effect.asSome,
     Effect.catchIf(

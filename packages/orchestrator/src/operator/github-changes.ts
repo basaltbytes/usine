@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import type { AttemptSummary } from "@usine/engine/run-reader";
 import type { Worker } from "@usine/config/factory";
 import { BotLogin } from "@usine/core/worker";
@@ -301,13 +302,13 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     const workerActors = new Map(
       workers.map(({ name, kind }) => [name, githubBotLogin(kind, appActor)]),
     );
-    const identityKey = JSON.stringify([
+    const identityKey = jsonKey([
       appActor,
       [...workerActors].sort(([left], [right]) => left.localeCompare(right)),
     ]);
     const cacheKey = (attempt: Attempt) =>
       Option.map(Option.fromUndefinedOr(workerActors.get(attempt.worker)), (actor) =>
-        JSON.stringify([attempt.id, actor, identityKey]),
+        jsonKey([attempt.id, actor, identityKey]),
       );
     const stored = yield* Ref.get(cache);
     const cached = new Map(
@@ -495,6 +496,6 @@ export class RunGitHubChanges extends Context.Service<
       runId: RunId,
     ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
   }
->()("@usine/orchestrator/RunGitHubChanges") {
+>()("@usine/orchestrator/operator/github-changes/RunGitHubChanges") {
   static readonly layer = Layer.effect(RunGitHubChanges, makeRunGitHubChanges);
 }

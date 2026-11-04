@@ -1,3 +1,6 @@
+import { jsonKey } from "@usine/core/json-key";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
 import { assert, it } from "@effect/vitest";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
@@ -55,7 +58,9 @@ const withClient = (respond: (url: string) => Response) =>
     ),
   );
 const json = (value: Schema.Json) =>
-  new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  new Response(jsonKey(value), {
+    headers: { "content-type": "application/json" },
+  });
 it.effect.each([
   { mergeable: "CONFLICTING", rollup: null, expected: "conflict" },
   { mergeable: "UNKNOWN", rollup: null, expected: "pending" },

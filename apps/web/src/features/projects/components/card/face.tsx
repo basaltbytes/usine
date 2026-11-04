@@ -67,7 +67,7 @@ export const CardFace = ({
     );
   // Waiting and Failed Runs explain why the card needs the operator; a blocked Item does not.
   const unexplained =
-    item.needsYou && !(run?.canApprove || run?.canResolveFailure) && stall === null;
+    item.needsYou && run?.canApprove !== true && run?.canResolveFailure !== true && stall === null;
   return (
     <div className="flex min-w-0 flex-col gap-1.5 px-3">
       <p className="flex flex-wrap items-baseline gap-x-2.5 pr-6">

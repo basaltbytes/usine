@@ -9,4 +9,4 @@ export class SqliteReader extends Context.Service<
   {
     readonly state: Effect.Effect<SqliteReaderState>;
   }
->()("@usine/engine/SqliteReader") {}
+>()("@usine/engine/database/sqlite-reader/status/SqliteReader") {}

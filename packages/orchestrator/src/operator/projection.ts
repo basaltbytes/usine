@@ -240,7 +240,9 @@ export const runSummaryView = (
     handoff: snapshot.run.state._tag === "HandedOff" ? snapshot.run.state : null,
     ciWait: snapshot.run.state._tag === "AwaitingCi" ? snapshot.run.state.handoff : null,
     upgradeWait:
-      actions.canCancel && upgrade?.runIds.includes(snapshot.run.id) ? upgrade.wait : null,
+      Boolean(actions.canCancel) && upgrade !== null && upgrade.runIds.includes(snapshot.run.id)
+        ? upgrade.wait
+        : null,
     providerRetry: Option.getOrNull(pendingProviderRetry(snapshot.run.state, snapshot.attempts)),
     loopPaused: pausedLoops.has(snapshot.run.loop),
     machineWait: actions.canCancel ? (waits.get(snapshot.run.id) ?? null) : null,

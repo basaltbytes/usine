@@ -1,3 +1,5 @@
+import { FetchHttpClient } from "effect/http";
+import { webRequest } from "../../../../tooling/test/http.mts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
@@ -30,6 +32,8 @@ import { TestClock } from "effect/testing";
 import { Worker } from "node:worker_threads";
 import { spawnWorker } from "../../src/database/sqlite-reader/connection.ts";
 import { withReadWorker } from "../../src/database/sqlite-reader/reader.ts";
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
 import { RunStore } from "../../src/store/store.ts";
 import { lifecycleSubmission, testAgent, withRunStore } from "./support.ts";
@@ -68,29 +72,29 @@ for (const method of ["standalone", "list", "board"] as const) {
             }),
           });
           const server = yield* Effect.acquireRelease(
-            Effect.promise(
-              () =>
-                new Promise<ReturnType<typeof createServer>>((resolve) => {
-                  const server = createServer((_request, response) => response.end("ok"));
-                  server.listen(0, "127.0.0.1", () => resolve(server));
-                }),
-            ),
+            Effect.callback<ReturnType<typeof createServer>>((resume) => {
+              const resolve = (value: ReturnType<typeof createServer>) =>
+                resume(Effect.succeed(value));
+              const server = createServer((_request, response) => response.end("ok"));
+              server.listen(0, "127.0.0.1", () => resolve(server));
+            }),
             (server) =>
-              Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+              Effect.callback<void>((resume) => {
+                const resolve = (value: void) => resume(Effect.succeed(value));
+                server.close(() => resolve());
+              }),
           );
           const address = yield* Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
             server.address(),
           );
-          yield* Effect.promise(async () =>
-            (await fetch(`http://127.0.0.1:${address.port}/health`)).text(),
-          );
+          const health = yield* webRequest(`http://127.0.0.1:${address.port}/health`);
+          yield* Effect.promise(() => health.text());
           const heavyRead = sql`WITH RECURSIVE numbers(i) AS (
         VALUES(1) UNION ALL SELECT i + 1 FROM numbers WHERE i < 32000000
       ) SELECT sum(i) AS total FROM numbers`;
           const entered = yield* Deferred.make<void>();
           const injected = yield* Ref.make(false);
           const logger = Layer.succeed(EffectLogger)({
-            // Add expensive SQL to the first summary query in its actual connection scope.
             logQuery: () =>
               Effect.gen(function* () {
                 if (yield* Ref.getAndSet(injected, true)) return;
@@ -132,9 +136,7 @@ for (const method of ["standalone", "list", "board"] as const) {
                 sequence: AttemptChannel.Sequence.make(sequence),
               }),
             );
-            const response = yield* Effect.promise(() =>
-              fetch(`http://127.0.0.1:${address.port}/health`),
-            );
+            const response = yield* webRequest(`http://127.0.0.1:${address.port}/health`);
             const responseBody = yield* Effect.promise(() => response.text());
             assert.strictEqual(responseBody, "ok");
             assert(
@@ -154,7 +156,10 @@ for (const method of ["standalone", "list", "board"] as const) {
         }).pipe(
           Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.provideMerge(NodeServices.layer, FetchHttpClient.layer)),
+      ),
   );
 }
 
@@ -226,7 +231,9 @@ it.live(
         );
         const invalid = yield* sql`SELECT missing FROM reader_contract`.pipe(Effect.flip);
         assert.strictEqual(invalid._tag, "SqlError");
-        const invalidBinding = yield* sql.unsafe("SELECT ?", [new Date()]).pipe(Effect.flip);
+        const invalidBinding = yield* sql
+          .unsafe("SELECT ?", [DateTime.toDateUtc(DateTime.nowUnsafe())])
+          .pipe(Effect.flip);
         assert.strictEqual(invalidBinding._tag, "SqlError");
         const fifthRows = yield* sql`SELECT 42 AS value`;
         assert.deepStrictEqual(fifthRows, [{ value: 42 }]);

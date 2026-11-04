@@ -1,3 +1,8 @@
+import { jsonKey } from "@usine/core/json-key";
+// SDK streams and hooks require native Promises, including the test implementations.
+// @effect-diagnostics newPromise:off
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
@@ -26,8 +31,12 @@ import {
   Release,
 } from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
+// This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -218,7 +227,7 @@ const loginRace = (contended: number) => {
 const infoLines = () => {
   const lines: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-    if (logLevel === "Info") lines.push(JSON.stringify(message));
+    if (logLevel === "Info") lines.push(jsonKey(message));
   });
   return { lines, layer: Logger.layer([logger]) };
 };
@@ -873,7 +882,7 @@ describe("Claude child backend", () => {
     });
     const warnings: Array<string> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      if (logLevel === "Warn") warnings.push(jsonKey(message));
     });
     return Effect.scoped(
       Effect.gen(function* () {

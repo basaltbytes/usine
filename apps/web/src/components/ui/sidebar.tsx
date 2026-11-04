@@ -42,7 +42,7 @@ const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 
 function useSidebar() {
   const context = React.useContext(SidebarContext);
-  if (!context) {
+  if (context === null) {
     throw new Error("useSidebar must be used within a SidebarProvider.");
   }
 
@@ -72,7 +72,7 @@ function SidebarProvider({
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value;
-      if (setOpenProp) {
+      if (setOpenProp !== undefined) {
         setOpenProp(openState);
       } else {
         _setOpen(openState);
@@ -500,7 +500,7 @@ function SidebarMenuButton({
       },
       props,
     ),
-    render: !tooltip ? render : <TooltipTrigger render={render} />,
+    render: tooltip === undefined || tooltip === "" ? render : <TooltipTrigger render={render} />,
     state: {
       slot: "sidebar-menu-button",
       sidebar: "menu-button",
@@ -509,7 +509,7 @@ function SidebarMenuButton({
     },
   });
 
-  if (!tooltip) {
+  if (tooltip === undefined || tooltip === "") {
     return comp;
   }
 

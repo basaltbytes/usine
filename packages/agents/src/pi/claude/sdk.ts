@@ -1,3 +1,7 @@
+// SDK streams and hooks require native Promises, including the test implementations.
+// @effect-diagnostics newPromise:off
+// SDK hooks, transactions, and async iterators require Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import {
   query as openClaudeQuery,
   type Options,
@@ -5,6 +9,10 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Context, Layer, Schema } from "effect";
+
+// The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
+// @effect-diagnostics-next-line schemaSync:off
+const serializeVendorValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** A user message sent to a Claude Code child through the SDK's streaming input. */
 export interface ClaudeUserMessage {
@@ -70,14 +78,14 @@ export class ClaudeSdk extends Context.Service<
       options: ClaudeQueryOptions,
     ) => ClaudeQuery;
   }
->()("@usine/agents/pi/ClaudeSdk") {}
+>()("@usine/agents/pi/claude/sdk/ClaudeSdk") {}
 
 // The SDK async iterator converts each message before yielding it.
 // @effect-diagnostics-next-line schemaSync:off
 const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
-  decodeVendorMessage(JSON.stringify(message));
+  decodeVendorMessage(serializeVendorValue(message));
 
 /** Provides `ClaudeSdk` through the installed Agent SDK, exposing output messages as JSON for decoding by the child backend. */
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({

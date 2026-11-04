@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
@@ -79,7 +80,7 @@ export const config = Schema.decodeEffect(UsineConfig)({
 export const workerCredential = (value: Redacted.Redacted<string>) =>
   WorkerCredential.make({
     value,
-    expiresAt: DateTime.makeUnsafe(Date.now() + 3600000),
+    expiresAt: DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3600000),
   });
 
 export const credentialLayer = Layer.succeed(CredentialProvider)({
@@ -157,7 +158,8 @@ export const waitFor = Effect.fn("test.waitFor")(function* (
   for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
     if (snapshot.run.state._tag === state) return snapshot;
     if (state === "Succeeded" && snapshot.run.state._tag === "Failed") {
-      return yield* Effect.die(JSON.stringify(snapshot.attempts.map((attempt) => attempt.outcome)));
+      const json1 = jsonKey(snapshot.attempts.map((attempt) => attempt.outcome));
+      return yield* Effect.die(json1);
     }
     yield* Effect.sleep("10 millis");
     snapshot = yield* engine.inspect(runId);

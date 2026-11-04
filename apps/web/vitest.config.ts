@@ -13,6 +13,8 @@ import {
   configurationEditorRequests,
 } from "./src/features/configuration/components/editor/browser-fixture.ts";
 import { playwright } from "@vitest/browser-playwright";
+import { NodeServices } from "@effect/platform-node";
+import { Effect } from "effect";
 import { configDefaults, defineConfig, mergeConfig } from "vitest/config";
 import type { Page, Route } from "playwright";
 import vite from "./vite.config.ts";
@@ -129,7 +131,11 @@ export default mergeConfig(
                 releaseConfigurationLookup,
                 configurationEditorResponses,
                 configurationEditorRequests,
-                configurationEditorScreenshot,
+                configurationEditorScreenshot: (context, name: string) =>
+                  configurationEditorScreenshot(context, name).pipe(
+                    Effect.provide(NodeServices.layer),
+                    Effect.runPromise,
+                  ),
                 reducedMotion: async ({ page }, reduce: boolean) => {
                   await page.emulateMedia({ reducedMotion: reduce ? "reduce" : "no-preference" });
                 },

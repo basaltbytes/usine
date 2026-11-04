@@ -51,7 +51,7 @@ port.on("message", (message) => {
         statements.set(command.sql, statement);
         if (statements.size > 200) {
           const oldest = statements.keys().next();
-          if (!oldest.done) statements.delete(oldest.value);
+          if (oldest.done !== true) statements.delete(oldest.value);
         }
       }
       statement.setReadBigInts(command.safeIntegers);

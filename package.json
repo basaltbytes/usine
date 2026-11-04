@@ -10,7 +10,6 @@
   "scripts": {
     "build": "turbo run build",
     "check": "node scripts/docs/check.mjs && turbo run check && pnpm --filter @usine/docs openapi:check && git diff --exit-code -- apps/docs/public/openapi.json",
-    "effect:baseline": "turbo run effect:baseline",
     "effect:fix": "node scripts/effect-diagnostics/fix.mjs",
     "check:packed-install": "node scripts/check-packed-install.mjs",
     "test": "node --experimental-strip-types --test tooling/test/*.test.mts scripts/docs/*.test.mjs scripts/release/*.test.mjs scripts/effect-diagnostics/*.test.mjs infra/hetzner/gateway/test/*.test.mjs infra/boat/test/*.test.mjs && turbo run test --concurrency=1",
@@ -21,7 +20,8 @@
     "changeset": "changeset",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "pnpm build && pnpm stage publish -r --tag latest --no-git-checks && node scripts/release/tag.mjs",
-    "prerelease:publish": "node scripts/release/next.mjs"
+    "prerelease:publish": "node scripts/release/next.mjs",
+    "prepare": "effect-tsgo patch --typescript"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",

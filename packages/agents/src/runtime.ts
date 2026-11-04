@@ -366,7 +366,7 @@ export interface ChildBackendService {
 
 /** The service that runs tasks delegated by an attempt's parent. */
 export class ChildBackend extends Context.Service<ChildBackend, ChildBackendService>()(
-  "@usine/agents/ChildBackend",
+  "@usine/agents/runtime/ChildBackend",
 ) {}
 
 /**
@@ -389,19 +389,19 @@ export class ClaudeLoginLock extends Context.Service<
       machine: Option.Option<MachineId>,
     ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   }
->()("@usine/agents/ClaudeLoginLock") {}
+>()("@usine/agents/runtime/ClaudeLoginLock") {}
 
 /** The child backend for Claude Code. */
 export class ClaudeChildBackend extends Context.Service<ClaudeChildBackend, ChildBackendService>()(
-  "@usine/agents/ClaudeChildBackend",
+  "@usine/agents/runtime/ClaudeChildBackend",
 ) {}
 
 /** The child backend for Codex. */
 export class CodexChildBackend extends Context.Service<CodexChildBackend, ChildBackendService>()(
-  "@usine/agents/CodexChildBackend",
+  "@usine/agents/runtime/CodexChildBackend",
 ) {}
 
 /** The child backend for Pi. */
 export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackendService>()(
-  "@usine/agents/PiChildBackend",
+  "@usine/agents/runtime/PiChildBackend",
 ) {}

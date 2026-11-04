@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { AttemptContext } from "@usine/core/attempt";
 import { type CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey, Event, EventId } from "@usine/core/event";
@@ -62,7 +63,7 @@ export const runAgainSubmission = (
   identity: RunAgainIdentity,
 ): Submission => {
   const dedupKey = DedupKey.make(
-    JSON.stringify(["operator-run-again", identity.reopening, identity.trigger]),
+    jsonKey(["operator-run-again", identity.reopening, identity.trigger]),
   );
   return Submission.make({
     event: Event.make({

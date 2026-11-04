@@ -90,7 +90,7 @@ export class CallerTokens extends Context.Service<
      */
     readonly withoutCallerTokens: (headers: Headers.Headers) => Effect.Effect<Headers.Headers>;
   }
->()("@usine/gateway/CallerTokens") {
+>()("@usine/gateway/caller/caller/CallerTokens") {
   /** Imports the caller key from `GatewaySettings` for signing and verification with Web Crypto. */
   static readonly layer = Layer.effect(
     CallerTokens,

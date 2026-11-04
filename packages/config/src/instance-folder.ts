@@ -34,7 +34,7 @@ export class InstanceFolder extends Context.Service<
      */
     readonly load: (root: InstanceDirectory) => Effect.Effect<LoadedInstance, FactoryConfigError>;
   }
->()("@usine/config/InstanceFolder") {
+>()("@usine/config/instance-folder/InstanceFolder") {
   /** Provides folder inspection using `FileSystem`, `Path`, and `ConfigParser`. */
   static readonly layer = Layer.effect(
     InstanceFolder,

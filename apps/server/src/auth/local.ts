@@ -1,5 +1,5 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import { Effect, FileSystem, Option, Redacted, Schema } from "effect";
+import { Effect, FileSystem, Option, Redacted, Schema, Crypto } from "effect";
 import { authFailure } from "./model.ts";
 import { randomSecret } from "./crypto.ts";
 
@@ -39,7 +39,8 @@ export const writeAdminToken = Effect.fn("Authentication.writeAdminToken")(funct
 ) {
   const fs = yield* FileSystem.FileSystem;
   const token = randomSecret();
-  const temporary = `${file(directory)}.${crypto.randomUUID()}`;
+  const suffix = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+  const temporary = `${file(directory)}.${suffix}`;
   yield* fs.writeFileString(temporary, Redacted.value(token), { mode: 0o600, flag: "wx" }).pipe(
     Effect.andThen(fs.rename(temporary, file(directory))),
     Effect.mapError(() => authFailure("Could not write the local admin token.", 503)),

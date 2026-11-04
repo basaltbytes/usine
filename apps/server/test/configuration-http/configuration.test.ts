@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { LoopFile } from "@usine/config/loop";
 import { ManagedRepo } from "@usine/config/factory";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
@@ -168,13 +169,15 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
         status: 409,
         body: { error: "ReloadPreflightError", workers: ["broken"] },
       });
-      expect(JSON.stringify(preflight)).not.toContain("private observation");
+      const json1 = jsonKey(preflight);
+      expect(json1).not.toContain("private observation");
       const secret = yield* request("PUT", "/entities/worker/secret", {
         expected: 1,
         text: "name: secret\nkind: ssh\ndestination: host\nroot: /srv/usine\ngateway:\n  domain: gateway.test\n  destination: gateway\n  admin_token_env: sk-literal-secret\n",
       });
       expect(secret.status).toBe(422);
-      expect(JSON.stringify(secret)).not.toContain("sk-literal-secret");
+      const json2 = jsonKey(secret);
+      expect(json2).not.toContain("sk-literal-secret");
 
       expect(
         (yield* request("PUT", "/entities/label/ready", {

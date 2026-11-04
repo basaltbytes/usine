@@ -1,5 +1,7 @@
+// The Node server adapter requires native HTTP server and connection types.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
-import { NodeFileSystem, NodeHttpClient, NodeHttpServer } from "@effect/platform-node";
+import { NodeFileSystem, NodeHttpClient, NodeHttpServer, NodeCrypto } from "@effect/platform-node";
 import { Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
 import {
   HttpMiddleware,
@@ -50,7 +52,7 @@ export class GatewayAddresses extends Context.Service<
     /** The bound admin API address with any requested port zero replaced by the assigned port. */
     readonly admin: Listener;
   }
->()("@usine/gateway/node/GatewayAddresses") {}
+>()("@usine/gateway/node/node/GatewayAddresses") {}
 
 const boundTo = (address: NetAddress.SocketAddress, requested: Listener): Listener =>
   address._tag === "UnixPathAddress"
@@ -151,7 +153,9 @@ export const gatewayLayer = (
   ).pipe(
     Layer.provide(GatewayProxy.layer),
     Layer.provideMerge(gatewayServicesWithAttachments(attachments)),
-    Layer.provide(Layer.mergeAll(NodeHttpClient.layerUndici, NodeFileSystem.layer)),
+    Layer.provide(
+      Layer.mergeAll(NodeHttpClient.layerUndici, NodeFileSystem.layer, NodeCrypto.layer),
+    ),
     // No automatic HTTP span records the incoming headers. Named Gateway spans record safe fields
     // without incoming credentials.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
@@ -174,7 +178,7 @@ export const gatewayFromEnvironment = Layer.unwrap(
       .parse(source.provider);
     const attachments = fileAttachmentsLayer(directory);
     return reloadOnHangup.pipe(
-      Layer.provideMerge(gatewayReloadLayer(started, base)),
+      Layer.provideMerge(gatewayReloadLayer(started, base).pipe(Layer.provide(NodeCrypto.layer))),
       Layer.provideMerge(gatewayLayer(started.listeners, attachments)),
       Layer.provide(Layer.succeed(GatewaySettings)(started.settings)),
     );

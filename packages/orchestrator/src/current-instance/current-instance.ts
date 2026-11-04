@@ -194,7 +194,7 @@ export class CurrentInstance extends Context.Service<
      */
     readonly registerWorkers: (workers: WorkerReload) => Effect.Effect<void, never, Scope.Scope>;
   }
->()("@usine/orchestrator/CurrentInstance") {
+>()("@usine/orchestrator/current-instance/current-instance/CurrentInstance") {
   /**
    * Starts from the imported or stored configuration and follows revisions after `after`.
    */

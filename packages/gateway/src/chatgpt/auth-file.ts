@@ -1,4 +1,5 @@
 import {
+  Crypto,
   type Brand,
   DateTime,
   Effect,
@@ -9,6 +10,7 @@ import {
   Result,
   Schema,
 } from "effect";
+
 import { Base64Url } from "effect/encoding";
 
 /**
@@ -141,7 +143,7 @@ export const readAuthFile = Effect.fn("ChatGptAuthFile.read")(function* (path: s
 });
 
 /** Returns the path of a new temporary file next to `path`. */
-const besides = (path: string, suffix: string) => `${path}.${crypto.randomUUID()}.${suffix}`;
+const besides = (path: string, uuid: string, suffix: string) => `${path}.${uuid}.${suffix}`;
 
 /**
  * Writes rotated tokens into the Codex `auth.json` at `path` and sets `last_refresh`, keeping
@@ -184,8 +186,12 @@ export const writeAuthFile = Effect.fn("ChatGptAuthFile.write")(function* (
       onSome: DateTime.formatIso,
     }),
   };
-  const temporary = besides(path, "tmp");
-  yield* fs.writeFileString(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 }).pipe(
+  const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+  const temporary = besides(path, uuid, "tmp");
+  const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(JsonObject, { space: 2 }))(
+    next,
+  ).pipe(Effect.orDie);
+  yield* fs.writeFileString(temporary, `${serialized}\n`, { mode: 0o600 }).pipe(
     Effect.andThen(fs.rename(temporary, path)),
     Effect.onExit((exit) =>
       Exit.isSuccess(exit) ? Effect.void : fs.remove(temporary).pipe(Effect.ignore),
@@ -205,7 +211,8 @@ export const checkAuthFileWritable = Effect.fn("ChatGptAuthFile.checkWritable")(
 ) {
   yield* Effect.annotateCurrentSpan({ authFile: path });
   const fs = yield* FileSystem.FileSystem;
-  const probe = besides(path, "check");
+  const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+  const probe = besides(path, uuid, "check");
   yield* fs.writeFileString(probe, "", { mode: 0o600 }).pipe(
     Effect.andThen(fs.remove(probe)),
     Effect.mapError((error) =>

@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -148,14 +149,12 @@ const pullRequestParent =
       }
 
       const head = (yield* output("git", ["rev-parse", "HEAD"], request.cwd)).trim();
-      yield* fileSystem.writeFileString(
-        `${request.cwd}/.test-pull-request.json`,
-        JSON.stringify({
-          number: 71,
-          html_url: "https://github.com/acme/demo/pull/71",
-          head: { sha: head },
-        }),
-      );
+      const json1 = jsonKey({
+        number: 71,
+        html_url: "https://github.com/acme/demo/pull/71",
+        head: { sha: head },
+      });
+      yield* fileSystem.writeFileString(`${request.cwd}/.test-pull-request.json`, json1);
       return `Completed: ${request.spec.task}`;
     }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
 
@@ -164,17 +163,15 @@ const reviewedParent: StubParent = ({ request }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const currentNow = yield* DateTime.now;
-    yield* fileSystem.writeFileString(
-      `${request.cwd}/.test-review.json`,
-      JSON.stringify({
-        id: 81,
-        html_url: REVIEW_URL,
-        body: `No findings.\n\n${githubSignature(request.spec.agent.name)}`,
-        user: { login: "usine-test[bot]" },
-        state: "COMMENTED",
-        submitted_at: DateTime.formatIso(currentNow),
-      }),
-    );
+    const json2 = jsonKey({
+      id: 81,
+      html_url: REVIEW_URL,
+      body: `No findings.\n\n${githubSignature(request.spec.agent.name)}`,
+      user: { login: "usine-test[bot]" },
+      state: "COMMENTED",
+      submitted_at: DateTime.formatIso(currentNow),
+    });
+    yield* fileSystem.writeFileString(`${request.cwd}/.test-review.json`, json2);
     return AttemptReport.make({
       message: "Posted the review on pull request 71.",
       answeredOperator: true,
@@ -912,7 +909,8 @@ describe("local worker", () => {
                 environment.TURBO_CACHE_DIR,
                 path.join(instance, ".usine", "workers", "local", "turbo"),
               );
-              assert(!JSON.stringify(environment).includes(TOKEN));
+              const json3 = jsonKey(environment);
+              assert(!json3.includes(TOKEN));
             }),
         );
       }).pipe(Effect.provide(NodeServices.layer)),

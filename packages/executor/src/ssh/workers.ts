@@ -37,7 +37,7 @@ export class SshWorkers extends Context.Service<
      */
     readonly removeWorker: (worker: WorkerName) => Effect.Effect<void>;
   }
->()("@usine/executor/SshWorkers") {}
+>()("@usine/executor/ssh/workers/SshWorkers") {}
 
 interface HeldForward {
   readonly forward: GatewayForward;

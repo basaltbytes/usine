@@ -1,6 +1,12 @@
-import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { type Brand, Effect, FileSystem, Path, Schema } from "effect";
 import type { Page, Route } from "playwright";
+
+class ConfigurationEditorScreenshotError extends Schema.TaggedError<
+  ConfigurationEditorScreenshotError,
+  Brand.Brand<"@usine/web/features/configuration/components/editor/browser-fixture/ConfigurationEditorScreenshotError">
+>(
+  "@usine/web/features/configuration/components/editor/browser-fixture/ConfigurationEditorScreenshotError",
+)("ConfigurationEditorScreenshotError", { path: Schema.String, cause: Schema.Defect() }) {}
 
 interface WriteRequest {
   readonly method: string;
@@ -213,14 +219,21 @@ export const configurationEditorResponses = async (
   });
 };
 
-export const configurationEditorScreenshot = async (
+export const configurationEditorScreenshot = Effect.fn("configurationEditorScreenshot")(function* (
   { page }: { readonly page: Page },
   name: string,
-) => {
-  await mkdir(resolve("../../.impeccable/review"), { recursive: true });
-  await page.screenshot({
-    path: resolve(`../../.impeccable/review/${name}.png`),
-    fullPage: true,
-    animations: "disabled",
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const output = path.resolve(`../../.impeccable/review/${name}.png`);
+  yield* Effect.annotateCurrentSpan({ screenshot: name, path: output });
+  yield* fs.makeDirectory(path.dirname(output), { recursive: true });
+  yield* Effect.tryPromise({
+    try: () => page.screenshot({ path: output, fullPage: true, animations: "disabled" }),
+    catch: (cause) => ConfigurationEditorScreenshotError.make({ path: output, cause }),
   });
-};
+  yield* Effect.logDebug("Configuration editor screenshot saved", {
+    screenshot: name,
+    path: output,
+  });
+});
