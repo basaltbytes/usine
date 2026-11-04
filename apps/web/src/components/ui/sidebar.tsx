@@ -4,6 +4,7 @@ import * as React from "react";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Schema } from "effect";
 
 import { useIsMobile } from "~/hooks/use-mobile";
 import { cn } from "~/lib/utils";
@@ -70,8 +71,7 @@ function SidebarProvider({
   const [_open, _setOpen] = React.useState(defaultOpen);
   const open = openProp ?? _open;
   const setOpen = React.useCallback(
-    (value: boolean | ((value: boolean) => boolean)) => {
-      const openState = typeof value === "function" ? value(open) : value;
+    (openState: boolean) => {
       if (setOpenProp !== undefined) {
         setOpenProp(openState);
       } else {
@@ -81,13 +81,13 @@ function SidebarProvider({
       // This sets the cookie to keep the sidebar state.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
     },
-    [setOpenProp, open],
+    [setOpenProp],
   );
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(
-    () => (isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)),
-    [isMobile, setOpen, setOpenMobile],
+    () => (isMobile ? setOpenMobile((open) => !open) : setOpen(!open)),
+    [isMobile, open, setOpen, setOpenMobile],
   );
 
   // Adds a keyboard shortcut to toggle the sidebar.
@@ -120,17 +120,20 @@ function SidebarProvider({
     [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar],
   );
 
+  const sidebarStyle: React.CSSProperties & {
+    "--sidebar-width": string;
+    "--sidebar-width-icon": string;
+  } = {
+    "--sidebar-width": SIDEBAR_WIDTH,
+    "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+    ...style,
+  };
+
   return (
     <SidebarContext.Provider value={contextValue}>
       <div
         data-slot="sidebar-wrapper"
-        style={
-          {
-            "--sidebar-width": SIDEBAR_WIDTH,
-            "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
-            ...style,
-          } as React.CSSProperties
-        }
+        style={sidebarStyle}
         className={cn(
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
@@ -174,6 +177,10 @@ function Sidebar({
   }
 
   if (isMobile) {
+    const style: React.CSSProperties & { "--sidebar-width": string } = {
+      "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+    };
+
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
@@ -182,11 +189,7 @@ function Sidebar({
           data-slot="sidebar"
           data-mobile="true"
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
-          style={
-            {
-              "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
-            } as React.CSSProperties
-          }
+          style={style}
           side={side}
         >
           <SheetHeader className="sr-only">
@@ -513,7 +516,7 @@ function SidebarMenuButton({
     return comp;
   }
 
-  if (typeof tooltip === "string") {
+  if (Schema.is(Schema.String)(tooltip)) {
     tooltip = {
       children: tooltip,
     };
@@ -585,6 +588,9 @@ function SidebarMenuSkeleton({
 }) {
   // Random width between 50 to 90%.
   const [width] = React.useState(() => `${Math.floor(Math.random() * 40) + 50}%`);
+  const style: React.CSSProperties & { "--skeleton-width": string } = {
+    "--skeleton-width": width,
+  };
 
   return (
     <div
@@ -597,11 +603,7 @@ function SidebarMenuSkeleton({
       <Skeleton
         className="h-4 max-w-(--skeleton-width) flex-1"
         data-sidebar="menu-skeleton-text"
-        style={
-          {
-            "--skeleton-width": width,
-          } as React.CSSProperties
-        }
+        style={style}
       />
     </div>
   );

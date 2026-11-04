@@ -61,6 +61,7 @@ for (const [name, filename, source, rule] of [
   ],
   ["the old alias", "features/tasks/example.ts", 'import "@/lib/example";', "web-import-direction"],
   ["default exports", "features/tasks/example.ts", "export default 1;", "no-default-export"],
+  ["UI default exports", "components/ui/example.ts", "export default 1;", "no-default-export"],
 ]) {
   test(`rejects ${name}`, () => {
     const result = lint(`apps/web/src/${filename}`, source);
@@ -77,7 +78,7 @@ for (const [filename, source] of [
     'import "~/components/example"; import "~/hooks/example"; import "~/lib/example";',
   ],
   ["lib/example.ts", 'import "./sibling";'],
-  ["components/ui/example.ts", "export default 1;"],
+  ["components/ai-elements/example.ts", "export default 1;"],
 ]) {
   test(`allows ${source} in ${filename}`, () => {
     const result = lint(`apps/web/src/${filename}`, source);

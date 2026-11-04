@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as RechartsPrimitive from "recharts";
 import type { TooltipValueType } from "recharts";
+import { Option, Predicate, Record, Schema } from "effect";
 
 import { cn } from "~/lib/utils";
 
@@ -9,6 +10,9 @@ const THEMES = { light: "", dark: ".dark" } as const;
 
 const INITIAL_DIMENSION = { width: 320, height: 200 } as const;
 type TooltipNameType = number | string;
+type ChartPayload =
+  | RechartsPrimitive.TooltipPayloadEntry<TooltipValueType, TooltipNameType>
+  | RechartsPrimitive.LegendPayload;
 
 export type ChartConfig = Record<
   string,
@@ -85,13 +89,13 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   return (
     <style
       dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
+        __html: Record.keys(THEMES)
           .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+            (theme) => `
+${THEMES[theme]} [data-chart=${id}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
-    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig.color;
+    const color = itemConfig.theme?.[theme] ?? itemConfig.color;
     return color !== undefined && color !== "" ? `  --color-${key}: ${color};` : null;
   })
   .join("\n")}
@@ -142,7 +146,7 @@ function ChartTooltipContent({
     const key = `${labelKey ?? item?.dataKey ?? item?.name ?? "value"}`;
     const itemConfig = getPayloadConfigFromPayload(config, item, key);
     const value =
-      (labelKey === undefined || labelKey === "") && typeof label === "string"
+      (labelKey === undefined || labelKey === "") && Schema.is(Schema.String)(label)
         ? (config[label]?.label ?? label)
         : itemConfig?.label;
 
@@ -182,6 +186,13 @@ function ChartTooltipContent({
             const key = `${nameKey ?? item.name ?? item.dataKey ?? "value"}`;
             const itemConfig = getPayloadConfigFromPayload(config, item, key);
             const indicatorColor = color ?? item.payload?.fill ?? item.color;
+            const indicatorStyle: React.CSSProperties & {
+              "--color-bg": string | undefined;
+              "--color-border": string | undefined;
+            } = {
+              "--color-bg": indicatorColor,
+              "--color-border": indicatorColor,
+            };
 
             return (
               <div
@@ -215,12 +226,7 @@ function ChartTooltipContent({
                               "my-0.5": nestLabel && indicator === "dashed",
                             },
                           )}
-                          style={
-                            {
-                              "--color-bg": indicatorColor,
-                              "--color-border": indicatorColor,
-                            } as React.CSSProperties
-                          }
+                          style={indicatorStyle}
                         />
                       )
                     )}
@@ -238,9 +244,9 @@ function ChartTooltipContent({
                       </div>
                       {item.value != null && (
                         <span className="font-mono font-medium text-foreground tabular-nums">
-                          {typeof item.value === "number"
-                            ? item.value.toLocaleString()
-                            : String(item.value)}
+                          {Array.isArray(item.value)
+                            ? String(item.value)
+                            : item.value.toLocaleString()}
                         </span>
                       )}
                     </div>
@@ -311,28 +317,28 @@ function ChartLegendContent({
   );
 }
 
-function getPayloadConfigFromPayload(config: ChartConfig, payload: unknown, key: string) {
-  if (typeof payload !== "object" || payload === null) {
+function getPayloadConfigFromPayload(
+  config: ChartConfig,
+  payload: ChartPayload | undefined,
+  key: string,
+) {
+  if (payload === undefined) {
     return undefined;
   }
 
-  const payloadPayload =
-    "payload" in payload && typeof payload.payload === "object" && payload.payload !== null
-      ? payload.payload
-      : undefined;
-
-  let configLabelKey: string = key;
-
-  if (key in payload && typeof payload[key as keyof typeof payload] === "string") {
-    configLabelKey = payload[key as keyof typeof payload] as string;
-  } else if (
-    payloadPayload !== undefined &&
-    key in payloadPayload &&
-    typeof payloadPayload[key as keyof typeof payloadPayload] === "string"
-  ) {
-    configLabelKey = payloadPayload[key as keyof typeof payloadPayload] as string;
-  }
-
+  const decodeSeriesName = Schema.decodeUnknownOption(Schema.String);
+  const direct = Option.getOrUndefined(
+    decodeSeriesName(Predicate.hasProperty(payload, key) ? payload[key] : undefined),
+  );
+  const nestedPayload = payload.payload;
+  const nested = Option.getOrUndefined(
+    decodeSeriesName(
+      Predicate.isObjectOrArray(nestedPayload) && Predicate.hasProperty(nestedPayload, key)
+        ? nestedPayload[key]
+        : undefined,
+    ),
+  );
+  const configLabelKey = direct ?? nested ?? key;
   return configLabelKey in config ? config[configLabelKey] : config[key];
 }
 
