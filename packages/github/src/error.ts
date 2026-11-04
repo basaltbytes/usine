@@ -1,4 +1,4 @@
-import { Match, Option, Schema } from "effect";
+import { type Brand, Match, Option, Schema } from "effect";
 import { InstallationDiscoveryError } from "./installation.ts";
 import { AppPermissionError } from "./access.ts";
 
@@ -27,9 +27,10 @@ export const GitHubOperation = Schema.Literals([
 export type GitHubOperation = typeof GitHubOperation.Type;
 
 /** A failed GitHub request, with the HTTP status if a response was received. */
-export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
-  "@usine/github/GitHubApiError",
-)("GitHubApiError", {
+export class GitHubApiError extends Schema.TaggedError<
+  GitHubApiError,
+  Brand.Brand<"@usine/github/error/GitHubApiError">
+>("@usine/github/GitHubApiError")("GitHubApiError", {
   /** The GitHub operation that failed. */
   operation: GitHubOperation,
   /** The HTTP response status, or `None` when transport failed before a response arrived. */
@@ -39,9 +40,10 @@ export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
 }) {}
 
 /** The error when GitHub defers the request until `retryAt`. */
-export class GitHubRateLimitError extends Schema.TaggedError<GitHubRateLimitError>(
-  "@usine/github/GitHubRateLimitError",
-)("GitHubRateLimitError", {
+export class GitHubRateLimitError extends Schema.TaggedError<
+  GitHubRateLimitError,
+  Brand.Brand<"@usine/github/error/GitHubRateLimitError">
+>("@usine/github/GitHubRateLimitError")("GitHubRateLimitError", {
   /** The GitHub operation that failed. */
   operation: GitHubOperation,
   /** The earliest UTC retry time derived from GitHub's retry or rate-limit headers. */
@@ -51,9 +53,10 @@ export class GitHubRateLimitError extends Schema.TaggedError<GitHubRateLimitErro
 }) {}
 
 /** The error when a GitHub response can't be decoded or lacks required content. */
-export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHubResponseError>(
-  "@usine/github/InvalidGitHubResponseError",
-)("InvalidGitHubResponseError", {
+export class InvalidGitHubResponseError extends Schema.TaggedError<
+  InvalidGitHubResponseError,
+  Brand.Brand<"@usine/github/error/InvalidGitHubResponseError">
+>("@usine/github/InvalidGitHubResponseError")("InvalidGitHubResponseError", {
   /** The GitHub operation that failed. */
   operation: GitHubOperation,
   /** An operator-facing explanation; branch on the error tag and fields instead of matching this text. */
@@ -66,9 +69,10 @@ export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHub
  * The error when the repository has no item with this number because it was deleted,
  * transferred, or is no longer readable by the App. The repository itself responded.
  */
-export class GitHubItemNotFoundError extends Schema.TaggedError<GitHubItemNotFoundError>(
-  "@usine/github/GitHubItemNotFoundError",
-)("GitHubItemNotFoundError", {
+export class GitHubItemNotFoundError extends Schema.TaggedError<
+  GitHubItemNotFoundError,
+  Brand.Brand<"@usine/github/error/GitHubItemNotFoundError">
+>("@usine/github/GitHubItemNotFoundError")("GitHubItemNotFoundError", {
   /** The GitHub operation that failed. */
   operation: GitHubOperation,
   /** The issue or pull request number that the responding repository could not return. */

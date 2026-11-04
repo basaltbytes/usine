@@ -44,15 +44,18 @@ export const revertConfiguration = (
     }
     const workerKeys = (snapshot: Configuration) =>
       Option.match(snapshot.instance, {
-        onNone: () => [],
+        onNone: () => Effect.succeed([]),
         onSome: (instance) =>
-          configurationEntities(instance)
-            .filter(({ key }) => key.kind === "worker")
-            .map(({ key }) => key.key),
+          configurationEntities(instance).pipe(
+            Effect.map((entities) =>
+              entities.filter(({ key }) => key.kind === "worker").map(({ key }) => key.key),
+            ),
+          ),
       });
-    const historical = workerKeys(previous);
+    const historical = yield* workerKeys(previous);
     const changed = new Set(target.changes.map(({ key }) => key.key));
-    const ordered = workerKeys(current).filter((key) => !changed.has(key));
+    const currentWorkerKeys = yield* workerKeys(current);
+    const ordered = currentWorkerKeys.filter((key) => !changed.has(key));
     for (const [index, key] of historical.entries()) {
       if (!changed.has(key)) continue;
       const next = historical.slice(index + 1).find((candidate) => ordered.includes(candidate));

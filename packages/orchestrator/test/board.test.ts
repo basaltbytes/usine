@@ -37,7 +37,7 @@ import {
   WritableBoardLaneView,
 } from "../src/operator/board.ts";
 import { SucceededAttemptView } from "../src/operator/attempt.ts";
-import { RunView } from "../src/operator/run.ts";
+import { RunSummaryView } from "../src/operator/run.ts";
 import {
   PoolUsageView,
   RunUsageView,
@@ -133,7 +133,7 @@ const mergedPullRequest = ItemProjection.make({
 });
 
 const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
-  RunView.make({
+  RunSummaryView.make({
     agentBrain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("test-model"),
@@ -148,11 +148,9 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
     loopPaused: false,
     openedAt: "2026-09-01T12:00:00.000Z",
     closedAt: state === "Failed" || state === "Succeeded" ? "2026-09-01T12:30:00.000Z" : null,
-    task: "Build the Board.",
     attempts: [],
     approval: null,
     runAgain: null,
-    resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",
     canRetry: state === "Failed",
@@ -164,7 +162,7 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
 describe("Board projection", () => {
   it.effect("gives label lanes precedence over state lanes", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [
           {
@@ -187,7 +185,7 @@ describe("Board projection", () => {
 
   it.effect("matches lane labels ignoring case, as GitHub does", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [
           { name: repository, lanes: [{ name: "Ready", sources: [{ label: "Ready-For-Agent" }] }] },
@@ -202,7 +200,7 @@ describe("Board projection", () => {
 
   it.effect("groups a merged pull request by state even when it still carries a lane label", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [
           {
@@ -227,7 +225,7 @@ describe("Board projection", () => {
     "leaves a closed issue, or an open one GitHub no longer has, unmapped instead of placing it by a leftover label",
     () =>
       Effect.gen(function* () {
-        const config = Schema.decodeSync(UsineConfig)({
+        const config = yield* Schema.decodeEffect(UsineConfig)({
           version: 1,
           repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
         });
@@ -249,7 +247,7 @@ describe("Board projection", () => {
 
   it.effect("moves an open pull request GitHub no longer has to its closed lane", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [
           {
@@ -294,7 +292,7 @@ describe("Board projection", () => {
 
   it.effect("proposes lanes from unused repository labels when there are no Items", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
@@ -310,7 +308,7 @@ describe("Board projection", () => {
 
   it.effect("quarantines one malformed Item projection and keeps its sibling", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
       });
@@ -333,7 +331,7 @@ describe("Board projection", () => {
 
   it.effect("keeps every actionable Run while preferring it over a settled Run", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
       });
@@ -355,7 +353,7 @@ describe("Board projection", () => {
 
   it.effect("retains a Waiting and Failed Run when another Run is active", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
       });
@@ -377,7 +375,7 @@ describe("Board projection", () => {
 
   it.effect("prefers the active Run over a failed Run on a closed issue, which needs no one", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository, lanes: [{ name: "Review", sources: [{ label: review }] }] }],
       });
@@ -393,11 +391,11 @@ describe("Board projection", () => {
           labels: { totalCount: 1, nodes: [{ name: review }] },
         },
       });
-      const failed = RunView.make({
+      const failed = RunSummaryView.make({
         ...runForBoard("failed-run", "Failed"),
         pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
       });
-      const reviewRun = RunView.make({
+      const reviewRun = RunSummaryView.make({
         ...runForBoard("review-run", "Running"),
         itemKey: pr.itemKey,
         openedAt: "2026-09-01T11:00:00.000Z",
@@ -413,7 +411,7 @@ describe("Board projection", () => {
     "keeps issue development and PR review in one Task after the issue loses its label",
     () =>
       Effect.gen(function* () {
-        const config = Schema.decodeSync(UsineConfig)({
+        const config = yield* Schema.decodeEffect(UsineConfig)({
           version: 1,
           repos: [{ name: repository, lanes: [{ name: "Review", sources: [{ label: review }] }] }],
         });
@@ -431,11 +429,11 @@ describe("Board projection", () => {
             labels: { totalCount: 1, nodes: [{ name: review }] },
           },
         });
-        const development = RunView.make({
+        const development = RunSummaryView.make({
           ...runForBoard("development", "Succeeded"),
           pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
         });
-        const reviewRun = RunView.make({
+        const reviewRun = RunSummaryView.make({
           ...runForBoard("review", "Running"),
           itemKey: pr.itemKey,
           openedAt: "2026-09-02T12:00:00.000Z",
@@ -492,7 +490,7 @@ describe("Board projection", () => {
 
   it.effect("joins only canonical same-repository closing links without Runs", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
@@ -523,7 +521,7 @@ describe("Board projection", () => {
 
   it.effect("groups several issues sharing a PR once, independently of snapshot order", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
@@ -540,16 +538,16 @@ describe("Board projection", () => {
           url: "https://github.com/basaltbytes/usine/issues/34",
         },
       });
-      const development = RunView.make({
+      const development = RunSummaryView.make({
         ...runForBoard("dev-33", "Succeeded"),
         pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
       });
-      const companion = RunView.make({
+      const companion = RunSummaryView.make({
         ...development,
         id: RunId.make("dev-34"),
         itemKey: issue34.itemKey,
       });
-      const reviewRun = RunView.make({
+      const reviewRun = RunSummaryView.make({
         ...runForBoard("review-98", "Running"),
         itemKey: mergedPullRequest.itemKey,
       });
@@ -644,7 +642,10 @@ describe("Board projection", () => {
 
   it.effect("keeps proposed label lanes read-only and preserves descriptive labels", () =>
     Effect.gen(function* () {
-      const config = Schema.decodeSync(UsineConfig)({
+      const fixtureValue1 = yield* Effect.context<never>();
+      const runFixture = Effect.runSyncWith(fixtureValue1);
+
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
       });
@@ -658,11 +659,13 @@ describe("Board projection", () => {
       assert(board.lanes.every((lane) => lane._tag === "ReadOnlyBoardLane"));
       assert.deepStrictEqual(board.lanes.flatMap(({ items }) => items)[0]?.labels, labels);
       assert.throws(() =>
-        Schema.decodeUnknownSync(WritableBoardLaneView)({
-          ...target,
-          _tag: "WritableBoardLane",
-          labels: [review],
-        }),
+        runFixture(
+          Schema.decodeUnknownEffect(WritableBoardLaneView)({
+            ...target,
+            _tag: "WritableBoardLane",
+            labels: [review],
+          }),
+        ),
       );
     }),
   );
@@ -837,7 +840,7 @@ describe("Task usage", () => {
 
 it.effect("matches a project's label lane by name in both repositories", () =>
   Effect.gen(function* () {
-    const config = Schema.decodeSync(UsineConfig)({
+    const config = yield* Schema.decodeEffect(UsineConfig)({
       version: 2,
       repos: [{ name: repository }, { name: "basaltbytes/second" }],
       projects: [

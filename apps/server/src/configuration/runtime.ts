@@ -88,15 +88,14 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
         ),
       ),
     );
+    const currentEntities = yield* configurationEntities(current.instance.value);
+    const migratedEntities = yield* configurationEntities(migrated);
     yield* store
       .commit({
         expected: current.number,
         actor: Option.some(localActor),
         message: Option.some("Migrated repositories and loops to projects"),
-        changes: configurationDiff(
-          configurationEntities(current.instance.value),
-          configurationEntities(migrated),
-        ),
+        changes: configurationDiff(currentEntities, migratedEntities),
       })
       .pipe(
         Effect.catchTag("StaleRevision", () =>
@@ -135,6 +134,7 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
         invalidAgents: [],
         quarantinedLoops: [],
       });
+  const importedEntities = yield* configurationEntities(imported);
   yield* store
     .commit({
       expected: current.number,
@@ -142,7 +142,7 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
       message: Option.some(
         hasFiles ? "Imported from the instance folder" : "Initialized empty configuration",
       ),
-      changes: configurationDiff([], configurationEntities(imported)),
+      changes: configurationDiff([], importedEntities),
     })
     .pipe(
       Effect.catchTag("StaleRevision", () =>

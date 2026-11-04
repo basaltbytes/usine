@@ -1,54 +1,26 @@
 {
-  "src/admin/api.ts": {
-    "schemaClassMissingBrand": 7
-  },
-  "src/attachment/attachment.ts": {
-    "schemaClassMissingBrand": 9
-  },
   "src/attachment/store.ts": {
     "deterministicKeys": 1
   },
   "src/caller/caller.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2,
-    "schemaSync": 1
+    "deterministicKeys": 1
   },
   "src/chatgpt/auth-file.ts": {
     "cryptoRandomUUID": 1,
-    "globalJsonInEffect": 1,
-    "schemaClassMissingBrand": 2
+    "globalJsonInEffect": 1
   },
   "src/chatgpt/logins.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 1
-  },
-  "src/egress/egress.ts": {
-    "schemaClassMissingBrand": 5
-  },
-  "src/github/download.ts": {
-    "redundantSchemaTagIdentifier": 1,
-    "schemaClassMissingBrand": 1
-  },
-  "src/github/rename.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/llm/llm.ts": {
-    "schemaClassMissingBrand": 6
+    "deterministicKeys": 1
   },
   "src/node/attachments.ts": {
     "cryptoRandomUUIDInEffect": 1,
-    "nodeBuiltinImport": 2,
-    "schemaSync": 1
+    "nodeBuiltinImport": 2
   },
   "src/node/connections.ts": {
     "nodeBuiltinImport": 1
   },
   "src/node/egress-proxy.ts": {
-    "nodeBuiltinImport": 2,
-    "schemaClassMissingBrand": 3
-  },
-  "src/node/environment.ts": {
-    "schemaClassMissingBrand": 2
+    "nodeBuiltinImport": 2
   },
   "src/node/node.ts": {
     "deterministicKeys": 1,
@@ -62,10 +34,6 @@
   },
   "src/settings.ts": {
     "deterministicKeys": 2
-  },
-  "test/caller.test.ts": {
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
   },
   "test/chatgpt.test.ts": {
     "deterministicKeys": 1,
@@ -83,8 +51,7 @@
     "processEnv": 2
   },
   "test/fixtures.ts": {
-    "globalJson": 3,
-    "schemaSync": 2
+    "globalJson": 3
   },
   "test/main.test.ts": {
     "asyncFunction": 4,
@@ -94,8 +61,7 @@
     "globalTimers": 1,
     "newPromise": 6,
     "nodeBuiltinImport": 4,
-    "processEnv": 2,
-    "schemaSync": 1
+    "processEnv": 2
   },
   "test/node.test.ts": {
     "asyncFunction": 1,

@@ -22,7 +22,7 @@ import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
 import { DateTime, Deferred, Effect, Option, Queue, Result, Schema } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
-import type { DurableHarness, DurableHarnessError } from "../harness.ts";
+import { durableError, type DurableHarness, type DurableHarnessError } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import { entryEvents, ledgerUsage } from "./events.ts";
 import {
@@ -84,7 +84,7 @@ export const readRecord = (durable: DurableHarness["Service"], attemptId: string
   );
 
 const outboundJson = Schema.fromJsonString(AttemptChannel.OutboundEnvelope);
-const encodeOutbound = Schema.encodeSync(outboundJson);
+const encodeOutbound = Schema.encodeEffect(outboundJson);
 const decodeOutbound = Schema.decodeUnknownEffect(Schema.Array(outboundJson));
 
 const admitOutbound = (
@@ -164,7 +164,10 @@ const emit = (
           payload,
         });
         outbound = yield* admitOutbound(hub, outbound, envelope);
-        pending.push(encodeOutbound(envelope));
+        const encoded = yield* encodeOutbound(envelope).pipe(
+          Effect.mapError((cause) => durableError("encode outbound envelope", cause)),
+        );
+        pending.push(encoded);
       }
       const cursor = advance(progress);
       yield* durable.use("reserve the outbound envelopes", (harness, context) =>
@@ -199,6 +202,7 @@ export const appendInbound = (
     Effect.gen(function* () {
       if (Option.isNone(hub.channel)) return yield* unavailable();
       const { io, progress } = hub.channel.value;
+
       const envelope = AttemptChannel.InboundEnvelope.make({
         version: AttemptChannel.PROTOCOL_VERSION,
         attemptId: hub.attemptId,

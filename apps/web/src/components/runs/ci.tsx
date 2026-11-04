@@ -2,7 +2,7 @@ import type { RunSummaryView } from "@usine/orchestrator/operator";
 import { Link } from "@tanstack/react-router";
 import { ciFailedOn, continuesTheWork, waitingForCi } from "~/lib/runs/strings";
 
-type CiWaitLineProps = { readonly run: RunSummaryView };
+type CiWaitLineProps = { readonly run: Pick<RunSummaryView, "ciWait" | "repository" | "handoff"> };
 
 export const CiWaitLine = ({ run }: CiWaitLineProps) =>
   run.ciWait === null ? null : (

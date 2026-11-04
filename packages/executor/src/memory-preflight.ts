@@ -1,5 +1,5 @@
 import type { WorkerName } from "@usine/core/worker";
-import { Effect, Match, Option, Schema } from "effect";
+import { type Brand, Effect, Match, Option, Schema } from "effect";
 import { type ExecutorOperationError, WorkerCapabilityError } from "./executor.ts";
 
 const GIB = 1024 ** 3;
@@ -22,7 +22,10 @@ export const SwapOnDemand = Schema.TaggedStruct("SwapOnDemand", {});
 const WorkerSwap = Schema.Union([NoSwap, SwapSpace, SwapOnDemand]);
 type WorkerSwap = typeof WorkerSwap.Type;
 
-export class WorkerMemory extends Schema.Class<WorkerMemory>("@usine/executor/WorkerMemory")({
+export class WorkerMemory extends Schema.Class<
+  WorkerMemory,
+  Brand.Brand<"@usine/executor/memory-preflight/WorkerMemory">
+>("@usine/executor/WorkerMemory")({
   totalBytes: Schema.Int.check(Schema.isGreaterThan(0)),
   swap: WorkerSwap,
 }) {}

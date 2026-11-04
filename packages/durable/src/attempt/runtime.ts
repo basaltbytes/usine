@@ -4,9 +4,14 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { StepResult } from "@usine/core/step/result";
-import { Deferred, Duration, Effect, Layer, Option, Result, Schema } from "effect";
+import { type Brand, Deferred, Duration, Effect, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, AttemptRuntime, type FinishedAttempt } from "../attempt-runtime.ts";
-import { DurableHarness, type DurableHarnessError, type DurableStorageFailed } from "../harness.ts";
+import {
+  durableError,
+  DurableHarness,
+  type DurableHarnessError,
+  type DurableStorageFailed,
+} from "../harness.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./documents.ts";
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
@@ -21,9 +26,12 @@ import { queueParentSteer } from "./steering.ts";
  * An operator input that couldn't be applied. The reason is recorded in the transcript and the
  * Attempt continues.
  */
-class InterventionRefused extends Schema.TaggedError<InterventionRefused>(
-  "@usine/durable/InterventionRefused",
-)("InterventionRefused", { message: Schema.NonEmptyString }) {}
+class InterventionRefused extends Schema.TaggedError<
+  InterventionRefused,
+  Brand.Brand<"@usine/durable/attempt/runtime/InterventionRefused">
+>("@usine/durable/InterventionRefused")("InterventionRefused", {
+  message: Schema.NonEmptyString,
+}) {}
 
 const refuse = (message: string) => InterventionRefused.make({ message });
 
@@ -38,7 +46,7 @@ const storageFailed = (failure: DurableStorageFailed) =>
 
 const LIVE_STATUSES: ReadonlyArray<string> = ["pending", "running", "waiting"];
 
-const encodeIntervention = Schema.encodeSync(AttemptChannel.Intervention);
+const encodeIntervention = Schema.encodeEffect(AttemptChannel.Intervention);
 
 const makeAttemptRuntime = Effect.gen(function* () {
   const durable = yield* DurableHarness;
@@ -64,7 +72,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     request: AttemptRequest,
   ) {
     const attemptId = request.spec.attemptId;
-    const input = taskInput(request);
+    const input = yield* taskInput(request);
     return yield* durable.use("create or find the Attempt task", async (harness, context) => {
       const root = await harness.root(context);
       return root.commit(async (tx) => {
@@ -188,7 +196,9 @@ const makeAttemptRuntime = Effect.gen(function* () {
   const recordResult = Effect.fn("AttemptRuntime.recordResult")(
     function* (attemptId: AttemptId, result: StepResult) {
       yield* Effect.annotateCurrentSpan({ attemptId });
-      const encoded = encodeResult(result);
+      const encoded = yield* encodeResult(result).pipe(
+        Effect.mapError((cause) => durableError("encode the Attempt result", cause)),
+      );
       yield* durable.use("record the Attempt's result", (harness, context) =>
         harness.commit(async (tx) => {
           const record = await tx.doc(AttemptRecordDoc, attemptId, null);
@@ -305,6 +315,9 @@ const makeAttemptRuntime = Effect.gen(function* () {
     }
     if (state.queued) {
       hub.childInputs.add(inputSequence);
+      const encoded = yield* encodeIntervention(intervention).pipe(
+        Effect.mapError((cause) => durableError("record the queued operator input", cause)),
+      );
       yield* durable.use("record the queued operator input", (harness, context) =>
         harness.commit(async (tx) => {
           const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
@@ -313,7 +326,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
             {
               inputSequence,
               child: target.sessionId,
-              intervention: encodeIntervention(intervention),
+              intervention: encoded,
             },
           ];
         }, context),
@@ -482,6 +495,9 @@ const makeAttemptRuntime = Effect.gen(function* () {
         context,
       );
     });
+    const encoded = yield* encodeIntervention(intervention).pipe(
+      Effect.mapError((cause) => durableError("record the queued operator input", cause)),
+    );
     const queued = yield* durable.use("record the queued operator input", (harness, context) =>
       harness.commit(async (tx) => {
         const submission = await tx.submissionByRequest(parent, requestId);
@@ -492,7 +508,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
           {
             inputSequence,
             submission: submission.id,
-            intervention: encodeIntervention(intervention),
+            intervention: encoded,
           },
         ];
         return true;

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 
 /** A worker's kebab-case name in the instance configuration. */
 export const WorkerName = Schema.String.check(
@@ -36,7 +36,10 @@ export type BotUserId = typeof BotUserId.Type;
  * A GitHub App's bot account. The factory App's account authors and commits every Attempt's
  * commits on every Worker kind (ADR 0011).
  */
-export class BotAccount extends Schema.Class<BotAccount>("BotAccount")({
+export class BotAccount extends Schema.Class<
+  BotAccount,
+  Brand.Brand<"@usine/core/worker/BotAccount">
+>("BotAccount")({
   /** The GitHub bot login used to author attempt commits. */
   login: BotLogin,
   /** The bot account's user ID, used in its noreply email address. */
@@ -174,7 +177,10 @@ export const ContainerPids = Schema.Int.check(Schema.isGreaterThanOrEqualTo(64))
 export type ContainerPids = typeof ContainerPids.Type;
 
 /** The CPU, memory, and process limits of one Attempt container. */
-export class ContainerLimits extends Schema.Class<ContainerLimits>("ContainerLimits")({
+export class ContainerLimits extends Schema.Class<
+  ContainerLimits,
+  Brand.Brand<"@usine/core/worker/ContainerLimits">
+>("ContainerLimits")({
   /** The CPU capacity available to the container, including fractional CPUs. */
   cpus: ContainerCpus,
   /** The container's memory ceiling in MiB, at least 256. */
@@ -346,7 +352,10 @@ const secondsWithDefault = (seconds: number) =>
   );
 
 /** Provisioner timings, in seconds. Creation failures double their delay up to the maximum. */
-export class ProvisionerTimings extends Schema.Class<ProvisionerTimings>("ProvisionerTimings")(
+export class ProvisionerTimings extends Schema.Class<
+  ProvisionerTimings,
+  Brand.Brand<"@usine/core/worker/ProvisionerTimings">
+>("ProvisionerTimings")(
   Schema.Struct({
     /** Seconds to wait for SSH readiness after machine creation; defaults to 600. */
     sshWait: secondsWithDefault(600),
@@ -391,7 +400,10 @@ export const MachineAttemptLimit = Schema.Int.check(
 export type MachineAttemptLimit = typeof MachineAttemptLimit.Type;
 
 /** Limits for consecutive attempts on a provisioned machine. */
-export class ProvisionerReuse extends Schema.Class<ProvisionerReuse>("ProvisionerReuse")({
+export class ProvisionerReuse extends Schema.Class<
+  ProvisionerReuse,
+  Brand.Brand<"@usine/core/worker/ProvisionerReuse">
+>("ProvisionerReuse")({
   attempts: MachineAttemptLimit,
   maxAge: MachineMaxAge,
 }) {

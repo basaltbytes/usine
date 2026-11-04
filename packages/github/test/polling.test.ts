@@ -80,8 +80,10 @@ const GraphqlRequest = Schema.Struct({
 const requestBody = (request: HttpClientRequest.HttpClientRequest): typeof GraphqlRequest.Type => {
   assert.strictEqual(request.body._tag, "Uint8Array");
   if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
-  return Schema.decodeUnknownSync(GraphqlRequest)(
-    JSON.parse(new TextDecoder().decode(request.body.body)),
+  return Effect.runSync(
+    Schema.decodeUnknownEffect(GraphqlRequest)(
+      JSON.parse(new TextDecoder().decode(request.body.body)),
+    ),
   );
 };
 
@@ -622,9 +624,12 @@ describe("GitHubPolling", () => {
           }),
         )
         .pipe(Effect.flip);
+
       assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
+
       assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
       // A null repository says nothing about the Item.
+
       assert.strictEqual((yield* fetch)._tag, "InvalidGitHubResponseError");
     }).pipe(Effect.provide(pollingLayer(client)));
   });
@@ -640,11 +645,15 @@ describe("GitHubPolling", () => {
       Effect.sync(() => {
         assert.strictEqual(request.body._tag, "Uint8Array");
         if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
-        const { query, variables } = Schema.decodeUnknownSync(PresenceRequest)(
-          JSON.parse(new TextDecoder().decode(request.body.body)),
+        const { query, variables } = Effect.runSync(
+          Schema.decodeUnknownEffect(PresenceRequest)(
+            JSON.parse(new TextDecoder().decode(request.body.body)),
+          ),
         );
         const numbers = Object.entries(variables).flatMap(([name, value]) =>
-          /^n\d+$/u.test(name) ? [Schema.decodeUnknownSync(Schema.Int)(value)] : [],
+          /^n\d+$/u.test(name)
+            ? [Effect.runSync(Schema.decodeUnknownEffect(Schema.Int)(value))]
+            : [],
         );
         asked.push(numbers);
         assert.include(query, `i${numbers.length - 1}: issue(number: $n${numbers.length - 1})`);
@@ -925,11 +934,10 @@ describe("GitHubPolling", () => {
       });
       return Effect.gen(function* () {
         const polling = yield* GitHubPolling;
-        assert.deepStrictEqual(Schema.decodeSync(IssuePayload)(base).labelEvents, {});
-        assert.deepStrictEqual(
-          Schema.decodeSync(PullRequestPayload)(pullRequestPayload).labelEvents,
-          {},
-        );
+        const decodedValue4 = yield* Schema.decodeEffect(IssuePayload)(base);
+        assert.deepStrictEqual(decodedValue4.labelEvents, {});
+        const decodedValue5 = yield* Schema.decodeEffect(PullRequestPayload)(pullRequestPayload);
+        assert.deepStrictEqual(decodedValue5.labelEvents, {});
         for (const item of [
           ChangedIssue.make({ number: 28, updatedAt: DateTime.makeUnsafe(newTime) }),
           ChangedPullRequest.make({ number: 51, updatedAt: DateTime.makeUnsafe(newTime) }),

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 /** A provider model name, which the harness checks when the session starts. */
 export const ModelId = Schema.String.check(
@@ -19,7 +19,10 @@ export const Effort = Schema.Literals(EFFORTS);
 export type Effort = typeof Effort.Type;
 
 /** The harness, model, and reasoning effort selected for an agent session. */
-export class BrainSpec extends Schema.Class<BrainSpec>("Agent/BrainSpec")({
+export class BrainSpec extends Schema.Class<
+  BrainSpec,
+  Brand.Brand<"@usine/core/agent/brain/BrainSpec">
+>("Agent/BrainSpec")({
   /** The coding-agent CLI that runs the session. */
   harness: Harness,
   /** The provider model name checked by the harness at startup. */

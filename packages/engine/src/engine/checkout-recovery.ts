@@ -1,7 +1,7 @@
 import { AttemptId, type StopReason } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
-import { Array as EffectArray, Effect, Option, Ref, Result, Schema } from "effect";
+import { type Brand, Array as EffectArray, Effect, Option, Ref, Result, Schema } from "effect";
 import type { StepExecutor, WorkerLease } from "../step-executor.ts";
 import type { RunStore, SalvageCandidate } from "../store/store.ts";
 
@@ -9,9 +9,10 @@ import type { RunStore, SalvageCandidate } from "../store/store.ts";
  * An error for an Attempt whose parent task couldn't be confirmed stopped. Its slot of `worker`,
  * and any checkout startup kept, stay kept, and the Run's next Attempt doesn't start.
  */
-class ParentStopUnconfirmedError extends Schema.TaggedError<ParentStopUnconfirmedError>(
-  "@usine/engine/internal/ParentStopUnconfirmedError",
-)("ParentStopUnconfirmedError", {
+class ParentStopUnconfirmedError extends Schema.TaggedError<
+  ParentStopUnconfirmedError,
+  Brand.Brand<"@usine/engine/engine/checkout-recovery/ParentStopUnconfirmedError">
+>("@usine/engine/internal/ParentStopUnconfirmedError")("ParentStopUnconfirmedError", {
   attemptId: AttemptId,
   worker: WorkerName,
   cause: Schema.Defect(),
@@ -322,6 +323,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     const attempt = found.success.value;
     const fields = { attemptId, worker: attempt.worker, open: attempt.open };
     yield* Effect.annotateCurrentSpan(fields);
+
     if (!(yield* executor.workers).includes(attempt.worker)) {
       yield* Effect.logWarning(
         "The Worker of the Attempt whose checkout startup kept is no longer configured; the checkout stays until it is configured again or its leftovers are discarded",
@@ -348,6 +350,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     reason: StopReason,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, reason });
+
     const occupied = (yield* Ref.get(kept)).get(attemptId);
     if (occupied === undefined) {
       yield* Effect.logDebug("No slot kept for the Attempt awaits its parent task's stop", {

@@ -15,12 +15,12 @@ import {
 import { DateTime, Effect, Schema } from "effect";
 import { projectBoard } from "../src/board/projection.ts";
 import type { BoardView } from "../src/operator/board.ts";
-import { RunView, type RunStateTag } from "../src/operator/run.ts";
+import { RunSummaryView, type RunStateTag } from "../src/operator/run.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 
 // The dogfood instance's lanes, where every Loop removes its trigger label first (#467).
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -115,7 +115,7 @@ const isOpen = (state: RunStateTag) =>
   state === "Pending" || state === "Waiting" || state === "Queued" || state === "Running";
 
 const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
-  RunView.make({
+  RunSummaryView.make({
     agentBrain: BrainSpec.make({
       harness: "codex",
       model: ModelId.make("test-model"),
@@ -130,11 +130,9 @@ const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
     loopPaused: false,
     openedAt: "2026-10-21T17:55:00.000Z",
     closedAt: isOpen(state) ? null : "2026-10-21T18:10:00.000Z",
-    task: `Work on #${item.number}.`,
     attempts: [],
     approval: null,
     runAgain: null,
-    resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",
     canRetry: state === "Failed",
@@ -144,7 +142,7 @@ const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
   });
 
 /** Returns the Event that `opened` was opened for, with `payload` as the Item its trigger saw. */
-const eventOf = (opened: RunView, payload: Schema.JsonObject) =>
+const eventOf = (opened: RunSummaryView, payload: Schema.JsonObject) =>
   [
     opened.id,
     Event.make({
@@ -156,16 +154,20 @@ const eventOf = (opened: RunView, payload: Schema.JsonObject) =>
   ] as const;
 
 /** Returns the Event that `opened` was opened for, when `item` had `labels`. */
-const triggeredWith = (opened: RunView, item: ItemProjection, labels: ReadonlyArray<string>) =>
-  eventOf(opened, { ...item.payload, labels: labelNodes(labels) });
+const triggeredWith = (
+  opened: RunSummaryView,
+  item: ItemProjection,
+  labels: ReadonlyArray<string>,
+) => eventOf(opened, { ...item.payload, labels: labelNodes(labels) });
 
 const project = (
   items: ReadonlyArray<ItemProjection>,
-  runs: ReadonlyArray<RunView>,
+  runs: ReadonlyArray<RunSummaryView>,
   events: ReadonlyArray<ReturnType<typeof eventOf>> = [],
 ) =>
   Effect.gen(function* () {
-    const managed = config.repos[0];
+    const fixtureConfig = yield* config;
+    const managed = fixtureConfig.repos[0];
     assert(managed !== undefined);
     return yield* projectBoard(managed, [], items, runs, [], new Map(), new Map(), new Map(events));
   });

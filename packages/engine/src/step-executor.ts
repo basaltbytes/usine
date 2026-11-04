@@ -8,7 +8,7 @@ import { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, type RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
-import { Schema, Context, Effect, type Option, type Result } from "effect";
+import { type Brand, Schema, Context, Effect, type Option, type Result } from "effect";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import type { WorkerName } from "@usine/core/worker";
@@ -16,7 +16,10 @@ import type { StepResult } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
 
 /** The saved Event, effective task and Agent, and Step of one Attempt. */
-export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
+export class StepExecution extends Schema.Class<
+  StepExecution,
+  Brand.Brand<"@usine/engine/step-executor/StepExecution">
+>("@usine/engine/StepExecution")({
   /** The saved attempt to execute or reattach, including its worker assignment. */
   attempt: Attempt,
   /** The run's original event and payload slice; retries retain this input. */

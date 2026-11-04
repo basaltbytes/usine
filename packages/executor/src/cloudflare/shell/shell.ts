@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 /**
  * The sandbox shell: a stand-in for `ssh` that runs one command in a Cloudflare sandbox through
  * the Worker's exec stream. It takes an SSH client's arguments, `[options] <sandbox> -- <command>`,
@@ -97,7 +98,7 @@ else {
   process.stdin.on("end", () => {
     stdinOpen = false;
     if (stdinTarget._tag === "Streaming")
-      stdinTarget.socket.send(encodeClientMessage(StdinEnd.make()));
+      stdinTarget.socket.send(Effect.runSync(encodeClientMessage(StdinEnd.make())));
   });
 
   /** Opens one exec or attach stream and resolves when it ends. */
@@ -125,11 +126,11 @@ else {
         Option.match(start, {
           onNone: () => undefined,
           onSome: (line) => {
-            socket.send(encodeClientMessage(ExecStart.make({ command: line })));
+            socket.send(Effect.runSync(encodeClientMessage(ExecStart.make({ command: line }))));
             if (stdinTarget._tag === "Buffering")
               for (const chunk of stdinTarget.chunks) socket.send(chunk);
             stdinTarget = { _tag: "Streaming", socket };
-            if (!stdinOpen) socket.send(encodeClientMessage(StdinEnd.make()));
+            if (!stdinOpen) socket.send(Effect.runSync(encodeClientMessage(StdinEnd.make())));
           },
         });
       });

@@ -103,7 +103,8 @@ describe("instance lock", () => {
         assert(Option.isSome(read));
         const stopping = read.value;
         assert.isDefined(stopping.stoppingSince);
-        assert.deepStrictEqual(Schema.encodeSync(InstanceLaunch)(stopping.launch), {
+        const valueDecoded1 = yield* Schema.encodeEffect(InstanceLaunch)(stopping.launch);
+        assert.deepStrictEqual(valueDecoded1, {
           node: process.execPath,
           nodeOptions: ["--enable-source-maps"],
           script: "/opt/usine/dist/main.js",

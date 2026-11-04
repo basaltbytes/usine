@@ -1,9 +1,12 @@
-import { Duration, Effect, Match, Option, Schedule, Schema } from "effect";
+import { type Brand, Duration, Effect, Match, Option, Schedule, Schema } from "effect";
 import { type GitHubApiError, type GitHubAppError, InvalidGitHubResponseError } from "./error.ts";
 
-export class GraphqlServerError extends Schema.TaggedError<GraphqlServerError>(
-  "@usine/github/GraphqlServerError",
-)("GraphqlServerError", { failure: InvalidGitHubResponseError }) {}
+export class GraphqlServerError extends Schema.TaggedError<
+  GraphqlServerError,
+  Brand.Brand<"@usine/github/retry/GraphqlServerError">
+>("@usine/github/GraphqlServerError")("GraphqlServerError", {
+  failure: InvalidGitHubResponseError,
+}) {}
 
 export const isTransientStatus = (status: number): boolean =>
   status === 502 || status === 503 || status === 504;

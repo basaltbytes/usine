@@ -1,7 +1,9 @@
-import { Equal, Option, Schema } from "effect";
+import { Effect, Equal, Option, Schema } from "effect";
 import { AgentFile } from "../agent.ts";
 import { UsineConfig } from "../factory.ts";
 import type { LoadedInstance } from "../instance/instance.ts";
+import { ConfigFileError, InstancePath } from "../file.ts";
+import { ConfigurationInvalid } from "./model.ts";
 import { LoopFile } from "../loop.ts";
 import {
   ConfigurationChange,
@@ -24,33 +26,42 @@ const entity = (kind: ConfigurationEntityKind, identifier: string, value: Schema
  * Encodes `instance` as configuration entities with defaults applied. Worker order preserves
  * scheduling preference; settings use the singleton identifier `instance`.
  */
-export const configurationEntities = (
-  instance: LoadedInstance,
-): ReadonlyArray<ConfigurationEntity> => {
-  const { workers, repos, labels, projects, bindings, ...settings } = Schema.encodeSync(
-    UsineConfig,
-  )(instance.config);
-  return [
-    entity("settings", "instance", settings),
-    ...(bindings ?? []).map((value) => entity("binding", value.name, value)),
-    ...(workers ?? []).map((value) => entity("worker", value.name, value)),
-    ...repos.map(({ lanes, ...value }) =>
-      entity(
-        "repository",
-        value.name,
-        instance.config.version === 1 ? { ...value, lanes: lanes ?? [] } : value,
+export const configurationEntities = Effect.fn("Configuration.entities")(
+  function* (instance: LoadedInstance) {
+    const { workers, repos, labels, projects, bindings, ...settings } = yield* Schema.encodeEffect(
+      UsineConfig,
+    )(instance.config);
+    return [
+      entity("settings", "instance", settings),
+      ...(bindings ?? []).map((value) => entity("binding", value.name, value)),
+      ...(workers ?? []).map((value) => entity("worker", value.name, value)),
+      ...repos.map(({ lanes, ...value }) =>
+        entity(
+          "repository",
+          value.name,
+          instance.config.version === 1 ? { ...value, lanes: lanes ?? [] } : value,
+        ),
       ),
-    ),
-    ...(projects ?? []).map((value) => entity("project", value.id, value)),
-    ...(labels ?? []).map((value) => entity("label", value.name, value)),
-    ...instance.agents.map((value) =>
-      entity("agent", value.name, Schema.encodeSync(AgentJson)(value)),
-    ),
-    ...instance.loops.map((value) =>
-      entity("loop", value.name, Schema.encodeSync(LoopJson)(value)),
-    ),
-  ];
-};
+      ...(projects ?? []).map((value) => entity("project", value.id, value)),
+      ...(labels ?? []).map((value) => entity("label", value.name, value)),
+      ...(yield* Effect.forEach(instance.agents, (value) =>
+        Schema.encodeEffect(AgentJson)(value).pipe(
+          Effect.map((json) => entity("agent", value.name, json)),
+        ),
+      )),
+      ...(yield* Effect.forEach(instance.loops, (value) =>
+        Schema.encodeEffect(LoopJson)(value).pipe(
+          Effect.map((json) => entity("loop", value.name, json)),
+        ),
+      )),
+    ];
+  },
+  Effect.mapError((error) =>
+    ConfigurationInvalid.make({
+      problems: [ConfigFileError.fromSchema(InstancePath.make("usine.yaml"), error)],
+    }),
+  ),
+);
 
 /**
  * Returns changes from `before` to `after`, comparing values and the relative order of retained

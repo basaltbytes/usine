@@ -4,7 +4,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Context, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 
 /** A user message sent to a Claude Code child through the SDK's streaming input. */
 export interface ClaudeUserMessage {
@@ -72,10 +72,9 @@ export class ClaudeSdk extends Context.Service<
   }
 >()("@usine/agents/pi/ClaudeSdk") {}
 
-const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
+const decodeVendorMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
-const vendorMessageJson = (message: SDKMessage): Schema.Json =>
-  decodeVendorMessage(JSON.stringify(message));
+const vendorMessageJson = (message: SDKMessage) => decodeVendorMessage(JSON.stringify(message));
 
 /** Provides `ClaudeSdk` through the installed Agent SDK, exposing output messages as JSON for decoding by the child backend. */
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
@@ -89,7 +88,8 @@ export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
       },
       supportedModels: () => query.supportedModels(),
       async *[Symbol.asyncIterator]() {
-        for await (const message of query) yield vendorMessageJson(message);
+        for await (const message of query)
+          yield await Effect.runPromise(vendorMessageJson(message));
       },
     };
   },

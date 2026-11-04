@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 const Failure = Schema.Struct({ message: Schema.String });
 export const csrfToken = () =>
@@ -27,7 +27,8 @@ export const authRequest = async <A, I>(
   if (response.status === 401 && (path === "/api/auth/session" || !path.startsWith("/api/auth/")))
     window.location.replace("/sign-in");
   const value: unknown = await response.json();
-  if (!response.ok) throw new Error(Schema.decodeUnknownSync(Failure)(value).message);
-  return Schema.decodeUnknownSync(schema)(value);
+  if (!response.ok)
+    throw new Error((await Effect.runPromise(Schema.decodeUnknownEffect(Failure)(value))).message);
+  return await Effect.runPromise(Schema.decodeUnknownEffect(schema)(value));
 };
 export const Acknowledged = Schema.Struct({ ok: Schema.Boolean });

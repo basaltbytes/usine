@@ -3,94 +3,36 @@
     "deterministicKeys": 1,
     "globalJsonInEffect": 1
   },
-  "src/connections.ts": {
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
-  },
-  "src/current-instance/changes.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/current-instance/current-instance.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2
+    "deterministicKeys": 1
   },
   "src/label-reconciler.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 1
   },
   "src/loop-matches.ts": {
     "deterministicKeys": 1
   },
-  "src/operator/attempt.ts": {
-    "schemaClassMissingBrand": 20
-  },
-  "src/operator/attention.ts": {
-    "globalJson": 3,
-    "schemaSync": 1
-  },
-  "src/operator/board.ts": {
-    "schemaClassMissingBrand": 13
-  },
-  "src/operator/changes.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/operator/configuration/editor.ts": {
     "deterministicKeys": 1
   },
-  "src/operator/configuration/loops/model.ts": {
-    "schemaClassMissingBrand": 4
-  },
-  "src/operator/configuration/model.ts": {
-    "redundantSchemaTagIdentifier": 1,
-    "schemaClassMissingBrand": 8
-  },
-  "src/operator/configuration/repositories.ts": {
-    "schemaSync": 2,
-    "schemaSyncInEffect": 1
-  },
   "src/operator/configuration/view.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 22
+    "deterministicKeys": 1
   },
   "src/operator/desk.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 18
+    "deterministicKeys": 1
   },
   "src/operator/github-changes.ts": {
     "deterministicKeys": 1,
     "globalJson": 1,
-    "globalJsonInEffect": 1,
-    "schemaClassMissingBrand": 7
-  },
-  "src/operator/http.ts": {
-    "schemaClassMissingBrand": 7
-  },
-  "src/operator/machines.ts": {
-    "schemaClassMissingBrand": 5
-  },
-  "src/operator/need.ts": {
-    "redundantSchemaTagIdentifier": 1,
-    "schemaClassMissingBrand": 16
+    "globalJsonInEffect": 1
   },
   "src/operator/operator.ts": {
     "deterministicKeys": 2,
     "globalJson": 3,
     "globalJsonInEffect": 1
   },
-  "src/operator/overview.ts": {
-    "schemaClassMissingBrand": 5
-  },
-  "src/operator/preflight.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/operator/projection.ts": {
     "strictBooleanExpressions": 2
-  },
-  "src/operator/run.ts": {
-    "schemaClassMissingBrand": 10
-  },
-  "src/operator/setup.ts": {
-    "schemaStructWithTag": 5
   },
   "src/operator/statistics/runs.ts": {
     "globalDate": 1,
@@ -103,37 +45,20 @@
     "globalDate": 1,
     "globalJson": 1
   },
-  "src/operator/statistics/view.ts": {
-    "schemaClassMissingBrand": 24
-  },
   "src/operator/statistics/window.ts": {
     "globalDate": 2
   },
   "src/operator/task.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 4
-  },
-  "src/operator/transcript.ts": {
-    "schemaClassMissingBrand": 7
-  },
-  "src/operator/upgrade.ts": {
-    "schemaClassMissingBrand": 2
+    "deterministicKeys": 1
   },
   "src/operator/usage.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 6
+    "deterministicKeys": 1
   },
   "src/orchestrator.ts": {
     "deterministicKeys": 1
   },
-  "src/polling/cycle.ts": {
-    "schemaClassMissingBrand": 3
-  },
   "src/polling/deliveries.ts": {
     "deterministicKeys": 1
-  },
-  "src/polling/evaluation-failures.ts": {
-    "schemaClassMissingBrand": 2
   },
   "src/polling/hints.ts": {
     "deterministicKeys": 1
@@ -141,90 +66,45 @@
   "src/polling/loop-evaluation.ts": {
     "globalJson": 1
   },
-  "src/polling/open-pull-requests.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/polling/polling.ts": {
     "deterministicKeys": 1,
-    "globalJson": 2,
-    "schemaClassMissingBrand": 1
-  },
-  "src/polling/repository-sync.ts": {
-    "schemaSync": 1
-  },
-  "src/polling/unfetched-items.ts": {
-    "schemaClassMissingBrand": 1
+    "globalJson": 2
   },
   "src/schedule-triggers.ts": {
     "deterministicKeys": 1,
     "globalJson": 2,
-    "globalJsonInEffect": 2,
-    "schemaClassMissingBrand": 4
-  },
-  "src/scheduler/scheduler.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/trigger-submission.ts": {
-    "schemaClassMissingBrand": 1
+    "globalJsonInEffect": 2
   },
   "src/webhooks.ts": {
     "deterministicKeys": 1
   },
   "src/worker-status.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 1
   },
   "test/approval.test.ts": {
-    "globalJson": 1,
-    "schemaSync": 2,
-    "schemaSyncInEffect": 2
+    "globalJson": 1
   },
   "test/board.test.ts": {
-    "globalJsonInEffect": 1,
-    "schemaSync": 16,
-    "schemaSyncInEffect": 15
+    "globalJsonInEffect": 1
   },
   "test/ci.test.ts": {
     "globalJson": 2,
     "globalJsonInEffect": 1,
     "nodeBuiltinImport": 1,
-    "schemaSync": 2,
     "strictBooleanExpressions": 1
   },
   "test/closed-items.test.ts": {
     "globalJson": 1,
-    "nodeBuiltinImport": 1,
-    "schemaSync": 2
-  },
-  "test/configuration-revisions.test.ts": {
-    "schemaSync": 2
+    "nodeBuiltinImport": 1
   },
   "test/configuration.test.ts": {
-    "globalJsonInEffect": 1,
-    "schemaSync": 4,
-    "schemaSyncInEffect": 3
-  },
-  "test/credentials.test.ts": {
-    "schemaSync": 1
+    "globalJsonInEffect": 1
   },
   "test/cycle-reset-polling.test.ts": {
-    "globalJson": 1,
-    "schemaSync": 5,
-    "schemaSyncInEffect": 1
-  },
-  "test/deliveries.test.ts": {
-    "schemaSync": 2
-  },
-  "test/desk.test.ts": {
-    "schemaSync": 2
+    "globalJson": 1
   },
   "test/evaluation-failures.test.ts": {
-    "globalJson": 1,
-    "schemaSync": 6,
-    "schemaSyncInEffect": 2
-  },
-  "test/hints.test.ts": {
-    "schemaSync": 1
+    "globalJson": 1
   },
   "test/http-client.test.ts": {
     "asyncFunction": 1,
@@ -234,41 +114,25 @@
     "cryptoRandomUUIDInEffect": 2,
     "globalFetchInEffect": 2,
     "globalJson": 1,
-    "globalJsonInEffect": 1,
-    "schemaSync": 2,
-    "schemaSyncInEffect": 1
+    "globalJsonInEffect": 1
   },
   "test/integration/exe-dev-worker.test.ts": {
-    "cryptoRandomUUIDInEffect": 2,
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
+    "cryptoRandomUUIDInEffect": 2
   },
   "test/integration/polling-triggers.test.ts": {
     "cryptoRandomUUIDInEffect": 1,
     "globalDateInEffect": 2,
     "globalFetchInEffect": 1,
     "globalJson": 1,
-    "globalJsonInEffect": 2,
-    "schemaSync": 2,
-    "schemaSyncInEffect": 1
+    "globalJsonInEffect": 2
   },
   "test/integration/ssh-worker.test.ts": {
     "cryptoRandomUUIDInEffect": 5,
     "globalJsonInEffect": 2,
-    "processEnv": 2,
-    "schemaSync": 2
-  },
-  "test/label-preflight-polling.test.ts": {
-    "schemaSync": 2
-  },
-  "test/lease-order.test.ts": {
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
+    "processEnv": 2
   },
   "test/local-worker/local-worker.test.ts": {
-    "globalJsonInEffect": 3,
-    "schemaSync": 2,
-    "schemaSyncInEffect": 2
+    "globalJsonInEffect": 3
   },
   "test/local-worker/permissions.test.ts": {
     "globalJsonInEffect": 1
@@ -278,91 +142,36 @@
   },
   "test/local-worker/support.ts": {
     "globalDate": 1,
-    "globalJsonInEffect": 1,
-    "schemaSync": 1
+    "globalJsonInEffect": 1
   },
   "test/local-worker/unconfirmed-stop.test.ts": {
     "globalJsonInEffect": 1,
     "nodeBuiltinImport": 2
   },
-  "test/open-issues-polling.test.ts": {
-    "schemaSync": 1
-  },
   "test/open-pull-request-refresh.test.ts": {
-    "globalJson": 1,
-    "schemaSync": 6,
-    "schemaSyncInEffect": 4
+    "globalJson": 1
   },
   "test/operator.test.ts": {
     "globalJson": 4,
-    "globalJsonInEffect": 1,
-    "schemaSync": 18,
-    "schemaSyncInEffect": 13
+    "globalJsonInEffect": 1
   },
   "test/polling-triggers.test.ts": {
     "globalJsonInEffect": 3,
-    "nodeBuiltinImport": 1,
-    "schemaSync": 7,
-    "schemaSyncInEffect": 4
-  },
-  "test/running-task-lane.test.ts": {
-    "schemaSync": 1
+    "nodeBuiltinImport": 1
   },
   "test/schedule-triggers.test.ts": {
-    "globalJsonInEffect": 1,
-    "schemaSync": 3
-  },
-  "test/scheduler-machines.test.ts": {
-    "schemaSync": 4,
-    "schemaSyncInEffect": 3
-  },
-  "test/scheduler.test.ts": {
-    "schemaSync": 2,
-    "schemaSyncInEffect": 2
-  },
-  "test/self-write.test.ts": {
-    "schemaSync": 1
+    "globalJsonInEffect": 1
   },
   "test/ssh-addresses.test.ts": {
-    "globalJsonInEffect": 1,
-    "schemaSync": 1
-  },
-  "test/statistics.test.ts": {
-    "schemaSync": 1
-  },
-  "test/statistics/access.test.ts": {
-    "schemaSync": 2,
-    "schemaSyncInEffect": 1
+    "globalJsonInEffect": 1
   },
   "test/statistics/cache.test.ts": {
-    "globalJsonInEffect": 3,
-    "schemaSync": 4,
-    "schemaSyncInEffect": 3
-  },
-  "test/statistics/workers.test.ts": {
-    "schemaSync": 1
-  },
-  "test/support/polling.ts": {
-    "schemaSync": 2,
-    "schemaSyncInEffect": 2
-  },
-  "test/task.test.ts": {
-    "schemaSync": 2,
-    "schemaSyncInEffect": 1
-  },
-  "test/trigger-condition.test.ts": {
-    "schemaSync": 3
-  },
-  "test/trigger-revision.test.ts": {
-    "schemaSync": 4,
-    "schemaSyncInEffect": 4
+    "globalJsonInEffect": 3
   },
   "test/usage.test.ts": {
     "globalJson": 1
   },
   "test/worker-engine.test.ts": {
-    "asyncFunction": 1,
-    "schemaSync": 3,
-    "schemaSyncInEffect": 3
+    "asyncFunction": 1
   }
 }

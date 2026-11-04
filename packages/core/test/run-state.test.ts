@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Schema } from "effect";
+import { flow, Effect, Schema } from "effect";
 import { EventId } from "../src/event.ts";
 import * as RunState from "../src/run/state.ts";
 
-const decodeRunState = Schema.decodeUnknownSync(RunState.RunState);
+const decodeRunState = flow(Schema.decodeUnknownEffect(RunState.RunState), Effect.runSync);
 
 describe("run state machine (ADR 0002)", () => {
   it("a gated run reaches running only through waiting and queued", () => {
@@ -121,7 +121,7 @@ describe("run state machine (ADR 0002)", () => {
 
   it("a stored state row parses back into the same state", () => {
     const canceled = RunState.supersede(RunState.Waiting.make(), EventId.make("evt-9"));
-    const encoded = Schema.encodeSync(RunState.RunState)(canceled);
+    const encoded = Effect.runSync(Schema.encodeEffect(RunState.RunState)(canceled));
     expect(decodeRunState(encoded)).toEqual(canceled);
   });
 

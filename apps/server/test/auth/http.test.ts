@@ -54,12 +54,14 @@ it("requires authentication even from loopback, binds cookie writes to CSRF, and
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+
       assert.equal(
         (yield* Effect.promise(() =>
           request(app, "/api/future-route", "POST", {}, { "x-forwarded-for": "127.0.0.1" }),
         )).status,
         401,
       );
+
       assert.equal(
         (yield* Effect.promise(() =>
           request(app, "/api/future-route", "POST", {}, { authorization: "Bearer invalid" }),
@@ -83,21 +85,21 @@ it("requires authentication even from loopback, binds cookie writes to CSRF, and
         ),
       );
       const headers = { cookie: cookie(response) };
+
       assert.equal(
         (yield* Effect.promise(() => request(app, "/api/auth/link/consume", "POST", { token })))
           .status,
         401,
       );
-      assert.equal(
-        (yield* Effect.promise(() => request(app, "/api/future-route", "POST", {}, headers)))
-          .status,
-        403,
+      const decodedValue4 = yield* Effect.promise(() =>
+        request(app, "/api/future-route", "POST", {}, headers),
       );
+      assert.equal(decodedValue4.status, 403);
       const session = yield* Effect.promise(() =>
         request(app, "/api/auth/session", "GET", undefined, headers),
       );
       const responseBody = yield* Effect.promise(() => session.json());
-      const { csrf } = Schema.decodeUnknownSync(Schema.Struct({ csrf: Schema.String }))(
+      const { csrf } = yield* Schema.decodeUnknownEffect(Schema.Struct({ csrf: Schema.String }))(
         responseBody,
       );
       const authorized = { ...headers, "x-usine-csrf": csrf };
@@ -106,16 +108,14 @@ it("requires authentication even from loopback, binds cookie writes to CSRF, and
       );
       const currentResponseBody = yield* Effect.promise(() => action.json());
       assert.deepEqual(currentResponseBody, { actor: "alice" });
-      assert.equal(
-        (yield* Effect.promise(() => request(app, "/api/auth/sign-out", "POST", {}, authorized)))
-          .status,
-        200,
+      const decodedValue5 = yield* Effect.promise(() =>
+        request(app, "/api/auth/sign-out", "POST", {}, authorized),
       );
-      assert.equal(
-        (yield* Effect.promise(() => request(app, "/api/tokens", "GET", undefined, headers)))
-          .status,
-        401,
+      assert.equal(decodedValue5.status, 200);
+      const decodedValue6 = yield* Effect.promise(() =>
+        request(app, "/api/tokens", "GET", undefined, headers),
       );
+      assert.equal(decodedValue6.status, 401);
     }).pipe(Effect.scoped),
   ));
 
@@ -159,13 +159,16 @@ it("enrolls the first admin only after a setup link and a cookie-bound GitHub we
         }),
       );
       assert.equal(completed.headers.get("location"), "/setup");
+
       assert.equal((yield* services.store.members)[0]?.login, alice.login);
+
       assert.equal(
         (yield* Effect.promise(() =>
           request(app, "/api/members", "GET", undefined, { cookie: cookie(completed) }),
         )).status,
         200,
       );
+
       assert.equal(
         (yield* Effect.promise(() =>
           request(app, "/api/members", "GET", undefined, { cookie: cookie(opened) }),
@@ -189,6 +192,7 @@ it("issues a device token once, refuses non-members, and expires one-time links"
         Redacted.value(result.value.secret),
       );
       assert.equal(Option.getOrNull(access.member)?.login, alice.login);
+
       assert.equal(
         (yield* services.authentication.pollDevice(Redacted.value(started.id)).pipe(Effect.flip))
           .status,
@@ -197,6 +201,7 @@ it("issues a device token once, refuses non-members, and expires one-time links"
       const outsiders = yield* authFixture([alice], bob);
       const outsider = yield* outsiders.authentication.startDevice(TokenName.make("Laptop"));
       yield* TestClock.adjust("2 seconds");
+
       assert.equal(
         (yield* outsiders.authentication.pollDevice(Redacted.value(outsider.id)).pipe(Effect.flip))
           .status,
@@ -205,6 +210,7 @@ it("issues a device token once, refuses non-members, and expires one-time links"
       const currentLink = yield* services.authentication.link;
       const token = linkToken(currentLink);
       yield* TestClock.adjust("11 minutes");
+
       assert.equal(
         (yield* services.authentication.consumeLink(token).pipe(Effect.flip)).status,
         401,
@@ -226,6 +232,7 @@ it("limits sign-in attempts globally and refuses cross-site link consumption", a
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       const currentLink = yield* services.authentication.link;
       const token = linkToken(currentLink);
+
       assert.equal(
         (yield* Effect.promise(() =>
           request(
@@ -240,8 +247,10 @@ it("limits sign-in attempts globally and refuses cross-site link consumption", a
       );
       yield* services.authentication.consumeLink(token);
       for (let count = 1; count < 60; count++) yield* services.authentication.link;
+
       assert.equal((yield* services.authentication.link.pipe(Effect.flip)).status, 429);
       const started = yield* services.authentication.startDevice(TokenName.make("Phone"));
+
       assert.equal(
         (yield* services.authentication.pollDevice(Redacted.value(started.id)).pipe(Effect.flip))
           .status,
@@ -266,10 +275,11 @@ it("restricts link issuance to the local credential and binds links to the origi
         "fake",
       );
       const headers = { authorization: `Bearer ${Redacted.value(bobSession.secret)}` };
-      assert.equal(
-        (yield* Effect.promise(() => request(app, "/api/auth/link", "POST", {}, headers))).status,
-        403,
+      const decodedValue16 = yield* Effect.promise(() =>
+        request(app, "/api/auth/link", "POST", {}, headers),
       );
+      assert.equal(decodedValue16.status, 403);
+
       assert.equal(
         (yield* Effect.promise(() =>
           request(
@@ -290,8 +300,11 @@ it("restricts link issuance to the local credential and binds links to the origi
       );
       assert.equal(response.status, 200);
       const responseBody = yield* Effect.promise(() => response.json());
-      const { url } = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(responseBody);
+      const { url } = yield* Schema.decodeUnknownEffect(Schema.Struct({ url: Schema.String }))(
+        responseBody,
+      );
       yield* services.store.remove(alice.id);
+
       assert.equal(
         (yield* services.authentication.consumeLink(linkToken(url)).pipe(Effect.flip)).status,
         401,
@@ -303,6 +316,7 @@ it("restricts link issuance to the local credential and binds links to the origi
         disableLogger: true,
       });
       yield* Effect.addFinalizer(() => Effect.promise(() => setupApp.dispose()));
+
       assert.equal(
         (yield* Effect.promise(() =>
           request(
@@ -328,8 +342,11 @@ it("keeps valid sign-ins available after invalid challenges exhaust their limits
       const device = yield* auth.startDevice(TokenName.make("Phone"));
       for (let count = 0; count < 61; count++) {
         const status = count < 60 ? 401 : 429;
+
         assert.equal((yield* auth.consumeLink("invalid").pipe(Effect.flip)).status, status);
+
         assert.equal((yield* auth.finishWeb("invalid", "fake").pipe(Effect.flip)).status, status);
+
         assert.equal((yield* auth.pollDevice("invalid").pipe(Effect.flip)).status, status);
       }
       yield* auth.consumeLink(link);
@@ -391,6 +408,7 @@ it("defers operator enrollment when GitHub is unavailable and retries on the nex
       const currentMembers = yield* services.store.members;
       assert.deepEqual(currentMembers, []);
       yield* seed.pipe(Effect.provideService(GitHubSignIn, services.github));
+
       assert.equal((yield* services.store.members)[0]?.id, alice.id);
     }).pipe(Effect.scoped),
   ));

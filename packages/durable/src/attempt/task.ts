@@ -186,9 +186,8 @@ export const attemptTask = (
         errorTag: resolved.failure._tag,
         message: resolved.failure.message,
       });
-      yield* commit(runtime, context, "record the failed start", () =>
-        resolved.failure.pipe(toAttemptFailure, failedOutcome),
-      );
+      const outcome = yield* resolved.failure.pipe(toAttemptFailure, failedOutcome);
+      yield* commit(runtime, context, "record the failed start", () => outcome);
       return;
     }
     const { ref, model } = resolved.success;
@@ -371,14 +370,13 @@ export const attemptTask = (
         },
       );
       // A failed outcome aborts the task's remaining work, including children.
-      yield* commit(runtime, context, "record the exceeded budget", () =>
-        failedOutcome(
-          ChildSessionBudgetFailure.make({
-            attemptedChildren: ChildSessionCount.make(attempted),
-            maxChildren: ChildSessionBudget.make(spec.maxChildren),
-          }),
-        ),
+      const outcome = yield* failedOutcome(
+        ChildSessionBudgetFailure.make({
+          attemptedChildren: ChildSessionCount.make(attempted),
+          maxChildren: ChildSessionBudget.make(spec.maxChildren),
+        }),
       );
+      yield* commit(runtime, context, "record the exceeded budget", () => outcome);
       return;
     }
     const settled = ended.settled;
@@ -407,6 +405,10 @@ export const attemptTask = (
         Option.isSome(relayed) && relayed.value.kind === "infra"
           ? Option.some(childReportFailure(relayed.value))
           : Option.orElse(own, () => Option.map(relayed, childReportFailure));
+      const terminal = yield* Option.match(outcome, {
+        onNone: () => Effect.succeed(completedOutcome(answer, answeredOperator)),
+        onSome: failedOutcome,
+      });
       const hub = yield* services.hubs.hub(spec.attemptId, task.id);
       let finished = false;
       while (true) {
@@ -419,10 +421,7 @@ export const attemptTask = (
             if (pending || supervised(await tx.doc(HoldDoc, task.id), spec.attemptId))
               return undefined;
             finished = true;
-            return Option.match(outcome, {
-              onNone: () => completedOutcome(answer, answeredOperator),
-              onSome: failedOutcome,
-            });
+            return terminal;
           }),
         );
         if (!pending) break;
@@ -469,18 +468,17 @@ export const attemptTask = (
             Option.filter((error) => Schema.is(AgentCapacityError)(error)),
           )
         : Option.none<AgentCapacityError>();
-    yield* commit(runtime, context, "record the unanswered turn", () =>
-      failedOutcome(
-        Option.match(refusal, {
-          onSome: toAttemptFailure,
-          onNone: () =>
-            InfraFailure.make({
-              message: `The Pi parent's turn ended without an answer: ${reason}`,
-              cause: settled.status === "unanswered" ? (settled.detail ?? reason) : reason,
-            }),
-        }),
-      ),
+    const outcome = yield* failedOutcome(
+      Option.match(refusal, {
+        onSome: toAttemptFailure,
+        onNone: () =>
+          InfraFailure.make({
+            message: `The Pi parent's turn ended without an answer: ${reason}`,
+            cause: settled.status === "unanswered" ? (settled.detail ?? reason) : reason,
+          }),
+      }),
     );
+    yield* commit(runtime, context, "record the unanswered turn", () => outcome);
   });
 
   return defineTask<AttemptTaskInput, AttemptCheckpoint, AttemptResult>({
@@ -512,12 +510,15 @@ export const attemptTask = (
             Effect.orElseSucceed(() => undefined),
           );
           const storageFailure = Option.fromUndefinedOr(record?.storageFailure);
-          yield* commit(runtime, context, "record the abort", () =>
-            Option.match(storageFailure, {
-              onNone: (): NextState => ({ status: "terminal", outcome: { status: "aborted" } }),
-              onSome: (message) => failedOutcome(InfraFailure.make({ message, cause: message })),
-            }),
-          );
+          const outcome = yield* Option.match(storageFailure, {
+            onNone: () =>
+              Effect.succeed<NextState>({
+                status: "terminal",
+                outcome: { status: "aborted" },
+              }),
+            onSome: (message) => failedOutcome(InfraFailure.make({ message, cause: message })),
+          });
+          yield* commit(runtime, context, "record the abort", () => outcome);
           yield* Option.match(storageFailure, {
             onNone: () => Effect.logInfo("Attempt task aborted", { taskId: task.id }),
             onSome: (message) =>

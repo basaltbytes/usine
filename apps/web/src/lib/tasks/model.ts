@@ -2,6 +2,7 @@ import { boardTaskRuns } from "@usine/orchestrator/operator";
 import { isSettledItemState } from "@usine/config/board";
 import type { CommentKind } from "@usine/core/step/result";
 import type {
+  AttemptSummaryView,
   BoardLaneView,
   BoardTaskView,
   FailureView,
@@ -18,7 +19,9 @@ import { durationLabel, tokensLabel, usdLabel } from "~/lib/strings";
  * Attempt up to `now`. Returns `None` if no Attempt started or an ended Attempt has no recorded end.
  */
 export const attemptsDuration = (
-  run: Pick<RunSummaryView, "attempts">,
+  run: {
+    readonly attempts: ReadonlyArray<Pick<AttemptSummaryView, "startedAt" | "endedAt" | "outcome">>;
+  },
   now: number,
 ): Option.Option<number> => {
   if (run.attempts.length === 0) return Option.none();
@@ -38,7 +41,9 @@ export const attemptsDuration = (
 
 /** Returns the failure of a Failed Run's latest Attempt, or `None` for any other Run. */
 export const runFailure = (
-  run: Pick<RunSummaryView, "state" | "attempts">,
+  run: Pick<RunSummaryView, "state"> & {
+    readonly attempts: ReadonlyArray<Pick<AttemptSummaryView, "outcome">>;
+  },
 ): Option.Option<FailureView> => {
   const outcome = run.attempts.at(-1)?.outcome;
   return run.state === "Failed" && outcome?._tag === "Failed"

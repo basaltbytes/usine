@@ -1,6 +1,14 @@
 import { AttemptId } from "@usine/core/attempt";
 import { CloudflareImageName, CloudflareInstanceType } from "@usine/core/worker";
-import { Context, type DateTime, type Duration, Effect, type Option, Schema } from "effect";
+import {
+  type Brand,
+  Context,
+  type DateTime,
+  type Duration,
+  Effect,
+  type Option,
+  Schema,
+} from "effect";
 import { SandboxCredentials, SandboxName, SandboxOwner, SandboxSummary } from "../api/api.ts";
 import type { Interception } from "./outbound.ts";
 
@@ -23,7 +31,10 @@ export const ContainerOperation = Schema.Literals([
 export type ContainerOperation = typeof ContainerOperation.Type;
 
 /** A Container API call failed. `message` comes from the runtime and contains no credential. */
-export class ContainerFailure extends Schema.TaggedError<ContainerFailure>()("ContainerFailure", {
+export class ContainerFailure extends Schema.TaggedError<
+  ContainerFailure,
+  Brand.Brand<"@usine/cloudflare/sandbox/ports/ContainerFailure">
+>()("ContainerFailure", {
   operation: ContainerOperation,
   message: Schema.String,
 }) {}
@@ -63,7 +74,10 @@ export class SandboxContainer extends Context.Service<
 >()("@usine/cloudflare/SandboxContainer") {}
 
 /** A sandbox as its Durable Object stores it. */
-export class StoredSandbox extends Schema.Class<StoredSandbox>("@usine/cloudflare/StoredSandbox")({
+export class StoredSandbox extends Schema.Class<
+  StoredSandbox,
+  Brand.Brand<"@usine/cloudflare/sandbox/ports/StoredSandbox">
+>("@usine/cloudflare/StoredSandbox")({
   name: SandboxName,
   owner: SandboxOwner,
   attempt: AttemptId,

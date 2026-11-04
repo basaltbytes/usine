@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { CycleBudgetAsk, CycleLimit, LoopCycleCount } from "../src/cycle-budget.ts";
 
 describe("cycle budget boundaries", () => {
@@ -13,16 +13,17 @@ describe("cycle budget boundaries", () => {
       limit: 3,
       counts: [count],
     };
-    const legacy = Schema.decodeUnknownSync(CycleBudgetAsk)(ask);
+    const legacy = Effect.runSync(Schema.decodeUnknownEffect(CycleBudgetAsk)(ask));
     assert.strictEqual(legacy.completedCycles, 3);
     assert.strictEqual(legacy.blockedLoop, "review");
     assert.deepStrictEqual(legacy.blocks, []);
-    for (const invalid of [0, -1, 1.5]) assert.throws(() => Schema.decodeSync(CycleLimit)(invalid));
+    for (const invalid of [0, -1, 1.5])
+      assert.throws(() => Effect.runSync(Schema.decodeEffect(CycleLimit)(invalid)));
     for (const invalid of [
       { ...count, completed: 4 },
       { ...count, extra: true },
     ]) {
-      assert.throws(() => Schema.decodeSync(LoopCycleCount)(invalid));
+      assert.throws(() => Effect.runSync(Schema.decodeEffect(LoopCycleCount)(invalid)));
     }
     for (const invalid of [
       { ...ask, counts: [] },
@@ -39,7 +40,7 @@ describe("cycle budget boundaries", () => {
       { ...ask, blocks: [{ loop: "fix", eventId: 1 }] },
       { ...ask, extra: true },
     ]) {
-      assert.throws(() => Schema.decodeUnknownSync(CycleBudgetAsk)(invalid));
+      assert.throws(() => Effect.runSync(Schema.decodeUnknownEffect(CycleBudgetAsk)(invalid)));
     }
   });
 });

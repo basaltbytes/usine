@@ -19,7 +19,17 @@ import {
   WorkerKind,
 } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { Context, Effect, Option, Predicate, Redacted, type Result, Schema, Scope } from "effect";
+import {
+  type Brand,
+  Context,
+  Effect,
+  Option,
+  Predicate,
+  Redacted,
+  type Result,
+  Schema,
+  Scope,
+} from "effect";
 import { EXE_DEV_BOT_LOGIN } from "./exe-dev/model.ts";
 
 /** Returns the GitHub writer for a worker kind; provisioned workers use the SSH kind. */
@@ -55,9 +65,10 @@ export const WorkerCapability = Schema.Literals([
 ]);
 export type WorkerCapability = typeof WorkerCapability.Type;
 
-export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperationError>(
-  "@usine/executor/ExecutorOperationError",
-)("ExecutorOperationError", {
+export class ExecutorOperationError extends Schema.TaggedError<
+  ExecutorOperationError,
+  Brand.Brand<"@usine/executor/executor/ExecutorOperationError">
+>("@usine/executor/ExecutorOperationError")("ExecutorOperationError", {
   /** `cleanup` includes removing a checkout, its credential, or credentials left by an earlier process. */
   operation: ExecutorOperation,
   /** An operator-facing summary without the Worker name. Not part of the contract; branch on `operation`. */
@@ -75,9 +86,10 @@ export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperation
 export const CredentialUnavailableReason = Schema.Literals(["refused", "unreachable"]);
 export type CredentialUnavailableReason = typeof CredentialUnavailableReason.Type;
 
-export class CredentialUnavailableError extends Schema.TaggedError<CredentialUnavailableError>(
-  "@usine/executor/CredentialUnavailableError",
-)("CredentialUnavailableError", {
+export class CredentialUnavailableError extends Schema.TaggedError<
+  CredentialUnavailableError,
+  Brand.Brand<"@usine/executor/executor/CredentialUnavailableError">
+>("@usine/executor/CredentialUnavailableError")("CredentialUnavailableError", {
   repository: RepositoryName,
   reason: CredentialUnavailableReason,
   /** An operator-facing summary, including GitHub's reason for a refusal. */
@@ -87,9 +99,10 @@ export class CredentialUnavailableError extends Schema.TaggedError<CredentialUna
 }) {}
 
 /** The error when preflight finds a Worker capability missing or incompatible. */
-export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityError>(
-  "@usine/executor/WorkerCapabilityError",
-)("WorkerCapabilityError", {
+export class WorkerCapabilityError extends Schema.TaggedError<
+  WorkerCapabilityError,
+  Brand.Brand<"@usine/executor/executor/WorkerCapabilityError">
+>("@usine/executor/WorkerCapabilityError")("WorkerCapabilityError", {
   worker: WorkerName,
   /**
    * - `machine`: the machine or VM is absent, stopped, or unreachable, or its Worker directory
@@ -133,9 +146,10 @@ export type MachineUnavailableReason = typeof MachineUnavailableReason.Type;
  * The error when a provisioned Worker can't create a machine for an Attempt. The Run keeps
  * waiting, and the scheduler tries again later; it isn't an Attempt failure.
  */
-export class MachineUnavailableError extends Schema.TaggedError<MachineUnavailableError>(
-  "@usine/executor/MachineUnavailableError",
-)("MachineUnavailableError", {
+export class MachineUnavailableError extends Schema.TaggedError<
+  MachineUnavailableError,
+  Brand.Brand<"@usine/executor/executor/MachineUnavailableError">
+>("@usine/executor/MachineUnavailableError")("MachineUnavailableError", {
   worker: WorkerName,
   provider: MachineProvider,
   reason: MachineUnavailableReason,
@@ -195,9 +209,10 @@ export const logPreflightFailure = <A, R>(
         }),
   );
 
-export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
-  "@usine/executor/CheckoutRequest",
-)({
+export class CheckoutRequest extends Schema.Class<
+  CheckoutRequest,
+  Brand.Brand<"@usine/executor/executor/CheckoutRequest">
+>("@usine/executor/CheckoutRequest")({
   /** The checkout directory name, and the key for `cancel`, `intervene`, `isLive`, and `outcome`. */
   attemptId: AttemptId,
   worker: WorkerName,
@@ -263,9 +278,10 @@ export const WorktreePath = Schema.NonEmptyString.pipe(Schema.brand("WorktreePat
 export type WorktreePath = typeof WorktreePath.Type;
 
 /** A serializable checkout location and RunSpec, without credentials or live resources. */
-export class AttemptWorkspace extends Schema.Class<AttemptWorkspace>(
-  "@usine/executor/AttemptWorkspace",
-)({
+export class AttemptWorkspace extends Schema.Class<
+  AttemptWorkspace,
+  Brand.Brand<"@usine/executor/executor/AttemptWorkspace">
+>("@usine/executor/AttemptWorkspace")({
   worker: WorkerName,
   /** The request's fields plus the commit that `revision` resolved to. */
   spec: AttemptChannel.RunSpec,
@@ -299,9 +315,10 @@ const IssuedToken = Schema.declare(
   { expected: "Redacted<string>" },
 );
 
-export class WorkerCredential extends Schema.Class<WorkerCredential>(
-  "@usine/executor/WorkerCredential",
-)({
+export class WorkerCredential extends Schema.Class<
+  WorkerCredential,
+  Brand.Brand<"@usine/executor/executor/WorkerCredential">
+>("@usine/executor/WorkerCredential")({
   /**
    * The token for git and gh, never written inside the checkout. Wiped when the Attempt's scope
    * closes; `Redacted.value` then throws.
@@ -412,7 +429,10 @@ export const MachineHold = Schema.NonEmptyString.pipe(Schema.brand("MachineHold"
 export type MachineHold = typeof MachineHold.Type;
 
 /** The machine preflight of a provisioned Worker's first machine each day. */
-export class MachineCheck extends Schema.Class<MachineCheck>("@usine/executor/MachineCheck")({
+export class MachineCheck extends Schema.Class<
+  MachineCheck,
+  Brand.Brand<"@usine/executor/executor/MachineCheck">
+>("@usine/executor/MachineCheck")({
   brains: Schema.Array(BrainSpec),
   /**
    * The limits of each Attempt container that the Worker's machines get until the next check,
@@ -422,7 +442,10 @@ export class MachineCheck extends Schema.Class<MachineCheck>("@usine/executor/Ma
 }) {}
 
 /** A machine that a provisioned Worker created for an Attempt and holds until `release`. */
-export class MachineGrant extends Schema.Class<MachineGrant>("@usine/executor/MachineGrant")({
+export class MachineGrant extends Schema.Class<
+  MachineGrant,
+  Brand.Brand<"@usine/executor/executor/MachineGrant">
+>("@usine/executor/MachineGrant")({
   hold: MachineHold,
   id: MachineId,
   worker: WorkerName,
@@ -440,7 +463,10 @@ export const MachineState = Schema.Literals(["creating", "preparing", "ready", "
 export type MachineState = typeof MachineState.Type;
 
 /** A machine in flight on a provisioned Worker. */
-export class MachineStatus extends Schema.Class<MachineStatus>("@usine/executor/MachineStatus")({
+export class MachineStatus extends Schema.Class<
+  MachineStatus,
+  Brand.Brand<"@usine/executor/executor/MachineStatus">
+>("@usine/executor/MachineStatus")({
   worker: WorkerName,
   provider: MachineProvider,
   state: MachineState,
@@ -458,7 +484,10 @@ export class MachineStatus extends Schema.Class<MachineStatus>("@usine/executor/
 }) {}
 
 /** Accepted provider creations by worker and UTC day, including failed preflights. */
-export class MachineStarts extends Schema.Class<MachineStarts>("@usine/executor/MachineStarts")({
+export class MachineStarts extends Schema.Class<
+  MachineStarts,
+  Brand.Brand<"@usine/executor/executor/MachineStarts">
+>("@usine/executor/MachineStarts")({
   worker: WorkerName,
   provider: MachineProvider,
   day: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u)),

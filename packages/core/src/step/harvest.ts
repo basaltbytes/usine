@@ -1,4 +1,4 @@
-import { DateTime, Effect, Option, Schema } from "effect";
+import { type Brand, DateTime, Effect, Option, Schema } from "effect";
 import { githubSignature } from "../agent/agent.ts";
 import { type AttemptWindow, AttemptWindows, windowHolds } from "../attempt/attempt.ts";
 import type { RunSpec } from "../attempt/channel.ts";
@@ -35,17 +35,17 @@ export type HarvestCommand<E> = (
 ) => Effect.Effect<ReadonlyArray<string>, E>;
 
 /** An error for invalid `git` or GitHub output, or for Attempt windows that can't be read. */
-export class HarvestError extends Schema.TaggedError<HarvestError>("@usine/core/HarvestError")(
-  "HarvestError",
-  {
-    /** The source of the invalid output or failed window read. */
-    stage: Schema.Literals(["git", "github", "windows"]),
-    /** The diagnostic describing which harvest input could not be read. */
-    message: Schema.NonEmptyString,
-    /** The original decoding or storage failure preserved for diagnosis. */
-    cause: Schema.Defect(),
-  },
-) {}
+export class HarvestError extends Schema.TaggedError<
+  HarvestError,
+  Brand.Brand<"@usine/core/step/harvest/HarvestError">
+>("@usine/core/HarvestError")("HarvestError", {
+  /** The source of the invalid output or failed window read. */
+  stage: Schema.Literals(["git", "github", "windows"]),
+  /** The diagnostic describing which harvest input could not be read. */
+  message: Schema.NonEmptyString,
+  /** The original decoding or storage failure preserved for diagnosis. */
+  cause: Schema.Defect(),
+}) {}
 
 const PullRequestResponse = Schema.Struct({
   number: PullRequest.fields.number,
@@ -176,11 +176,13 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
   run: HarvestCommand<E>,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
+
   const head = yield* decodeCommit((yield* run("git", ["rev-parse", "HEAD"])).join("")).pipe(
     Effect.mapError((cause) =>
       HarvestError.make({ stage: "git", message: "Git returned an invalid final HEAD", cause }),
     ),
   );
+
   const branch = (yield* run("git", ["branch", "--show-current"])).join("");
   // Checkouts start detached. There's no candidate if HEAD is unchanged, no branch was created,
   // and the revision isn't a fixed commit.

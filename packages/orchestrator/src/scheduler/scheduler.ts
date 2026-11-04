@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import { ChangeBus, type ScopedChange } from "@usine/core/changes";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { positionFor, positionFields } from "./position.ts";
@@ -24,6 +25,7 @@ import {
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
 import {
+  type Brand,
   Array as EffectArray,
   Context,
   DateTime,
@@ -59,9 +61,10 @@ import { preflightFor } from "./preflight.ts";
 import { provisioningPausesFor, type WorkerPause } from "./provisioning.ts";
 
 /** A worker kind for which the scheduler has no configured executor. */
-export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
-  "@usine/orchestrator/UnsupportedWorkerError",
-)("UnsupportedWorkerError", {
+export class UnsupportedWorkerError extends Schema.TaggedError<
+  UnsupportedWorkerError,
+  Brand.Brand<"@usine/orchestrator/scheduler/scheduler/UnsupportedWorkerError">
+>("@usine/orchestrator/UnsupportedWorkerError")("UnsupportedWorkerError", {
   /** The configured worker name. */
   worker: WorkerName,
   /** The configured worker kind that has no executor in this composition. */
@@ -291,7 +294,7 @@ export const stepExecutorLayer = (
       const workers = yield* validateWorkers(executor.kind, config.workers);
       const bus = yield* ChangeBus;
       const changedWorker = (worker: WorkerName) =>
-        bus.publish([{ audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } }]);
+        bus.publish([{ audience: InstanceScope.make(), target: { kind: "worker", id: worker } }]);
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
       const pending = yield* TxPriorityQueue.empty<Reservation>(leaseOrder);
       const nextOrder = yield* Ref.make(0);
@@ -324,7 +327,7 @@ export const stepExecutorLayer = (
       const provisioning = yield* provisioningPausesFor(instances, (worker) =>
         Effect.gen(function* () {
           const changes: ScopedChange[] = [
-            { audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } },
+            { audience: InstanceScope.make(), target: { kind: "worker", id: worker } },
           ];
           for (const [runId, lease] of yield* Ref.get(runMachines)) {
             if (lease.worker !== worker) continue;
@@ -357,7 +360,9 @@ export const stepExecutorLayer = (
         removal: WorkerRemoval,
       ) {
         yield* Effect.annotateCurrentSpan({ worker, removal });
+
         const scheduled = (yield* TxRef.get(pool)).has(worker);
+
         const added = (yield* Ref.get(adding)).has(worker);
         if (scheduled || added) {
           yield* Effect.logDebug(
@@ -425,7 +430,7 @@ export const stepExecutorLayer = (
         ]);
         yield* bus.publish(
           [...new Set([...before.keys(), ...declared.map(({ name }) => name)])].map((worker) => ({
-            audience: { _tag: "Instance" },
+            audience: InstanceScope.make(),
             target: { kind: "worker", id: worker },
           })),
         );
@@ -803,6 +808,7 @@ export const stepExecutorLayer = (
         const attemptId = execution.attempt.id;
         const fields = { runId: execution.run.id, attemptId, worker };
         yield* Effect.annotateCurrentSpan(fields);
+
         const machine = (yield* Ref.get(runMachines)).get(execution.run.id)?.machine;
         if (execution.reattach) {
           const adopted = yield* machines.adopt(worker, attemptId);
@@ -987,6 +993,7 @@ export const stepExecutorLayer = (
                 Effect.map((hold) => (Option.isNone(hold) ? [{ runId, worker }] : [])),
               ),
           );
+
           return [...(yield* provisioning.current).values()].map((pause): ProvisioningPause => ({
             ...pause,
             waitingRuns: waiting

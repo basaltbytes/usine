@@ -94,11 +94,11 @@ const requestJson = Effect.fn("agentIntegration.requestJson")(function* <A>(opti
       `GitHub returned ${response.status} for ${options.method ?? "GET"} ${options.url}: ${detail}`,
     );
   }
-  const value = yield* Effect.tryPromise({
+  const valueDecoded1 = yield* Effect.tryPromise({
     try: () => response.json(),
     catch: (cause) => RequestFailed.make({ cause }),
   });
-  return yield* Schema.decodeUnknownEffect(options.schema)(value);
+  return yield* Schema.decodeUnknownEffect(options.schema)(valueDecoded1);
 });
 
 const requestEmpty = Effect.fn("agentIntegration.requestEmpty")(function* (options: {
@@ -138,12 +138,14 @@ const makeInstance = (options: {
   readonly parentModel: ModelId;
   readonly repository: RepositoryName;
 }): LoadedInstance => {
-  const config = Schema.decodeSync(UsineConfig)({
-    version: 1,
-    repos: [{ name: options.repository, tags: ["integration"] }],
-    settings: { parent_model: options.parentModel, poll_interval: 15 },
-    workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
-  });
+  const config = Effect.runSync(
+    Schema.decodeEffect(UsineConfig)({
+      version: 1,
+      repos: [{ name: options.repository, tags: ["integration"] }],
+      settings: { parent_model: options.parentModel, poll_interval: 15 },
+      workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
+    }),
+  );
   const agent = AgentFile.make({
     name: AgentName.make("live-contract-agent"),
     harness: "claude",
@@ -393,7 +395,9 @@ describe("live agent loop", () => {
               assert.strictEqual(attempt.brain.effort, "low");
               assert(Option.isSome(attempt.parentModel));
               assert.strictEqual(attempt.parentModel.value, settings.parentModel);
-              const payload = Schema.decodeUnknownSync(IssuePayload)(snapshot.event.payload);
+              const payload = yield* Schema.decodeUnknownEffect(IssuePayload)(
+                snapshot.event.payload,
+              );
 
               const comments = (yield* listComments()).filter(
                 ({ body }) => body?.includes(marker) === true,

@@ -1,5 +1,5 @@
 import { OperatorActor } from "../operator.ts";
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { LoopName } from "../loop.ts";
 import { CiHandoff } from "../ci.ts";
 import { CommitSha } from "../repository.ts";
@@ -7,9 +7,10 @@ import { RunId } from "./id.ts";
 import { EventId } from "../event.ts";
 
 /** An operator-requested cancellation, with the operator login when recorded. */
-export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
-  "CancelReason/OperatorCanceled",
-)("OperatorCanceled", {
+export class OperatorCanceled extends Schema.TaggedClass<
+  OperatorCanceled,
+  Brand.Brand<"@usine/core/run/state/OperatorCanceled">
+>("CancelReason/OperatorCanceled")("OperatorCanceled", {
   /** The canceling operator's login, or `None` if none was recorded. */
   by: Schema.OptionFromNullOr(OperatorActor).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
@@ -18,53 +19,70 @@ export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
 }) {}
 
 /** Cancellation because a newer Event for the same Item arrived before any Attempt started. */
-export class Superseded extends Schema.TaggedClass<Superseded>("CancelReason/Superseded")(
-  "Superseded",
-  {
-    /** The newer event that replaced this unstarted run. */
-    by: EventId,
-  },
-) {}
+export class Superseded extends Schema.TaggedClass<
+  Superseded,
+  Brand.Brand<"@usine/core/run/state/Superseded">
+>("CancelReason/Superseded")("Superseded", {
+  /** The newer event that replaced this unstarted run. */
+  by: EventId,
+}) {}
 
 /** Cancellation because the Item stopped matching the Loop's trigger before any Attempt started. */
-export class Revoked extends Schema.TaggedClass<Revoked>("CancelReason/Revoked")("Revoked", {}) {}
+export class Revoked extends Schema.TaggedClass<
+  Revoked,
+  Brand.Brand<"@usine/core/run/state/Revoked">
+>("CancelReason/Revoked")("Revoked", {}) {}
 
 /** Cancellation because another push replaced a head awaiting CI. */
-export class HeadChanged extends Schema.TaggedClass<HeadChanged>("CancelReason/HeadChanged")(
-  "HeadChanged",
-  { head: CommitSha },
-) {}
+export class HeadChanged extends Schema.TaggedClass<
+  HeadChanged,
+  Brand.Brand<"@usine/core/run/state/HeadChanged">
+>("CancelReason/HeadChanged")("HeadChanged", { head: CommitSha }) {}
 
 /** Why a run was canceled: operator action, a newer event or head, or an item that stopped matching its trigger. */
 export const CancelReason = Schema.Union([OperatorCanceled, Superseded, Revoked, HeadChanged]);
 export type CancelReason = typeof CancelReason.Type;
 
 /** A new Run with no Attempt started and no approval gate passed. */
-export class Pending extends Schema.TaggedClass<Pending>("RunState/Pending")("Pending", {}) {}
+export class Pending extends Schema.TaggedClass<
+  Pending,
+  Brand.Brand<"@usine/core/run/state/Pending">
+>("RunState/Pending")("Pending", {}) {}
 
 /** A Run waiting for its Loop's approval Event. */
-export class Waiting extends Schema.TaggedClass<Waiting>("RunState/Waiting")("Waiting", {}) {}
+export class Waiting extends Schema.TaggedClass<
+  Waiting,
+  Brand.Brand<"@usine/core/run/state/Waiting">
+>("RunState/Waiting")("Waiting", {}) {}
 
 /** An approved Run waiting for a Worker slot. */
-export class Queued extends Schema.TaggedClass<Queued>("RunState/Queued")("Queued", {}) {}
+export class Queued extends Schema.TaggedClass<Queued, Brand.Brand<"@usine/core/run/state/Queued">>(
+  "RunState/Queued",
+)("Queued", {}) {}
 
 /** A Run with an Attempt running on a Worker. */
-export class Running extends Schema.TaggedClass<Running>("RunState/Running")("Running", {}) {}
+export class Running extends Schema.TaggedClass<
+  Running,
+  Brand.Brand<"@usine/core/run/state/Running">
+>("RunState/Running")("Running", {}) {}
 
 /** A run whose agent session ended and whose pushed head awaits CI. */
-export class AwaitingCi extends Schema.TaggedClass<AwaitingCi>("RunState/AwaitingCi")(
-  "AwaitingCi",
-  { handoff: CiHandoff },
-) {}
+export class AwaitingCi extends Schema.TaggedClass<
+  AwaitingCi,
+  Brand.Brand<"@usine/core/run/state/AwaitingCi">
+>("RunState/AwaitingCi")("AwaitingCi", { handoff: CiHandoff }) {}
 
 /** A Run whose Step finished with a stored result. */
-export class Succeeded extends Schema.TaggedClass<Succeeded>("RunState/Succeeded")(
-  "Succeeded",
-  {},
-) {}
+export class Succeeded extends Schema.TaggedClass<
+  Succeeded,
+  Brand.Brand<"@usine/core/run/state/Succeeded">
+>("RunState/Succeeded")("Succeeded", {}) {}
 
 /** A closed run whose failed CI continues in an admitted fix run. */
-export class HandedOff extends Schema.TaggedClass<HandedOff>("RunState/HandedOff")("HandedOff", {
+export class HandedOff extends Schema.TaggedClass<
+  HandedOff,
+  Brand.Brand<"@usine/core/run/state/HandedOff">
+>("RunState/HandedOff")("HandedOff", {
   reason: Schema.NonEmptyString,
   head: CommitSha,
   fixLoop: LoopName,
@@ -72,10 +90,15 @@ export class HandedOff extends Schema.TaggedClass<HandedOff>("RunState/HandedOff
 }) {}
 
 /** A Run whose last Attempt failed without an auto-retry; the failure is stored on the Attempt. */
-export class Failed extends Schema.TaggedClass<Failed>("RunState/Failed")("Failed", {}) {}
+export class Failed extends Schema.TaggedClass<Failed, Brand.Brand<"@usine/core/run/state/Failed">>(
+  "RunState/Failed",
+)("Failed", {}) {}
 
 /** A closed run with the reason no further attempt should start. */
-export class Canceled extends Schema.TaggedClass<Canceled>("RunState/Canceled")("Canceled", {
+export class Canceled extends Schema.TaggedClass<
+  Canceled,
+  Brand.Brand<"@usine/core/run/state/Canceled">
+>("RunState/Canceled")("Canceled", {
   /** The operator action or trigger change that closed the run. */
   reason: CancelReason,
 }) {}

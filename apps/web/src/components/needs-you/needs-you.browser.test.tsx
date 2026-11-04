@@ -21,6 +21,8 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import {
+  RunSummaryView,
+  AttemptSummaryView,
   ApprovalNeed,
   CycleBudgetNeed,
   UnresponsiveWorkerNeed,
@@ -35,7 +37,7 @@ import {
   RunDetailView,
   RunView,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -113,35 +115,44 @@ const unrelated = approvalOf(RunId.make("other-run"), 12, "Wait for the operator
 // receives the requests a test sends.
 const overview = (needsYou: ReadonlyArray<NeedView>, runs: ReadonlyArray<RunView> = []) =>
   JSON.stringify(
-    Schema.encodeSync(FactoryOverview)(
-      ReadyOverview.make({
-        projects: [
-          ProjectView.make({
-            repository,
-            status: "needs-you",
-            runs,
-            board: BoardView.make({ lanes: [], failures: [] }),
-            labels: [],
-            preflightFindings: [],
-          }),
-        ],
-        loops: [],
-        needsYou,
-      }),
+    Effect.runSync(
+      Schema.encodeEffect(FactoryOverview)(
+        ReadyOverview.make({
+          projects: [
+            ProjectView.make({
+              repository,
+              status: "needs-you",
+              runs: runs.map((run) =>
+                RunSummaryView.make({
+                  ...run,
+                  attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+                }),
+              ),
+              board: BoardView.make({ lanes: [], failures: [] }),
+              labels: [],
+              preflightFindings: [],
+            }),
+          ],
+          loops: [],
+          needsYou,
+        }),
+      ),
     ),
   );
 const detail = (run: RunView) =>
   JSON.stringify(
-    Schema.encodeSync(RunDetailView)(
-      RunDetailView.make({
-        agentDefinitionChanged: false,
-        run,
-        eventDedupKey: "event",
-        eventPayload: {},
-        transcript: [],
-        sessionState: [],
-        earlierTranscript: [],
-      }),
+    Effect.runSync(
+      Schema.encodeEffect(RunDetailView)(
+        RunDetailView.make({
+          agentDefinitionChanged: false,
+          run,
+          eventDedupKey: "event",
+          eventPayload: {},
+          transcript: [],
+          sessionState: [],
+          earlierTranscript: [],
+        }),
+      ),
     ),
   );
 

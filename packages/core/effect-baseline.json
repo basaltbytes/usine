@@ -1,103 +1,12 @@
 {
-  "src/access.ts": {
-    "redundantSchemaTagIdentifier": 1,
-    "schemaClassMissingBrand": 5
-  },
-  "src/agent/agent.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/agent/brain.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/agent/capability.ts": {
-    "redundantSchemaTagIdentifier": 2,
-    "schemaClassMissingBrand": 2
-  },
-  "src/agent/session.ts": {
-    "schemaClassMissingBrand": 17
-  },
-  "src/attempt/attempt.ts": {
-    "schemaClassMissingBrand": 8
-  },
-  "src/attempt/channel.ts": {
-    "schemaClassMissingBrand": 21
-  },
-  "src/attempt/failure.ts": {
-    "schemaClassMissingBrand": 9
-  },
-  "src/attempt/outcome.ts": {
-    "schemaClassMissingBrand": 5
-  },
-  "src/attempt/salvage.ts": {
-    "schemaClassMissingBrand": 4
-  },
-  "src/attempt/start.ts": {
-    "schemaClassMissingBrand": 6
-  },
   "src/changes.ts": {
-    "globalDateInEffect": 1,
-    "schemaStructWithTag": 3
-  },
-  "src/ci.ts": {
-    "redundantSchemaTagIdentifier": 4,
-    "schemaClassMissingBrand": 7
-  },
-  "src/cycle-budget.ts": {
-    "schemaClassMissingBrand": 3
-  },
-  "src/event.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/run/again.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/run/approval.ts": {
-    "schemaClassMissingBrand": 2
-  },
-  "src/run/run.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/run/state.ts": {
-    "schemaClassMissingBrand": 13
-  },
-  "src/step/harvest.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/step/result.ts": {
-    "schemaClassMissingBrand": 4
-  },
-  "src/step/step.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/upgrade.ts": {
-    "schemaClassMissingBrand": 4
-  },
-  "src/worker.ts": {
-    "schemaClassMissingBrand": 4
-  },
-  "test/agent.test.ts": {
-    "schemaSync": 3
-  },
-  "test/attempt-channel.test.ts": {
-    "schemaSync": 33
-  },
-  "test/attempt.test.ts": {
-    "schemaSync": 8
+    "globalDateInEffect": 1
   },
   "test/ci.test.ts": {
     "globalJson": 2
   },
-  "test/cycle-budget.test.ts": {
-    "schemaSync": 4
-  },
   "test/harvest.test.ts": {
     "globalJson": 2,
     "globalJsonInEffect": 3
-  },
-  "test/repository.test.ts": {
-    "schemaSync": 1
-  },
-  "test/run-state.test.ts": {
-    "schemaSync": 2
   }
 }

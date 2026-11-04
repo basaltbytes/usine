@@ -70,8 +70,5 @@
   },
   "src/lib/changes.test.ts": {
     "strictBooleanExpressions": 1
-  },
-  "src/lib/runs/transcript/reader/memory.ts": {
-    "schemaStructWithTag": 2
   }
 }

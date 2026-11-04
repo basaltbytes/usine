@@ -55,15 +55,19 @@ const requestJson = (
 ): typeof TokenRequestBody.Type => {
   assert.strictEqual(request.body._tag, "Uint8Array");
   if (request.body._tag !== "Uint8Array") return assert.fail("missing body");
-  return Schema.decodeUnknownSync(TokenRequestBody)(
-    JSON.parse(new TextDecoder().decode(request.body.body)),
+  return Effect.runSync(
+    Schema.decodeUnknownEffect(TokenRequestBody)(
+      JSON.parse(new TextDecoder().decode(request.body.body)),
+    ),
   );
 };
 
 const jwtJson = (part: string): Schema.Json => {
   const base64 = part.replace(/-/gu, "+").replace(/_/gu, "/");
-  return Schema.decodeUnknownSync(Schema.Json)(
-    JSON.parse(Buffer.from(base64, "base64").toString("utf8")),
+  return Effect.runSync(
+    Schema.decodeUnknownEffect(Schema.Json)(
+      JSON.parse(Buffer.from(base64, "base64").toString("utf8")),
+    ),
   );
 };
 
@@ -153,6 +157,7 @@ describe("GitHubApp", () => {
         assert.strictEqual(Redacted.value(wide.value), "installation-secret");
         assert(!String(wide).includes("installation-secret"));
         // The slug is the App's bot login, which attributes timeline changes to the factory.
+
         assert.strictEqual((yield* app.installation).appSlug, "usine-basaltbytes");
 
         const currentRepositories = yield* app.repositories;
@@ -203,11 +208,12 @@ describe("GitHubApp", () => {
         assert.strictEqual(parts.length, 3);
         const [headerPart, claimsPart, signaturePart] = parts;
         assert(headerPart !== undefined && claimsPart !== undefined && signaturePart !== undefined);
-        assert.deepStrictEqual(Schema.decodeUnknownSync(JwtHeader)(jwtJson(headerPart)), {
+        const valueDecoded1 = yield* Schema.decodeUnknownEffect(JwtHeader)(jwtJson(headerPart));
+        assert.deepStrictEqual(valueDecoded1, {
           alg: "RS256",
           typ: "JWT",
         });
-        const claims = Schema.decodeUnknownSync(JwtClaims)(jwtJson(claimsPart));
+        const claims = yield* Schema.decodeUnknownEffect(JwtClaims)(jwtJson(claimsPart));
         assert.strictEqual(claims.iss, 12345);
         assert(claims.exp - claims.iat <= 600);
         assert(
@@ -370,6 +376,7 @@ describe("GitHubApp", () => {
     const client = HttpClient.make((request) =>
       Effect.gen(function* () {
         if (request.method !== "POST") return jsonResponse(request, [installation]);
+
         return jsonResponse(request, {
           token: "skewed-token",
           expires_at: new Date((yield* Clock.currentTimeMillis) + 62 * 60_000).toISOString(),
@@ -545,7 +552,9 @@ describe("GitHubApp webhook deliveries", () => {
       Effect.sync(() => {
         requests.push(request.url);
         const bearer = request.headers.authorization ?? "";
-        const claims = Schema.decodeUnknownSync(JwtClaims)(jwtJson(bearer.split(".")[1] ?? ""));
+        const claims = Effect.runSync(
+          Schema.decodeUnknownEffect(JwtClaims)(jwtJson(bearer.split(".")[1] ?? "")),
+        );
         assert.strictEqual(claims.iss, credentials.appId);
         const first = request.url === "https://api.github.com/app/hook/deliveries?per_page=100";
         assert(

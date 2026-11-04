@@ -32,7 +32,7 @@ const listenHere = () =>
     const server = createServer();
     servers.push(server);
     server.listen({ host: SERVER_HOST, port: 0 }, () =>
-      resolve(Schema.decodeUnknownSync(PortAddress)(server.address()).port),
+      resolve(Effect.runSync(Schema.decodeUnknownEffect(PortAddress)(server.address())).port),
     );
   });
 
@@ -51,8 +51,8 @@ const listeningChild = () =>
     child.once("error", reject);
     child.stdout.once("data", (data) =>
       resolve({
-        pid: Schema.decodeUnknownSync(ProcessId)(child.pid),
-        port: Schema.decodeSync(Port)(Number(String(data).trim())),
+        pid: Effect.runSync(Schema.decodeUnknownEffect(ProcessId)(child.pid)),
+        port: Effect.runSync(Schema.decodeEffect(Port)(Number(String(data).trim()))),
       }),
     );
   });

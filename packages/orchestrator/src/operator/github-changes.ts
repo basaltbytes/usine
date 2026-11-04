@@ -20,16 +20,28 @@ import {
   ReviewState,
 } from "@usine/github/item-history";
 import type { RepositoryLabel } from "@usine/github/polling";
-import { Clock, Context, DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
+import {
+  type Brand,
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Ref,
+  Schema,
+} from "effect";
 import { GitHubItemKey } from "@usine/core/item";
 import { LabelView } from "./board.ts";
 
 /**
  * A label that an Attempt's Agent added to the Run's Item, with GitHub's current label definition.
  */
-export class LabelAddedView extends Schema.TaggedClass<LabelAddedView>(
-  "@usine/orchestrator/LabelAddedView",
-)("LabelAdded", {
+export class LabelAddedView extends Schema.TaggedClass<
+  LabelAddedView,
+  Brand.Brand<"@usine/orchestrator/operator/github-changes/LabelAddedView">
+>("@usine/orchestrator/LabelAddedView")("LabelAdded", {
   /** The change time as an ISO 8601 timestamp. */
   at: Schema.String,
   /** The current GitHub label definition, including its name, color, and description. */
@@ -40,9 +52,10 @@ export class LabelAddedView extends Schema.TaggedClass<LabelAddedView>(
  * A label that an Attempt's Agent removed from the Run's Item, with GitHub's current label
  * definition.
  */
-export class LabelRemovedView extends Schema.TaggedClass<LabelRemovedView>(
-  "@usine/orchestrator/LabelRemovedView",
-)("LabelRemoved", {
+export class LabelRemovedView extends Schema.TaggedClass<
+  LabelRemovedView,
+  Brand.Brand<"@usine/orchestrator/operator/github-changes/LabelRemovedView">
+>("@usine/orchestrator/LabelRemovedView")("LabelRemoved", {
   /** The change time as an ISO 8601 timestamp. */
   at: Schema.String,
   /** The current GitHub label definition, including its name, color, and description. */
@@ -50,9 +63,10 @@ export class LabelRemovedView extends Schema.TaggedClass<LabelRemovedView>(
 }) {}
 
 /** A comment that an Attempt's Agent posted on the Run's Item. */
-export class CommentedView extends Schema.TaggedClass<CommentedView>(
-  "@usine/orchestrator/CommentedView",
-)("Commented", {
+export class CommentedView extends Schema.TaggedClass<
+  CommentedView,
+  Brand.Brand<"@usine/orchestrator/operator/github-changes/CommentedView">
+>("@usine/orchestrator/CommentedView")("Commented", {
   /** The change time as an ISO 8601 timestamp. */
   at: Schema.String,
   /** The GitHub URL of the comment or review. */
@@ -60,9 +74,10 @@ export class CommentedView extends Schema.TaggedClass<CommentedView>(
 }) {}
 
 /** A review that an Attempt's Agent submitted on the Run's pull request, with its current state. */
-export class ReviewedView extends Schema.TaggedClass<ReviewedView>(
-  "@usine/orchestrator/ReviewedView",
-)("Reviewed", {
+export class ReviewedView extends Schema.TaggedClass<
+  ReviewedView,
+  Brand.Brand<"@usine/orchestrator/operator/github-changes/ReviewedView">
+>("@usine/orchestrator/ReviewedView")("Reviewed", {
   /** The change time as an ISO 8601 timestamp. */
   at: Schema.String,
   /** The GitHub URL of the comment or review. */
@@ -75,9 +90,10 @@ export class ReviewedView extends Schema.TaggedClass<ReviewedView>(
  * An operator move of the Run's Item between Board lanes during an Attempt. `at` is when the
  * operator made the move.
  */
-export class BoardMovedView extends Schema.TaggedClass<BoardMovedView>(
-  "@usine/orchestrator/BoardMovedView",
-)("BoardMoved", {
+export class BoardMovedView extends Schema.TaggedClass<
+  BoardMovedView,
+  Brand.Brand<"@usine/orchestrator/operator/github-changes/BoardMovedView">
+>("@usine/orchestrator/BoardMovedView")("BoardMoved", {
   /** The change time as an ISO 8601 timestamp. */
   at: Schema.String,
   /** The lane name before the operator move. */
@@ -104,9 +120,10 @@ export const GitHubChangeView = Schema.Union([
 export type GitHubChangeView = typeof GitHubChangeView.Type;
 
 /** The changes on the Run's GitHub Item during one Attempt, oldest first. */
-export class AttemptGitHubChangesView extends Schema.Class<AttemptGitHubChangesView>(
-  "@usine/orchestrator/AttemptGitHubChangesView",
-)({
+export class AttemptGitHubChangesView extends Schema.Class<
+  AttemptGitHubChangesView,
+  Brand.Brand<"@usine/orchestrator/operator/github-changes/AttemptGitHubChangesView">
+>("@usine/orchestrator/AttemptGitHubChangesView")({
   /** The attempt associated with this entry. */
   attemptId: AttemptId,
   /** GitHub writes attributed to this attempt, in chronological order. */
@@ -117,9 +134,10 @@ export class AttemptGitHubChangesView extends Schema.Class<AttemptGitHubChangesV
  * The GitHub changes of each of a Run's Attempts, in Attempt order. Empty for a Run without a
  * GitHub Item, such as a schedule Run.
  */
-export class RunGitHubChangesView extends Schema.Class<RunGitHubChangesView>(
-  "@usine/orchestrator/RunGitHubChangesView",
-)({
+export class RunGitHubChangesView extends Schema.Class<
+  RunGitHubChangesView,
+  Brand.Brand<"@usine/orchestrator/operator/github-changes/RunGitHubChangesView">
+>("@usine/orchestrator/RunGitHubChangesView")({
   /** Changes grouped by the run attempts. */
   attempts: Schema.Array(AttemptGitHubChangesView),
 }) {}
@@ -232,7 +250,9 @@ const makeRunGitHubChanges = Effect.gen(function* () {
   const cache = yield* Ref.make(new Map<string, ReadonlyArray<GitHubChangeView>>());
 
   // Attempts that ended before end times were recorded end at their last transcript row.
-  const windowFor = Effect.fn("RunGitHubChanges.windowFor")(function* (attempt: AttemptSummary) {
+  const windowFor = Effect.fn("RunGitHubChanges.windowFor")(function* (
+    attempt: Attempt | AttemptSummary,
+  ) {
     yield* Effect.annotateCurrentSpan({ attemptId: attempt.id, worker: attempt.worker });
     const recorded = windowOf(attempt);
     if (Option.isSome(recorded)) return recorded;
@@ -312,7 +332,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     }
 
     const itemRuns = yield* reader.forItems([snapshot.itemKey]);
-    const onItem = new Map<AttemptId, AttemptSummary>(
+    const onItem = new Map<AttemptId, Attempt | AttemptSummary>(
       [...itemRuns.flatMap(({ attempts }) => attempts), ...snapshot.attempts].map((attempt) => [
         attempt.id,
         attempt,
@@ -332,6 +352,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         );
       } else actors.set(attempt.id, actor);
     }
+
     const windows = (yield* Effect.forEach([...onItem.values()], windowFor)).flatMap(
       Option.toArray,
     );

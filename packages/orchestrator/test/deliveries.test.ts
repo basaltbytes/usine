@@ -53,11 +53,13 @@ const project = CoveredProject.make({
 });
 const instance = (mode: "off" | "deliveries") =>
   LoadedInstance.make({
-    config: Schema.decodeSync(UsineConfig)({
-      version: 1,
-      repos: [{ name: repository }],
-      webhooks: { mode },
-    }),
+    config: Effect.runSync(
+      Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+        webhooks: { mode },
+      }),
+    ),
     agents: [],
     loops: [],
     invalidAgents: [],
@@ -65,7 +67,7 @@ const instance = (mode: "off" | "deliveries") =>
     warnings: [],
   });
 const delivery = (id: string, event: string, repositoryId: number | null) =>
-  Schema.decodeSync(WebhookDelivery)({ id, event, repositoryId });
+  Effect.runSync(Schema.decodeEffect(WebhookDelivery)({ id, event, repositoryId }));
 
 const appLayer = (deliveries: GitHubApp["Service"]["deliveries"]) =>
   Layer.mock(GitHubApp)({
@@ -114,6 +116,7 @@ describe("Webhook delivery polling", () => {
         }
         const cycle = Effect.gen(function* () {
           yield* (yield* WebhookDeliveries).poll(instance("deliveries"));
+
           const stored = yield* (yield* CursorStore).read(key, Schema.String);
           assert.deepStrictEqual(stored, Option.some("3851199271760044123"));
         }).pipe(

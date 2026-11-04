@@ -89,7 +89,7 @@ describe("live exe.dev Worker", () => {
         parentEffort: Option.none(),
         persona: AgentPersona.make("Verify the remote Worker transport."),
       });
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
         workers: [{ name: worker, kind: "exe.dev", max_concurrent_attempts: 1 }],
@@ -117,6 +117,7 @@ describe("live exe.dev Worker", () => {
 
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
+
         const accepted = yield* engine.submit(
           Submission.make({
             event: Event.make({
@@ -168,6 +169,7 @@ describe("live exe.dev Worker", () => {
         );
         const vm = machines.vms.find(({ vm_name: name }) => name === worker);
         assert(vm !== undefined);
+
         const home = (yield* output("ssh", [vm.ssh_dest, "--", "printenv", "HOME"])).trim();
         const root = `${home}/.usine/workers/${safeSegment(worker)}`;
         const cache = `${root}/repos/${safeSegment(repository)}.git`;

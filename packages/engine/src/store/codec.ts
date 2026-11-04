@@ -27,7 +27,7 @@ import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { Comment, StepResult } from "@usine/core/step/result";
-import { Array as EffectArray, Effect, Option, Schema, Struct } from "effect";
+import { Array as EffectArray, DateTime, Effect, Option, Schema, Struct } from "effect";
 import { EnginePersistenceError, RunStoreError } from "../engine/error.ts";
 import { IgnoreReason, Submission } from "../engine/submission.ts";
 import { ProjectionRevision, RunEvent, RunSummary, AttemptSummary } from "../run-reader/model.ts";
@@ -157,27 +157,27 @@ export const decodeProjectionRevision = Schema.decodeUnknownEffect(
 );
 export const decodeTranscriptRows = Schema.decodeUnknownEffect(Schema.Array(TranscriptRow));
 
-export const encodePayload = Schema.encodeSync(Schema.Json);
-export const encodeDateTime = Schema.encodeSync(Schema.DateTimeUtcFromString);
-export const encodeRunState = Schema.encodeSync(RunState.RunState);
-export const encodeOutcome = Schema.encodeSync(AttemptOutcome);
-export const encodeSalvage = Schema.encodeSync(AttemptSalvage);
-export const encodeComments = Schema.encodeSync(Schema.Array(Comment));
-export const encodeOutOfMemory = Schema.encodeSync(Schema.Array(ContainerOutOfMemoryKills));
+export const encodePayload = Schema.encodeEffect(Schema.Json);
+export const encodeDateTime = DateTime.formatIso;
+export const encodeRunState = Schema.encodeEffect(RunState.RunState);
+export const encodeOutcome = Schema.encodeEffect(AttemptOutcome);
+export const encodeSalvage = Schema.encodeEffect(AttemptSalvage);
+export const encodeComments = Schema.encodeEffect(Schema.Array(Comment));
+export const encodeOutOfMemory = Schema.encodeEffect(Schema.Array(ContainerOutOfMemoryKills));
 export const decodeOutOfMemory = Schema.decodeUnknownEffect(
   Schema.Array(
     Schema.Struct({ outOfMemory: Schema.NullOr(Schema.Array(ContainerOutOfMemoryKills)) }),
   ),
 );
-export const encodeFailureResolution = Schema.encodeSync(FailureResolution);
-export const encodeAttemptStart = Schema.encodeSync(AttemptStart);
+export const encodeFailureResolution = Schema.encodeEffect(FailureResolution);
+export const encodeAttemptStart = Schema.encodeEffect(AttemptStart);
 export const decodeNextStarts = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ nextStart: Schema.NullOr(OperatorRetryStart) })),
 );
-export const encodeStepResult = Schema.encodeSync(StepResult);
-export const encodeEnvelope = Schema.encodeSync(AttemptChannel.Envelope);
-export const encodeAgent = Schema.encodeSync(Agent);
-export const encodeBrainSpec = Schema.encodeSync(BrainSpec);
+export const encodeStepResult = Schema.encodeEffect(StepResult);
+export const encodeEnvelope = Schema.encodeEffect(AttemptChannel.Envelope);
+export const encodeAgent = Schema.encodeEffect(Agent);
+export const encodeBrainSpec = Schema.encodeEffect(BrainSpec);
 
 const isRunStoreError = Schema.is(RunStoreError);
 

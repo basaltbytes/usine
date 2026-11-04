@@ -29,3 +29,7 @@ Changesets releases `create-usine` and `@usine/server` together. The build copie
 ## Validation
 
 After `pnpm build`, `pnpm --filter create-usine test` runs the compiled CLI in temporary folders. A process fixture substitutes the registry install and links the built server; the startup test runs that server, checks setup mode and the stored revision, then stops it. npm and pnpm integration tests install a fixture package from a local registry inside an enclosing workspace and check that the lockfile and dependencies stay in the destination. `pnpm check:packed-install` checks installation of the published package contents with npm.
+
+## Schema contracts
+
+Scaffold operations decode configuration inside Effects and report failures through the scaffold error channel.

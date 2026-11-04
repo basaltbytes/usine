@@ -134,3 +134,7 @@ Enable the App webhook to record deliveries. A delivery with a failed HTTP statu
 `GitHubChecks` from `/checks` reads the live PR head and aggregate check state. When checks are absent and GitHub reports `CONFLICTING`, the snapshot state is `conflict`. Missing checks otherwise stay pending, including while mergeability is `UNKNOWN`. Failure diagnostics include failed check and step names and up to 12,000 characters from four Actions jobs. The excerpt reads numbered step files when available, or separates the archive’s combined job log with step timestamps and matching runner headers. It keeps context around failure markers plus each failed step’s final output. When combined step boundaries are ambiguous, diagnostics use the check output. Legacy commit statuses provide their context and description. Grant the App **Actions: read-only** to read job logs. Without this optional permission, diagnostics use the check output. CI REST reads, including check runs, commit statuses, job metadata, and log archives, use the same bounded retry policy as polling reads. Rate limits propagate to the caller's polling backoff. `GitHubChecks.layer` needs `GitHubApp` and an Effect HTTP client.
 
 `ItemLabelMutation.add` and `remove` can each be empty. Removal-only actions send no additions request, and repeated removals ignore missing labels.
+
+## Schema contracts
+
+GitHub response records and errors use nominal Schema brands. Use their schema constructors for typed values, and decode external responses with `Schema.decodeUnknownEffect`.

@@ -27,14 +27,16 @@ const secret = "webhook-test-secret";
 const repository = RepositoryName.make("test/repo");
 const instance = (mode: "off" | "deliveries" | "endpoint") =>
   LoadedInstance.make({
-    config: Schema.decodeSync(UsineConfig)({
-      version: 1,
-      repos: [{ name: repository }],
-      webhooks:
-        mode === "endpoint"
-          ? { mode, public_url: "https://usine.example/webhooks/github" }
-          : { mode },
-    }),
+    config: Effect.runSync(
+      Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+        webhooks:
+          mode === "endpoint"
+            ? { mode, public_url: "https://usine.example/webhooks/github" }
+            : { mode },
+      }),
+    ),
     agents: [],
     loops: [],
     invalidAgents: [],
@@ -123,16 +125,20 @@ it("verifies the raw body outside operator authentication and hints only current
       ]) {
         assert.equal((yield* send(web.handler, body, sig)).status, 401);
       }
+
       assert.equal((yield* send(web.handler, "{bad json", "invalid")).status, 401);
       for (const bad of ["{bad json", "null", '{"repository":{"full_name":42}}']) {
         assert.equal((yield* send(web.handler, bad)).status, 400);
       }
+
       assert.equal((yield* send(web.handler, body, signature(body), "")).status, 400);
       assert.deepEqual(hints, []);
       yield* TestClock.adjust("10 minutes");
       const currentSilent = yield* health.silent;
       assert.isTrue(currentSilent);
+
       assert.equal((yield* send(web.handler, body)).status, 204);
+
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.deepEqual(hints, [repository, repository]);
       const nextSilent = yield* health.silent;
@@ -152,6 +158,7 @@ it("verifies the raw body outside operator authentication and hints only current
           config: UsineConfig.make({ ...loaded.config, repos: [] }),
         }),
       );
+
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.equal(hints.length, 2);
     }).pipe(
@@ -174,6 +181,7 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
         );
         const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
         yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
+
         assert.equal((yield* send(web.handler, "{}")).status, 404);
       }
       const app = {
@@ -206,6 +214,7 @@ it("requires a nonempty secret only in endpoint mode and keeps the endpoint avai
       );
       const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
       yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
+
       assert.equal((yield* send(web.handler, "{}", signature("{}"), "ping")).status, 204);
     }).pipe(
       Effect.provide(WebhookHealth.layer.pipe(Layer.provideMerge(TestClock.layer()))),
@@ -279,12 +288,14 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
       yield* Effect.addFinalizer(() => Effect.promise(() => web.dispose()));
       const body = JSON.stringify({ repository: { full_name: repository } });
+
       assert.equal((yield* send(web.handler, body)).status, 404);
       yield* TestClock.adjust("1 day");
       yield* SubscriptionRef.set(current, instance("endpoint"));
       yield* TestClock.adjust("1 millis");
       const currentSilent = yield* health.silent;
       assert.isFalse(currentSilent);
+
       assert.equal((yield* send(web.handler, body)).status, 204);
       assert.deepEqual(hints, [repository]);
       yield* SubscriptionRef.update(current, (loaded) =>
@@ -307,6 +318,7 @@ it("switches a running endpoint between modes and public URLs without rebuilding
       for (const mode of ["deliveries", "off"] as const) {
         yield* SubscriptionRef.set(current, instance(mode));
         yield* TestClock.adjust("1 millis");
+
         assert.equal((yield* send(web.handler, body)).status, 404);
       }
       assert.deepEqual(hints, [repository]);

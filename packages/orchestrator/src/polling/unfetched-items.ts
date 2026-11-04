@@ -2,7 +2,7 @@ import { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GitHubServerError } from "@usine/github/github-app";
 import type { ChangedItem } from "@usine/github/polling";
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { changedItem, FailingItem } from "./evaluation-failures.ts";
 import { RepositoryPollFailure, repositoryFailureLogFields } from "./cycle.ts";
 
@@ -10,13 +10,14 @@ import { RepositoryPollFailure, repositoryFailureLogFields } from "./cycle.ts";
  * An Item that GitHub couldn't return in a cycle because of a server error. The poll cursor keeps
  * it, and the next cycle fetches it again.
  */
-export class UnfetchedItem extends Schema.Class<UnfetchedItem>("@usine/orchestrator/UnfetchedItem")(
-  {
-    stream: FailingItem.fields.stream,
-    number: ItemNumber,
-    updatedAt: Schema.DateTimeUtcFromString,
-  },
-) {}
+export class UnfetchedItem extends Schema.Class<
+  UnfetchedItem,
+  Brand.Brand<"@usine/orchestrator/polling/unfetched-items/UnfetchedItem">
+>("@usine/orchestrator/UnfetchedItem")({
+  stream: FailingItem.fields.stream,
+  number: ItemNumber,
+  updatedAt: Schema.DateTimeUtcFromString,
+}) {}
 
 /** The outcome of an Item deferred to the next cycle by a GitHub server error. */
 interface Unfetched {

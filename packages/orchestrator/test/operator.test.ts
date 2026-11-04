@@ -114,7 +114,18 @@ import {
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
-import { DateTime, Effect, Layer, Logger, Match, Option, Redacted, Ref, Schema } from "effect";
+import {
+  flow,
+  DateTime,
+  Effect,
+  Layer,
+  Logger,
+  Match,
+  Option,
+  Redacted,
+  Ref,
+  Schema,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
@@ -159,7 +170,7 @@ const brain = BrainSpec.make({
   effort: "high",
 });
 
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -192,13 +203,16 @@ const loop = LoopFile.make({
   agent: agentFile.name,
   body: PromptTemplate.make("Review it."),
 });
-const instance = LoadedInstance.make({
-  config,
-  agents: [agentFile],
-  invalidAgents: [],
-  loops: [loop],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const fixtureConfig = yield* config;
+  return LoadedInstance.make({
+    config: fixtureConfig,
+    agents: [agentFile],
+    invalidAgents: [],
+    loops: [loop],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 
 const snapshot = RunSnapshot.make({
@@ -597,14 +611,16 @@ const testLayer = (
   const repositoryLabelReader = Layer.succeed(RepositoryLabelProjectionReader)({
     get: () =>
       Effect.succeedSome(
-        Schema.decodeSync(RepositoryLabelProjection)({
-          repository,
-          labels: ["ready", "ready-for-review", "bug", "documentation"].map((name) => ({
-            name,
-            color: null,
-            description: null,
-          })),
-        }),
+        Effect.runSync(
+          Schema.decodeEffect(RepositoryLabelProjection)({
+            repository,
+            labels: ["ready", "ready-for-review", "bug", "documentation"].map((name) => ({
+              name,
+              color: null,
+              description: null,
+            })),
+          }),
+        ),
       ),
   });
   const github = Layer.succeed(GitHubItemWriter)({
@@ -739,14 +755,15 @@ describe("Operator", () => {
     "refreshes endpoint attention outside the cached overview and shares delivery health",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const endpointInstance = LoadedInstance.make({
-          ...instance,
+          ...fixtureInstance,
           config: UsineConfig.make({
-            ...instance.config,
+            ...fixtureInstance.config,
             webhooks: {
               mode: "endpoint",
               publicUrl: new URL("https://usine.example/webhooks/github"),
@@ -770,10 +787,13 @@ describe("Operator", () => {
           assert(need !== undefined);
           const readsState = yield* Ref.get(reads);
           assert.strictEqual(readsState, 1);
-          yield* operator.dismissNeed(endpointInstance, attentionKey(need));
+          const valueDecoded1 = yield* attentionKey(need);
+          yield* operator.dismissNeed(endpointInstance, valueDecoded1);
           const currentConfigWarnings = yield* warnings;
           assert.deepStrictEqual(currentConfigWarnings, []);
-          yield* operator.undoDismissNeed(attentionKey(need));
+          const valueDecoded2 = yield* attentionKey(need);
+          yield* operator.undoDismissNeed(valueDecoded2);
+
           assert.strictEqual((yield* warnings).length, 1);
           const readsBeforeDelivery = yield* Ref.get(reads);
           yield* health.received;
@@ -847,6 +867,7 @@ describe("Operator", () => {
         remaining.attempts.map(({ runId }) => runId),
         ["two"],
       );
+
       assert.deepStrictEqual((yield* refresh(overview, [], [])).needsYou, []);
     }),
   );
@@ -855,6 +876,7 @@ describe("Operator", () => {
     "refreshes pool warnings on a cached overview, supports dismissal and undo, and clears at reset",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         yield* TestClock.setTime(DateTime.toEpochMillis(now));
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
@@ -898,7 +920,8 @@ describe("Operator", () => {
           );
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const needs = Effect.map(operator.overview(instance), (view) =>
+
+          const needs = Effect.map(operator.overview(fixtureInstance), (view) =>
             view.needsYou.filter((need) => need._tag === "PoolLimitNeed"),
           );
           const attentionNeeds = yield* needs;
@@ -912,17 +935,18 @@ describe("Operator", () => {
           assert.deepStrictEqual(need.resetsAt, resetsAt);
           const readsState = yield* Ref.get(reads);
           assert.strictEqual(readsState, 1, "rate windows refresh without a board revision");
-          yield* operator.dismissNeed(instance, attentionKey(need));
+
+          const valueDecoded1 = yield* attentionKey(need);
+          yield* operator.dismissNeed(fixtureInstance, valueDecoded1);
           const currentAttentionNeeds = yield* needs;
           assert.deepStrictEqual(currentAttentionNeeds, []);
-          assert(
-            (yield* operator.overview(instance)).dismissedNeeds.some(
-              (entry) => entry.id === need.id,
-            ),
-          );
+
+          const decodedValue3 = yield* operator.overview(fixtureInstance);
+          assert(decodedValue3.dismissedNeeds.some((entry) => entry.id === need.id));
           for (let usedPercent = 81; usedPercent < 90; usedPercent++) {
             append(usedPercent);
-            const view = yield* operator.overview(instance);
+
+            const view = yield* operator.overview(fixtureInstance);
             assert.deepStrictEqual(
               view.needsYou.filter((entry) => entry._tag === "PoolLimitNeed"),
               [],
@@ -931,17 +955,22 @@ describe("Operator", () => {
             assert(dismissed?._tag === "PoolLimitNeed");
             assert.strictEqual(dismissed.usedPercent, usedPercent);
           }
-          yield* operator.undoDismissNeed(attentionKey(need));
+          const valueDecoded7 = yield* attentionKey(need);
+          yield* operator.undoDismissNeed(valueDecoded7);
           const nextAttentionNeeds = yield* needs;
           assert.deepStrictEqual(nextAttentionNeeds, [
             PoolLimitNeed.make({ ...need, usedPercent: 89 }),
           ]);
-          yield* operator.dismissNeed(instance, attentionKey(need));
+
+          const valueDecoded2 = yield* attentionKey(need);
+          yield* operator.dismissNeed(fixtureInstance, valueDecoded2);
           append(90);
           const [higherBand] = yield* needs;
           assert(higherBand !== undefined);
           assert.strictEqual(higherBand.usedPercent, 90);
-          yield* operator.dismissNeed(instance, attentionKey(higherBand));
+
+          const valueDecoded3 = yield* attentionKey(higherBand);
+          yield* operator.dismissNeed(fixtureInstance, valueDecoded3);
           const updatedAttentionNeeds = yield* needs;
           assert.deepStrictEqual(updatedAttentionNeeds, []);
           const nextReset = DateTime.add(resetsAt, { hours: 1 });
@@ -949,17 +978,16 @@ describe("Operator", () => {
           const [nextWindow] = yield* needs;
           assert(nextWindow !== undefined);
           assert.deepStrictEqual(nextWindow.resetsAt, nextReset);
-          yield* operator.dismissNeed(instance, attentionKey(nextWindow));
+
+          const valueDecoded4 = yield* attentionKey(nextWindow);
+          yield* operator.dismissNeed(fixtureInstance, valueDecoded4);
           const latestAttentionNeeds = yield* needs;
           assert.deepStrictEqual(latestAttentionNeeds, []);
           append(20);
           const secondAttentionNeeds = yield* needs;
           assert.deepStrictEqual(secondAttentionNeeds, []);
-          assert(
-            !(yield* operator.overview(instance)).dismissedNeeds.some(
-              (entry) => entry.id === need.id,
-            ),
-          );
+          const decodedValue4 = yield* operator.overview(fixtureInstance);
+          assert(!decodedValue4.dismissedNeeds.some((entry) => entry.id === need.id));
           append(80);
           const thirdAttentionNeeds = yield* needs;
           assert.deepStrictEqual(
@@ -999,6 +1027,7 @@ describe("Operator", () => {
     "refreshes quota waits on cached boards and run details, including after dismissal",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -1030,7 +1059,8 @@ describe("Operator", () => {
         ).pipe(Layer.provide(status));
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const boardWaits = Effect.map(operator.overview(instance), (view) =>
+
+          const boardWaits = Effect.map(operator.overview(fixtureInstance), (view) =>
             view.projects.flatMap(({ board }) =>
               board.lanes.flatMap(({ items }) =>
                 items.flatMap((task) =>
@@ -1041,6 +1071,7 @@ describe("Operator", () => {
               ),
             ),
           );
+
           assert((yield* boardWaits).every((wait) => wait === null));
           yield* Ref.set(pauses, [refusal]);
           const waiting = yield* boardWaits;
@@ -1048,45 +1079,42 @@ describe("Operator", () => {
           assert(
             waiting.every((wait) => wait?.worker === worker && wait.message === refusal.message),
           );
-          assert.strictEqual(
-            (yield* operator.detail(instance, current.run.id)).run.machineWait?.message,
-            refusal.message,
-          );
-          const task = yield* operator.task(instance, repository, ItemNumber.make(31));
+
+          const decodedValue6 = yield* operator.detail(fixtureInstance, current.run.id);
+          assert.strictEqual(decodedValue6.run.machineWait?.message, refusal.message);
+
+          const task = yield* operator.task(fixtureInstance, repository, ItemNumber.make(31));
           assert.strictEqual(
             task.runs.find(({ id }) => id === current.run.id)?.machineWait?.message,
             refusal.message,
           );
-          const need = (yield* operator.overview(instance)).needsYou.find(
-            (need) => need._tag === "WorkerQuotaNeed",
-          );
+
+          const decodedValue7 = yield* operator.overview(fixtureInstance);
+          const need = decodedValue7.needsYou.find((need) => need._tag === "WorkerQuotaNeed");
           assert(need !== undefined);
-          yield* operator.dismissNeed(instance, attentionKey(need));
-          assert(
-            !(yield* operator.overview(instance)).needsYou.some(
-              (entry) => entry._tag === "WorkerQuotaNeed",
-            ),
-          );
-          assert.strictEqual(
-            (yield* operator.detail(instance, current.run.id)).run.machineWait?.message,
-            refusal.message,
-          );
+
+          const valueDecoded5 = yield* attentionKey(need);
+          yield* operator.dismissNeed(fixtureInstance, valueDecoded5);
+          const decodedValue8 = yield* operator.overview(fixtureInstance);
+          assert(!decodedValue8.needsYou.some((entry) => entry._tag === "WorkerQuotaNeed"));
+
+          const decodedValue9 = yield* operator.detail(fixtureInstance, current.run.id);
+          assert.strictEqual(decodedValue9.run.machineWait?.message, refusal.message);
           yield* Ref.set(pauses, [{ ...refusal, waitingRuns: [] }]);
+
           assert(
             (yield* boardWaits).every((wait) => wait === null),
             "an assigned machine clears only its run wait",
           );
-          assert.strictEqual(
-            (yield* operator.detail(instance, current.run.id)).run.machineWait,
-            null,
-          );
-          assert(
-            (yield* operator.overview(instance)).dismissedNeeds.some(
-              (entry) => entry._tag === "WorkerQuotaNeed",
-            ),
-          );
+
+          const decodedValue11 = yield* operator.detail(fixtureInstance, current.run.id);
+          assert.strictEqual(decodedValue11.run.machineWait, null);
+
+          const decodedValue12 = yield* operator.overview(fixtureInstance);
+          assert(decodedValue12.dismissedNeeds.some((entry) => entry._tag === "WorkerQuotaNeed"));
           yield* Ref.set(pauses, []);
-          const recovered = yield* operator.overview(instance);
+
+          const recovered = yield* operator.overview(fixtureInstance);
           assert(
             ![...recovered.needsYou, ...recovered.dismissedNeeds].some(
               (entry) => entry._tag === "WorkerQuotaNeed",
@@ -1118,6 +1146,7 @@ describe("Operator", () => {
     "refreshes worker attention on a cached overview, clears recovery, and resurfaces a later outage",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -1152,7 +1181,8 @@ describe("Operator", () => {
           });
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const workerNeeds = Effect.map(operator.overview(instance), (view) =>
+
+          const workerNeeds = Effect.map(operator.overview(fixtureInstance), (view) =>
             view.needsYou.filter((need) => need._tag === "UnresponsiveWorkerNeed"),
           );
           append(silent(1));
@@ -1170,14 +1200,14 @@ describe("Operator", () => {
           );
           const readsState = yield* Ref.get(reads);
           assert.strictEqual(readsState, 1, "worker notices do not need a board revision");
-          yield* operator.dismissNeed(instance, attentionKey(need));
+
+          const valueDecoded6 = yield* attentionKey(need);
+          yield* operator.dismissNeed(fixtureInstance, valueDecoded6);
           const currentWorkerAttention = yield* workerNeeds;
           assert.deepStrictEqual(currentWorkerAttention, []);
-          assert(
-            (yield* operator.overview(instance)).dismissedNeeds.some(
-              (entry) => entry.id === need.id,
-            ),
-          );
+
+          const decodedValue13 = yield* operator.overview(fixtureInstance);
+          assert(decodedValue13.dismissedNeeds.some((entry) => entry.id === need.id));
           append(
             AttemptChannel.WorkerResponsive.make({
               worker: need.worker,
@@ -1187,11 +1217,8 @@ describe("Operator", () => {
           );
           const nextWorkerAttention = yield* workerNeeds;
           assert.deepStrictEqual(nextWorkerAttention, []);
-          assert(
-            !(yield* operator.overview(instance)).dismissedNeeds.some(
-              (entry) => entry.id === need.id,
-            ),
-          );
+          const decodedValue14 = yield* operator.overview(fixtureInstance);
+          assert(!decodedValue14.dismissedNeeds.some((entry) => entry.id === need.id));
           append(silent(3));
           const updatedWorkerAttention = yield* workerNeeds;
           assert.lengthOf(updatedWorkerAttention, 1, "recovery prunes the previous dismissal");
@@ -1225,16 +1252,21 @@ describe("Operator", () => {
     "dismisses every projected entry across refreshes, keeps approval waiting, and restores badges with undo",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const before = yield* operator.overview(instance);
-          for (const need of before.needsYou)
-            yield* operator.dismissNeed(instance, attentionKey(need));
-          const dismissed = yield* operator.overview(instance);
+
+          const before = yield* operator.overview(fixtureInstance);
+          for (const need of before.needsYou) {
+            const fixtureValue1 = yield* attentionKey(need);
+            yield* operator.dismissNeed(fixtureInstance, fixtureValue1);
+          }
+
+          const dismissed = yield* operator.overview(fixtureInstance);
           assert.deepStrictEqual(dismissed.needsYou, []);
           assert.deepStrictEqual(dismissed.dismissedNeeds, before.needsYou);
           assert(
@@ -1244,16 +1276,21 @@ describe("Operator", () => {
                 board.lanes.every(({ items }) => items.every(({ needsYou }) => !needsYou)),
             ),
           );
-          assert.deepStrictEqual((yield* operator.overview(instance)).needsYou, []);
-          const detail = yield* operator.detail(instance, runId);
+
+          const decodedValue15 = yield* operator.overview(fixtureInstance);
+          assert.deepStrictEqual(decodedValue15.needsYou, []);
+
+          const detail = yield* operator.detail(fixtureInstance, runId);
           assert.strictEqual(detail.run.state, "Waiting");
           assert.strictEqual(detail.run.canApprove, true);
           const approvedState = yield* Ref.get(approved);
           assert.deepStrictEqual(approvedState, []);
           const approval = before.needsYou.find((need) => need._tag === "ApprovalNeed");
           assert(approval !== undefined);
-          yield* operator.undoDismissNeed(attentionKey(approval));
-          const restored = yield* operator.overview(instance);
+          const valueDecoded27 = yield* attentionKey(approval);
+          yield* operator.undoDismissNeed(valueDecoded27);
+
+          const restored = yield* operator.overview(fixtureInstance);
           assert.deepStrictEqual(restored.needsYou, [approval]);
           assert.strictEqual(restored.projects[0]?.status, "needs-you");
           assert(
@@ -1269,6 +1306,7 @@ describe("Operator", () => {
     "shows %s decode diagnostics in the failure log and Needs attention",
     (operation) =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const app = yield* GitHubApp.pipe(Effect.provide(testAppLayer));
         const client = HttpClient.make((request) =>
           Effect.succeed(
@@ -1311,9 +1349,14 @@ describe("Operator", () => {
         });
         const cycle = yield* Effect.gen(function* () {
           const polling = yield* PollingTriggers;
-          assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
-          assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
-          return yield* polling.poll(instance);
+
+          const decodedValue16 = yield* polling.poll(fixtureInstance);
+          assert.deepStrictEqual(decodedValue16.failures, []);
+
+          const decodedValue17 = yield* polling.poll(fixtureInstance);
+          assert.deepStrictEqual(decodedValue17.failures, []);
+
+          return yield* polling.poll(fixtureInstance);
         }).pipe(Effect.provide(pollingTestLayer(github)), Effect.withLogger(logger));
         const failure = cycle.failures[0];
         assert(failure !== undefined);
@@ -1337,7 +1380,8 @@ describe("Operator", () => {
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const overview = yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          return yield* operator.overview(instance);
+
+          return yield* operator.overview(fixtureInstance);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -1366,6 +1410,7 @@ describe("Operator", () => {
 
   it.effect("defers pruning until startup reports arrive, then removes obsolete dismissals", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
@@ -1430,7 +1475,8 @@ describe("Operator", () => {
       const latestSchedule = yield* Ref.make(Option.some(schedule));
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
-        const before = yield* operator.overview(instance);
+
+        const before = yield* operator.overview(fixtureInstance);
         const failures = before.needsYou.filter(
           (need) =>
             need._tag === "PollFailureNeed" ||
@@ -1446,7 +1492,10 @@ describe("Operator", () => {
               need.failure._tag !== "ScheduleTickFailure" ||
               need.failure.repository === scheduleB.repository,
         );
-        for (const need of dismissed) yield* operator.dismissNeed(instance, attentionKey(need));
+        for (const need of dismissed) {
+          const fixtureValue2 = yield* attentionKey(need);
+          yield* operator.dismissNeed(fixtureInstance, fixtureValue2);
+        }
         for (const [pollReport, scheduleReport] of [
           [Option.none<PollCycle>(), Option.none<ScheduleCycle>()],
           [Option.some(poll), Option.none<ScheduleCycle>()],
@@ -1456,7 +1505,7 @@ describe("Operator", () => {
           yield* Ref.set(latestPoll, pollReport);
           yield* Ref.set(latestSchedule, scheduleReport);
           for (let refresh = 0; refresh < 2; refresh++) {
-            const starting = yield* operator.overview(instance);
+            const starting = yield* operator.overview(fixtureInstance);
             const expected = dismissed.filter((need) =>
               need._tag === "ScheduleFailureNeed"
                 ? Option.isSome(scheduleReport)
@@ -1481,7 +1530,8 @@ describe("Operator", () => {
             latestSchedule,
             Option.some(ScheduleCycle.make({ ...schedule, failures: scheduleFailures })),
           );
-          const refreshed = yield* operator.overview(instance);
+
+          const refreshed = yield* operator.overview(fixtureInstance);
           assert.deepStrictEqual(new Set(refreshed.dismissedNeeds), new Set(dismissed));
           assert(!refreshed.needsYou.some((need) => dismissed.some(({ id }) => id === need.id)));
         }
@@ -1509,7 +1559,8 @@ describe("Operator", () => {
             }),
           ),
         );
-        const changed = yield* operator.overview(instance);
+
+        const changed = yield* operator.overview(fixtureInstance);
         assert.deepStrictEqual(changed.dismissedNeeds, []);
         assert.strictEqual(
           changed.needsYou.filter(
@@ -1522,7 +1573,8 @@ describe("Operator", () => {
         );
         yield* Ref.set(latestPoll, Option.some(poll));
         yield* Ref.set(latestSchedule, Option.some(schedule));
-        const recurring = yield* operator.overview(instance);
+
+        const recurring = yield* operator.overview(fixtureInstance);
         assert.deepStrictEqual(recurring.dismissedNeeds, []);
         assert.deepStrictEqual(
           recurring.needsYou.filter(
@@ -1533,16 +1585,22 @@ describe("Operator", () => {
           ),
           failures,
         );
-        yield* operator.overview(instance);
+
+        yield* operator.overview(fixtureInstance);
         const readsAfterPruning = yield* Ref.get(reads);
-        yield* operator.overview(instance);
+
+        yield* operator.overview(fixtureInstance);
         const readsState = yield* Ref.get(reads);
         assert.strictEqual(readsState, readsAfterPruning);
 
-        for (const need of failures) yield* operator.dismissNeed(instance, attentionKey(need));
+        for (const need of failures) {
+          const fixtureValue3 = yield* attentionKey(need);
+          yield* operator.dismissNeed(fixtureInstance, fixtureValue3);
+        }
         yield* Ref.set(latestPoll, Option.none());
         yield* Ref.set(latestSchedule, Option.none());
-        yield* operator.overview(instance);
+
+        yield* operator.overview(fixtureInstance);
         yield* Ref.set(
           latestPoll,
           Option.some(PollCycle.make({ ...poll, failures: [], preflightFindings: [] })),
@@ -1551,10 +1609,13 @@ describe("Operator", () => {
           latestSchedule,
           Option.some(ScheduleCycle.make({ ...schedule, failures: [] })),
         );
-        yield* operator.overview(instance);
+
+        yield* operator.overview(fixtureInstance);
         yield* Ref.set(latestPoll, Option.some(poll));
         yield* Ref.set(latestSchedule, Option.some(schedule));
-        assert.deepStrictEqual((yield* operator.overview(instance)).dismissedNeeds, []);
+
+        const decodedValue18 = yield* operator.overview(fixtureInstance);
+        assert.deepStrictEqual(decodedValue18.dismissedNeeds, []);
       }).pipe(
         Effect.provide(
           testLayer(
@@ -1580,6 +1641,7 @@ describe("Operator", () => {
     "leaves handed-off runs out of Needs attention and preserves the fix link in detail",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -1606,13 +1668,15 @@ describe("Operator", () => {
         });
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const overview = yield* operator.overview(instance);
+
+          const overview = yield* operator.overview(fixtureInstance);
           assert(!overview.needsYou.some((need) => need._tag === "RunFailureNeed"));
           const card = overview.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
             .find((item) => item.itemKey === itemKey);
           assert.strictEqual(card?.needsYou, false);
-          const detail = yield* operator.detail(instance, runId);
+
+          const detail = yield* operator.detail(fixtureInstance, runId);
           assert.strictEqual(detail.run.state, "HandedOff");
           assert.deepStrictEqual(detail.run.handoff, handoff);
           assert.strictEqual(detail.run.canResolveFailure, false);
@@ -1622,6 +1686,7 @@ describe("Operator", () => {
 
   it.effect("clears only resolved failure attention and renews it for a later failed Attempt", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
@@ -1646,7 +1711,7 @@ describe("Operator", () => {
         id: AttemptId.make("later-failure"),
         number: AttemptNumber.make(2),
       });
-      let dismissedFailure: ReturnType<typeof attentionKey> | undefined;
+      let dismissedFailure: Effect.Success<ReturnType<typeof attentionKey>> | undefined;
       for (const [attempts, resolved, needsAttention] of [
         [[failed], Option.none<AttemptId>(), true],
         [[failed], Option.some(failed.id), false],
@@ -1660,7 +1725,8 @@ describe("Operator", () => {
         });
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const overview = yield* operator.overview(instance);
+
+          const overview = yield* operator.overview(fixtureInstance);
           assert.strictEqual(
             overview.needsYou.some((need) => need._tag === "RunFailureNeed"),
             needsAttention,
@@ -1676,7 +1742,8 @@ describe("Operator", () => {
             .find((item) => item.itemKey === itemKey);
           assert.strictEqual(card?.needsYou, needsAttention);
           assert.strictEqual(overview.projects[0]?.status, "needs-you");
-          const detail = yield* operator.detail(instance, runId);
+
+          const detail = yield* operator.detail(fixtureInstance, runId);
           assert.strictEqual(detail.run.canResolveFailure, needsAttention);
           assert.strictEqual(detail.run.canRetry, true);
           assert.strictEqual(detail.run.state, "Failed");
@@ -1688,17 +1755,20 @@ describe("Operator", () => {
             assert.deepStrictEqual(outcome.failure, failureNeed.failure);
             assert.include(failureNeed.failure.message, "single-repository installation token");
             if (dismissedFailure !== undefined)
-              assert.deepStrictEqual(partitionNeeds([failureNeed], [dismissedFailure]).needsYou, [
-                failureNeed,
-              ]);
-            yield* operator.dismissNeed(instance, attentionKey(failureNeed));
-            dismissedFailure = attentionKey(failureNeed);
-            const dismissed = yield* operator.overview(instance);
+              assert.deepStrictEqual(
+                (yield* partitionNeeds([failureNeed], [dismissedFailure])).needsYou,
+                [failureNeed],
+              );
+
+            const valueDecoded7 = yield* attentionKey(failureNeed);
+            yield* operator.dismissNeed(fixtureInstance, valueDecoded7);
+            dismissedFailure = yield* attentionKey(failureNeed);
+
+            const dismissed = yield* operator.overview(fixtureInstance);
             assert(!dismissed.needsYou.some((need) => need._tag === "RunFailureNeed"));
-            assert.strictEqual(
-              (yield* operator.detail(instance, runId)).run.canResolveFailure,
-              true,
-            );
+
+            const decodedValue19 = yield* operator.detail(fixtureInstance, runId);
+            assert.strictEqual(decodedValue19.run.canResolveFailure, true);
           }
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
       }
@@ -1709,6 +1779,7 @@ describe("Operator", () => {
     "leaves the Runs of a repository usine.yaml no longer lists out of Needs attention",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const original = snapshot.attempts[0];
         assert(original !== undefined);
         const failed = RunSnapshot.make({
@@ -1728,12 +1799,13 @@ describe("Operator", () => {
             }),
           ],
         });
+        const decodedValue20 = yield* Schema.decodeEffect(UsineConfig)({
+          version: 1,
+          repos: [{ name: "basaltbytes/site" }],
+        });
         const elsewhere = LoadedInstance.make({
-          ...instance,
-          config: Schema.decodeSync(UsineConfig)({
-            version: 1,
-            repos: [{ name: "basaltbytes/site" }],
-          }),
+          ...fixtureInstance,
+          config: decodedValue20,
         });
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
@@ -1748,7 +1820,8 @@ describe("Operator", () => {
               const overview = yield* (yield* Operator).overview(loaded);
               return overview.needsYou.map(({ _tag }) => _tag);
             }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
-          const attentionNeeds = yield* needs(instance);
+
+          const attentionNeeds = yield* needs(fixtureInstance);
           assert.include(attentionNeeds, need);
           const currentAttentionNeeds = yield* needs(elsewhere);
           assert.notInclude(currentAttentionNeeds, need);
@@ -1758,6 +1831,7 @@ describe("Operator", () => {
 
   it.effect("projects when each Attempt on a Board card started and when a closed one ended", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
@@ -1786,7 +1860,8 @@ describe("Operator", () => {
       });
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
-        const overview = yield* operator.overview(instance);
+
+        const overview = yield* operator.overview(fixtureInstance);
         const card = overview.projects[0]?.board.lanes
           .flatMap((lane) => lane.items)
           .find((item) => item.itemKey === itemKey);
@@ -1803,6 +1878,7 @@ describe("Operator", () => {
 
   it.effect("places a running Run's card by its Item's labels, else by its Event's labels", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
@@ -1813,31 +1889,32 @@ describe("Operator", () => {
         payload: { number: 31, labels: { totalCount: 1, nodes: [{ name: "ready-for-review" }] } },
       });
       // No lane has a label that #31 has now.
+      const decodedValue22 = yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [
+          {
+            name: repository,
+            lanes: [
+              { name: "Triage", sources: [{ label: "triage" }] },
+              {
+                name: "In review",
+                sources: [{ label: "ready-for-review" }, { state: "pr-open" }],
+              },
+              { name: "Issues", sources: [{ state: "issue-open" }] },
+            ],
+          },
+        ],
+      });
       const unlaned = LoadedInstance.make({
-        ...instance,
-        config: Schema.decodeSync(UsineConfig)({
-          version: 1,
-          repos: [
-            {
-              name: repository,
-              lanes: [
-                { name: "Triage", sources: [{ label: "triage" }] },
-                {
-                  name: "In review",
-                  sources: [{ label: "ready-for-review" }, { state: "pr-open" }],
-                },
-                { name: "Issues", sources: [{ state: "issue-open" }] },
-              ],
-            },
-          ],
-        }),
+        ...fixtureInstance,
+        config: decodedValue22,
       });
       const laneOf = (overview: ReadyOverview): string | undefined =>
         overview.projects[0]?.board.lanes.find(({ items }) =>
           items.some((item) => item.itemKey === itemKey),
         )?.name;
       for (const [loaded, state, lane, toLane] of [
-        [instance, RunState.Running.make(), "Ready", "In review"],
+        [fixtureInstance, RunState.Running.make(), "Ready", "In review"],
         [unlaned, RunState.Running.make(), "In review", "Triage"],
         [unlaned, RunState.Waiting.make(), "Issues", "In review"],
       ] as const) {
@@ -1919,6 +1996,7 @@ describe("Operator", () => {
     "details the Run's Worker, how each Attempt's Worker is reached, Attempt time, why each Attempt began, and its tokens per session and pool, with a Claude Code child its Gateway paid with an API key among API keys",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -1950,21 +2028,22 @@ describe("Operator", () => {
           attempts: [failed, running],
         });
         // `instance` declares only `local`; this one also declares `usine-worker-1` over SSH.
+        const decodedValue23 = yield* Schema.decodeEffect(UsineConfig)({
+          version: 1,
+          repos: [{ name: repository }],
+          workers: [
+            { name: "local", kind: "local" },
+            {
+              name: "usine-worker-1",
+              kind: "ssh",
+              destination: "usine-worker-1",
+              root: "/home/usine/.usine",
+            },
+          ],
+        });
         const declared = LoadedInstance.make({
-          ...instance,
-          config: Schema.decodeSync(UsineConfig)({
-            version: 1,
-            repos: [{ name: repository }],
-            workers: [
-              { name: "local", kind: "local" },
-              {
-                name: "usine-worker-1",
-                kind: "ssh",
-                destination: "usine-worker-1",
-                root: "/home/usine/.usine",
-              },
-            ],
-          }),
+          ...fixtureInstance,
+          config: decodedValue23,
         });
         const usageQueries: Array<AttemptId> = [];
         const laterReports: Array<TranscriptEntry> = [];
@@ -2041,7 +2120,8 @@ describe("Operator", () => {
           );
 
           // The ended Attempt's reports are read once; the running one's on every read.
-          const again = yield* (yield* Operator).detail(instance, runId);
+
+          const again = yield* (yield* Operator).detail(fixtureInstance, runId);
           assert.strictEqual(again.usage.tokens, 30_300);
           assert.deepStrictEqual(
             again.run.attempts.map(({ workerAccess }) => workerAccess),
@@ -2050,6 +2130,7 @@ describe("Operator", () => {
           assert.deepStrictEqual(usageQueries, [attemptId, retryAttemptId, retryAttemptId]);
 
           // The Board card sums its Runs the same way, from the same cache.
+
           const overview = yield* (yield* Operator).overview(declared);
           const card = overview.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
@@ -2089,6 +2170,7 @@ describe("Operator", () => {
           // A later token report doesn't change the projection revision, so the next read keeps the
           // cached overview, rereads the running Attempt, and counts the new tokens.
           laterReports.push(tokenReport(retryAttemptId, codexChild, 9_000, null, 2_000));
+
           const later = yield* (yield* Operator).overview(declared);
           const laterCard = later.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
@@ -2106,6 +2188,7 @@ describe("Operator", () => {
           assert.strictEqual(readsState, 1);
           assert.deepStrictEqual(usageQueries.slice(4), [retryAttemptId]);
           // Without a new report, the read returns the same overview.
+
           const currentOverview = yield* (yield* Operator).overview(declared);
           assert.strictEqual(currentOverview, later);
         }).pipe(
@@ -2130,6 +2213,7 @@ describe("Operator", () => {
     "names on each Board card the Loops whose trigger matches its Items now, and renames them after a reload changes a trigger",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -2154,7 +2238,7 @@ describe("Operator", () => {
           trigger: PullRequestTrigger.make({ on: "pr", if: Source.make("true") }),
         });
         const watched = LoadedInstance.make({
-          ...instance,
+          ...fixtureInstance,
           loops: [loop, labelled, triage, pullRequests],
         });
         const reloaded = LoadedInstance.make({
@@ -2183,22 +2267,23 @@ describe("Operator", () => {
 
   it.effect("compares the loaded agent with the saved definition, including amendments", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       const replacement = AgentFile.make({ ...agentFile, harness: "claude" });
-      const reloaded = LoadedInstance.make({ ...instance, agents: [replacement] });
+      const reloaded = LoadedInstance.make({ ...fixtureInstance, agents: [replacement] });
       const amended = RunSnapshot.make({ ...snapshot, agent: replacement.agent });
       const changedPersona = LoadedInstance.make({
-        ...instance,
+        ...fixtureInstance,
         agents: [
           AgentFile.make({ ...agentFile, persona: AgentPersona.make("Changed instructions") }),
         ],
       });
-      const missing = LoadedInstance.make({ ...instance, agents: [], loops: [] });
+      const missing = LoadedInstance.make({ ...fixtureInstance, agents: [], loops: [] });
       for (const [saved, loaded, changed] of [
-        [RunSnapshot.make({ ...snapshot, attempts: [] }), instance, false],
+        [RunSnapshot.make({ ...snapshot, attempts: [] }), fixtureInstance, false],
         [snapshot, reloaded, true],
         [snapshot, changedPersona, true],
         [amended, reloaded, false],
@@ -2217,6 +2302,7 @@ describe("Operator", () => {
     "derives retry context from the selected roster agent and attributes input to the configured operator",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -2234,9 +2320,9 @@ describe("Operator", () => {
           parentEffort: Option.some("medium"),
         });
         const configured = LoadedInstance.make({
-          ...instance,
+          ...fixtureInstance,
           config: UsineConfig.make({
-            ...instance.config,
+            ...fixtureInstance.config,
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
           agents: [agentFile, replacement],
@@ -2290,7 +2376,7 @@ describe("Operator", () => {
               parentModel: reloadedAgent.parentModel,
             }),
           );
-          const input = Schema.decodeSync(SessionIntervention)({
+          const input = yield* Schema.decodeEffect(SessionIntervention)({
             attemptId,
             action: { _tag: "Steer", message: "Continue" },
           });
@@ -2327,6 +2413,7 @@ describe("Operator", () => {
     "runs a Run again with its Loop file's gate, budget, and permissions, the selected roster Agent, and the configured operator",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -2338,9 +2425,9 @@ describe("Operator", () => {
           parentModel: Option.some(ModelId.make("openai/new-parent")),
         });
         const configured = LoadedInstance.make({
-          ...instance,
+          ...fixtureInstance,
           config: UsineConfig.make({
-            ...instance.config,
+            ...fixtureInstance.config,
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
           agents: [agentFile, reviewer],
@@ -2419,6 +2506,7 @@ describe("Operator", () => {
 
   it.effect("projects Item-level exhaustion without a new Run and answers the exact Ask", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const ask = CycleBudgetAsk.make({
         id: CycleBudgetAskId.make("exhausted-round"),
         itemKey,
@@ -2456,7 +2544,8 @@ describe("Operator", () => {
       });
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
-        const overview = yield* operator.overview(instance);
+
+        const overview = yield* operator.overview(fixtureInstance);
         const need = overview.needsYou.find((need) => need._tag === "CycleBudgetNeed");
         assert(need?._tag === "CycleBudgetNeed");
         assert.deepStrictEqual(need.ask, ask);
@@ -2466,8 +2555,11 @@ describe("Operator", () => {
             lane.items.some((card) => card.itemKey === itemKey && card.needsYou),
           ),
         );
-        yield* operator.dismissNeed(instance, attentionKey(need));
-        const dismissed = yield* operator.overview(instance);
+
+        const valueDecoded8 = yield* attentionKey(need);
+        yield* operator.dismissNeed(fixtureInstance, valueDecoded8);
+
+        const dismissed = yield* operator.overview(fixtureInstance);
         assert(!dismissed.needsYou.some((entry) => entry.id === need.id));
         assert(dismissed.dismissedNeeds.some((entry) => entry.id === need.id));
         const asksState = yield* Ref.get(asks);
@@ -2489,18 +2581,26 @@ describe("Operator", () => {
           revision,
           Option.map((value) => ProjectionRevision.make(value + 1)),
         );
-        const changed = yield* operator.overview(instance);
+
+        const changed = yield* operator.overview(fixtureInstance);
         const changedNeed = changed.needsYou.find((entry) => entry.id === need.id);
         assert(changedNeed !== undefined);
         assert(!changed.dismissedNeeds.some((entry) => entry.id === need.id));
-        yield* operator.dismissNeed(instance, attentionKey(changedNeed));
-        yield* operator.undoDismissNeed(attentionKey(changedNeed));
-        assert((yield* operator.overview(instance)).needsYou.some((entry) => entry.id === need.id));
-        yield* operator.resetCycleBudget(instance, ask.id);
+
+        const valueDecoded9 = yield* attentionKey(changedNeed);
+        yield* operator.dismissNeed(fixtureInstance, valueDecoded9);
+        const valueDecoded57 = yield* attentionKey(changedNeed);
+        yield* operator.undoDismissNeed(valueDecoded57);
+
+        const decodedValue30 = yield* operator.overview(fixtureInstance);
+        assert(decodedValue30.needsYou.some((entry) => entry.id === need.id));
+
+        yield* operator.resetCycleBudget(fixtureInstance, ask.id);
         const answers = yield* Ref.get(answered);
         assert.strictEqual(answers[0]?.id, ask.id);
         assert.strictEqual(answers[0]?.event.id, `cycle-budget-reset:${ask.id}`);
-        const refreshed = yield* operator.overview(instance);
+
+        const refreshed = yield* operator.overview(fixtureInstance);
         assert(!refreshed.needsYou.some((need) => need._tag === "CycleBudgetNeed"));
       }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, snapshot, budgets)));
     }),
@@ -2510,6 +2610,7 @@ describe("Operator", () => {
     "rejects approving a Run that already left its gate and keeps it out of needs-you",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
         const overviewReads = yield* Ref.make(0);
@@ -2527,13 +2628,14 @@ describe("Operator", () => {
         });
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const rejected = yield* operator.approve(instance, runId).pipe(Effect.flip);
+
+          const rejected = yield* operator.approve(fixtureInstance, runId).pipe(Effect.flip);
           assert(rejected._tag === "RunOperationRejectedError");
           assert.strictEqual(rejected.state, "Queued");
           const approvedState = yield* Ref.get(approved);
           assert.deepStrictEqual(approvedState, []);
 
-          const overview = yield* operator.overview(instance);
+          const overview = yield* operator.overview(fixtureInstance);
           assert(overview._tag === "Ready");
           const run = overview.projects[0]?.runs[0];
           assert(run !== undefined);
@@ -2546,7 +2648,9 @@ describe("Operator", () => {
             source: earlierApproval,
           });
           assert.deepStrictEqual(run.approval, shown);
-          assert.deepStrictEqual((yield* operator.detail(instance, runId)).run.approval, shown);
+
+          const decodedValue31 = yield* operator.detail(fixtureInstance, runId);
+          assert.deepStrictEqual(decodedValue31.run.approval, shown);
           // The fixture's malformed Item, poll failure, and preflight finding still need the
           // operator; the Run does not.
           assert.deepStrictEqual(
@@ -2563,6 +2667,7 @@ describe("Operator", () => {
 
   it.effect("projects needs-you state and protocol child activity without recursive nesting", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
       const overviewReads = yield* Ref.make(0);
@@ -2570,26 +2675,30 @@ describe("Operator", () => {
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
         const [overview] = yield* Effect.all(
-          [operator.overview(instance), operator.overview(instance)],
+          [operator.overview(fixtureInstance), operator.overview(fixtureInstance)],
           { concurrency: "unbounded" },
         );
         assert(overview !== undefined);
         const overviewReadsState = yield* Ref.get(overviewReads);
         assert.strictEqual(overviewReadsState, 1);
         yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
-        yield* operator.overview(instance);
+
+        yield* operator.overview(fixtureInstance);
         const currentOverviewReadsState = yield* Ref.get(overviewReads);
         assert.strictEqual(currentOverviewReadsState, 2);
         // A missing invalidation singleton must bypass the cache entirely.
         yield* Ref.set(projectionRevision, Option.none());
-        yield* operator.overview(instance);
-        yield* operator.overview(instance);
+
+        yield* operator.overview(fixtureInstance);
+
+        yield* operator.overview(fixtureInstance);
         const nextOverviewReadsState = yield* Ref.get(overviewReads);
         assert.strictEqual(nextOverviewReadsState, 4);
         // Bypassing the cache also clears its old token: once revision
         // tracking recovers, the first request must rebuild the projection.
         yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
-        yield* operator.overview(instance);
+
+        yield* operator.overview(fixtureInstance);
         const updatedOverviewReadsState = yield* Ref.get(overviewReads);
         assert.strictEqual(updatedOverviewReadsState, 5);
         assert.strictEqual(overview.projects[0]?.status, "needs-you");
@@ -2616,7 +2725,7 @@ describe("Operator", () => {
           overview.projects[0]?.board.lanes[0]?.items[0]?.items[0],
         );
 
-        const detail = yield* operator.detail(instance, runId, ColdTranscriptRequest.make());
+        const detail = yield* operator.detail(fixtureInstance, runId, ColdTranscriptRequest.make());
         assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
         assert.deepStrictEqual(detail.eventPayload, { number: 31 });
         assert.strictEqual(detail.run.attempts[0]?.number, 1);
@@ -2627,7 +2736,7 @@ describe("Operator", () => {
         assert.strictEqual(detail.earlierTranscript[0]?.before, 3);
 
         const tail = yield* operator.detail(
-          instance,
+          fixtureInstance,
           runId,
           TailTranscriptRequest.make({ after: TranscriptSequence.make(1) }),
         );
@@ -2635,8 +2744,9 @@ describe("Operator", () => {
         assert.strictEqual(tail.transcript[0]?.sequence, 2);
         assert.strictEqual(tail.transcript.at(-1)?.sequence, 501);
         assert.deepStrictEqual(tail.earlierTranscript, []);
+
         const remainingTail = yield* operator.detail(
-          instance,
+          fixtureInstance,
           runId,
           TailTranscriptRequest.make({ after: TranscriptSequence.make(501) }),
         );
@@ -2646,7 +2756,7 @@ describe("Operator", () => {
         );
 
         const earlier = yield* operator.detail(
-          instance,
+          fixtureInstance,
           runId,
           EarlierTranscriptRequest.make({
             attemptId,
@@ -2662,9 +2772,10 @@ describe("Operator", () => {
         assert.strictEqual(childPayload.event.session._tag, "ChildSession");
         assert.strictEqual(childPayload.event.session.id, child.id);
         assert.deepStrictEqual(earlier.earlierTranscript, []);
+
         const wrongAttempt = yield* operator
           .detail(
-            instance,
+            fixtureInstance,
             runId,
             EarlierTranscriptRequest.make({
               attemptId: AttemptId.make("another-attempt"),
@@ -2676,9 +2787,9 @@ describe("Operator", () => {
 
         assert.strictEqual(overview.projects[0]?.runs[0]?.approval, null);
         const configured = LoadedInstance.make({
-          ...instance,
+          ...fixtureInstance,
           config: UsineConfig.make({
-            ...instance.config,
+            ...fixtureInstance.config,
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
         });
@@ -2708,8 +2819,9 @@ describe("Operator", () => {
           runId,
           decision: "approved",
         });
+
         yield* operator.moveBoardItem(
-          instance,
+          fixtureInstance,
           BoardMove.make({
             repository,
             item: CoreItemNumber.make(31),
@@ -2728,17 +2840,21 @@ describe("Operator", () => {
     "rejects Board moves onto unknown destinations and read-only lanes before writing labels",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const logs: Array<ReadonlyArray<unknown>> = [];
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
         const overviewReads = yield* Ref.make(0);
         const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         yield* Effect.gen(function* () {
+          const fixtureValue4 = yield* Effect.context<never>();
+          const runFixture = Effect.runSyncWith(fixtureValue4);
+
           const operator = yield* Operator;
           const rejected = (target: RepositoryName, item: number, toLane: string) =>
             operator
               .moveBoardItem(
-                instance,
+                runFixture(instance),
                 BoardMove.make({
                   repository: target,
                   item: CoreItemNumber.make(item),
@@ -2758,12 +2874,13 @@ describe("Operator", () => {
           assert.strictEqual(unknownLane._tag, "BoardLaneNotFoundError");
           const stateLane = yield* rejected(repository, 31, "fallback:unmapped");
           assert.strictEqual(stateLane._tag, "BoardLaneReadOnlyError");
+          const decodedValue32 = yield* Schema.decodeEffect(UsineConfig)({
+            version: 1,
+            repos: [{ name: repository }],
+          });
           const proposed = LoadedInstance.make({
-            ...instance,
-            config: Schema.decodeSync(UsineConfig)({
-              version: 1,
-              repos: [{ name: repository }],
-            }),
+            ...fixtureInstance,
+            config: decodedValue32,
           });
           const proposedLane = yield* operator
             .moveBoardItem(
@@ -2831,6 +2948,7 @@ describe("Operator", () => {
 
   it.effect("lists quarantined Loops and invalid Agent files in Needs you", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
@@ -2843,7 +2961,7 @@ describe("Operator", () => {
           message,
         });
       const broken = LoadedInstance.make({
-        ...instance,
+        ...fixtureInstance,
         invalidAgents: [
           InvalidAgent.make({
             file: InstancePath.make("agents/intern.md"),
@@ -2859,7 +2977,8 @@ describe("Operator", () => {
       });
       const overview = yield* Effect.gen(function* () {
         const operator = yield* Operator;
-        const before = yield* operator.overview(instance);
+
+        const before = yield* operator.overview(fixtureInstance);
         assert.isFalse(before.needsYou.some((need) => need._tag === "ConfigFileNeed"));
         // A reload that only leaves files out still replaces the cached overview.
         return yield* operator.overview(broken);
@@ -2884,11 +3003,10 @@ describe("Operator", () => {
           ],
         ],
       );
-      const encoded = Schema.encodeUnknownSync(ReadyOverview)(overview);
+      const encoded = yield* Schema.encodeUnknownEffect(ReadyOverview)(overview);
+      const decodedValue33 = yield* Schema.decodeEffect(ReadyOverview)(encoded);
       assert.deepStrictEqual(
-        Schema.decodeSync(ReadyOverview)(encoded).needsYou.filter(
-          (need) => need._tag === "ConfigFileNeed",
-        ),
+        decodedValue33.needsYou.filter((need) => need._tag === "ConfigFileNeed"),
         needs,
       );
     }),
@@ -2896,6 +3014,7 @@ describe("Operator", () => {
 
   it.effect("lists the Attempts of a Worker that usine.yaml no longer declares once", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
@@ -2906,15 +3025,16 @@ describe("Operator", () => {
           Effect.map(operator.overview(current), ({ needsYou }) =>
             needsYou.filter((need) => need._tag === "UnconfiguredWorkerNeed"),
           );
+
         // The reader reports three Attempts on `local`, the Worker `instance` declares, one of them open.
-        const unconfiguredAttention = yield* unconfiguredNeeds(instance);
+        const unconfiguredAttention = yield* unconfiguredNeeds(fixtureInstance);
         assert.deepStrictEqual(unconfiguredAttention, []);
         // A reload that changes only the Worker leaves the runtime store as it
         // was; the overview must not answer from its cache.
         const switched = LoadedInstance.make({
-          ...instance,
+          ...fixtureInstance,
           config: UsineConfig.make({
-            ...instance.config,
+            ...fixtureInstance.config,
             workers: [
               LocalWorker.make({
                 name: WorkerName.make("laptop"),
@@ -2930,10 +3050,11 @@ describe("Operator", () => {
           needs.map(({ id, worker, attempts, running }) => [id, worker, attempts, running]),
           [["unconfigured-worker:local", "local", 3, 1]],
         );
-        const encoded = Schema.encodeUnknownSync(ReadyOverview)(
+        const encoded = yield* Schema.encodeUnknownEffect(ReadyOverview)(
           ReadyOverview.make({ projects: [], loops: [], needsYou: needs }),
         );
-        assert.deepStrictEqual(Schema.decodeSync(ReadyOverview)(encoded).needsYou, needs);
+        const decodedValue34 = yield* Schema.decodeEffect(ReadyOverview)(encoded);
+        assert.deepStrictEqual(decodedValue34.needsYou, needs);
       }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
     }),
   );
@@ -2942,6 +3063,7 @@ describe("Operator", () => {
     "lists a closed Attempt whose parent task isn't confirmed stopped until a retried stop succeeds",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -2969,7 +3091,8 @@ describe("Operator", () => {
         ]);
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const unconfirmedNeeds = Effect.map(operator.overview(instance), ({ needsYou }) =>
+
+          const unconfirmedNeeds = Effect.map(operator.overview(fixtureInstance), ({ needsYou }) =>
             needsYou.filter((need) => need._tag === "UnconfirmedStopNeed"),
           );
           const needs = yield* unconfirmedNeeds;
@@ -2984,10 +3107,11 @@ describe("Operator", () => {
             ]),
             [[`unconfirmed-stop:${attemptId}`, repository, runId, loopName, 1, local]],
           );
-          const encoded = Schema.encodeUnknownSync(ReadyOverview)(
+          const encoded = yield* Schema.encodeUnknownEffect(ReadyOverview)(
             ReadyOverview.make({ projects: [], loops: [], needsYou: needs }),
           );
-          assert.deepStrictEqual(Schema.decodeSync(ReadyOverview)(encoded).needsYou, needs);
+          const decodedValue35 = yield* Schema.decodeEffect(ReadyOverview)(encoded);
+          assert.deepStrictEqual(decodedValue35.needsYou, needs);
           // The stop succeeds without a write to the runtime store; the overview must not answer
           // from its cache.
           yield* Ref.set(stops, []);
@@ -3017,6 +3141,7 @@ describe("Operator", () => {
     "shows on an open Run's detail the unconfirmed stop that keeps it from starting an Attempt",
     () =>
       Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
         const moved = yield* Ref.make<ItemLabelMutation | null>(null);
         const reads = yield* Ref.make(0);
@@ -3051,8 +3176,9 @@ describe("Operator", () => {
         ]);
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
+
           const shown = Effect.map(
-            operator.detail(instance, runId),
+            operator.detail(fixtureInstance, runId),
             ({ unconfirmedStop }) => unconfirmedStop,
           );
           const visibleAttention = yield* shown;
@@ -3100,7 +3226,7 @@ describe("Operator", () => {
   it("shows an Agent's blocker to the operator as its own failure kind", () => {
     const encoded = BlockedFailure.make({ message: "The baseline gate fails on main." }).pipe(
       failureView,
-      Schema.encodeUnknownSync(FailureView),
+      flow(Schema.encodeUnknownEffect(FailureView), Effect.runSync),
     );
     assert.deepStrictEqual(encoded, {
       _tag: "BlockedFailure",
@@ -3118,7 +3244,7 @@ describe("Operator", () => {
           cause: new Error(secret),
         }),
       );
-      const encoded = Schema.encodeUnknownSync(FailureView)(view);
+      const encoded = Effect.runSync(Schema.encodeUnknownEffect(FailureView)(view));
       const json = JSON.stringify(encoded);
 
       assert.deepStrictEqual(encoded, {
@@ -3135,6 +3261,7 @@ it.effect(
   "refreshes upgrade waits on cached runs and clears deferred attention when canceled",
   () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
@@ -3147,24 +3274,27 @@ it.effect(
       });
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
+
         const wait = UpgradeWait.make({
           target: ReleaseVersion.make("1.2.3"),
           since: yield* DateTime.now,
         });
-        const runWaits = Effect.map(operator.overview(instance), (view) =>
+
+        const runWaits = Effect.map(operator.overview(fixtureInstance), (view) =>
           view.projects.flatMap(({ runs }) =>
             runs.filter(({ id }) => id === current.run.id).map(({ upgradeWait }) => upgradeWait),
           ),
         );
+
         assert((yield* runWaits).every((value) => value === null));
         yield* Ref.set(drain, Option.some(UpgradeDrain.make({ wait, runIds: [current.run.id] })));
         const upgradeWaits = yield* runWaits;
         assert.deepStrictEqual(upgradeWaits, [wait]);
-        assert.deepStrictEqual(
-          (yield* operator.detail(instance, current.run.id)).run.upgradeWait,
-          wait,
-        );
-        const desk = yield* operator.desk(instance);
+
+        const decodedValue38 = yield* operator.detail(fixtureInstance, current.run.id);
+        assert.deepStrictEqual(decodedValue38.run.upgradeWait, wait);
+
+        const desk = yield* operator.desk(fixtureInstance);
         assert(desk.workers.every(({ upgradeWait }) => upgradeWait?.target === wait.target));
         assert(
           desk.notMoving.some(
@@ -3172,30 +3302,28 @@ it.effect(
           ),
         );
         yield* TestClock.adjust("599 seconds");
-        assert(
-          !(yield* operator.overview(instance)).needsYou.some(
-            ({ _tag }) => _tag === "UpgradeDrainNeed",
-          ),
-        );
+        const decodedValue39 = yield* operator.overview(fixtureInstance);
+        assert(!decodedValue39.needsYou.some(({ _tag }) => _tag === "UpgradeDrainNeed"));
         yield* TestClock.adjust("1 second");
-        const warning = (yield* operator.overview(instance)).needsYou.find(
-          ({ _tag }) => _tag === "UpgradeDrainNeed",
-        );
+
+        const decodedValue40 = yield* operator.overview(fixtureInstance);
+        const warning = decodedValue40.needsYou.find(({ _tag }) => _tag === "UpgradeDrainNeed");
         assert(warning?._tag === "UpgradeDrainNeed");
         assert.strictEqual(warning.deferredRuns, 1);
-        yield* operator.dismissNeed(instance, attentionKey(warning));
-        assert(
-          (yield* operator.overview(instance)).dismissedNeeds.some(
-            ({ _tag }) => _tag === "UpgradeDrainNeed",
-          ),
-        );
+
+        const valueDecoded10 = yield* attentionKey(warning);
+        yield* operator.dismissNeed(fixtureInstance, valueDecoded10);
+
+        const decodedValue41 = yield* operator.overview(fixtureInstance);
+        assert(decodedValue41.dismissedNeeds.some(({ _tag }) => _tag === "UpgradeDrainNeed"));
         yield* Ref.set(drain, Option.none());
+
         assert((yield* runWaits).every((value) => value === null));
-        assert.strictEqual(
-          (yield* operator.detail(instance, current.run.id)).run.upgradeWait,
-          null,
-        );
-        const canceled = yield* operator.overview(instance);
+
+        const decodedValue43 = yield* operator.detail(fixtureInstance, current.run.id);
+        assert.strictEqual(decodedValue43.run.upgradeWait, null);
+
+        const canceled = yield* operator.overview(fixtureInstance);
         assert(
           ![...canceled.needsYou, ...canceled.dismissedNeeds].some(
             ({ _tag }) => _tag === "UpgradeDrainNeed",
@@ -3226,30 +3354,32 @@ it.effect(
 
 it.effect("filters cached project lists and refuses actions outside a project binding", () =>
   Effect.gen(function* () {
+    const fixtureInstance = yield* instance;
     const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
     const moved = yield* Ref.make<ItemLabelMutation | null>(null);
     const reads = yield* Ref.make(0);
     const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
     const alphaLoop = LoopName.make("alpha/review");
     const betaLoop = LoopName.make("beta/review");
+    const decodedValue44 = yield* Schema.decodeEffect(UsineConfig)({
+      version: 2,
+      repos: [{ name: repository }, { name: "acme/hidden" }],
+      projects: [
+        { id: "alpha", name: "Alpha", repositories: [repository] },
+        { id: "beta", name: "Beta", repositories: ["acme/hidden"] },
+      ],
+      bindings: [
+        {
+          name: "beta-reader",
+          member: 2,
+          role: "viewer",
+          scope: { _tag: "Project", project: "beta" },
+        },
+      ],
+    });
     const loaded = LoadedInstance.make({
-      ...instance,
-      config: Schema.decodeSync(UsineConfig)({
-        version: 2,
-        repos: [{ name: repository }, { name: "acme/hidden" }],
-        projects: [
-          { id: "alpha", name: "Alpha", repositories: [repository] },
-          { id: "beta", name: "Beta", repositories: ["acme/hidden"] },
-        ],
-        bindings: [
-          {
-            name: "beta-reader",
-            member: 2,
-            role: "viewer",
-            scope: { _tag: "Project", project: "beta" },
-          },
-        ],
-      }),
+      ...fixtureInstance,
+      config: decodedValue44,
       loops: [
         LoopFile.make({ ...loop, name: alphaLoop }),
         LoopFile.make({ ...loop, name: betaLoop }),
@@ -3263,6 +3393,7 @@ it.effect("filters cached project lists and refuses actions outside a project bi
     }).permissions;
     yield* Effect.gen(function* () {
       const operator = yield* Operator;
+
       assert.lengthOf((yield* operator.overview(loaded)).projects, 2);
       const scoped = yield* operator
         .overview(loaded)
@@ -3275,6 +3406,7 @@ it.effect("filters cached project lists and refuses actions outside a project bi
         scoped.loops.map(({ name }) => name),
         [alphaLoop],
       );
+
       assert.lengthOf(
         (yield* operator
           .overview(loaded)
@@ -3287,6 +3419,7 @@ it.effect("filters cached project lists and refuses actions outside a project bi
       assert.equal(refusal._tag, "AccessDenied");
       yield* operator.pause(alphaLoop).pipe(Effect.provideService(RequestPermissions, grants));
       const viewer = grants.filter(({ permission }) => permission === "read");
+
       assert.equal(
         (yield* operator
           .pause(alphaLoop)
@@ -3299,6 +3432,9 @@ it.effect("filters cached project lists and refuses actions outside a project bi
 
 it.effect("authorizes historical run actions by current repository ownership", () =>
   Effect.gen(function* () {
+    const fixtureValue5 = yield* Effect.context<never>();
+    const runFixture = Effect.runSyncWith(fixtureValue5);
+
     const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
     const moved = yield* Ref.make<ItemLabelMutation | null>(null);
     const reads = yield* Ref.make(0);
@@ -3309,23 +3445,25 @@ it.effect("authorizes historical run actions by current repository ownership", (
     });
     const loaded = (owner: "alpha" | "beta" | "removed") =>
       LoadedInstance.make({
-        ...instance,
-        config: Schema.decodeSync(UsineConfig)({
-          version: 2,
-          repos: [{ name: repository }, { name: "acme/alpha" }, { name: "acme/beta" }],
-          projects: [
-            {
-              id: "alpha",
-              name: "Alpha",
-              repositories: owner === "alpha" ? [repository, "acme/alpha"] : ["acme/alpha"],
-            },
-            {
-              id: "beta",
-              name: "Beta",
-              repositories: owner === "beta" ? [repository, "acme/beta"] : ["acme/beta"],
-            },
-          ],
-        }),
+        ...runFixture(instance),
+        config: runFixture(
+          Schema.decodeEffect(UsineConfig)({
+            version: 2,
+            repos: [{ name: repository }, { name: "acme/alpha" }, { name: "acme/beta" }],
+            projects: [
+              {
+                id: "alpha",
+                name: "Alpha",
+                repositories: owner === "alpha" ? [repository, "acme/alpha"] : ["acme/alpha"],
+              },
+              {
+                id: "beta",
+                name: "Beta",
+                repositories: owner === "beta" ? [repository, "acme/beta"] : ["acme/beta"],
+              },
+            ],
+          }),
+        ),
         loops: [LoopFile.make({ ...loop, name: historical.run.loop })],
       });
     const grants = (project: "alpha" | "beta", role: "operator" | "viewer" = "operator") =>
@@ -3336,7 +3474,7 @@ it.effect("authorizes historical run actions by current repository ownership", (
         scope: ProjectScope.make({ project: ProjectId.make(project) }),
       }).permissions;
     const edit = EditAndRetry.make({ task: snapshot.task, agent: agentFile.name });
-    const intervention = Schema.decodeSync(SessionIntervention)({
+    const intervention = yield* Schema.decodeEffect(SessionIntervention)({
       attemptId,
       action: { _tag: "Steer", message: "Continue" },
     });

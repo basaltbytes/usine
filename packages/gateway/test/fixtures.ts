@@ -35,8 +35,8 @@ export const settingsLayer = (
         github,
         providers,
         egress: Result.getOrThrow(parseEgressAllowlist(TEST_ALLOWLIST)),
-        adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN_VALUE),
-        callerKey: Schema.decodeSync(CallerKey)(callerKey),
+        adminToken: Effect.runSync(Schema.decodeEffect(AdminToken)(ADMIN_TOKEN_VALUE)),
+        callerKey: Effect.runSync(Schema.decodeEffect(CallerKey)(callerKey)),
       }),
     ),
   );

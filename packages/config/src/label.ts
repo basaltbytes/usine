@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 /**
  * A trimmed label name of at most 50 characters, as GitHub stores it. Any other name never
@@ -32,7 +32,10 @@ const GitHubLabelDescription = Schema.String.check(
 );
 
 /** A label created in every managed repository. */
-export class DeclaredLabel extends Schema.Class<DeclaredLabel>("@usine/config/DeclaredLabel")({
+export class DeclaredLabel extends Schema.Class<
+  DeclaredLabel,
+  Brand.Brand<"@usine/config/label/DeclaredLabel">
+>("@usine/config/DeclaredLabel")({
   /** The GitHub label name, compared case-insensitively. */
   name: GitHubLabelName,
   /** Six hex digits without `#`, or `None` to let GitHub choose the color. */

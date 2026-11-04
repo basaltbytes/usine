@@ -2,7 +2,7 @@ import { BrainSpec } from "@usine/core/agent/brain";
 import type { BillingPool } from "@usine/core/agent/session";
 import type { LoopView } from "@usine/orchestrator/operator";
 
-export const brainLine = (brain: BrainSpec): string =>
+export const brainLine = (brain: Pick<BrainSpec, "harness" | "model" | "effort">): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
 
 /** Returns the label of a Loop trigger, using the Item kind names from Board cards. */

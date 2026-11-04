@@ -1,4 +1,4 @@
-import { Effect, Option, Result, Schema } from "effect";
+import { type Brand, Effect, Option, Result, Schema } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
@@ -33,7 +33,10 @@ export const Direction = Schema.Literals(DIRECTIONS);
 export type Direction = typeof Direction.Type;
 
 /** The launch input for one Attempt, without Worker credentials. */
-export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
+export class RunSpec extends Schema.Class<
+  RunSpec,
+  Brand.Brand<"@usine/core/attempt/channel/RunSpec">
+>("AttemptChannel/RunSpec")({
   /** The attempt that all channel messages must identify. */
   attemptId: AttemptId,
   /** The managed repo checked out for this attempt. */
@@ -75,7 +78,10 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
 }) {}
 
 /** The start of an Attempt, with the parent model selected at launch, which can differ from the roster. */
-export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {
+export class Started extends Schema.TaggedClass<
+  Started,
+  Brand.Brand<"@usine/core/attempt/channel/Started">
+>("AttemptChannel/Started")("Started", {
   /** The Pi parent model actually selected when the attempt launched. */
   parentModel: ModelId,
   /** The previous salvage that could not be rebased onto the prepared revision, or `None`. */
@@ -86,51 +92,64 @@ export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started
 }) {}
 
 /** A normalized parent or child session event, persisted in the Attempt transcript. */
-export class SessionEvent extends Schema.TaggedClass<SessionEvent>("AttemptChannel/SessionEvent")(
-  "SessionEvent",
-  {
-    /** The parent or child session report to append to the transcript. */
-    event: AgentSessionEvent,
-  },
-) {}
+export class SessionEvent extends Schema.TaggedClass<
+  SessionEvent,
+  Brand.Brand<"@usine/core/attempt/channel/SessionEvent">
+>("AttemptChannel/SessionEvent")("SessionEvent", {
+  /** The parent or child session report to append to the transcript. */
+  event: AgentSessionEvent,
+}) {}
 
 /** The parent's terminal success message with the step result to persist. */
-export class Final extends Schema.TaggedClass<Final>("AttemptChannel/Final")("Final", {
+export class Final extends Schema.TaggedClass<
+  Final,
+  Brand.Brand<"@usine/core/attempt/channel/Final">
+>("AttemptChannel/Final")("Final", {
   /** The successful step result, including the agent's final message and collected facts. */
   result: StepResult,
 }) {}
 
 /** The parent's terminal failure message with the reason the attempt failed. */
-export class Failed extends Schema.TaggedClass<Failed>("AttemptChannel/Failed")("Failed", {
+export class Failed extends Schema.TaggedClass<
+  Failed,
+  Brand.Brand<"@usine/core/attempt/channel/Failed">
+>("AttemptChannel/Failed")("Failed", {
   /** The reason the attempt failed, used to decide whether to retry. */
   failure: AttemptFailure,
 }) {}
 
 /** The parent's terminal acknowledgment of cancellation. */
-export class Interrupted extends Schema.TaggedClass<Interrupted>("AttemptChannel/Interrupted")(
-  "Interrupted",
-  {},
-) {}
+export class Interrupted extends Schema.TaggedClass<
+  Interrupted,
+  Brand.Brand<"@usine/core/attempt/channel/Interrupted">
+>("AttemptChannel/Interrupted")("Interrupted", {}) {}
 
 /** A message for the target session's next turn that does not place a hold. */
-export class Steer extends Schema.TaggedClass<Steer>("AttemptChannel/Steer")("Steer", {
+export class Steer extends Schema.TaggedClass<
+  Steer,
+  Brand.Brand<"@usine/core/attempt/channel/Steer">
+>("AttemptChannel/Steer")("Steer", {
   /** The text to deliver to the target session without placing a hold. */
   message: Schema.NonEmptyString,
 }) {}
 
 /** A request to interrupt the target session's current turn without canceling the attempt. */
-export class Interrupt extends Schema.TaggedClass<Interrupt>("AttemptChannel/Interrupt")(
-  "Interrupt",
-  {},
-) {}
+export class Interrupt extends Schema.TaggedClass<
+  Interrupt,
+  Brand.Brand<"@usine/core/attempt/channel/Interrupt">
+>("AttemptChannel/Interrupt")("Interrupt", {}) {}
 
 /** The request to stop the whole Attempt, including held and paused sessions. */
-export class Cancel extends Schema.TaggedClass<Cancel>("AttemptChannel/Cancel")("Cancel", {}) {}
+export class Cancel extends Schema.TaggedClass<
+  Cancel,
+  Brand.Brand<"@usine/core/attempt/channel/Cancel">
+>("AttemptChannel/Cancel")("Cancel", {}) {}
 
 /** An operator turn for the target session; unlike `Steer`, it puts the session on hold (ADR 0018). */
-export class OperatorMessage extends Schema.TaggedClass<OperatorMessage>(
-  "AttemptChannel/OperatorMessage",
-)("OperatorMessage", {
+export class OperatorMessage extends Schema.TaggedClass<
+  OperatorMessage,
+  Brand.Brand<"@usine/core/attempt/channel/OperatorMessage">
+>("AttemptChannel/OperatorMessage")("OperatorMessage", {
   /** The operator's text to deliver while placing a hold on the target session. */
   message: Schema.NonEmptyString,
 }) {}
@@ -139,7 +158,10 @@ export class OperatorMessage extends Schema.TaggedClass<OperatorMessage>(
  * The request to end a takeover (ADR 0018). A held child returns its idle result to the parent,
  * and a held or paused parent resumes the task.
  */
-export class Release extends Schema.TaggedClass<Release>("AttemptChannel/Release")("Release", {}) {}
+export class Release extends Schema.TaggedClass<
+  Release,
+  Brand.Brand<"@usine/core/attempt/channel/Release">
+>("AttemptChannel/Release")("Release", {}) {}
 
 /** The non-terminal operator actions; `Cancel` is separate. */
 export const OperatorAction = Schema.Union([Steer, Interrupt, OperatorMessage, Release]);
@@ -149,26 +171,29 @@ export const InboundPayload = Schema.Union([OperatorAction, Cancel]);
 export type InboundPayload = typeof InboundPayload.Type;
 
 /** The default target of operator input. */
-export class ParentTarget extends Schema.TaggedClass<ParentTarget>("AttemptChannel/ParentTarget")(
-  "Parent",
-  {},
-) {}
+export class ParentTarget extends Schema.TaggedClass<
+  ParentTarget,
+  Brand.Brand<"@usine/core/attempt/channel/ParentTarget">
+>("AttemptChannel/ParentTarget")("Parent", {}) {}
 
 /** A child session, addressed by the session ID in its events. */
-export class ChildTarget extends Schema.TaggedClass<ChildTarget>("AttemptChannel/ChildTarget")(
-  "Child",
-  {
-    /** The usine session ID of the child that should receive the action. */
-    sessionId: AgentSessionId,
-  },
-) {}
+export class ChildTarget extends Schema.TaggedClass<
+  ChildTarget,
+  Brand.Brand<"@usine/core/attempt/channel/ChildTarget">
+>("AttemptChannel/ChildTarget")("Child", {
+  /** The usine session ID of the child that should receive the action. */
+  sessionId: AgentSessionId,
+}) {}
 
 /** The parent or child session that receives an operator action. */
 export const SessionTarget = Schema.Union([ParentTarget, ChildTarget]);
 export type SessionTarget = typeof SessionTarget.Type;
 
 /** Operator input for one live session, never stored as an Event. */
-export class Intervention extends Schema.Class<Intervention>("AttemptChannel/Intervention")({
+export class Intervention extends Schema.Class<
+  Intervention,
+  Brand.Brand<"@usine/core/attempt/channel/Intervention">
+>("AttemptChannel/Intervention")({
   /** The operator identity attributed to this action. */
   operator: Schema.NonEmptyString,
   /** The parent or child session to which the action applies. */
@@ -178,9 +203,10 @@ export class Intervention extends Schema.Class<Intervention>("AttemptChannel/Int
 }) {}
 
 /** The session's supervision state after an accepted operator action. */
-export class InterventionState extends Schema.Class<InterventionState>(
-  "AttemptChannel/InterventionState",
-)({
+export class InterventionState extends Schema.Class<
+  InterventionState,
+  Brand.Brand<"@usine/core/attempt/channel/InterventionState">
+>("AttemptChannel/InterventionState")({
   /** Whether the session must wait for operator release before returning its result. */
   held: Schema.Boolean,
   /** Whether the session's turn is interrupted and waits for input or release. */
@@ -203,9 +229,10 @@ export class InterventionState extends Schema.Class<InterventionState>(
  * The receipt for an accepted operator input, with the resulting hold or pause state. A queued
  * input gets a second receipt with the same `inputSequence` when the session reads it.
  */
-export class InterventionApplied extends Schema.TaggedClass<InterventionApplied>(
-  "AttemptChannel/InterventionApplied",
-)("InterventionApplied", {
+export class InterventionApplied extends Schema.TaggedClass<
+  InterventionApplied,
+  Brand.Brand<"@usine/core/attempt/channel/InterventionApplied">
+>("AttemptChannel/InterventionApplied")("InterventionApplied", {
   /** The inbound sequence of the accepted action, reused for queued delivery receipts. */
   inputSequence: Sequence,
   /** The operator action that the target session accepted. */
@@ -215,9 +242,10 @@ export class InterventionApplied extends Schema.TaggedClass<InterventionApplied>
 }) {}
 
 /** The rejection of an operator action by a closed or refusing session; the Attempt continues. */
-export class InterventionRejected extends Schema.TaggedClass<InterventionRejected>(
-  "AttemptChannel/InterventionRejected",
-)("InterventionRejected", {
+export class InterventionRejected extends Schema.TaggedClass<
+  InterventionRejected,
+  Brand.Brand<"@usine/core/attempt/channel/InterventionRejected">
+>("AttemptChannel/InterventionRejected")("InterventionRejected", {
   /** The inbound sequence of the rejected action. */
   inputSequence: Sequence,
   /** The operator action the target session could not accept. */
@@ -233,9 +261,10 @@ export const WORKER_UNRESPONSIVE_PROBES = 3;
  * A probe of the Worker that didn't run a command over a new SSH connection within its timeout.
  * The Attempt isn't stopped or failed (ADR 0013).
  */
-export class WorkerUnresponsive extends Schema.TaggedClass<WorkerUnresponsive>(
-  "AttemptChannel/WorkerUnresponsive",
-)("WorkerUnresponsive", {
+export class WorkerUnresponsive extends Schema.TaggedClass<
+  WorkerUnresponsive,
+  Brand.Brand<"@usine/core/attempt/channel/WorkerUnresponsive">
+>("AttemptChannel/WorkerUnresponsive")("WorkerUnresponsive", {
   /** The worker that did not answer the probe. */
   worker: WorkerName,
   /** The last successful probe, or the Attempt's launch time if no probe has run. */
@@ -250,9 +279,10 @@ export class WorkerUnresponsive extends Schema.TaggedClass<WorkerUnresponsive>(
 }) {}
 
 /** The first successful probe for an attempt's watch, or a successful probe after `WorkerUnresponsive`. */
-export class WorkerResponsive extends Schema.TaggedClass<WorkerResponsive>(
-  "AttemptChannel/WorkerResponsive",
-)("WorkerResponsive", {
+export class WorkerResponsive extends Schema.TaggedClass<
+  WorkerResponsive,
+  Brand.Brand<"@usine/core/attempt/channel/WorkerResponsive">
+>("AttemptChannel/WorkerResponsive")("WorkerResponsive", {
   /** The worker that answered the probe. */
   worker: WorkerName,
   /** The value from the preceding `WorkerUnresponsive`, or the first confirmed answer after joining a watch. */
@@ -294,18 +324,20 @@ const EnvelopeFields = {
 } as const;
 
 /** A versioned attempt message sent to the orchestrator for validation and storage. */
-export class OutboundEnvelope extends Schema.TaggedClass<OutboundEnvelope>(
-  "AttemptChannel/OutboundEnvelope",
-)("OutboundEnvelope", {
+export class OutboundEnvelope extends Schema.TaggedClass<
+  OutboundEnvelope,
+  Brand.Brand<"@usine/core/attempt/channel/OutboundEnvelope">
+>("AttemptChannel/OutboundEnvelope")("OutboundEnvelope", {
   ...EnvelopeFields,
   /** The activity, receipt, connectivity report, or terminal outcome to record. */
   payload: OutboundPayload,
 }) {}
 
 /** A versioned operator message sent to the attempt's parent, optionally targeting a child. */
-export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
-  "AttemptChannel/InboundEnvelope",
-)("InboundEnvelope", {
+export class InboundEnvelope extends Schema.TaggedClass<
+  InboundEnvelope,
+  Brand.Brand<"@usine/core/attempt/channel/InboundEnvelope">
+>("AttemptChannel/InboundEnvelope")("InboundEnvelope", {
   ...EnvelopeFields,
   /** The target session, the parent by default. */
   target: SessionTarget.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ _tag: "Parent" }))),

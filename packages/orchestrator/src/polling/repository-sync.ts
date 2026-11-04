@@ -33,18 +33,18 @@ import {
   repositoryFailureLogFields,
 } from "./cycle.ts";
 
-const encodeGitHubItemKey = Schema.encodeSync(GitHubItemKey);
+const encodeGitHubItemKey = Schema.encodeEffect(GitHubItemKey);
 
 /**
  * Returns the key of Item `number` of `repository`, as used by the Board projection and the Run
  * engine.
  */
-export const gitHubItemKey = (repository: RepositoryName, number: number): ItemKey =>
+export const gitHubItemKey = (repository: RepositoryName, number: number): Effect.Effect<ItemKey> =>
   encodeGitHubItemKey([
     "github",
     RepositoryName.make(canonicalRepositoryName(repository)),
     ItemNumber.make(number),
-  ]);
+  ]).pipe(Effect.orDie);
 
 /** The result of one repository's label catalog request in a cycle. */
 interface LabelCatalogCycle {
@@ -211,7 +211,7 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
   const github = yield* GitHubPolling;
   const items = yield* ItemProjectionWriter;
   const budgets = yield* CycleBudgets;
-  const itemKey = gitHubItemKey(repository, changed.number);
+  const itemKey = yield* gitHubItemKey(repository, changed.number);
   const cycleGeneration = yield* budgets.generation(itemKey);
   const snapshot = yield* github.snapshot(repository, changed);
   const projection = ItemProjection.make({
@@ -245,5 +245,6 @@ export const markItemGone = Effect.fn("PollingTriggers.markItemGone")(function* 
   yield* Effect.annotateCurrentSpan({ repository, item: number });
   const items = yield* ItemProjectionWriter;
   const observedAt = yield* DateTime.now;
-  return yield* items.markGone(gitHubItemKey(repository, number), observedAt);
+  const itemKey = yield* gitHubItemKey(repository, number);
+  return yield* items.markGone(itemKey, observedAt);
 });

@@ -20,13 +20,19 @@ import { PollingTriggers } from "../src/polling-triggers.ts";
 import { baseBranches, memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const instance = LoadedInstance.make({
-  config: Schema.decodeSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
-  agents: [],
-  invalidAgents: [],
-  loops: [],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
+    version: 1,
+    repos: [{ name: repository }],
+  });
+  return LoadedInstance.make({
+    config: decodedValue1,
+    agents: [],
+    invalidAgents: [],
+    loops: [],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 const updatedAt = DateTime.makeUnsafe("2026-10-24T10:00:00Z");
 
@@ -46,35 +52,37 @@ const payload = (
     statusCheckRollup = null,
   }: RemotePullRequest,
 ) =>
-  Schema.decodeSync(PullRequestPayload)({
-    number,
-    title: "Track base branch heads",
-    body: "",
-    url: `https://github.com/basaltbytes/usine/pull/${number}`,
-    state: "OPEN",
-    isDraft: false,
-    merged: false,
-    createdAt: "2026-10-24T09:00:00Z",
-    updatedAt: "2026-10-24T10:00:00Z",
-    mergedAt: null,
-    author: null,
-    baseRefName,
-    headRefName: `feature-${number}`,
-    headRefOid: "a".repeat(40),
-    additions: 1,
-    deletions: 0,
-    changedFiles: 1,
-    reviewDecision: null,
-    mergeable,
-    mergeStateStatus,
-    statusCheckRollup,
-    labels: { totalCount: 0, nodes: [] },
-    reviewRequests: { totalCount: 0, nodes: [] },
-    reviews: { totalCount: 0, nodes: [] },
-    reviewThreads: { totalCount: 0, nodes: [] },
-    comments: { totalCount: 0, nodes: [] },
-    closingIssuesReferences: { totalCount: 0, nodes: [] },
-  });
+  Effect.runSync(
+    Schema.decodeEffect(PullRequestPayload)({
+      number,
+      title: "Track base branch heads",
+      body: "",
+      url: `https://github.com/basaltbytes/usine/pull/${number}`,
+      state: "OPEN",
+      isDraft: false,
+      merged: false,
+      createdAt: "2026-10-24T09:00:00Z",
+      updatedAt: "2026-10-24T10:00:00Z",
+      mergedAt: null,
+      author: null,
+      baseRefName,
+      headRefName: `feature-${number}`,
+      headRefOid: "a".repeat(40),
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      reviewDecision: null,
+      mergeable,
+      mergeStateStatus,
+      statusCheckRollup,
+      labels: { totalCount: 0, nodes: [] },
+      reviewRequests: { totalCount: 0, nodes: [] },
+      reviews: { totalCount: 0, nodes: [] },
+      reviewThreads: { totalCount: 0, nodes: [] },
+      comments: { totalCount: 0, nodes: [] },
+      closingIssuesReferences: { totalCount: 0, nodes: [] },
+    }),
+  );
 
 /**
  * Returns a repository whose change detection reports `pullRequests` on the first poll only, and a
@@ -127,11 +135,13 @@ const fakeRepository = (
       }),
   };
   const poll = Effect.gen(function* () {
+    const fixtureInstance = yield* instance;
     const polling = yield* PollingTriggers;
     changes = 0;
     baseRefReads.length = 0;
     snapshots.length = 0;
-    const cycle = yield* polling.poll(instance);
+
+    const cycle = yield* polling.poll(fixtureInstance);
     assert.deepStrictEqual(cycle.failures, []);
     return {
       changes,
@@ -195,6 +205,7 @@ describe("open pull request refresh", () => {
       );
       return Effect.gen(function* () {
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         const pollResult = yield* poll;
         assert.deepStrictEqual(pollResult, {
@@ -203,7 +214,9 @@ describe("open pull request refresh", () => {
           snapshots: [28],
         });
         pullRequest.mergeable = "CONFLICTING";
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, []);
       }).pipe(Effect.provide(testLayer(github, cursors)));
     },
@@ -229,6 +242,7 @@ describe("open pull request refresh", () => {
       );
       return Effect.gen(function* () {
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         const pollResult = yield* poll;
         assert.deepStrictEqual(pollResult, {
@@ -237,7 +251,9 @@ describe("open pull request refresh", () => {
           snapshots: [28],
         });
         pullRequest.statusCheckRollup = { state: settled };
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, []);
       }).pipe(Effect.provide(testLayer(github, cursors)));
     });
@@ -260,14 +276,20 @@ describe("open pull request refresh", () => {
       return Effect.gen(function* () {
         yield* poll;
         yield* poll;
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         pullRequest.statusCheckRollup = { state: "PENDING" };
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         pullRequest.statusCheckRollup = { state: "SUCCESS" };
         pullRequest.mergeStateStatus = "CLEAN";
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, []);
       }).pipe(Effect.provide(testLayer(github, cursors)));
     },
@@ -297,13 +319,16 @@ describe("open pull request refresh", () => {
       return Effect.gen(function* () {
         yield* poll;
         yield* poll;
+
         assert.deepStrictEqual((yield* poll).snapshots, []);
-        const { openPullRequests, ...rest } = Schema.decodeUnknownSync(Schema.JsonObject)(
+        const { openPullRequests, ...rest } = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(
           cursors.stored.get(key),
         );
+        const decodedValue17 =
+          yield* Schema.decodeUnknownEffect(LegacyOpenPullRequests)(openPullRequests);
         cursors.stored.set(key, {
           ...rest,
-          openPullRequests: Schema.decodeUnknownSync(LegacyOpenPullRequests)(openPullRequests),
+          openPullRequests: decodedValue17,
         });
         pullRequest.statusCheckRollup = { state: "PENDING" };
         const pollResult = yield* poll;
@@ -312,9 +337,12 @@ describe("open pull request refresh", () => {
           baseRefReads: ["main if-none-match"],
           snapshots: [28, 29],
         });
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         pullRequest.statusCheckRollup = { state: "SUCCESS" };
+
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
+
         assert.deepStrictEqual((yield* poll).snapshots, []);
       }).pipe(Effect.provide(testLayer(github, cursors)));
     },
@@ -337,16 +365,19 @@ describe("open pull request refresh", () => {
     return Effect.gen(function* () {
       yield* poll;
       yield* poll;
+
       assert.deepStrictEqual((yield* poll).snapshots, []);
 
       const {
         baseRefHeads: _baseRefHeads,
         openPullRequests,
         ...rest
-      } = Schema.decodeUnknownSync(Schema.JsonObject)(cursors.stored.get(key));
+      } = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(cursors.stored.get(key));
+      const decodedValue22 =
+        yield* Schema.decodeUnknownEffect(LegacyOpenPullRequests)(openPullRequests);
       cursors.stored.set(key, {
         ...rest,
-        openPullRequests: Schema.decodeUnknownSync(LegacyOpenPullRequests)(openPullRequests),
+        openPullRequests: decodedValue22,
       });
 
       const pollResult = yield* poll;
@@ -357,6 +388,7 @@ describe("open pull request refresh", () => {
         baseRefReads: ["main"],
         snapshots: [28, 29],
       });
+
       assert.deepStrictEqual((yield* poll).snapshots, []);
     }).pipe(Effect.provide(testLayer(github, cursors)));
   });
@@ -389,6 +421,7 @@ describe("open pull request refresh", () => {
       );
       return Effect.gen(function* () {
         yield* poll;
+
         assert.deepStrictEqual((yield* poll).snapshots, [28, 29, 30]);
         warnings.length = 0;
         const pollResult = yield* poll;

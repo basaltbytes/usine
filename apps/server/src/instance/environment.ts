@@ -1,14 +1,18 @@
 import { join } from "node:path";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { ConfigProvider, Effect, FileSystem, Option, Schema } from "effect";
+import { type Brand, ConfigProvider, Effect, FileSystem, Option, Schema } from "effect";
 
 /** The instance folder's file of `KEY=value` lines that `usine` reads at startup. */
 const ENVIRONMENT_FILE = ".env";
 
 /** The instance folder's `.env` exists but couldn't be read. */
-class EnvironmentFileError extends Schema.TaggedError<EnvironmentFileError>(
-  "@usine/server/EnvironmentFileError",
-)("EnvironmentFileError", { path: Schema.String, reason: Schema.String }) {}
+class EnvironmentFileError extends Schema.TaggedError<
+  EnvironmentFileError,
+  Brand.Brand<"@usine/server/instance/environment/EnvironmentFileError">
+>("@usine/server/EnvironmentFileError")("EnvironmentFileError", {
+  path: Schema.String,
+  reason: Schema.String,
+}) {}
 
 /** Returns the child keys of `node`: a record's keys, an array's indices, or none for a value. */
 const childKeys = (node: ConfigProvider.Node): ReadonlyArray<string> =>

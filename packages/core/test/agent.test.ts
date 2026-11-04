@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Option, Schema } from "effect";
+import { flow, Effect, Option, Schema } from "effect";
 import {
   Agent,
   AgentPersona,
@@ -9,7 +9,7 @@ import {
 } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 
-const decodeBrain = Schema.decodeUnknownSync(BrainSpec);
+const decodeBrain = flow(Schema.decodeUnknownEffect(BrainSpec), Effect.runSync);
 
 describe("Agent brain specs", () => {
   it("validates usine harness and effort shapes while passing model ids through", () => {
@@ -72,13 +72,15 @@ describe("Agent brain specs", () => {
   });
 
   it("decodes a stored Agent without a parent effort as inheriting", () => {
-    const stored = Schema.decodeSync(Agent)({
-      name: "developer",
-      brain: { harness: "codex", model: "gpt-5.6-sol", effort: "xhigh" },
-      parentModel: null,
-      persona: "Implement the issue.",
-    });
+    const stored = Effect.runSync(
+      Schema.decodeEffect(Agent)({
+        name: "developer",
+        brain: { harness: "codex", model: "gpt-5.6-sol", effort: "xhigh" },
+        parentModel: null,
+        persona: "Implement the issue.",
+      }),
+    );
     expect(Option.isNone(stored.parentEffort)).toBe(true);
-    expect("parentEffort" in Schema.encodeSync(Agent)(stored)).toBe(false);
+    expect("parentEffort" in Effect.runSync(Schema.encodeEffect(Agent)(stored))).toBe(false);
   });
 });

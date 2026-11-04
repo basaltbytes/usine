@@ -9,6 +9,7 @@ import type {
   MachineView,
   MachineQuotaWait,
   RunSummaryView,
+  AttemptSummaryView,
   UnconfirmedStopView,
 } from "@usine/orchestrator/operator";
 import { DateTime, Match, Option } from "effect";
@@ -74,10 +75,9 @@ export const upgradeWaitLine = ({ target }: UpgradeWait): string =>
 
 /** Returns the run state, including a stop or machine creation that prevents progress. */
 export const runStateLine = (
-  run: Pick<
-    RunSummaryView,
-    "id" | "state" | "attempts" | "providerRetry" | "machineWait" | "upgradeWait"
-  >,
+  run: Pick<RunSummaryView, "id" | "state" | "providerRetry" | "machineWait" | "upgradeWait"> & {
+    readonly attempts: ReadonlyArray<Pick<AttemptSummaryView, "number">>;
+  },
   unconfirmedStop: UnconfirmedStopView | null = null,
   machine: MachineView | null = null,
 ): string => {

@@ -29,8 +29,17 @@ type CodexRequestPayload =
   | TurnInterruptParams;
 
 /** Returns typed Codex request parameters as JSON for the app-server transport. */
-export const json = (value: CodexRequestPayload): Schema.Json =>
-  Schema.decodeUnknownSync(Schema.Json)(JSON.parse(JSON.stringify(value)));
+export const json = (
+  value: CodexRequestPayload,
+  operation: SessionOperationError["operation"],
+  client: CodexClient,
+) =>
+  Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
+    Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Schema.Json))),
+    Effect.mapError((cause) =>
+      operationError(operation, client, "Could not encode Codex request parameters", cause),
+    ),
+  );
 
 /** Returns the text of a recorded user message as the executor sent it. */
 export const userMessageText = (item: typeof UserMessageItem.Type): string =>

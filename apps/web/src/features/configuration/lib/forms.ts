@@ -5,7 +5,7 @@ import {
   validateConfigurationForm,
 } from "@usine/config/folder-codec";
 import { writeYaml } from "@usine/config/yaml/writer";
-import { Effect, Schema } from "effect";
+import { flow, Effect, Schema } from "effect";
 
 export type FormProblem = { readonly path: readonly (string | number)[]; readonly message: string };
 export type FormFieldsProps = {
@@ -45,11 +45,14 @@ export const readForm = (key: ConfigurationEntityKey, text: string) =>
 export const validateForm = (key: ConfigurationEntityKey, value: Schema.JsonObject) =>
   Effect.runSync(Effect.result(validateConfigurationForm(key, value)));
 
-const encodeCiDraft = Schema.encodeSync(
-  Schema.Struct({
-    fixLoop: Schema.optionalKey(Schema.Json),
-    timeoutSeconds: Schema.optionalKey(Schema.Json),
-  }).pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
+const encodeCiDraft = flow(
+  Schema.encodeEffect(
+    Schema.Struct({
+      fixLoop: Schema.optionalKey(Schema.Json),
+      timeoutSeconds: Schema.optionalKey(Schema.Json),
+    }).pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
+  ),
+  Effect.runSync,
 );
 
 export const formText = (key: ConfigurationEntityKey, value: Schema.JsonObject): string => {

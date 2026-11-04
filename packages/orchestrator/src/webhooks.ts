@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import { ChangeBus } from "@usine/core/changes";
 import { Context, DateTime, Effect, FiberMap, Layer, Ref } from "effect";
 
@@ -16,7 +17,7 @@ export class WebhookHealth extends Context.Service<
     Effect.gen(function* () {
       const bus = yield* ChangeBus;
       const changed = bus.publish([
-        { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+        { audience: InstanceScope.make(), target: { kind: "attention", id: "instance" } },
       ]);
       let startedAt = yield* DateTime.now;
       const received = yield* Ref.make(false);

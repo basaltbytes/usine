@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 
 /** The npm release tag to check: `latest` for stable releases or `next` for prereleases. */
 export const UpgradeChannel = Schema.Literals(["latest", "next"]);
@@ -27,17 +27,23 @@ const versions = {
   target: ReleaseVersion,
 };
 
-class Installing extends Schema.Class<Installing>("@usine/core/UpgradeInstalling")({
+class Installing extends Schema.Class<Installing, Brand.Brand<"@usine/core/upgrade/Installing">>(
+  "@usine/core/UpgradeInstalling",
+)({
   ...versions,
   /** Installation began but the helper has not recorded a terminal outcome. */
   status: Schema.Literal("installing"),
 }) {}
-class Good extends Schema.Class<Good>("@usine/core/UpgradeGood")({
+class Good extends Schema.Class<Good, Brand.Brand<"@usine/core/upgrade/Good">>(
+  "@usine/core/UpgradeGood",
+)({
   ...versions,
   /** The target version passed the post-installation health check. */
   status: Schema.Literal("good"),
 }) {}
-class RolledBack extends Schema.Class<RolledBack>("@usine/core/UpgradeRolledBack")({
+class RolledBack extends Schema.Class<RolledBack, Brand.Brand<"@usine/core/upgrade/RolledBack">>(
+  "@usine/core/UpgradeRolledBack",
+)({
   ...versions,
   /** The helper restored the previous version after the upgrade failed. */
   status: Schema.Literal("rolled-back"),
@@ -48,7 +54,9 @@ class RolledBack extends Schema.Class<RolledBack>("@usine/core/UpgradeRolledBack
     Schema.withDecodingDefaultKey(Effect.succeed("unknown")),
   ),
 }) {}
-class Failed extends Schema.Class<Failed>("@usine/core/UpgradeFailed")({
+class Failed extends Schema.Class<Failed, Brand.Brand<"@usine/core/upgrade/Failed">>(
+  "@usine/core/UpgradeFailed",
+)({
   ...versions,
   /** The helper recorded an unrecovered upgrade failure. */
   status: Schema.Literal("failed"),
@@ -57,5 +65,9 @@ class Failed extends Schema.Class<Failed>("@usine/core/UpgradeFailed")({
 }) {}
 
 /** The durable result written by the upgrade helper, including an unfinished installation. */
-export const UpgradeRecord = Schema.Union([Installing, Good, RolledBack, Failed]);
+const upgradeRecord = Schema.Union([Installing, Good, RolledBack, Failed]);
+export const UpgradeRecord: Schema.Codec<
+  Installing | Good | RolledBack | Failed,
+  typeof upgradeRecord.Encoded
+> = upgradeRecord;
 export type UpgradeRecord = typeof UpgradeRecord.Type;

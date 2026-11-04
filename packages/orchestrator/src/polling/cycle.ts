@@ -4,7 +4,7 @@ import { type RunEngineError, SubmissionResult } from "@usine/engine/engine";
 import type { ExpressionError } from "@usine/expression/expression-engine";
 import type { GitHubAppError } from "@usine/github/github-app";
 import type { GitHubItemNotFoundError } from "@usine/github/polling";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { type Brand, DateTime, Effect, Option, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { configFileErrorLogFields } from "../trigger-submission.ts";
 
@@ -12,9 +12,10 @@ import { configFileErrorLogFields } from "../trigger-submission.ts";
  * A failure isolated to one repository, or to one Loop and Item in it. A Loop that can't evaluate
  * an Item is reported every cycle until the Item or Loop changes.
  */
-export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
-  "@usine/orchestrator/RepositoryPollFailure",
-)({
+export class RepositoryPollFailure extends Schema.Class<
+  RepositoryPollFailure,
+  Brand.Brand<"@usine/orchestrator/polling/cycle/RepositoryPollFailure">
+>("@usine/orchestrator/RepositoryPollFailure")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The failure tag for callers to classify the error. */
@@ -24,9 +25,10 @@ export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
 }) {}
 
 /** When one managed repository last completed a poll in this process. */
-export class RepositoryPoll extends Schema.Class<RepositoryPoll>(
-  "@usine/orchestrator/RepositoryPoll",
-)({
+export class RepositoryPoll extends Schema.Class<
+  RepositoryPoll,
+  Brand.Brand<"@usine/orchestrator/polling/cycle/RepositoryPoll">
+>("@usine/orchestrator/RepositoryPoll")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The time polling last completed for this repository. */
@@ -34,7 +36,10 @@ export class RepositoryPoll extends Schema.Class<RepositoryPoll>(
 }) {}
 
 /** The outcome of one poll over all managed repositories, with isolated failures and backoff. */
-export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/PollCycle")({
+export class PollCycle extends Schema.Class<
+  PollCycle,
+  Brand.Brand<"@usine/orchestrator/polling/cycle/PollCycle">
+>("@usine/orchestrator/PollCycle")({
   /**
    * When each managed repository last completed a poll in this process. Repositories that haven't
    * completed one are absent.

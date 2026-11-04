@@ -1,7 +1,4 @@
 {
-  "src/cloudflare/client.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/cloudflare/shell/shell.ts": {
     "asyncFunction": 1,
     "globalTimers": 2,
@@ -15,33 +12,11 @@
   "src/credential-environment.ts": {
     "globalJson": 2
   },
-  "src/exe-dev/model.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/executor.ts": {
-    "deterministicKeys": 3,
-    "schemaClassMissingBrand": 11
-  },
-  "src/memory-preflight.ts": {
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 3
   },
   "src/remote/liveness.ts": {
     "globalJson": 1
-  },
-  "src/ssh/gateway/admin.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/ssh/gateway/forward.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/ssh/limits.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/ssh/provisioner/model.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/ssh/worker-records.ts": {
-    "schemaClassMissingBrand": 1
   },
   "src/ssh/workers.ts": {
     "deterministicKeys": 1
@@ -57,7 +32,6 @@
     "globalJson": 3,
     "newPromise": 1,
     "nodeBuiltinImport": 1,
-    "schemaSync": 2,
     "strictBooleanExpressions": 1
   },
   "test/exe-dev/launch.test.ts": {
@@ -97,9 +71,7 @@
   },
   "test/ssh/gateway/support.ts": {
     "globalTimers": 1,
-    "newPromise": 1,
-    "schemaStructWithTag": 1,
-    "schemaSync": 2
+    "newPromise": 1
   },
   "test/ssh/podman.test.ts": {
     "globalJson": 2,
@@ -109,18 +81,12 @@
     "globalJson": 2,
     "globalJsonInEffect": 2
   },
-  "test/ssh/provisioner/drivers.test.ts": {
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
-  },
   "test/ssh/provisioner/fake-providers.ts": {
-    "globalJson": 1,
-    "schemaSync": 4
+    "globalJson": 1
   },
   "test/ssh/provisioner/provisioned.test.ts": {
     "globalDate": 1,
-    "globalDateInEffect": 1,
-    "schemaSync": 1
+    "globalDateInEffect": 1
   },
   "test/ssh/provisioner/recovery.test.ts": {
     "globalDateInEffect": 1
@@ -130,9 +96,7 @@
     "globalJsonInEffect": 1
   },
   "test/ssh/provisioner/tailnet.test.ts": {
-    "globalJsonInEffect": 2,
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
+    "globalJsonInEffect": 2
   },
   "test/ssh/runtime.test.ts": {
     "asyncFunction": 3,

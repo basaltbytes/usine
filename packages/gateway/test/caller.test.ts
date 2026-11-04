@@ -72,9 +72,10 @@ describe("CallerTokens", () => {
               repository: OTHER_REPOSITORY,
             }),
           ]) {
-            const payload = Base64Url.encode(
-              Schema.encodeSync(Schema.fromJsonString(CallerClaims))(forged),
+            const valueDecoded1 = yield* Schema.encodeEffect(Schema.fromJsonString(CallerClaims))(
+              forged,
             );
+            const payload = Base64Url.encode(valueDecoded1);
             const error = yield* Effect.flip(callers.verify(secret(`ugw1.${payload}.${mac}`)));
             assert.strictEqual(error.reason, "bad-signature");
           }

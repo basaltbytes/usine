@@ -162,7 +162,7 @@ describe("Runs ahead", () => {
 
 it.effect("orders label-driven priorities before event time and rejects unsafe integers", () =>
   Effect.gen(function* () {
-    const loop = Schema.decodeSync(LoopFile)({
+    const loop = yield* Schema.decodeEffect(LoopFile)({
       name: "start-dev",
       trigger: { on: "issue", if: "true" },
       selector: Option.none(),

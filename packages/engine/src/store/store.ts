@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { latestPoolRateLimits } from "../run-reader/pool-rate-limits.ts";
 import { ChangeBus } from "@usine/core/changes";
@@ -30,6 +31,7 @@ import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { type Comment, StepResult } from "@usine/core/step/result";
 import {
+  type Brand,
   Context,
   Crypto,
   DateTime,
@@ -94,7 +96,9 @@ const OptionalRunId = Schema.Option(RunId).pipe(
 );
 
 /** The result of recording an Event, with the Run it opened and the unstarted Run it superseded. */
-export class Claim extends Schema.Class<Claim>("@usine/engine/internal/Claim")({
+export class Claim extends Schema.Class<Claim, Brand.Brand<"@usine/engine/store/store/Claim">>(
+  "@usine/engine/internal/Claim",
+)({
   result: SubmissionResult,
   /** The Run that this claim opened, not yet driven; `None` for a joined Run. */
   openedRun: OptionalRunId,
@@ -108,22 +112,24 @@ export interface SalvageCandidate extends AttemptRecovery {
   readonly itemKey: ItemKey;
 }
 
-export class AttemptStarted extends Schema.TaggedClass<AttemptStarted>(
-  "@usine/engine/internal/AttemptStarted",
-)("AttemptStarted", {
+export class AttemptStarted extends Schema.TaggedClass<
+  AttemptStarted,
+  Brand.Brand<"@usine/engine/store/store/AttemptStarted">
+>("@usine/engine/internal/AttemptStarted")("AttemptStarted", {
   execution: StepExecution,
 }) {}
 
 /** A Run that failed because failing the interrupted Attempt used its last automatic retry. */
-export class AttemptRecoveryFailed extends Schema.TaggedClass<AttemptRecoveryFailed>(
-  "@usine/engine/internal/AttemptRecoveryFailed",
-)("AttemptRecoveryFailed", {}) {}
+export class AttemptRecoveryFailed extends Schema.TaggedClass<
+  AttemptRecoveryFailed,
+  Brand.Brand<"@usine/engine/store/store/AttemptRecoveryFailed">
+>("@usine/engine/internal/AttemptRecoveryFailed")("AttemptRecoveryFailed", {}) {}
 
 /** A Run that closed (canceled, superseded, or revoked) while waiting for a Worker slot; not an error. */
-export class RunClosed extends Schema.TaggedClass<RunClosed>("@usine/engine/internal/RunClosed")(
-  "RunClosed",
-  {},
-) {}
+export class RunClosed extends Schema.TaggedClass<
+  RunClosed,
+  Brand.Brand<"@usine/engine/store/store/RunClosed">
+>("@usine/engine/internal/RunClosed")("RunClosed", {}) {}
 
 /** The result of `RunStore.cancel`, decided in the closing transaction, with the Run's Loop and Item. */
 export type CancelOutcome =
@@ -176,7 +182,7 @@ const makeRunStore = Effect.gen(function* () {
           ),
           Effect.andThen(
             bus.publish([
-              { audience: { _tag: "Instance" }, target: { kind: "attention", id: "instance" } },
+              { audience: InstanceScope.make(), target: { kind: "attention", id: "instance" } },
             ]),
           ),
         ),
@@ -682,7 +688,7 @@ const makeRunStore = Effect.gen(function* () {
         .discardLeftovers(worker, discardedAt)
         .pipe(
           Effect.tap(() =>
-            record({ audience: { _tag: "Instance" }, target: { kind: "worker", id: worker } }),
+            record({ audience: InstanceScope.make(), target: { kind: "worker", id: worker } }),
           ),
         ),
     );
@@ -750,6 +756,7 @@ const makeRunStore = Effect.gen(function* () {
           yield* Effect.logInfo("Run failure already resolved", { runId, attemptId });
           return false;
         }
+
         const resolution = FailureResolution.make({ resolvedAt: yield* DateTime.now, operator });
         yield* tx.resolveFailure(runId, attemptId, resolution);
         const lifted = yield* tx.loopItems.liftRun(runId);

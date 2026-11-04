@@ -51,7 +51,7 @@ import {
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const updatedAt = DateTime.makeUnsafe("2026-10-17T10:00:00Z");
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [{ name: repository }],
   settings: { poll_interval: 60 },
@@ -82,7 +82,7 @@ const loop = (name: string, condition: string, body: string, on: "issue" | "pr" 
 
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
   LoadedInstance.make({
-    config,
+    config: Effect.runSync(config),
     agents: [agent],
     invalidAgents: [],
     loops,
@@ -111,26 +111,28 @@ const issuePayload = (number: number, milestone: string | null): IssuePayload =>
 });
 
 const pullRequestPayload = (number: number) =>
-  Schema.decodeSync(PullRequestPayload)({
-    ...issuePayload(number, null),
-    isDraft: false,
-    merged: false,
-    mergedAt: null,
-    baseRefName: "main",
-    headRefName: "feature",
-    headRefOid: "a".repeat(40),
-    additions: 1,
-    deletions: 0,
-    changedFiles: 1,
-    reviewDecision: null,
-    mergeable: "MERGEABLE",
-    mergeStateStatus: "CLEAN",
-    statusCheckRollup: null,
-    reviewThreads: { totalCount: 0, nodes: [] },
-    reviewRequests: { totalCount: 0, nodes: [] },
-    reviews: { totalCount: 0, nodes: [] },
-    closingIssuesReferences: { totalCount: 0, nodes: [] },
-  });
+  Effect.runSync(
+    Schema.decodeEffect(PullRequestPayload)({
+      ...issuePayload(number, null),
+      isDraft: false,
+      merged: false,
+      mergedAt: null,
+      baseRefName: "main",
+      headRefName: "feature",
+      headRefOid: "a".repeat(40),
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      reviewDecision: null,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      statusCheckRollup: null,
+      reviewThreads: { totalCount: 0, nodes: [] },
+      reviewRequests: { totalCount: 0, nodes: [] },
+      reviews: { totalCount: 0, nodes: [] },
+      closingIssuesReferences: { totalCount: 0, nodes: [] },
+    }),
+  );
 
 const advanced = PollCursor.make({
   entityTag: Option.some(EntityTag.make('W/"advanced"')),
@@ -220,14 +222,18 @@ const capturedLogs = () => {
 const FAILED = /Loop evaluation failed on an Item/u;
 
 const storedUnfetchedItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
-  Schema.decodeUnknownSync(
-    Schema.Struct({ unfetchedItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
-  )(cursors.stored.get(`github-poll:${repository}`)).unfetchedItems.map(({ number }) => number);
+  Effect.runSync(
+    Schema.decodeUnknownEffect(
+      Schema.Struct({ unfetchedItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
+    )(cursors.stored.get(`github-poll:${repository}`)),
+  ).unfetchedItems.map(({ number }) => number);
 
 const storedFailingItems = (cursors: ReturnType<typeof memoryCursorStore>) =>
-  Schema.decodeUnknownSync(
-    Schema.Struct({ failingItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
-  )(cursors.stored.get(`github-poll:${repository}`)).failingItems.map(({ number }) => number);
+  Effect.runSync(
+    Schema.decodeUnknownEffect(
+      Schema.Struct({ failingItems: Schema.Array(Schema.Struct({ number: Schema.Finite })) }),
+    )(cursors.stored.get(`github-poll:${repository}`)),
+  ).failingItems.map(({ number }) => number);
 
 describe("Loop evaluation failures", () => {
   it.effect(
@@ -271,7 +277,7 @@ describe("Loop evaluation failures", () => {
             first.failures[0]?.message ?? "",
             /^Loop "milestone": if: failed on issue #28: No such key: title/u,
           );
-          const saved = Schema.decodeUnknownSync(Schema.Struct({ cursor: PollCursor }))(
+          const saved = yield* Schema.decodeUnknownEffect(Schema.Struct({ cursor: PollCursor }))(
             cursors.stored.get(`github-poll:${repository}`),
           );
           assert.deepStrictEqual(saved.cursor, advanced);
@@ -577,7 +583,7 @@ describe("Loop evaluation failures", () => {
         const first = yield* polling.poll(instance);
         assert.deepStrictEqual(first.failures, []);
         assert.strictEqual(first.submissions.length, 7);
-        const saved = Schema.decodeUnknownSync(Schema.Struct({ cursor: PollCursor }))(
+        const saved = yield* Schema.decodeUnknownEffect(Schema.Struct({ cursor: PollCursor }))(
           cursors.stored.get(`github-poll:${repository}`),
         );
         assert.deepStrictEqual(saved.cursor, advanced);

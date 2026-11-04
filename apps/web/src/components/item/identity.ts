@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import type { TaskIdentityView, FactoryOverview } from "@usine/orchestrator/operator";
+import type {
+  TaskIdentityView,
+  BoardTaskView,
+  FactoryOverview,
+} from "@usine/orchestrator/operator";
 import { Array as EffectArray, Option } from "effect";
 import { overviewQuery } from "~/lib/overview";
 import type { ItemRef } from "~/components/item/mark";
@@ -32,14 +36,16 @@ export const taskIdentity = (
 };
 
 /** Returns the identity of a Board card's Task. */
-export const cardIdentity = (card: TaskIdentityView): TaskIdentity =>
+export const cardIdentity = (
+  card: Pick<TaskIdentityView, "items" | "kind" | "number" | "title" | "url" | "state">,
+): TaskIdentity =>
   taskIdentity(EffectArray.isReadonlyArrayNonEmpty(card.items) ? card.items : [card]);
 
 /** Returns the Board card of the Task that has the item `itemKey`, if the overview shows it. */
 export const taskCard = (
   overview: FactoryOverview | undefined,
   itemKey: string,
-): Option.Option<TaskIdentityView> =>
+): Option.Option<TaskIdentityView | BoardTaskView> =>
   Option.fromNullishOr(
     [
       ...(overview?.identities ?? []),

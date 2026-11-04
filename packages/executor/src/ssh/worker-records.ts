@@ -8,14 +8,17 @@ import {
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Option, Path, Schema } from "effect";
 import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
 import { codexHomeIn } from "./codex-homes.ts";
 import type { SshWorkerAddress } from "./model.ts";
 import { sshCommandFor, workerDirectoryOf } from "./workers.ts";
 
 /** How to reach a long-lived SSH Worker's machine. Holds no secret. */
-class SshWorkerRecord extends Schema.Class<SshWorkerRecord>("@usine/executor/SshWorkerRecord")({
+class SshWorkerRecord extends Schema.Class<
+  SshWorkerRecord,
+  Brand.Brand<"@usine/executor/ssh/worker-records/SshWorkerRecord">
+>("@usine/executor/SshWorkerRecord")({
   name: WorkerName,
   destination: SshDestination,
   port: Schema.OptionFromNullOr(SshPort),

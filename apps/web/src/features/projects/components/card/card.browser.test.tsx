@@ -27,7 +27,7 @@ import {
   type ReadyOverview,
   type RunSummaryView,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -117,7 +117,10 @@ const menuContents = async () => {
 beforeEach(async () => {
   await page.viewport(1280, 800);
   overview = boardOverview();
-  await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
+  await commands.boardResponses(
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview))),
+    200,
+  );
   opened = [];
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(overviewQuery().queryKey, overview);
@@ -300,7 +303,10 @@ it("times a waiting Run from its opening and a failed one from its failure, with
 
 it("shows a card whose running Run's Loop removed its lane label in that lane, counted, with its Run line", async () => {
   overview = boardOverviewReviewing();
-  await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
+  await commands.boardResponses(
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview))),
+    200,
+  );
   flushSync(() => queryClient.setQueryData(overviewQuery().queryKey, overview));
   const review = lane("Review");
   await expect.element(review.getByRole("heading", { name: "Review 2" })).toBeVisible();
@@ -323,7 +329,10 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
 
 it("shows a running card whose Loop swapped its lane label in the lane of its current labels, with its Run line", async () => {
   overview = boardOverviewReviewing();
-  await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
+  await commands.boardResponses(
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview))),
+    200,
+  );
   flushSync(() => queryClient.setQueryData(overviewQuery().queryKey, overview));
   const inProgress = lane("In progress");
   await expect.element(inProgress.getByRole("heading", { name: "In progress 2" })).toBeVisible();
@@ -408,7 +417,7 @@ it("lists only the actions that apply to a card without a Run", async () => {
 });
 
 const runAgainBody = (result: RunAgainResult) =>
-  JSON.stringify(Schema.encodeSync(RunAgainResult)(result));
+  JSON.stringify(Effect.runSync(Schema.encodeEffect(RunAgainResult)(result)));
 
 const runDroppedAgain = async () => {
   const run = runOf("run-dropped");
@@ -428,7 +437,9 @@ const runDroppedAgain = async () => {
     sessionState: [],
     earlierTranscript: [],
   });
-  await commands.delayRunAgain(JSON.stringify(Schema.encodeSync(RunDetailView)(detail)));
+  await commands.delayRunAgain(
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(RunDetailView)(detail))),
+  );
   await actions(18).click();
   await page.getByRole("menuitem", { name: /^Run again/u }).click();
 };
@@ -642,7 +653,9 @@ it("loads older runs only when Run history opens and opens the selected run", as
     runs: [latest, older],
     comments: [],
   });
-  await commands.boardRunHistoryResponse(JSON.stringify(Schema.encodeSync(TaskView)(detail)));
+  await commands.boardRunHistoryResponse(
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(TaskView)(detail))),
+  );
   await actions(18).click();
   expect(await commands.boardRunHistoryRequests()).toEqual([]);
   await page.getByRole("menuitem", { name: "Run history", exact: true }).hover();

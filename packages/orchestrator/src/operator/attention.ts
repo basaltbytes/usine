@@ -1,3 +1,4 @@
+import { InstanceScope } from "@usine/core/access";
 import type { ChangeAudience } from "@usine/core/changes";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import {
@@ -18,10 +19,11 @@ import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT } from "./need.ts";
 import type { RunSummaryView } from "./run.ts";
 import { ProjectView, ReadyOverview } from "./overview.ts";
 
-const encodeNeed = Schema.encodeSync(NeedView);
+const encodeNeed = Schema.encodeEffect(NeedView);
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 /** Identifies the condition to dismiss; pool usage is grouped into threshold bands. */
-export const attentionKey = (need: NeedView): AttentionKey => {
+export const attentionKey = Effect.fn("Operator.attentionKey")(function* (need: NeedView) {
   const content =
     need._tag === "PoolLimitNeed"
       ? {
@@ -33,12 +35,13 @@ export const attentionKey = (need: NeedView): AttentionKey => {
             POOL_LIMIT_WARNING_PERCENT,
           ),
         }
-      : encodeNeed(need);
+      : yield* encodeNeed(need);
+  const revision = yield* encodeJson(content);
   return AttentionKey.make({
     id: need.id,
-    revision: AttentionRevision.make(JSON.stringify(content)),
+    revision: AttentionRevision.make(revision),
   });
-};
+}, Effect.orDie);
 
 export const needRepositories = (need: NeedView) =>
   Match.valueTags(need, {
@@ -62,7 +65,10 @@ export const needRepositories = (need: NeedView) =>
   });
 
 export const taskNeedsAttention = (
-  task: Pick<BoardTaskView, "items"> & { readonly runs: ReadonlyArray<Pick<RunSummaryView, "id">> },
+  task: {
+    readonly items: ReadonlyArray<Pick<BoardTaskView["items"][number], "itemKey">>;
+    readonly runs: ReadonlyArray<Pick<RunSummaryView, "id">>;
+  },
   needs: ReadonlyArray<NeedView>,
 ): boolean =>
   needs.some((need) => {
@@ -111,21 +117,23 @@ export const projectAttention = (
   );
 };
 
-export const partitionNeeds = (
+export const partitionNeeds = Effect.fn("Operator.partitionNeeds")(function* (
   needs: ReadonlyArray<NeedView>,
-  acknowledgements: ReadonlyArray<AttentionKey>,
-) => {
-  const dismissed = new Set(
-    acknowledgements.map(({ id, revision }) => JSON.stringify([id, revision])),
+  acknowledgements: ReadonlyArray<Pick<AttentionKey, "id" | "revision">>,
+) {
+  const dismissedKeys = yield* Effect.forEach(acknowledgements, ({ id, revision }) =>
+    encodeJson([id, revision]).pipe(Effect.orDie),
   );
+  const dismissed = new Set(dismissedKeys);
   const needsYou: Array<NeedView> = [];
   const dismissedNeeds: Array<NeedView> = [];
   for (const need of needs) {
-    const { id, revision } = attentionKey(need);
-    (dismissed.has(JSON.stringify([id, revision])) ? dismissedNeeds : needsYou).push(need);
+    const { id, revision } = yield* attentionKey(need);
+    const key = yield* encodeJson([id, revision]).pipe(Effect.orDie);
+    (dismissed.has(key) ? dismissedNeeds : needsYou).push(need);
   }
   return { needsYou, dismissedNeeds };
-};
+});
 
 export const poolLimitNeeds = (
   snapshots: ReadonlyArray<PoolRateLimitsUpdated>,
@@ -169,7 +177,7 @@ export const poolAttentionFor = (
     });
     if (needs.length === 0) return overview;
     const storedAcknowledgements = yield* acknowledgements.list;
-    const { needsYou, dismissedNeeds } = partitionNeeds(needs, storedAcknowledgements);
+    const { needsYou, dismissedNeeds } = yield* partitionNeeds(needs, storedAcknowledgements);
     return ReadyOverview.make({
       ...overview,
       needsYou: [...overview.needsYou, ...needsYou],
@@ -180,9 +188,9 @@ export const poolAttentionFor = (
 /** Uses the validated attention revision to scope dismissal notices like the displayed entry. */
 export const attentionAudiences = (key: AttentionKey): ReadonlyArray<ChangeAudience> => {
   const need = Schema.decodeOption(Schema.fromJsonString(NeedView))(key.revision);
-  if (Option.isNone(need)) return [{ _tag: "Instance" }];
+  if (Option.isNone(need)) return [InstanceScope.make()];
   const repositories = needRepositories(need.value);
   return repositories.length === 0
-    ? [{ _tag: "Instance" }]
+    ? [InstanceScope.make()]
     : repositories.map((repository) => ({ _tag: "Repository", repository }));
 };

@@ -68,9 +68,11 @@ const entityKey = (request: ConfigurationEntityRequest) =>
     ),
   );
 
-const entitiesOf = (configuration: Configuration) =>
+const entitiesOf = (
+  configuration: Configuration,
+): Effect.Effect<ReadonlyArray<ConfigurationEntity>, ConfigurationInvalid> =>
   Option.match(configuration.instance, {
-    onNone: () => [],
+    onNone: () => Effect.succeed([]),
     onSome: configurationEntities,
   });
 
@@ -175,7 +177,7 @@ export class ConfigurationEditor extends Context.Service<
         );
       const save = (
         snapshot: Configuration,
-        input: ConfigurationWrite,
+        input: Pick<ConfigurationWrite, "expected" | "message">,
         changes: ReadonlyArray<ConfigurationChange>,
       ) =>
         Effect.gen(function* () {
@@ -196,6 +198,7 @@ export class ConfigurationEditor extends Context.Service<
             )
               return yield* AccessDenied.make({ permission: "admin" });
           }
+
           return yield* current.commit({
             expected: input.expected,
             changes,
@@ -204,21 +207,25 @@ export class ConfigurationEditor extends Context.Service<
           });
         });
       const resolveKey = (snapshot: Configuration, key: ConfigurationEntityKey) =>
-        Effect.fromOption(resolveConfigurationEntityKey(entitiesOf(snapshot), key), () =>
-          ConfigurationNotFound.make({
-            message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
-          }),
-        );
-      const findEntity = (snapshot: Configuration, key: ConfigurationEntityKey) => {
-        const found = entitiesOf(snapshot).find((entity) => entity.key.key === key.key);
-        return found === undefined
-          ? Effect.fail(
+        entitiesOf(snapshot).pipe(
+          Effect.flatMap((entities) =>
+            Effect.fromOption(resolveConfigurationEntityKey(entities, key), () =>
               ConfigurationNotFound.make({
-                message: `Configuration entity ${key.key} was not found.`,
+                message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
               }),
-            )
-          : Effect.succeed(found);
-      };
+            ),
+          ),
+        );
+      const findEntity = (snapshot: Configuration, key: ConfigurationEntityKey) =>
+        Effect.gen(function* () {
+          const entities = yield* entitiesOf(snapshot);
+          const found = entities.find((entity) => entity.key.key === key.key);
+          if (found === undefined)
+            return yield* ConfigurationNotFound.make({
+              message: `Configuration entity ${key.key} was not found.`,
+            });
+          return found;
+        });
 
       return ConfigurationEditor.of({
         head: Effect.map(store.read, ({ number }) => number),
@@ -288,7 +295,8 @@ export class ConfigurationEditor extends Context.Service<
           yield* Effect.annotateCurrentSpan({ entity: key.key });
           yield* entityPermission(key, "read");
           const storedEntity = yield* findEntity(snapshot, key);
-          const entity = repositoryEditorEntity(snapshot, storedEntity);
+          const entity = yield* repositoryEditorEntity(snapshot, storedEntity);
+
           return ConfigurationEntityView.make({
             ...entity,
             text: yield* formatConfigurationEntity(entity),
@@ -306,7 +314,8 @@ export class ConfigurationEditor extends Context.Service<
               ? yield* parseConfigurationEntity(parser, key, input.text)
               : ConfigurationEntity.make({ key, value: qualifyLoopValue(key, input.value) });
           const { entity, changes } = yield* repositoryEditorChanges(snapshot, parsed);
-          const before = entitiesOf(snapshot).find((entry) => entry.key.key === key.key);
+          const entities = yield* entitiesOf(snapshot);
+          const before = entities.find((entry) => entry.key.key === key.key);
           const change = {
             key,
             before: Option.fromUndefinedOr(before?.value),

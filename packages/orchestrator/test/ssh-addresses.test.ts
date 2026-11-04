@@ -6,34 +6,36 @@ import { sshWorkerAddressesOf } from "../src/ssh.ts";
 it.effect(
   "resolves Boat OAuth variables without LLM API keys and reports a missing secret by variable name",
   () => {
-    const config = Schema.decodeSync(UsineConfig)({
-      version: 1,
-      repos: [],
-      workers: [
-        {
-          name: "boat",
-          kind: "ssh",
-          root: "/home/user/.usine",
-          identity_file: "/keys/boat",
-          gateway: {
-            domain: "gw.test",
-            destination: "gateway",
-            admin_token_env: "GATEWAY_TOKEN",
-            llm_providers: ["anthropic", "openai"],
-          },
-          provisioner: {
-            provider: "boat",
-            token_env: "BOAT_TOKEN",
-            snapshot: "usine-attempt",
-            tailnet: {
-              gateway_address: "100.64.0.2",
-              client_id_env: "TS_CLIENT",
-              client_secret_env: "TS_SECRET",
+    const config = Effect.runSync(
+      Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [],
+        workers: [
+          {
+            name: "boat",
+            kind: "ssh",
+            root: "/home/user/.usine",
+            identity_file: "/keys/boat",
+            gateway: {
+              domain: "gw.test",
+              destination: "gateway",
+              admin_token_env: "GATEWAY_TOKEN",
+              llm_providers: ["anthropic", "openai"],
+            },
+            provisioner: {
+              provider: "boat",
+              token_env: "BOAT_TOKEN",
+              snapshot: "usine-attempt",
+              tailnet: {
+                gateway_address: "100.64.0.2",
+                client_id_env: "TS_CLIENT",
+                client_secret_env: "TS_SECRET",
+              },
             },
           },
-        },
-      ],
-    });
+        ],
+      }),
+    );
     const resolve = (env: Record<string, string>) =>
       sshWorkerAddressesOf(config).pipe(
         Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),

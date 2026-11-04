@@ -1,6 +1,6 @@
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
-import { type DateTime, Effect, Option, Schema } from "effect";
+import { type Brand, type DateTime, Effect, Option, Schema } from "effect";
 
 /**
  * The stream that observed an item, such as `issue` or `pr`; decoding accepts any nonempty stream
@@ -22,7 +22,10 @@ export type ItemContentHash = typeof ItemContentHash.Type;
  * The latest payload a trigger observed for one Item. `goneAt` is the time a poll or re-check
  * found the Item missing on GitHub, or `None` while GitHub has it.
  */
-export class ItemProjection extends Schema.Class<ItemProjection>("@usine/engine/ItemProjection")({
+export class ItemProjection extends Schema.Class<
+  ItemProjection,
+  Brand.Brand<"@usine/engine/item-projection/model/ItemProjection">
+>("@usine/engine/ItemProjection")({
   /** The stable item identity used to replace its previous snapshot. */
   itemKey: ItemKey,
   /** The managed repo in which the item was observed. */

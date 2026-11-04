@@ -21,8 +21,8 @@ const ItemProjectionRow = Schema.Struct({
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(ItemProjectionRow));
 const decodeNumbers = Schema.decodeUnknownEffect(Schema.Array(ItemNumber));
-const encodePayload = Schema.encodeSync(Schema.JsonObject);
-const encodeGoneAt = Schema.encodeSync(ItemProjectionRow.fields.goneAt);
+const encodePayload = Schema.encodeEffect(Schema.JsonObject);
+const encodeGoneAt = Schema.encodeEffect(ItemProjectionRow.fields.goneAt);
 
 const persistence =
   (operation: string) =>
@@ -70,6 +70,7 @@ const makeReader = Effect.gen(function* () {
         .orderBy(desc(itemProjections.itemNumber))
         .limit(options.limit)
         .execute();
+
       return (yield* decodeRows(rows, { onExcessProperty: "error" })).map((row) =>
         ItemProjection.make(row),
       );
@@ -106,7 +107,8 @@ const makeWriter = Effect.gen(function* () {
         item: item.number,
         itemKey: item.itemKey,
       });
-      const goneAt = encodeGoneAt(item.goneAt);
+      const goneAt = yield* encodeGoneAt(item.goneAt);
+      const payloadJson = yield* encodePayload(item.payload);
       const changed = yield* database
         .insert(itemProjections)
         .values({
@@ -115,7 +117,7 @@ const makeWriter = Effect.gen(function* () {
           source: item.source,
           itemNumber: item.number,
           contentHash: item.contentHash,
-          payloadJson: encodePayload(item.payload),
+          payloadJson: payloadJson,
           goneAt,
         })
         .onConflictDoUpdate({
@@ -125,7 +127,7 @@ const makeWriter = Effect.gen(function* () {
             source: item.source,
             itemNumber: item.number,
             contentHash: item.contentHash,
-            payloadJson: encodePayload(item.payload),
+            payloadJson: payloadJson,
             goneAt,
           },
           setWhere: sql`${itemProjections.contentHash} != ${item.contentHash} OR ${distinctFrom(itemProjections.goneAt, sql`${goneAt}`)}`,
@@ -159,9 +161,10 @@ const makeWriter = Effect.gen(function* () {
       goneAt: DateTime.Utc,
     ) {
       yield* Effect.annotateCurrentSpan({ itemKey });
+      const goneAtJson = yield* encodeGoneAt(Option.some(goneAt));
       const marked = yield* database
         .update(itemProjections)
-        .set({ goneAt: encodeGoneAt(Option.some(goneAt)) })
+        .set({ goneAt: goneAtJson })
         .where(and(eq(itemProjections.itemKey, itemKey), isNull(itemProjections.goneAt)))
         .returning({ itemKey: itemProjections.itemKey, repository: itemProjections.repository })
         .execute();

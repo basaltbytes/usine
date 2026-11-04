@@ -22,7 +22,7 @@ import { SettingsPage } from "~/features/configuration/settings.page";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
 import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import {
   configurationFixture,
   configurationJson,
@@ -306,18 +306,20 @@ describe("Workers page", () => {
       "Limits 3584 MiB Derived from the machine at preflight: CPUs and processes",
     );
 
-    const checked = Schema.decodeUnknownSync(ConfigurationView)({
-      ...configurationJson,
-      workers: configurationJson.workers.map((worker) =>
-        worker.name === "eu-1"
-          ? {
-              ...worker,
-              prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
-              containerLimits: { cpus: 1.16, memoryMib: 3584, pids: 20325 },
-            }
-          : worker,
-      ),
-    });
+    const checked = await Effect.runPromise(
+      Schema.decodeUnknownEffect(ConfigurationView)({
+        ...configurationJson,
+        workers: configurationJson.workers.map((worker) =>
+          worker.name === "eu-1"
+            ? {
+                ...worker,
+                prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
+                containerLimits: { cpus: 1.16, memoryMib: 3584, pids: 20325 },
+              }
+            : worker,
+        ),
+      }),
+    );
     const after = text(await render(() => <WorkerDetail name="eu-1" configuration={checked} />));
     assert.include(
       after,

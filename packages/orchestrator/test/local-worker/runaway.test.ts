@@ -84,9 +84,13 @@ describe("local worker runaway guard", () => {
             event: SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(150) }),
           }),
         ).pipe(Effect.andThen(Effect.never));
+      const fixtureConfig = Effect.runSync(config);
       const ceiling = UsineConfig.make({
-        ...config,
-        settings: Settings.make({ ...config.settings, maxAttemptTokens: Option.some(100) }),
+        ...fixtureConfig,
+        settings: Settings.make({
+          ...fixtureConfig.settings,
+          maxAttemptTokens: Option.some(100),
+        }),
       });
       return Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -143,9 +147,13 @@ describe("local worker runaway guard", () => {
           Layer.provide(stubAttemptRuntime(storage, idle)),
           Layer.provide(claudeLoginLockLayer),
         );
+        const decodedValue1 = yield* config;
         const ceiling = UsineConfig.make({
-          ...config,
-          settings: Settings.make({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
+          ...decodedValue1,
+          settings: Settings.make({
+            ...decodedValue1.settings,
+            maxAttemptMinutes: Option.some(1),
+          }),
         });
         yield* Effect.gen(function* () {
           const scheduler = yield* StepExecutor;

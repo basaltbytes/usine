@@ -31,7 +31,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Claimed, CycleBlocked, RunAgainResult } from "@usine/engine/engine";
 import { ReadyOverview, RunView, ProjectView } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -89,7 +89,7 @@ const succeededRun = RunView.make({
   canRunAgain: true,
 });
 const runAgainBody = (result: RunAgainResult) =>
-  JSON.stringify(Schema.encodeSync(RunAgainResult)(result));
+  JSON.stringify(Effect.runSync(Schema.encodeEffect(RunAgainResult)(result)));
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;

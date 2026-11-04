@@ -11,6 +11,8 @@ import { RunId } from "@usine/core/run";
 import { LoopName } from "@usine/core/loop";
 import { ProjectId } from "@usine/core/project";
 import {
+  RunSummaryView,
+  AttemptSummaryView,
   ConfigurationView,
   FactoryOverview,
   ProjectView,
@@ -18,7 +20,7 @@ import {
   RunDetailView,
   RunView,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
@@ -61,7 +63,9 @@ it.each([1440, 390])(
       }),
     ];
     const configuration = ConfigurationView.make({ ...configurationFixture(), bindings });
-    const configurationJson = JSON.stringify(Schema.encodeSync(ConfigurationView)(configuration));
+    const configurationJson = JSON.stringify(
+      await Effect.runPromise(Schema.encodeEffect(ConfigurationView)(configuration)),
+    );
     await commands.configurationEditorResponses([], configurationJson);
     await commands.accessResponses(configurationJson, JSON.stringify(administratorPermissions));
     const template = fullTask().runs[0];
@@ -74,11 +78,22 @@ it.each([1440, 390])(
     const overview = ReadyOverview.make({
       ...taskOverview(),
       projects: taskOverview().projects.map((project) =>
-        ProjectView.make({ ...project, id: ProjectId.make("usine"), runs: [run] }),
+        ProjectView.make({
+          ...project,
+          id: ProjectId.make("usine"),
+          runs: [
+            RunSummaryView.make({
+              ...run,
+              attempts: run.attempts.map((attempt) => AttemptSummaryView.make(attempt)),
+            }),
+          ],
+        }),
       ),
       needsYou: [],
     });
-    const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
+    const overviewJson = JSON.stringify(
+      await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(overview)),
+    );
     const detail = RunDetailView.make({
       run,
       agentDefinitionChanged: false,
@@ -88,7 +103,9 @@ it.each([1440, 390])(
       sessionState: [],
       earlierTranscript: [],
     });
-    const detailJson = JSON.stringify(Schema.encodeSync(RunDetailView)(detail));
+    const detailJson = JSON.stringify(
+      await Effect.runPromise(Schema.encodeEffect(RunDetailView)(detail)),
+    );
     await commands.approvalResponses(overviewJson, overviewJson, detailJson, detailJson);
     await commands.githubChangesResponse('{"attempts":[]}');
     const client = new QueryClient({

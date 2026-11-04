@@ -9,7 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import { WorkerName } from "@usine/core/worker";
-import { Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { RemoteShell } from "../src/child-host/child-host.ts";
 import {
   AgentBlockedError,
@@ -64,7 +64,11 @@ describe("agent runtime contract", () => {
     });
 
     assert.deepStrictEqual(
-      Schema.decodeSync(ChildRequest)(Schema.encodeSync(ChildRequest)(request)),
+      Effect.runSync(
+        Schema.decodeEffect(ChildRequest)(
+          Effect.runSync(Schema.encodeEffect(ChildRequest)(request)),
+        ),
+      ),
       request,
     );
   });

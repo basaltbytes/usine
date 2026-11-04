@@ -1,20 +1,9 @@
 {
-  "src/access.ts": {
-    "schemaClassMissingBrand": 3
-  },
   "src/checks.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2
+    "deterministicKeys": 1
   },
   "src/credentials.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 2
-  },
-  "src/delivery.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/error.ts": {
-    "schemaClassMissingBrand": 4
+    "deterministicKeys": 1
   },
   "src/github-app.ts": {
     "deterministicKeys": 1
@@ -22,45 +11,26 @@
   "src/http.ts": {
     "preferBarrelImport": 1
   },
-  "src/installation.ts": {
-    "schemaClassMissingBrand": 5
-  },
   "src/item-history.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 4
+    "deterministicKeys": 1
   },
   "src/item-writer.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 1
   },
   "src/jwt.ts": {
     "asyncFunction": 1,
     "globalJson": 1
   },
   "src/label-writer.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 1
   },
   "src/local-secrets.ts": {
-    "globalJsonInEffect": 1,
-    "schemaClassMissingBrand": 3
-  },
-  "src/polling/detection.ts": {
-    "schemaClassMissingBrand": 6
-  },
-  "src/polling/labels.ts": {
-    "schemaClassMissingBrand": 3
-  },
-  "src/polling/payload.ts": {
-    "schemaClassMissingBrand": 2
+    "globalJsonInEffect": 1
   },
   "src/polling/polling.ts": {
     "deterministicKeys": 1,
     "globalDate": 1,
     "globalJsonInEffect": 1
-  },
-  "src/retry.ts": {
-    "schemaClassMissingBrand": 1
   },
   "test/checks.test.ts": {
     "globalJson": 1,
@@ -71,29 +41,22 @@
     "globalDateInEffect": 1,
     "globalJson": 5,
     "globalJsonInEffect": 2,
-    "nodeBuiltinImport": 1,
-    "schemaSync": 5,
-    "schemaSyncInEffect": 3
+    "nodeBuiltinImport": 1
   },
   "test/integration/github-app.test.ts": {
     "globalFetchInEffect": 2,
     "globalJsonInEffect": 1
   },
   "test/item-history.test.ts": {
-    "globalJson": 2,
-    "schemaSync": 1
+    "globalJson": 2
   },
   "test/item-writer.test.ts": {
     "globalJson": 2,
-    "globalJsonInEffect": 1,
-    "schemaSync": 2,
-    "schemaSyncInEffect": 1
+    "globalJsonInEffect": 1
   },
   "test/label-writer.test.ts": {
     "globalJson": 1,
-    "globalJsonInEffect": 1,
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
+    "globalJsonInEffect": 1
   },
   "test/local-secrets.test.ts": {
     "globalJsonInEffect": 7
@@ -102,9 +65,7 @@
     "globalDate": 1,
     "globalDateInEffect": 1,
     "globalJson": 2,
-    "globalJsonInEffect": 1,
-    "schemaSync": 5,
-    "schemaSyncInEffect": 3
+    "globalJsonInEffect": 1
   },
   "test/request-retry.test.ts": {
     "globalJsonInEffect": 1

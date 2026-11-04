@@ -104,3 +104,7 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 Attempt timing and provider-retry helpers accept the metadata they use, so polling summaries can omit prompts and comments.
 
 `ContainerScratchMib` in `@usine/core/worker` validates positive integer capacities for memory-backed container scratch filesystems.
+
+## Schema contracts
+
+Domain records and tagged errors use nominal Schema brands. Construct validated records with their schema’s `make` method, or decode input with `Schema.decodeUnknownEffect`; a structurally matching object does not satisfy the record type.

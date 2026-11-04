@@ -1,16 +1,20 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { Effect, type FileSystem, type Path, Schema, Layer } from "effect";
+import { Config, Effect, type FileSystem, type Path, Schema, Layer } from "effect";
 import { CodexChildBackend } from "../../src/runtime.ts";
 import { codexAppServerLive } from "../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../src/pi/codex/codex.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
 
-const brain = BrainSpec.make({
-  harness: "codex",
-  model: Schema.decodeUnknownSync(ModelId)(process.env.USINE_CODEX_INTEGRATION_MODEL),
-  effort: "low",
+const brain = Effect.gen(function* () {
+  const decodedValue2 = yield* Config.String("USINE_CODEX_INTEGRATION_MODEL");
+  const decodedValue1 = yield* Schema.decodeEffect(ModelId)(decodedValue2);
+  return BrainSpec.make({
+    harness: "codex",
+    model: decodedValue1,
+    effort: "low",
+  });
 });
 
 const live = <A, E>(
@@ -35,8 +39,10 @@ describe("Codex child live contract", () => {
       () =>
         live(
           Effect.gen(function* () {
+            const fixtureBrain = yield* brain;
             const codexChildBackend = yield* CodexChildBackend;
-            return yield* steeringContract(codexChildBackend, brain, child);
+
+            return yield* steeringContract(codexChildBackend, fixtureBrain, child);
           }),
         ),
       210_000,
@@ -47,8 +53,10 @@ describe("Codex child live contract", () => {
       () =>
         live(
           Effect.gen(function* () {
+            const fixtureBrain = yield* brain;
             const codexChildBackend = yield* CodexChildBackend;
-            return yield* interruptionContract(codexChildBackend, brain, child);
+
+            return yield* interruptionContract(codexChildBackend, fixtureBrain, child);
           }),
         ),
       150_000,

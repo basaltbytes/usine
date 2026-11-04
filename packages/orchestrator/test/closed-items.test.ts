@@ -119,7 +119,9 @@ const fixPr = LoopFile.make({
 });
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
   LoadedInstance.make({
-    config: Schema.decodeSync(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
+    config: Effect.runSync(
+      Schema.decodeEffect(UsineConfig)({ version: 1, repos: [{ name: repository }] }),
+    ),
     agents: [developer],
     invalidAgents: [],
     quarantinedLoops: [],
@@ -359,7 +361,8 @@ describe("Items no Loop acts on", () => {
           assert.deepStrictEqual(currentAsks, []);
           const currentAttentionTags = yield* needTags(instance);
           assert.deepStrictEqual(currentAttentionTags, []);
-          const currentGeneration = yield* budgets.generation(gitHubItemKey(repository, 468));
+          const fixtureValue1 = yield* gitHubItemKey(repository, 468);
+          const currentGeneration = yield* budgets.generation(fixtureValue1);
           assert.strictEqual(currentGeneration, 0);
           // The budget wasn't reset, so the reopened pull request is at its limit again.
           update(items, 468, { state: "OPEN" });
@@ -389,6 +392,7 @@ describe("Items no Loop acts on", () => {
           assert(failed?.run.state._tag === "Failed");
           const attentionTags = yield* needTags(instance);
           assert.deepStrictEqual(attentionTags, ["RunFailureNeed"]);
+
           assert.isNull((yield* operator.detail(instance, failed.run.id)).settledItemState);
           update(items, 177, { state: "CLOSED" });
           yield* polling.poll(instance);
@@ -483,18 +487,20 @@ describe("Items no Loop acts on", () => {
             ? startDev("required")
             : LoopFile.make({ ...reviewPr, approval: "required" }),
         ]),
-        config: Schema.decodeSync(UsineConfig)({
-          version: 1,
-          repos: [
-            {
-              name: repository,
-              lanes: [
-                { name: "Ready", sources: [{ label }] },
-                { name: "Triage", sources: [{ label: "triage" }] },
-              ],
-            },
-          ],
-        }),
+        config: Effect.runSync(
+          Schema.decodeEffect(UsineConfig)({
+            version: 1,
+            repos: [
+              {
+                name: repository,
+                lanes: [
+                  { name: "Ready", sources: [{ label }] },
+                  { name: "Triage", sources: [{ label: "triage" }] },
+                ],
+              },
+            ],
+          }),
+        ),
       });
       return withFactory(
         items,
@@ -549,7 +555,8 @@ describe("Items no Loop acts on", () => {
           const history = yield* reader.list(repository, { limit: 500 });
           assert.lengthOf(history, 500);
           assert(history.every(({ number }) => number >= 203));
-          const stored = yield* reader.get(gitHubItemKey(repository, 182));
+          const fixtureValue2 = yield* gitHubItemKey(repository, 182);
+          const stored = yield* reader.get(fixtureValue2);
           assert(Option.isSome(stored));
           yield* writer.upsert(
             ItemProjection.make({
@@ -567,7 +574,7 @@ describe("Items no Loop acts on", () => {
           if (kind === "issue") {
             yield* writer.upsert(
               ItemProjection.make({
-                itemKey: gitHubItemKey(repository, 702),
+                itemKey: yield* gitHubItemKey(repository, 702),
                 repository,
                 source: ItemProjectionSource.make("pr"),
                 number: ItemNumber.make(702),
@@ -607,6 +614,7 @@ describe("Items no Loop acts on", () => {
               [182, 702],
             );
             assert.strictEqual(linked.current, stored.value.itemKey);
+
             const grouped = (yield* operator.overview(instance)).projects.flatMap(({ board }) =>
               board.lanes.flatMap(({ items }) => items),
             );
@@ -623,6 +631,7 @@ describe("Items no Loop acts on", () => {
               payload: { number: 182 },
             }),
           );
+
           const refreshed = (yield* operator.overview(instance)).needsYou.filter(
             (need) => need._tag === "ApprovalNeed",
           );
@@ -697,6 +706,7 @@ describe("Items no Loop acts on", () => {
           yield* settledRuns;
           for (const number of [468, 469]) update(items, number, { round: 2 });
           yield* polling.poll(instance);
+
           assert.deepStrictEqual([...(yield* needTags(instance))].sort(), [
             "CycleBudgetNeed",
             "CycleBudgetNeed",

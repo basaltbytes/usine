@@ -43,7 +43,8 @@ import { testAgent, lifecycleSubmission } from "./support.ts";
 const seedPendingRun = (runId: RunId) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const agent = JSON.stringify(Schema.encodeSync(Agent)(testAgent));
+    const valueDecoded1 = yield* Schema.encodeEffect(Agent)(testAgent);
+    const agent = JSON.stringify(valueDecoded1);
     const eventId = lifecycleSubmission.event.id;
     yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
       VALUES (${eventId}, ${lifecycleSubmission.event.dedupKey}, '{}', '2026-10-01T00:00:00.000Z')`;
@@ -91,8 +92,9 @@ describe("Attempt migrations", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
+          const valueDecoded2 = yield* Schema.encodeEffect(Agent)(testAgent);
           // Seeds the old schema directly, because the current store writes columns from later migrations.
-          const agent = JSON.stringify(Schema.encodeSync(Agent)(testAgent));
+          const agent = JSON.stringify(valueDecoded2);
           const eventId = lifecycleSubmission.event.id;
           yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
             VALUES (${eventId}, 'upgrade-event', '{}', '2026-09-12T00:00:00.000Z')`;
@@ -101,8 +103,9 @@ describe("Attempt migrations", () => {
           yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
             VALUES (${runId}, ${eventId}, ${lifecycleSubmission.loop}, '{"_tag":"Pending"}', '2026-09-12T00:00:00.000Z', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
           yield* sql`INSERT INTO usine_steps (run_id, step_name) VALUES (${runId}, ${lifecycleSubmission.step})`;
+          const decodedValue1 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
           yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at)
-        VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain))}, '2026-09-12T00:00:00.000Z')`;
+        VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${JSON.stringify(decodedValue1)}, '2026-09-12T00:00:00.000Z')`;
           const envelope = JSON.stringify({
             _tag: "OutboundEnvelope",
             version: 4,
@@ -148,6 +151,7 @@ describe("Attempt migrations", () => {
         const sql = yield* SqlClient.SqlClient;
         const rows = yield* sql`PRAGMA foreign_key_check`;
         assert.deepStrictEqual(rows, []);
+
         assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
         const before = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
         yield* sql`UPDATE usine_attempts SET operator_intervened = 1 WHERE attempt_id = ${id}`;
@@ -209,6 +213,7 @@ describe("Run driver migration", () => {
           WHERE type = 'table' AND (name LIKE 'cluster_%' OR name = 'usine_workflow_commands')`;
         assert.deepStrictEqual(remaining, []);
         const store = yield* RunStore;
+
         assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Pending");
       }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -268,6 +273,7 @@ describe("Event reopening migration", () => {
           const returned = yield* store.recordAndClaim(lifecycleSubmission, RunId.make("unused"));
           assert(returned.result._tag === "Claimed");
           assert.notStrictEqual(returned.result.runId, runId);
+
           assert.strictEqual(
             (yield* store.snapshot(returned.result.runId)).run.state._tag,
             "Pending",
@@ -325,7 +331,8 @@ describe("Attempt salvage check migration", () => {
           ref: "usine/salvage/salvage-check-run/1",
           commit: "0123456789abcdef0123456789abcdef01234567",
         });
-        const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
+        const valueDecoded3 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
+        const brain = JSON.stringify(valueDecoded3);
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* seedPendingRun(runId);
@@ -399,7 +406,8 @@ describe("Attempt start migration", () => {
           ),
         );
         const runId = RunId.make("attempt-start-run");
-        const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
+        const valueDecoded4 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
+        const brain = JSON.stringify(valueDecoded4);
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* seedPendingRun(runId);
@@ -448,6 +456,7 @@ describe("Run approval source migration", () => {
             const rows =
               yield* sql`SELECT id, hash, created_at, applied_at FROM usine_migrations ORDER BY id`;
             assert.deepStrictEqual(rows, previous);
+
             assert.strictEqual(
               (yield* sql`SELECT name FROM usine_migrations WHERE name = '20261029101340_member_approval_source'`)
                 .length,
@@ -538,6 +547,7 @@ describe("Run approval source migration", () => {
             const sql = yield* SqlClient.SqlClient;
             const rows = yield* sql`PRAGMA foreign_key_check`;
             assert.deepStrictEqual(rows, []);
+
             assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
             const rejected =
               yield* sql`UPDATE usine_approvals SET channel = 'invalid' WHERE run_id = ${runId}`.pipe(
@@ -584,7 +594,8 @@ describe("Run close time migration", () => {
         Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` })),
       );
       const runId = RunId.make("closed-before-upgrade");
-      const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
+      const valueDecoded5 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
+      const brain = JSON.stringify(valueDecoded5);
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* seedPendingRun(runId);
@@ -599,6 +610,7 @@ describe("Run close time migration", () => {
       );
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
+
         assert.deepStrictEqual(
           (yield* store.snapshot(runId)).closedAt,
           Option.some(DateTime.makeUnsafe("2026-10-19T01:00:00.000Z")),
@@ -650,7 +662,8 @@ describe("Transcript read model migration", () => {
             const runId = RunId.make("transcript-upgrade");
             yield* seedPendingRun(runId);
             const at = DateTime.makeUnsafe("2026-11-01T00:00:00.000Z");
-            const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
+            const valueDecoded6 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
+            const brain = JSON.stringify(valueDecoded6);
             for (const attempt of [1, 2]) {
               const attemptId = AttemptId.make(`transcript-upgrade-${attempt}`);
               yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json)
@@ -708,17 +721,16 @@ describe("Transcript read model migration", () => {
                 ),
               ];
               for (const [i, event] of events.entries()) {
-                const envelope = JSON.stringify(
-                  Schema.encodeSync(AttemptChannel.Envelope)(
-                    AttemptChannel.OutboundEnvelope.make({
-                      version: AttemptChannel.PROTOCOL_VERSION,
-                      attemptId,
-                      sequence: AttemptChannel.Sequence.make(i + 1),
-                      sentAt: at,
-                      payload: AttemptChannel.SessionEvent.make({ event }),
-                    }),
-                  ),
+                const valueDecoded7 = yield* Schema.encodeEffect(AttemptChannel.Envelope)(
+                  AttemptChannel.OutboundEnvelope.make({
+                    version: AttemptChannel.PROTOCOL_VERSION,
+                    attemptId,
+                    sequence: AttemptChannel.Sequence.make(i + 1),
+                    sentAt: at,
+                    payload: AttemptChannel.SessionEvent.make({ event }),
+                  }),
                 );
+                const envelope = JSON.stringify(valueDecoded7);
                 yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)
               VALUES (${attemptId}, 'outbound', ${i + 1}, ${envelope}, '2026-11-01T00:00:00.000Z')`;
                 yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at)
@@ -760,6 +772,7 @@ describe("Transcript read model migration", () => {
           );
           const updatedRows = yield* sql`PRAGMA foreign_key_check`;
           assert.deepStrictEqual(updatedRows, []);
+
           assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
         }).pipe(Effect.provide(localSqliteLayer(directory)));
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

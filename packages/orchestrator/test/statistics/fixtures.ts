@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import {
@@ -11,7 +12,7 @@ const repository = RepositoryName.make("basaltbytes/usine");
 
 export const issue = (number: number, pullRequests: ReadonlyArray<number>) =>
   ItemProjection.make({
-    itemKey: gitHubItemKey(repository, number),
+    itemKey: Effect.runSync(gitHubItemKey(repository, number)),
     repository,
     source: ItemProjectionSource.make("issue"),
     number: ItemNumber.make(number),
@@ -45,7 +46,7 @@ export const issue = (number: number, pullRequests: ReadonlyArray<number>) =>
   });
 export const mergedPullRequest = (number: number, mergedAt: string) =>
   ItemProjection.make({
-    itemKey: gitHubItemKey(repository, number),
+    itemKey: Effect.runSync(gitHubItemKey(repository, number)),
     repository,
     source: ItemProjectionSource.make("pr"),
     number: ItemNumber.make(number),

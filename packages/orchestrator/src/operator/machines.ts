@@ -13,13 +13,14 @@ import {
   WorkerName,
 } from "@usine/core/worker";
 import { MachineState, type MachineStatus, MachineUnavailableReason } from "@usine/executor";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { type Brand, DateTime, Effect, Option, Schema } from "effect";
 import type { ProvisioningPause } from "../worker-status.ts";
 
 /** A quota refusal that prevents a run's leased worker from creating its machine. */
-export class MachineQuotaWait extends Schema.Class<MachineQuotaWait>(
-  "@usine/orchestrator/MachineQuotaWait",
-)({
+export class MachineQuotaWait extends Schema.Class<
+  MachineQuotaWait,
+  Brand.Brand<"@usine/orchestrator/operator/machines/MachineQuotaWait">
+>("@usine/orchestrator/MachineQuotaWait")({
   /** The worker assigned to the run. */
   worker: WorkerName,
   /** The provider's quota refusal. */
@@ -42,7 +43,10 @@ export const quotaWaits = (
   );
 
 /** A machine that a provisioned Worker created for one Attempt and hasn't deleted yet. */
-export class MachineView extends Schema.Class<MachineView>("@usine/orchestrator/MachineView")({
+export class MachineView extends Schema.Class<
+  MachineView,
+  Brand.Brand<"@usine/orchestrator/operator/machines/MachineView">
+>("@usine/orchestrator/MachineView")({
   /** The configured worker name. */
   worker: WorkerName,
   /** The provider hosting this attempt machine. */
@@ -64,9 +68,10 @@ export class MachineView extends Schema.Class<MachineView>("@usine/orchestrator/
 }) {}
 
 /** A provisioned Worker whose last machine creation failed, and when it tries again. */
-export class ProvisioningPauseView extends Schema.Class<ProvisioningPauseView>(
-  "@usine/orchestrator/ProvisioningPauseView",
-)({
+export class ProvisioningPauseView extends Schema.Class<
+  ProvisioningPauseView,
+  Brand.Brand<"@usine/orchestrator/operator/machines/ProvisioningPauseView">
+>("@usine/orchestrator/ProvisioningPauseView")({
   /** Why the creation failed, or `check` if the first machine of the day failed its preflight. */
   reason: Schema.Union([MachineUnavailableReason, Schema.Literal("check")]),
   /** The diagnostic text to show to the operator. */
@@ -82,9 +87,10 @@ export class ProvisioningPauseView extends Schema.Class<ProvisioningPauseView>(
 }) {}
 
 /** A Hetzner Cloud provisioner from `usine.yaml`, with the names of its variables only. */
-export class HetznerProvisionerView extends Schema.TaggedClass<HetznerProvisionerView>(
-  "@usine/orchestrator/HetznerProvisionerView",
-)("hetzner", {
+export class HetznerProvisionerView extends Schema.TaggedClass<
+  HetznerProvisionerView,
+  Brand.Brand<"@usine/orchestrator/operator/machines/HetznerProvisionerView">
+>("@usine/orchestrator/HetznerProvisionerView")("hetzner", {
   /** The environment-variable name for the Hetzner API token, never its value. */
   tokenEnv: Schema.String,
   /** The Hetzner server type to create. */
@@ -112,9 +118,10 @@ export class HetznerProvisionerView extends Schema.TaggedClass<HetznerProvisione
 }) {}
 
 /** A Boat provisioner from `usine.yaml`, with the names of its variables only. */
-export class BoatProvisionerView extends Schema.TaggedClass<BoatProvisionerView>(
-  "@usine/orchestrator/BoatProvisionerView",
-)("boat", {
+export class BoatProvisionerView extends Schema.TaggedClass<
+  BoatProvisionerView,
+  Brand.Brand<"@usine/orchestrator/operator/machines/BoatProvisionerView">
+>("@usine/orchestrator/BoatProvisionerView")("boat", {
   /** The environment-variable name for the Boat API token, never its value. */
   tokenEnv: Schema.String,
   /** The Boat machine size to create. */

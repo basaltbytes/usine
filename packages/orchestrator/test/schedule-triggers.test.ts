@@ -67,7 +67,7 @@ const isSchedulePayload = Schema.is(
 );
 
 const configWith = (repos: ReadonlyArray<{ readonly name: string; readonly tags?: string[] }>) =>
-  Schema.decodeSync(UsineConfig)({ version: 1, repos });
+  Effect.runSync(Schema.decodeEffect(UsineConfig)({ version: 1, repos }));
 
 const scheduleLoop = (
   config: UsineConfig,
@@ -85,8 +85,8 @@ const scheduleLoop = (
     trigger: ScheduleTrigger.make({
       on: "schedule",
       if: Source.make(options.expression ?? "true"),
-      cron: Schema.decodeSync(CronExpression)(options.cron),
-      tz: Schema.decodeSync(TimeZone)(options.tz ?? "UTC"),
+      cron: Effect.runSync(Schema.decodeEffect(CronExpression)(options.cron)),
+      tz: Effect.runSync(Schema.decodeEffect(TimeZone)(options.tz ?? "UTC")),
     }),
     selector:
       options.selectedTag === undefined
@@ -349,11 +349,15 @@ describe("ScheduleTriggers", () => {
           if (spin > 1_000) return yield* Effect.die("the first cycle never submitted");
           yield* Effect.yieldNow;
         }
+
         assert.strictEqual((yield* Ref.get(submissions)).length, 1);
         yield* TestClock.adjust("29 seconds");
+
         assert.strictEqual((yield* Ref.get(submissions)).length, 1);
         yield* TestClock.adjust("1 second");
+
         assert.strictEqual((yield* Ref.get(submissions)).length, 2);
+
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ event }) => event.payload),
           [
@@ -397,12 +401,14 @@ describe("ScheduleTriggers", () => {
           }),
         );
         yield* TestClock.adjust("1 second");
+
         assert.strictEqual((yield* Ref.get(submissions)).length, 0);
         yield* SubscriptionRef.set(current, instanceWith(config, [loop]));
         for (let spin = 0; (yield* Ref.get(submissions)).length === 0; spin += 1) {
           if (spin > 1_000) return yield* Effect.die("the reloaded Loop was never evaluated");
           yield* Effect.yieldNow;
         }
+
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ event }) => event.payload),
           [
@@ -439,6 +445,7 @@ describe("ScheduleTriggers", () => {
         assert(Schema.is(ScheduleTickFailure)(failure));
         assert.strictEqual(failure.repository, "basaltbytes/failing");
         assert.strictEqual(failure.errorTag, "EnginePersistenceError");
+
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ repository }) => repository),
           ["basaltbytes/healthy"],
@@ -488,6 +495,7 @@ describe("ScheduleTriggers", () => {
         assert(Schema.is(ScheduleTickFailure)(failure));
         assert.strictEqual(failure.loop, broken.name);
         assert.strictEqual(failure.errorTag, "ConfigFileError");
+
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ loop, task }) => ({ loop, task })),
           [{ loop: healthy.name, task: `Rendered ${healthy.name}.` }],
@@ -544,6 +552,7 @@ describe("ScheduleTriggers", () => {
         // cycle reports it.
         assert.strictEqual(second.submissions.length, 1);
         assert.strictEqual(second.alreadyFired, 1);
+
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ loop }) => loop),
           ["minutely", "daily", "minutely"],
@@ -558,6 +567,7 @@ describe("ScheduleTriggers", () => {
         yield* TestClock.adjust("60 seconds");
         const third = yield* schedules.tick(reloaded);
         assert.strictEqual(third.alreadyFired, 0);
+
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ loop }) => loop),
           ["minutely", "daily", "minutely", "minutely", "daily"],

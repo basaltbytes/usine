@@ -23,6 +23,8 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { RepositoryName } from "@usine/core/repository";
 import { type ConfigurationEditor, BoardMove } from "@usine/orchestrator/operator";
 import {
+  ConfigurationEntityRequest,
+  ConfigurationRevisionQuery,
   OperatorApi,
   OperatorHttpError,
   OperatorHttpPolicy,
@@ -445,19 +447,23 @@ const handlers = HttpApiBuilder.group(
         }),
       )
       .handle("configurationRevisions", ({ query }) =>
-        fromConfiguration((editor) => editor.list(query)),
+        fromConfiguration((editor) => editor.list(ConfigurationRevisionQuery.make(query))),
       )
       .handle("configurationRevision", ({ params }) =>
         fromConfigurationRevision((editor) => editor.revision(params.number)),
       )
       .handle("configurationEntity", ({ params }) =>
-        fromConfiguration((editor) => editor.entity(params)),
+        fromConfiguration((editor) => editor.entity(ConfigurationEntityRequest.make(params))),
       )
       .handle("replaceConfigurationEntity", ({ params, payload }) =>
-        fromConfigurationRevision((editor) => editor.replace(params, payload)),
+        fromConfigurationRevision((editor) =>
+          editor.replace(ConfigurationEntityRequest.make(params), payload),
+        ),
       )
       .handle("deleteConfigurationEntity", ({ params, payload }) =>
-        fromConfigurationRevision((editor) => editor.remove(params, payload)),
+        fromConfigurationRevision((editor) =>
+          editor.remove(ConfigurationEntityRequest.make(params), payload),
+        ),
       )
       .handle("revertConfigurationRevision", ({ params, payload }) =>
         fromConfigurationRevision((editor) => editor.revert(params.number, payload)),

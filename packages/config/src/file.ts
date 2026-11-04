@@ -1,5 +1,5 @@
 import { Source } from "@usine/expression/expression-engine";
-import { Match, Option, Schema, SchemaIssue } from "effect";
+import { type Brand, Match, Option, Schema, SchemaIssue } from "effect";
 
 /** A file path relative to the instance folder. */
 export const InstancePath = Schema.NonEmptyString.pipe(Schema.brand("InstancePath"));
@@ -34,9 +34,10 @@ export const ConfigProblem = Schema.Struct({
  * A failure associated with one file or entity at a validation stage. Permissive folder loading
  * quarantines the affected agent or loop.
  */
-export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
-  "@usine/config/ConfigFileError",
-)("ConfigFileError", {
+export class ConfigFileError extends Schema.TaggedError<
+  ConfigFileError,
+  Brand.Brand<"@usine/config/file/ConfigFileError">
+>("@usine/config/ConfigFileError")("ConfigFileError", {
   /** The relative file path or entity key associated with the failure. */
   file: InstancePath,
   /** The loading or validation stage that failed. */
@@ -77,9 +78,10 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
 }
 
 /** An error loading the registry or settings, which fails the whole instance load. */
-export class FactoryConfigError extends Schema.TaggedError<FactoryConfigError>(
-  "@usine/config/FactoryConfigError",
-)("FactoryConfigError", {
+export class FactoryConfigError extends Schema.TaggedError<
+  FactoryConfigError,
+  Brand.Brand<"@usine/config/file/FactoryConfigError">
+>("@usine/config/FactoryConfigError")("FactoryConfigError", {
   /** The relative file path or entity key associated with the failure. */
   file: InstancePath,
   /** The loading or validation stage that failed. */

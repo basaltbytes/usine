@@ -3,7 +3,7 @@ import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReleaseVersion, UpgradeRecord, type UpgradeTiming } from "@usine/core/upgrade";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
-import { Schema } from "effect";
+import { Effect, flow, Schema } from "effect";
 import { Suspense } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -34,7 +34,7 @@ const available = UpgradeView.make({
   message: null,
   outcome: null,
 });
-const json = Schema.encodeSync(Schema.fromJsonString(UpgradeView));
+const json = flow(Schema.encodeEffect(Schema.fromJsonString(UpgradeView)), Effect.runSync);
 
 it.each(["idle", "now"] satisfies ReadonlyArray<UpgradeTiming>)(
   "requests the %s upgrade and shows progress on desktop and mobile",

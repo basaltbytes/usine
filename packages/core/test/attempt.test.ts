@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { DateTime, Option, Schema } from "effect";
+import { flow, Effect, DateTime, Option, Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
@@ -36,8 +36,11 @@ const childBudget = ChildSessionBudgetFailure.make({
   attemptedChildren: ChildSessionCount.make(5),
 });
 const n = AttemptNumber.make;
-const decodeAttemptNumber = Schema.decodeUnknownSync(AttemptNumber);
-const decodeChildSessionBudget = Schema.decodeUnknownSync(ChildSessionBudget);
+const decodeAttemptNumber = flow(Schema.decodeUnknownEffect(AttemptNumber), Effect.runSync);
+const decodeChildSessionBudget = flow(
+  Schema.decodeUnknownEffect(ChildSessionBudget),
+  Effect.runSync,
+);
 
 describe("auto-retry law (ADR 0002, ADR 0013)", () => {
   it("infrastructure and capacity failures permit automatic retries", () => {
@@ -80,7 +83,7 @@ describe("construction is the only door", () => {
     ).toThrow();
   });
   it("rejects a resolution with an invalid time, operator, or unknown field", () => {
-    const decode = Schema.decodeUnknownSync(FailureResolution);
+    const decode = flow(Schema.decodeUnknownEffect(FailureResolution), Effect.runSync);
     const resolution = { resolvedAt: "2026-10-27T00:00:00Z", operator: "Philippe" };
     expect(() => decode({ ...resolution, resolvedAt: "not-a-time" })).toThrow();
     expect(() => decode({ ...resolution, operator: "" })).toThrow();
@@ -102,11 +105,11 @@ describe("construction is the only door", () => {
   });
 
   it("empty ids are unconstructible", () => {
-    expect(() => Schema.decodeSync(EventId)("")).toThrow();
+    expect(() => Effect.runSync(Schema.decodeEffect(EventId)(""))).toThrow();
   });
 
   it("an Event rejects payloads that SQLite cannot preserve as JSON", () => {
-    const decodeEvent = Schema.decodeUnknownSync(Event);
+    const decodeEvent = flow(Schema.decodeUnknownEffect(Event), Effect.runSync);
     expect(() =>
       decodeEvent({
         id: EventId.make("event-1"),
@@ -143,7 +146,9 @@ describe("retained push refusal", () => {
       commit: null,
       message: "push failed",
     } as const;
-    expect(Option.isNone(Schema.decodeSync(SalvageRetained)(legacy).pushFailure)).toBe(true);
+    expect(
+      Option.isNone(Effect.runSync(Schema.decodeEffect(SalvageRetained)(legacy)).pushFailure),
+    ).toBe(true);
     const failure = GitHubPushFailure.make({
       repository: RepositoryName.make("acme/demo"),
       ref: "refs/heads/usine/salvage/run/1",
@@ -156,6 +161,10 @@ describe("retained push refusal", () => {
       pushFailure: Option.some(failure),
     });
     const json = Schema.fromJsonString(SalvageRetained);
-    expect(Schema.decodeSync(json)(Schema.encodeSync(json)(retained))).toEqual(retained);
+    expect(
+      Effect.runSync(
+        Schema.decodeEffect(json)(Effect.runSync(Schema.encodeEffect(json)(retained))),
+      ),
+    ).toEqual(retained);
   });
 });

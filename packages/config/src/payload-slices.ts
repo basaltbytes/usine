@@ -10,7 +10,7 @@ import { Schema } from "effect";
 import type { ManagedRepo } from "./factory.ts";
 import type { Stream } from "./trigger.ts";
 
-const reference = Schema.decodeUnknownSync(TypeReference);
+const reference = TypeReference.make;
 
 /**
  * A field name, its CEL type, and `nullable` if the GitHub payload can have `null` for the field

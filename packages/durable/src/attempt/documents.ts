@@ -6,7 +6,7 @@ import {
   type TaskId,
 } from "@earendil-works/pi-durable";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /**
  * The return value of a completed `usine.attempt` task. `answeredOperator` is absent on older
@@ -135,7 +135,9 @@ export const HoldDoc = defineDoc<Hold>({
   checkpointWhen: () => false,
   initial: () => ({ paused: false, guidance: [], held: [] }),
   migrate: (value) => {
-    const legacy = Schema.decodeUnknownSync(LegacyHold)(value, { onExcessProperty: "error" });
+    const legacy = Effect.runSync(
+      Schema.decodeUnknownEffect(LegacyHold)(value, { onExcessProperty: "error" }),
+    );
     return {
       ...legacy,
       held: [...legacy.held],

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Option, Result, Schema } from "effect";
+import { flow, Effect, DateTime, Option, Result, Schema } from "effect";
 import { Agent, AgentPersona, AgentName } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 import {
@@ -55,12 +55,20 @@ const spec = AttemptChannel.RunSpec.make({
 
 describe("attempt channel", () => {
   it("reads older delivery receipts and round-trips the forwarded child identity", () => {
-    const decode = Schema.decodeUnknownSync(AttemptChannel.InterventionState);
+    const decode = flow(
+      Schema.decodeUnknownEffect(AttemptChannel.InterventionState),
+      Effect.runSync,
+    );
     assert.isTrue(Option.isNone(decode({ held: false, paused: false }).forwardedTo));
     const forwarded = decode({ held: false, paused: false, queued: true, forwardedTo: "child-1" });
     assert.deepStrictEqual(forwarded.forwardedTo, Option.some(AgentSessionId.make("child-1")));
     const json = Schema.fromJsonString(AttemptChannel.InterventionState);
-    assert.deepStrictEqual(Schema.decodeSync(json)(Schema.encodeSync(json)(forwarded)), forwarded);
+    assert.deepStrictEqual(
+      Effect.runSync(
+        Schema.decodeEffect(json)(Effect.runSync(Schema.encodeEffect(json)(forwarded))),
+      ),
+      forwarded,
+    );
   });
   it("preserves legacy worker recoveries and round-trips initial confirmations", () => {
     const notice = {
@@ -68,12 +76,18 @@ describe("attempt channel", () => {
       worker: "remote",
       lastAnsweredAt: "2026-10-28T00:00:00Z",
     };
-    const decode = Schema.decodeUnknownSync(AttemptChannel.WorkerResponsive);
+    const decode = flow(
+      Schema.decodeUnknownEffect(AttemptChannel.WorkerResponsive),
+      Effect.runSync,
+    );
     assert.isTrue(decode(notice).recovered);
     const initial = decode({ ...notice, recovered: false });
     assert.isFalse(initial.recovered);
     const json = Schema.fromJsonString(AttemptChannel.WorkerResponsive);
-    assert.deepStrictEqual(Schema.decodeSync(json)(Schema.encodeSync(json)(initial)), initial);
+    assert.deepStrictEqual(
+      Effect.runSync(Schema.decodeEffect(json)(Effect.runSync(Schema.encodeEffect(json)(initial)))),
+      initial,
+    );
   });
   it("reads legacy worker notices as one failed probe and rejects invalid probe counts", () => {
     const notice = {
@@ -82,7 +96,10 @@ describe("attempt channel", () => {
       lastAnsweredAt: "2026-10-28T00:00:00Z",
       reason: "SSH timed out",
     };
-    const decode = Schema.decodeUnknownSync(AttemptChannel.WorkerUnresponsive);
+    const decode = flow(
+      Schema.decodeUnknownEffect(AttemptChannel.WorkerUnresponsive),
+      Effect.runSync,
+    );
     assert.strictEqual(decode(notice).unansweredProbes, 1);
     assert.strictEqual(decode({ ...notice, unansweredProbes: 3 }).unansweredProbes, 3);
     for (const unansweredProbes of [0, -1, 1.5])
@@ -113,19 +130,21 @@ describe("attempt channel", () => {
       }),
     });
 
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
+    const encoded = Effect.runSync(Schema.encodeEffect(EnvelopeJson)(envelope));
+    const decoded = Effect.runSync(
+      Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      }),
+    );
 
     assert.deepStrictEqual(decoded, envelope);
   });
 
   it("decodes a Comment fact stored without its time as none", () => {
     const stored = { _tag: "Comment", url: "https://github.com/acme/demo/pull/71", kind: "review" };
-    const comment = Schema.decodeUnknownSync(Comment)(stored);
+    const comment = Effect.runSync(Schema.decodeUnknownEffect(Comment)(stored));
     assert.isTrue(Option.isNone(comment.at));
-    assert.deepStrictEqual(Schema.encodeSync(Comment)(comment), stored);
+    assert.deepStrictEqual(Effect.runSync(Schema.encodeEffect(Comment)(comment)), stored);
   });
 
   it("round-trips a child-session budget failure through JSON", () => {
@@ -142,10 +161,12 @@ describe("attempt channel", () => {
       }),
     });
 
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
+    const encoded = Effect.runSync(Schema.encodeEffect(EnvelopeJson)(envelope));
+    const decoded = Effect.runSync(
+      Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      }),
+    );
     assert.deepStrictEqual(decoded, envelope);
   });
 
@@ -164,10 +185,12 @@ describe("attempt channel", () => {
       }),
     });
 
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
+    const encoded = Effect.runSync(Schema.encodeEffect(EnvelopeJson)(envelope));
+    const decoded = Effect.runSync(
+      Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      }),
+    );
 
     assert.deepStrictEqual(decoded, envelope);
   });
@@ -183,30 +206,36 @@ describe("attempt channel", () => {
       payload: AttemptChannel.Release.make(),
     });
 
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
+    const encoded = Effect.runSync(Schema.encodeEffect(EnvelopeJson)(envelope));
+    const decoded = Effect.runSync(
+      Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      }),
+    );
 
     assert.deepStrictEqual(decoded, envelope);
   });
 
   it("rejects superseded protocol versions on the live channel", () => {
-    const outbound = Schema.encodeSync(AttemptChannel.Envelope)(
-      AttemptChannel.OutboundEnvelope.make({
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: spec.attemptId,
-        sequence: AttemptChannel.Sequence.make(1),
-        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-        payload: AttemptChannel.Interrupted.make(),
-      }),
+    const outbound = Effect.runSync(
+      Schema.encodeEffect(AttemptChannel.Envelope)(
+        AttemptChannel.OutboundEnvelope.make({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId: spec.attemptId,
+          sequence: AttemptChannel.Sequence.make(1),
+          sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+          payload: AttemptChannel.Interrupted.make(),
+        }),
+      ),
     );
 
     for (const version of [3, 4, 5] as const) {
       assert.throws(() =>
-        Schema.decodeUnknownSync(AttemptChannel.Envelope)(
-          { ...outbound, version },
-          { onExcessProperty: "error" },
+        Effect.runSync(
+          Schema.decodeUnknownEffect(AttemptChannel.Envelope)(
+            { ...outbound, version },
+            { onExcessProperty: "error" },
+          ),
         ),
       );
     }
@@ -250,28 +279,32 @@ describe("attempt channel", () => {
       }),
     });
 
-    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
-    const decoded = Schema.decodeSync(EnvelopeJson)(encoded, {
-      onExcessProperty: "error",
-    });
+    const encoded = Effect.runSync(Schema.encodeEffect(EnvelopeJson)(envelope));
+    const decoded = Effect.runSync(
+      Schema.decodeEffect(EnvelopeJson)(encoded, {
+        onExcessProperty: "error",
+      }),
+    );
 
     assert.deepStrictEqual(decoded, envelope);
     assert(envelope.payload._tag === "SessionEvent");
     assert(envelope.payload.event._tag === "PoolRateLimitsUpdated");
-    const { login: _, ...legacy } = Schema.encodeSync(PoolRateLimitsUpdated)(
-      envelope.payload.event,
+    const { login: _, ...legacy } = Effect.runSync(
+      Schema.encodeEffect(PoolRateLimitsUpdated)(envelope.payload.event),
     );
-    assert(Option.isNone(Schema.decodeSync(PoolRateLimitsUpdated)(legacy).login));
+    assert(Option.isNone(Effect.runSync(Schema.decodeEffect(PoolRateLimitsUpdated)(legacy)).login));
     assert.throws(() => PoolLogin.make(""));
   });
 
   it("rejects credentials smuggled into a RunSpec", () => {
-    const raw = Schema.encodeSync(AttemptChannel.RunSpec)(spec);
+    const raw = Effect.runSync(Schema.encodeEffect(AttemptChannel.RunSpec)(spec));
 
     assert.throws(() =>
-      Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
-        { ...raw, githubToken: "must-never-cross-the-channel" },
-        { onExcessProperty: "error" },
+      Effect.runSync(
+        Schema.decodeUnknownEffect(AttemptChannel.RunSpec)(
+          { ...raw, githubToken: "must-never-cross-the-channel" },
+          { onExcessProperty: "error" },
+        ),
       ),
     );
   });
@@ -282,13 +315,19 @@ describe("attempt channel", () => {
       agent: agent.name,
       brain: agent.brain,
     });
-    const legacy = Schema.encodeSync(SessionStarted)(SessionStarted.make({ session }));
-    assert(Option.isNone(Schema.decodeSync(SessionStarted)(legacy).harnessSession));
-    assert(Option.isNone(Schema.decodeSync(SessionStarted)(legacy).prompt));
-    const storedSpec = Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
-      Object.fromEntries(
-        Object.entries(Schema.encodeSync(AttemptChannel.RunSpec)(spec)).filter(
-          ([key]) => key !== "preparedAt" && key !== "botLogin",
+    const legacy = Effect.runSync(
+      Schema.encodeEffect(SessionStarted)(SessionStarted.make({ session })),
+    );
+    assert(
+      Option.isNone(Effect.runSync(Schema.decodeEffect(SessionStarted)(legacy)).harnessSession),
+    );
+    assert(Option.isNone(Effect.runSync(Schema.decodeEffect(SessionStarted)(legacy)).prompt));
+    const storedSpec = Effect.runSync(
+      Schema.decodeUnknownEffect(AttemptChannel.RunSpec)(
+        Object.fromEntries(
+          Object.entries(Effect.runSync(Schema.encodeEffect(AttemptChannel.RunSpec)(spec))).filter(
+            ([key]) => key !== "preparedAt" && key !== "botLogin",
+          ),
         ),
       ),
     );
@@ -305,13 +344,15 @@ describe("attempt channel", () => {
         }),
       ),
     });
-    const encoded = Schema.encodeSync(SessionStarted)(started);
-    assert.deepStrictEqual(Schema.decodeSync(SessionStarted)(encoded), started);
+    const encoded = Effect.runSync(Schema.encodeEffect(SessionStarted)(started));
+    assert.deepStrictEqual(Effect.runSync(Schema.decodeEffect(SessionStarted)(encoded)), started);
     // A record from before the home was saved.
-    const withoutHome = Schema.decodeSync(SessionStarted)({
-      ...encoded,
-      harnessSession: { id: "native-1", cwd: "/worker/repo" },
-    });
+    const withoutHome = Effect.runSync(
+      Schema.decodeEffect(SessionStarted)({
+        ...encoded,
+        harnessSession: { id: "native-1", cwd: "/worker/repo" },
+      }),
+    );
     assert(Option.isSome(withoutHome.harnessSession));
     assert(Option.isNone(withoutHome.harnessSession.value.home));
     assert.throws(() => HarnessSessionId.make(""));

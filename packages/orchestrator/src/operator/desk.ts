@@ -20,7 +20,18 @@ import {
   TranscriptPageQuery,
   TranscriptWorkerQuery,
 } from "@usine/engine/transcript";
-import { Context, DateTime, Effect, Layer, Match, Option, Order, Result, Schema } from "effect";
+import {
+  type Brand,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Order,
+  Result,
+  Schema,
+} from "effect";
 import { projectedItem } from "../board/items.ts";
 import { LoopMatches } from "../loop-matches.ts";
 import { PollingTriggers } from "../polling-triggers.ts";
@@ -59,9 +70,10 @@ const CLOSED_RUNS_READ = 100;
 const DESK_ITEMS = 500;
 
 /** The Attempt's Worker hasn't answered the executor's probe since `lastAnsweredAt`. */
-export class WorkerSilentView extends Schema.TaggedClass<WorkerSilentView>(
-  "@usine/orchestrator/WorkerSilentView",
-)("WorkerSilent", {
+export class WorkerSilentView extends Schema.TaggedClass<
+  WorkerSilentView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/WorkerSilentView">
+>("@usine/orchestrator/WorkerSilentView")("WorkerSilent", {
   /** The configured worker name. */
   worker: WorkerName,
   /** The last successful worker response time as an ISO 8601 timestamp. */
@@ -72,9 +84,10 @@ export class WorkerSilentView extends Schema.TaggedClass<WorkerSilentView>(
  * A session's harness is retrying its model provider: the retries in this turn, the latest report,
  * and when the first unanswered retry was recorded.
  */
-export class ProviderRetryingView extends Schema.TaggedClass<ProviderRetryingView>(
-  "@usine/orchestrator/ProviderRetryingView",
-)("ProviderRetrying", {
+export class ProviderRetryingView extends Schema.TaggedClass<
+  ProviderRetryingView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/ProviderRetryingView">
+>("@usine/orchestrator/ProviderRetryingView")("ProviderRetrying", {
   /** The referenced agent name. */
   agent: AgentName,
   /** The diagnostic text to show to the operator. */
@@ -97,9 +110,10 @@ export const ConnectivityWarningView = Schema.Union([WorkerSilentView, ProviderR
 export type ConnectivityWarningView = typeof ConnectivityWarningView.Type;
 
 /** A running Attempt with its Run, Item, and recent transcript activity. */
-export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
-  "@usine/orchestrator/RunningAttemptView",
-)({
+export class RunningAttemptView extends Schema.Class<
+  RunningAttemptView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/RunningAttemptView">
+>("@usine/orchestrator/RunningAttemptView")({
   /** The run whose lifecycle state explains this entry. */
   run: RunSummaryView,
   /** The open attempt currently running on a worker. */
@@ -122,9 +136,10 @@ export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
  * An Agent's question or blocker that suppresses the Item for the Loop until the operator answers
  * or resolves `run`, or the Item changes (ADR 0017).
  */
-export class SuppressedForOperatorView extends Schema.TaggedClass<SuppressedForOperatorView>(
-  "@usine/orchestrator/SuppressedForOperatorView",
-)("SuppressedForOperator", {
+export class SuppressedForOperatorView extends Schema.TaggedClass<
+  SuppressedForOperatorView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/SuppressedForOperatorView">
+>("@usine/orchestrator/SuppressedForOperatorView")("SuppressedForOperator", {
   /** The run whose lifecycle state explains this entry. */
   run: RunSummaryView,
 }) {}
@@ -133,46 +148,52 @@ export class SuppressedForOperatorView extends Schema.TaggedClass<SuppressedForO
  * `run` succeeded or was canceled on the Item's current state, so the Loop opens no other Run until
  * the state changes (ADR 0007).
  */
-export class ClosedUnchangedView extends Schema.TaggedClass<ClosedUnchangedView>(
-  "@usine/orchestrator/ClosedUnchangedView",
-)("ClosedUnchanged", {
+export class ClosedUnchangedView extends Schema.TaggedClass<
+  ClosedUnchangedView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/ClosedUnchangedView">
+>("@usine/orchestrator/ClosedUnchangedView")("ClosedUnchanged", {
   /** The run whose lifecycle state explains this entry. */
   run: RunSummaryView,
 }) {}
 
 /** `run` failed on the Item's current state and waits for the operator to retry it. */
-export class RunFailedView extends Schema.TaggedClass<RunFailedView>(
-  "@usine/orchestrator/RunFailedView",
-)("RunFailed", {
+export class RunFailedView extends Schema.TaggedClass<
+  RunFailedView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/RunFailedView">
+>("@usine/orchestrator/RunFailedView")("RunFailed", {
   /** The run whose lifecycle state explains this entry. */
   run: RunSummaryView,
 }) {}
 
 /** The Loop is paused, so its trigger opens no Run. */
-export class LoopPausedView extends Schema.TaggedClass<LoopPausedView>(
-  "@usine/orchestrator/LoopPausedView",
-)("LoopPaused", {}) {}
+export class LoopPausedView extends Schema.TaggedClass<
+  LoopPausedView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/LoopPausedView">
+>("@usine/orchestrator/LoopPausedView")("LoopPaused", {}) {}
 
 /** The Item used up its cycle budget; `ask` waits for the operator to reset it. */
-export class CycleBudgetUsedUpView extends Schema.TaggedClass<CycleBudgetUsedUpView>(
-  "@usine/orchestrator/CycleBudgetUsedUpView",
-)("CycleBudgetUsedUp", {
+export class CycleBudgetUsedUpView extends Schema.TaggedClass<
+  CycleBudgetUsedUpView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/CycleBudgetUsedUpView">
+>("@usine/orchestrator/CycleBudgetUsedUpView")("CycleBudgetUsedUp", {
   /** The unanswered cycle-budget ask preventing another run. */
   ask: CycleBudgetAsk,
 }) {}
 
 /** `run` waits for the operator's approval. */
-export class AwaitingApprovalView extends Schema.TaggedClass<AwaitingApprovalView>(
-  "@usine/orchestrator/AwaitingApprovalView",
-)("AwaitingApproval", {
+export class AwaitingApprovalView extends Schema.TaggedClass<
+  AwaitingApprovalView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/AwaitingApprovalView">
+>("@usine/orchestrator/AwaitingApprovalView")("AwaitingApproval", {
   /** The run whose lifecycle state explains this entry. */
   run: RunSummaryView,
 }) {}
 
 /** `run` waits for a free Worker slot. */
-export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>(
-  "@usine/orchestrator/QueuedForWorkerView",
-)("QueuedForWorker", {
+export class QueuedForWorkerView extends Schema.TaggedClass<
+  QueuedForWorkerView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/QueuedForWorkerView">
+>("@usine/orchestrator/QueuedForWorkerView")("QueuedForWorker", {
   /** The run whose lifecycle state explains this entry. */
   run: RunSummaryView,
   /**
@@ -193,9 +214,10 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
  * `run` starts no Attempt until the parent task of the Attempt in `stop`, on the same Loop and
  * Item, is confirmed stopped (#523).
  */
-export class WaitingForStopView extends Schema.TaggedClass<WaitingForStopView>(
-  "@usine/orchestrator/WaitingForStopView",
-)("WaitingForStop", {
+export class WaitingForStopView extends Schema.TaggedClass<
+  WaitingForStopView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/WaitingForStopView">
+>("@usine/orchestrator/WaitingForStopView")("WaitingForStop", {
   /** The run whose lifecycle state explains this entry. */
   run: RunSummaryView,
   /** The unconfirmed worker stop that prevents another attempt. */
@@ -203,17 +225,19 @@ export class WaitingForStopView extends Schema.TaggedClass<WaitingForStopView>(
 }) {}
 
 /** The idle upgrade defers this run without reserving worker capacity. */
-export class WaitingForUpgradeView extends Schema.TaggedClass<WaitingForUpgradeView>(
-  "@usine/orchestrator/WaitingForUpgradeView",
-)("WaitingForUpgrade", {
+export class WaitingForUpgradeView extends Schema.TaggedClass<
+  WaitingForUpgradeView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/WaitingForUpgradeView">
+>("@usine/orchestrator/WaitingForUpgradeView")("WaitingForUpgrade", {
   run: RunSummaryView,
   wait: UpgradeWait,
 }) {}
 
 /** No Event of the Loop has a Run for the Item's current state yet. The next poll acts on it. */
-export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
-  "@usine/orchestrator/AwaitingPollView",
-)("AwaitingPoll", {}) {}
+export class AwaitingPollView extends Schema.TaggedClass<
+  AwaitingPollView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/AwaitingPollView">
+>("@usine/orchestrator/AwaitingPollView")("AwaitingPoll", {}) {}
 
 /** The reason a matched Item has no running Attempt. */
 export const StallReasonView = Schema.Union([
@@ -232,9 +256,10 @@ export const StallReasonView = Schema.Union([
 export type StallReasonView = typeof StallReasonView.Type;
 
 /** An Item that a Loop's trigger matches with no running Attempt, and the reason. */
-export class StalledItemView extends Schema.Class<StalledItemView>(
-  "@usine/orchestrator/StalledItemView",
-)({
+export class StalledItemView extends Schema.Class<
+  StalledItemView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/StalledItemView">
+>("@usine/orchestrator/StalledItemView")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The project-qualified loop name. */
@@ -246,22 +271,26 @@ export class StalledItemView extends Schema.Class<StalledItemView>(
 }) {}
 
 /** A closed Run with its Item and close time. */
-export class ClosedRunView extends Schema.Class<ClosedRunView>("@usine/orchestrator/ClosedRunView")(
-  {
-    /** The run whose lifecycle state explains this entry. */
-    run: RunSummaryView,
-    /**
-     * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
-     * didn't read.
-     */
-    item: Schema.NullOr(BoardItemLink),
-    /** The Run's `closedAt`, set even for a Run canceled before any Attempt. */
-    closedAt: Schema.String,
-  },
-) {}
+export class ClosedRunView extends Schema.Class<
+  ClosedRunView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/ClosedRunView">
+>("@usine/orchestrator/ClosedRunView")({
+  /** The run whose lifecycle state explains this entry. */
+  run: RunSummaryView,
+  /**
+   * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
+   * didn't read.
+   */
+  item: Schema.NullOr(BoardItemLink),
+  /** The Run's `closedAt`, set even for a Run canceled before any Attempt. */
+  closedAt: Schema.String,
+}) {}
 
 /** One Worker on the desk's Workers line, with its slots and last preflight. */
-export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/WorkerView")({
+export class WorkerView extends Schema.Class<
+  WorkerView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/WorkerView">
+>("@usine/orchestrator/WorkerView")({
   /** The configured worker identity. */
   name: WorkerName,
   /**
@@ -290,9 +319,10 @@ export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/Wo
 /**
  * When the factory last finished polling a managed repository, or null before the first poll ends.
  */
-export class RepositoryPollView extends Schema.Class<RepositoryPollView>(
-  "@usine/orchestrator/RepositoryPollView",
-)({
+export class RepositoryPollView extends Schema.Class<
+  RepositoryPollView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/RepositoryPollView">
+>("@usine/orchestrator/RepositoryPollView")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The last completed poll time as an ISO 8601 timestamp, or null before the first poll. */
@@ -303,7 +333,10 @@ export class RepositoryPollView extends Schema.Class<RepositoryPollView>(
  * The operator's desk: running Attempts, stalled matched Items, recently closed Runs, Worker slots,
  * and poll times. Needs you comes from the overview.
  */
-export class DeskView extends Schema.Class<DeskView>("@usine/orchestrator/DeskView")({
+export class DeskView extends Schema.Class<
+  DeskView,
+  Brand.Brand<"@usine/orchestrator/operator/desk/DeskView">
+>("@usine/orchestrator/DeskView")({
   /** The attempts currently running, with run and item context. */
   running: Schema.Array(RunningAttemptView),
   /** Matched items whose loops cannot advance, with the reason for each. */

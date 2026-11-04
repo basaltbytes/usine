@@ -13,6 +13,7 @@ import type {
   WorkerCapability,
 } from "@usine/executor";
 import {
+  type Brand,
   Array as Arr,
   Context,
   type DateTime,
@@ -248,9 +249,10 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
 });
 
 /** An on-demand preflight could not reserve the configured worker. */
-export class WorkerPreflightRejectedError extends Schema.TaggedError<WorkerPreflightRejectedError>(
-  "@usine/orchestrator/WorkerPreflightRejectedError",
-)("WorkerPreflightRejectedError", {
+export class WorkerPreflightRejectedError extends Schema.TaggedError<
+  WorkerPreflightRejectedError,
+  Brand.Brand<"@usine/orchestrator/worker-status/WorkerPreflightRejectedError">
+>("@usine/orchestrator/WorkerPreflightRejectedError")("WorkerPreflightRejectedError", {
   worker: WorkerName,
   reason: Schema.Literals([
     "not-configured",

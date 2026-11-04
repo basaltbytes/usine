@@ -1,5 +1,14 @@
 import { GatewayDomain } from "@usine/core/worker";
-import { Config, ConfigProvider, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import {
+  type Brand,
+  Config,
+  ConfigProvider,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Schema,
+} from "effect";
 import { parseEgressAllowlist } from "../egress/egress.ts";
 import { GITHUB_ORIGINS } from "../github/github.ts";
 import { checkAuthFileWritable, readAuthFile } from "../chatgpt/auth-file.ts";
@@ -27,26 +36,26 @@ const upstream = (name: string, fallback: string) =>
   Config.schema(UpstreamBase, name).pipe(Config.withDefault(UpstreamBase.make(fallback)));
 
 /** The error when two credentials are set for one provider, such as an API key and a subscription token. */
-export class ConflictingProviderCredentials extends Schema.TaggedError<ConflictingProviderCredentials>()(
-  "ConflictingProviderCredentials",
-  {
-    /** The provider for which both an API key and a subscription credential were configured. */
-    provider: LlmProviderName,
-    /** The conflicting variable names and the configuration change required to select one credential. */
-    message: Schema.String,
-  },
-) {}
+export class ConflictingProviderCredentials extends Schema.TaggedError<
+  ConflictingProviderCredentials,
+  Brand.Brand<"@usine/gateway/node/environment/ConflictingProviderCredentials">
+>()("ConflictingProviderCredentials", {
+  /** The provider for which both an API key and a subscription credential were configured. */
+  provider: LlmProviderName,
+  /** The conflicting variable names and the configuration change required to select one credential. */
+  message: Schema.String,
+}) {}
 
 /** The error when a file listed in `USINE_GATEWAY_ENVIRONMENT_FILES` can't be read. */
-export class EnvironmentFileError extends Schema.TaggedError<EnvironmentFileError>()(
-  "EnvironmentFileError",
-  {
-    /** The file from `USINE_GATEWAY_ENVIRONMENT_FILES` that could not be read. */
-    path: Schema.String,
-    /** The file-system diagnostic for the failed read. */
-    message: Schema.String,
-  },
-) {}
+export class EnvironmentFileError extends Schema.TaggedError<
+  EnvironmentFileError,
+  Brand.Brand<"@usine/gateway/node/environment/EnvironmentFileError">
+>()("EnvironmentFileError", {
+  /** The file from `USINE_GATEWAY_ENVIRONMENT_FILES` that could not be read. */
+  path: Schema.String,
+  /** The file-system diagnostic for the failed read. */
+  message: Schema.String,
+}) {}
 
 /** The gateway's settings source: its environment files layered over the process environment. */
 export interface SettingsSource {

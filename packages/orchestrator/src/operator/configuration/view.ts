@@ -48,7 +48,7 @@ import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { WorkerCapability } from "@usine/executor";
 import { Source } from "@usine/expression/expression-engine";
-import { Context, DateTime, Effect, Layer, Match, Option, Schema } from "effect";
+import { type Brand, Context, DateTime, Effect, Layer, Match, Option, Schema } from "effect";
 import { LabelPreflightFinding } from "../../label-reconciler.ts";
 import { PollingTriggers } from "../../polling-triggers.ts";
 import { type PreflightCheck, WorkerStatus } from "../../worker-status.ts";
@@ -62,9 +62,10 @@ import {
 } from "../machines.ts";
 
 /** A Loop's selector as written: the repositories and registry tags. */
-export class LoopSelectorView extends Schema.Class<LoopSelectorView>(
-  "@usine/orchestrator/LoopSelectorView",
-)({
+export class LoopSelectorView extends Schema.Class<
+  LoopSelectorView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/LoopSelectorView">
+>("@usine/orchestrator/LoopSelectorView")({
   /** Explicit repository names in the selector, or null when omitted. */
   repos: Schema.NullOr(Schema.Array(RepositoryName)),
   /** Registry tags in the selector, or null when omitted. */
@@ -72,7 +73,10 @@ export class LoopSelectorView extends Schema.Class<LoopSelectorView>(
 }) {}
 
 /** A parsed Loop file with its runtime pause state. */
-export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrator/LoopFileView")({
+export class LoopFileView extends Schema.Class<
+  LoopFileView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/LoopFileView">
+>("@usine/orchestrator/LoopFileView")({
   /** The project-qualified loop name. */
   name: LoopName,
   /** The loop file path relative to the instance folder. */
@@ -110,9 +114,10 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
 }) {}
 
 /** A Loop file that failed to load and opens no Runs, with the failed stage and reason. */
-export class QuarantinedLoopView extends Schema.Class<QuarantinedLoopView>(
-  "@usine/orchestrator/QuarantinedLoopView",
-)({
+export class QuarantinedLoopView extends Schema.Class<
+  QuarantinedLoopView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/QuarantinedLoopView">
+>("@usine/orchestrator/QuarantinedLoopView")({
   /** The file name without its folder and `.md` extension. */
   name: Schema.NonEmptyString,
   /** The invalid file path relative to the instance folder. */
@@ -122,40 +127,42 @@ export class QuarantinedLoopView extends Schema.Class<QuarantinedLoopView>(
 }) {}
 
 /** A parsed rostered Agent file with the Loops that use it. */
-export class AgentFileView extends Schema.Class<AgentFileView>("@usine/orchestrator/AgentFileView")(
-  {
-    /** The roster name referenced by loops. */
-    name: AgentName,
-    /** The agent file path relative to the instance folder. */
-    file: InstancePath,
-    /** The coding-agent CLI used by the child session. */
-    harness: Harness,
-    /** The model ID supplied to the child harness. */
-    model: ModelId,
-    /** The child model reasoning effort. */
-    effort: Effort,
-    /** The file's own parent model and effort, or null if it sets none. */
-    parentModel: Schema.NullOr(ModelId),
-    /** The explicitly configured parent effort, or null to use the instance or agent default. */
-    parentEffort: Schema.NullOr(Effort),
-    /** The file's parent model, else `settings.parent_model`. If null, Pi chooses. */
-    resolvedParentModel: Schema.NullOr(ModelId),
-    /** The file's parent effort, else `settings.parent_effort`, else `effort`. */
-    resolvedParentEffort: Effort,
-    /** The standing instructions supplied to the agent. */
-    persona: AgentPersona,
-    /** The loaded Loops that use this Agent. */
-    loops: Schema.Array(LoopName),
-  },
-) {}
+export class AgentFileView extends Schema.Class<
+  AgentFileView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/AgentFileView">
+>("@usine/orchestrator/AgentFileView")({
+  /** The roster name referenced by loops. */
+  name: AgentName,
+  /** The agent file path relative to the instance folder. */
+  file: InstancePath,
+  /** The coding-agent CLI used by the child session. */
+  harness: Harness,
+  /** The model ID supplied to the child harness. */
+  model: ModelId,
+  /** The child model reasoning effort. */
+  effort: Effort,
+  /** The file's own parent model and effort, or null if it sets none. */
+  parentModel: Schema.NullOr(ModelId),
+  /** The explicitly configured parent effort, or null to use the instance or agent default. */
+  parentEffort: Schema.NullOr(Effort),
+  /** The file's parent model, else `settings.parent_model`. If null, Pi chooses. */
+  resolvedParentModel: Schema.NullOr(ModelId),
+  /** The file's parent effort, else `settings.parent_effort`, else `effort`. */
+  resolvedParentEffort: Effort,
+  /** The standing instructions supplied to the agent. */
+  persona: AgentPersona,
+  /** The loaded Loops that use this Agent. */
+  loops: Schema.Array(LoopName),
+}) {}
 
 /**
  * An Agent file that failed to load and is left out of the roster, with the failed stage and
  * reason.
  */
-export class InvalidAgentView extends Schema.Class<InvalidAgentView>(
-  "@usine/orchestrator/InvalidAgentView",
-)({
+export class InvalidAgentView extends Schema.Class<
+  InvalidAgentView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/InvalidAgentView">
+>("@usine/orchestrator/InvalidAgentView")({
   /** The file name without its folder and `.md` extension. */
   name: Schema.NonEmptyString,
   /** The invalid file path relative to the instance folder. */
@@ -168,7 +175,10 @@ export class InvalidAgentView extends Schema.Class<InvalidAgentView>(
  * The Gateway in front of an SSH Worker. Includes only the name of the environment variable with
  * its admin token.
  */
-export class GatewayView extends Schema.Class<GatewayView>("@usine/orchestrator/GatewayView")({
+export class GatewayView extends Schema.Class<
+  GatewayView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/GatewayView">
+>("@usine/orchestrator/GatewayView")({
   /** The gateway domain used for credential-injected requests. */
   domain: GatewayDomain,
   /** The SSH destination used to reach the gateway. */
@@ -182,9 +192,10 @@ export class GatewayView extends Schema.Class<GatewayView>("@usine/orchestrator/
 }) {}
 
 /** The current slot usage of a Worker. */
-export class WorkerSlotsView extends Schema.Class<WorkerSlotsView>(
-  "@usine/orchestrator/WorkerSlotsView",
-)({
+export class WorkerSlotsView extends Schema.Class<
+  WorkerSlotsView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/WorkerSlotsView">
+>("@usine/orchestrator/WorkerSlotsView")({
   /** The number of slots for Attempts: `max_concurrent_attempts` once a reload applied it. */
   capacity: Schema.Int,
   /** The number of occupied attempt slots; it can exceed capacity after a reduction. */
@@ -192,9 +203,10 @@ export class WorkerSlotsView extends Schema.Class<WorkerSlotsView>(
 }) {}
 
 /** A passed preflight check, at an ISO instant. */
-export class PassedCheckView extends Schema.TaggedClass<PassedCheckView>(
-  "@usine/orchestrator/PassedCheckView",
-)("Passed", {
+export class PassedCheckView extends Schema.TaggedClass<
+  PassedCheckView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/PassedCheckView">
+>("@usine/orchestrator/PassedCheckView")("Passed", {
   /** The check completion time as an ISO 8601 timestamp. */
   checkedAt: Schema.String,
 }) {}
@@ -203,9 +215,10 @@ export class PassedCheckView extends Schema.TaggedClass<PassedCheckView>(
  * A passed check of the Worker's own prerequisites, at an ISO instant, that found it running
  * Attempts without a capability that keeps them apart, such as an SSH Worker without Docker.
  */
-export class DegradedCheckView extends Schema.TaggedClass<DegradedCheckView>(
-  "@usine/orchestrator/DegradedCheckView",
-)("Degraded", {
+export class DegradedCheckView extends Schema.TaggedClass<
+  DegradedCheckView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/DegradedCheckView">
+>("@usine/orchestrator/DegradedCheckView")("Degraded", {
   /** The check completion time as an ISO 8601 timestamp. */
   checkedAt: Schema.String,
   /** The diagnostic text to show to the operator. */
@@ -216,9 +229,10 @@ export class DegradedCheckView extends Schema.TaggedClass<DegradedCheckView>(
  * A check that the preflight left for later, at an ISO instant, such as a provisioned Worker's
  * harness checks, which run on its first machine each day.
  */
-export class DeferredCheckView extends Schema.TaggedClass<DeferredCheckView>(
-  "@usine/orchestrator/DeferredCheckView",
-)("Deferred", {
+export class DeferredCheckView extends Schema.TaggedClass<
+  DeferredCheckView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/DeferredCheckView">
+>("@usine/orchestrator/DeferredCheckView")("Deferred", {
   /** The check completion time as an ISO 8601 timestamp. */
   checkedAt: Schema.String,
   /** The diagnostic text to show to the operator. */
@@ -226,9 +240,10 @@ export class DeferredCheckView extends Schema.TaggedClass<DeferredCheckView>(
 }) {}
 
 /** A preflight check that found a missing prerequisite or couldn't run, at an ISO instant. */
-export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
-  "@usine/orchestrator/FailedCheckView",
-)("Failed", {
+export class FailedCheckView extends Schema.TaggedClass<
+  FailedCheckView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/FailedCheckView">
+>("@usine/orchestrator/FailedCheckView")("Failed", {
   /** The check completion time as an ISO 8601 timestamp. */
   checkedAt: Schema.String,
   /** Null when the check itself failed, such as a timed-out probe. */
@@ -248,9 +263,10 @@ export const PreflightCheckView = Schema.Union([
 export type PreflightCheckView = typeof PreflightCheckView.Type;
 
 /** The last preflight of one harness on a Worker. */
-export class HarnessPreflightView extends Schema.Class<HarnessPreflightView>(
-  "@usine/orchestrator/HarnessPreflightView",
-)({
+export class HarnessPreflightView extends Schema.Class<
+  HarnessPreflightView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/HarnessPreflightView">
+>("@usine/orchestrator/HarnessPreflightView")({
   /** The coding-agent CLI checked by preflight. */
   harness: Harness,
   /** The latest preflight outcome for this harness. */
@@ -261,27 +277,29 @@ export class HarnessPreflightView extends Schema.Class<HarnessPreflightView>(
  * The container of each Attempt on an SSH Worker with Docker, from `usine.yaml`. Each limit is
  * null if `usine.yaml` leaves it unset, so preflight derives it from the machine.
  */
-export class ContainerView extends Schema.Class<ContainerView>("@usine/orchestrator/ContainerView")(
-  {
-    /** Null for the default image of this usine release. */
-    image: Schema.NullOr(ContainerImage),
-    /** The CPU limit per attempt container, or null for the derived default. */
-    cpus: Schema.NullOr(ContainerCpus),
-    /** The memory limit per attempt container in MiB, or null for the derived default. */
-    memoryMib: Schema.NullOr(ContainerMemoryMib),
-    /** The process limit per attempt container, or null for the derived default. */
-    pids: Schema.NullOr(ContainerPids),
-    /** The shared-memory capacity in MiB, or null for the default. */
-    shmSizeMib: Schema.NullOr(ContainerScratchMib),
-    /** The temporary-file capacity in MiB, or null for the default. */
-    tmpfsSizeMib: Schema.NullOr(ContainerScratchMib),
-  },
-) {}
+export class ContainerView extends Schema.Class<
+  ContainerView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/ContainerView">
+>("@usine/orchestrator/ContainerView")({
+  /** Null for the default image of this usine release. */
+  image: Schema.NullOr(ContainerImage),
+  /** The CPU limit per attempt container, or null for the derived default. */
+  cpus: Schema.NullOr(ContainerCpus),
+  /** The memory limit per attempt container in MiB, or null for the derived default. */
+  memoryMib: Schema.NullOr(ContainerMemoryMib),
+  /** The process limit per attempt container, or null for the derived default. */
+  pids: Schema.NullOr(ContainerPids),
+  /** The shared-memory capacity in MiB, or null for the default. */
+  shmSizeMib: Schema.NullOr(ContainerScratchMib),
+  /** The temporary-file capacity in MiB, or null for the default. */
+  tmpfsSizeMib: Schema.NullOr(ContainerScratchMib),
+}) {}
 
 /** A Worker as declared in `usine.yaml`, with its slot usage and last preflight. */
-export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationView>(
-  "@usine/orchestrator/WorkerConfigurationView",
-)({
+export class WorkerConfigurationView extends Schema.Class<
+  WorkerConfigurationView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/WorkerConfigurationView">
+>("@usine/orchestrator/WorkerConfigurationView")({
   /** The configured worker identity. */
   name: WorkerName,
   /** The executor kind used to run attempts. */
@@ -332,9 +350,10 @@ export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationVie
 }) {}
 
 /** A Worker removed by a reload that still runs Attempts. It's removed when the last one ends. */
-export class RemovedWorkerView extends Schema.Class<RemovedWorkerView>(
-  "@usine/orchestrator/RemovedWorkerView",
-)({
+export class RemovedWorkerView extends Schema.Class<
+  RemovedWorkerView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/RemovedWorkerView">
+>("@usine/orchestrator/RemovedWorkerView")({
   /** The removed worker identity retained until its attempts end. */
   name: WorkerName,
   /** The number of attempts still running on this removed worker. */
@@ -342,9 +361,10 @@ export class RemovedWorkerView extends Schema.Class<RemovedWorkerView>(
 }) {}
 
 /** A GitHub label in one repository, as of the last label poll. */
-export class LabelStateView extends Schema.Class<LabelStateView>(
-  "@usine/orchestrator/LabelStateView",
-)({
+export class LabelStateView extends Schema.Class<
+  LabelStateView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/LabelStateView">
+>("@usine/orchestrator/LabelStateView")({
   /** The GitHub label name. */
   name: GitHubLabelName,
   /** Null until polling has read the repository's labels. */
@@ -360,17 +380,19 @@ export class LabelStateView extends Schema.Class<LabelStateView>(
 }) {}
 
 /** A lane source that routes Items by label. */
-export class LabelLaneSourceView extends Schema.TaggedClass<LabelLaneSourceView>(
-  "@usine/orchestrator/LabelLaneSourceView",
-)("Label", {
+export class LabelLaneSourceView extends Schema.TaggedClass<
+  LabelLaneSourceView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/LabelLaneSourceView">
+>("@usine/orchestrator/LabelLaneSourceView")("Label", {
   /** The label and its repository creation status for this lane source. */
   label: LabelStateView,
 }) {}
 
 /** A lane source that routes Items by issue or pull request state. */
-export class StateLaneSourceView extends Schema.TaggedClass<StateLaneSourceView>(
-  "@usine/orchestrator/StateLaneSourceView",
-)("State", {
+export class StateLaneSourceView extends Schema.TaggedClass<
+  StateLaneSourceView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/StateLaneSourceView">
+>("@usine/orchestrator/StateLaneSourceView")("State", {
   /** The issue or pull request state that selects this lane. */
   state: LaneItemState,
 }) {}
@@ -381,9 +403,10 @@ export const LaneSourceView = Schema.Union([LabelLaneSourceView, StateLaneSource
 export type LaneSourceView = typeof LaneSourceView.Type;
 
 /** One lane declared in a project, with its sources in file order. */
-export class LaneConfigurationView extends Schema.Class<LaneConfigurationView>(
-  "@usine/orchestrator/LaneConfigurationView",
-)({
+export class LaneConfigurationView extends Schema.Class<
+  LaneConfigurationView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/LaneConfigurationView">
+>("@usine/orchestrator/LaneConfigurationView")({
   /** The configured lane display name. */
   name: LaneName,
   /** The label and state sources in configured order. */
@@ -391,9 +414,10 @@ export class LaneConfigurationView extends Schema.Class<LaneConfigurationView>(
 }) {}
 
 /** A registered repository with its lanes in Board order, declared labels, and Loops. */
-export class RepositoryConfigurationView extends Schema.Class<RepositoryConfigurationView>(
-  "@usine/orchestrator/RepositoryConfigurationView",
-)({
+export class RepositoryConfigurationView extends Schema.Class<
+  RepositoryConfigurationView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/RepositoryConfigurationView">
+>("@usine/orchestrator/RepositoryConfigurationView")({
   /** The registered repository in `owner/name` form. */
   name: RepositoryName,
   /** Registry tags used by loop selectors. */
@@ -407,7 +431,10 @@ export class RepositoryConfigurationView extends Schema.Class<RepositoryConfigur
 }) {}
 
 /** The `settings`, `operator`, webhooks mode, and `tracing` of `usine.yaml`, with defaults applied. */
-export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrator/SettingsView")({
+export class SettingsView extends Schema.Class<
+  SettingsView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/SettingsView">
+>("@usine/orchestrator/SettingsView")({
   /** The configured polling interval in seconds. */
   pollInterval: Schema.Int,
   /** The maximum child sessions per attempt. */
@@ -436,9 +463,10 @@ export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrato
  * The parsed instance folder (Loops, Agents, Workers, repositories, and settings), the files that
  * failed to load, and the runtime state of each.
  */
-export class ConfigurationView extends Schema.Class<ConfigurationView>(
-  "@usine/orchestrator/ConfigurationView",
-)({
+export class ConfigurationView extends Schema.Class<
+  ConfigurationView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/view/ConfigurationView">
+>("@usine/orchestrator/ConfigurationView")({
   /** The configured projects; defaults to an empty list for older projections. */
   projects: Schema.Array(Project).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),

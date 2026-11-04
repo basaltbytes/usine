@@ -126,8 +126,8 @@ for (const scenario of [
       const options = {
         loop,
         agent: agent.agent,
-        repository: Schema.decodeSync(ManagedRepo)({ name: "acme/project" }),
-        payload: Schema.decodeSync(Schema.Json)(scenario.payload),
+        repository: yield* Schema.decodeEffect(ManagedRepo)({ name: "acme/project" }),
+        payload: yield* Schema.decodeEffect(Schema.Json)(scenario.payload),
         dedupKey: DedupKey.make("approval-event"),
         cycleGeneration: CycleGeneration.make(0),
         itemKey: ItemKey.make("github:acme/project:1"),
@@ -173,6 +173,7 @@ for (const scenario of [
           loop: LoopFile.make({ ...loop, approval: "required" }),
         });
         yield* engine.submit(changed);
+
         expect((yield* inspect).approvalReason).toEqual(submission.approvalReason);
         return submitted.runId;
       }).pipe(Effect.provide(runtime));

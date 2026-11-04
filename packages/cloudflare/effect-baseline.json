@@ -1,30 +1,22 @@
 {
-  "src/api/api.ts": {
-    "schemaClassMissingBrand": 18
-  },
   "src/api/names.ts": {
     "preferBarrelImport": 1
   },
   "src/api/stream.ts": {
-    "preferBarrelImport": 2,
-    "schemaClassMissingBrand": 5,
-    "schemaSync": 2
+    "preferBarrelImport": 2
   },
   "src/registry.ts": {
-    "deterministicKeys": 2,
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 2
   },
   "src/sandbox/ports.ts": {
-    "deterministicKeys": 4,
-    "schemaClassMissingBrand": 2
+    "deterministicKeys": 4
   },
   "src/sandbox/sandbox.ts": {
     "asyncFunction": 1
   },
   "src/worker.ts": {
-    "asyncFunction": 14,
-    "globalFetch": 3,
-    "schemaSync": 5
+    "asyncFunction": 13,
+    "globalFetch": 3
   },
   "test/image.test.ts": {
     "asyncFunction": 1,
@@ -44,15 +36,13 @@
     "processEnv": 1
   },
   "test/registry.test.ts": {
-    "asyncFunction": 2,
-    "schemaSync": 1
+    "asyncFunction": 2
   },
   "test/sandbox.test.ts": {
     "asyncFunction": 15,
     "globalJson": 7,
     "globalTimers": 2,
-    "newPromise": 6,
-    "schemaSync": 2
+    "newPromise": 6
   },
   "test/stream.test.ts": {
     "globalJsonInEffect": 1

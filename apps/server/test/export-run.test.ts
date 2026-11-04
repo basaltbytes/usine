@@ -118,11 +118,13 @@ const seed = (directory: string) =>
     const submitted = yield* engine.submit(submission);
     assert(submitted._tag === "Claimed");
     const runId = submitted.runId;
+
     assert.strictEqual((yield* settle(engine, runId)).run.state._tag, "Failed");
     yield* engine.retry(runId);
     const snapshot = yield* settle(engine, runId);
     assert.strictEqual(snapshot.run.state._tag, "Succeeded");
     const reader = yield* RunReader;
+
     const transcript = (yield* Effect.forEach(snapshot.attempts, ({ id }) =>
       reader.transcript(TranscriptAllQuery.make({ attemptId: id })),
     )).flat();
@@ -186,7 +188,9 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", runId]);
     assert.strictEqual(exported.status, 0, exported.stderr);
     const output = join(directory, `run-${encodeURIComponent(runId)}.json`);
-    const evidence = Schema.decodeSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
+    const evidence = await Effect.runPromise(
+      Schema.decodeEffect(RunEvidenceFromJson)(await readFile(output, "utf8")),
+    );
 
     assert.strictEqual(evidence.version, 1);
     assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
@@ -234,10 +238,12 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     }
     const exported = runCli(restored, ["export-run", saved.snapshot.run.id]);
     assert.strictEqual(exported.status, 0, exported.stderr);
-    const evidence = Schema.decodeSync(RunEvidenceFromJson)(
-      await readFile(
-        join(restored, `run-${encodeURIComponent(saved.snapshot.run.id)}.json`),
-        "utf8",
+    const evidence = await Effect.runPromise(
+      Schema.decodeEffect(RunEvidenceFromJson)(
+        await readFile(
+          join(restored, `run-${encodeURIComponent(saved.snapshot.run.id)}.json`),
+          "utf8",
+        ),
       ),
     );
     assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
@@ -257,7 +263,9 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
       "waiting.json",
     ]);
     assert.strictEqual(exported.status, 0, exported.stderr);
-    const evidence = Schema.decodeSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
+    const evidence = await Effect.runPromise(
+      Schema.decodeEffect(RunEvidenceFromJson)(await readFile(output, "utf8")),
+    );
 
     assert.deepStrictEqual(evidence.snapshot, saved.waitingSnapshot);
     assert.deepStrictEqual(evidence.snapshot.attempts, []);

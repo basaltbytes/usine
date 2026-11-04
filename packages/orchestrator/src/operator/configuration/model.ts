@@ -5,15 +5,17 @@ import {
   type ConfigurationRevision,
 } from "@usine/config/configuration";
 import { OperatorActor } from "@usine/core/operator";
-import { Option, Schema } from "effect";
+import { type Brand, Option, Schema } from "effect";
 
-export class ConfigurationEntityRequest extends Schema.Class<ConfigurationEntityRequest>(
-  "ConfigurationEntityRequest",
-)({ kind: Schema.String, identifier: ConfigurationEntityId }) {}
+export class ConfigurationEntityRequest extends Schema.Class<
+  ConfigurationEntityRequest,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationEntityRequest">
+>("ConfigurationEntityRequest")({ kind: Schema.String, identifier: ConfigurationEntityId }) {}
 
-export class ConfigurationRevisionQuery extends Schema.Class<ConfigurationRevisionQuery>(
-  "ConfigurationRevisionQuery",
-)({
+export class ConfigurationRevisionQuery extends Schema.Class<
+  ConfigurationRevisionQuery,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationRevisionQuery">
+>("ConfigurationRevisionQuery")({
   kind: Schema.optionalKey(Schema.String),
   identifier: Schema.optionalKey(ConfigurationEntityId),
   before: Schema.optionalKey(ConfigurationRevisionNumber),
@@ -21,7 +23,10 @@ export class ConfigurationRevisionQuery extends Schema.Class<ConfigurationRevisi
 }) {}
 
 /** Concurrency and attribution metadata for a configuration edit. */
-export class ConfigurationWrite extends Schema.Class<ConfigurationWrite>("ConfigurationWrite")({
+export class ConfigurationWrite extends Schema.Class<
+  ConfigurationWrite,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationWrite">
+>("ConfigurationWrite")({
   /** The configuration revision the caller edited; a newer stored revision rejects the write. */
   expected: ConfigurationRevisionNumber,
   /** An optional operator explanation stored with the revision. */
@@ -53,9 +58,10 @@ export const ConfigurationReplacement = Schema.Union([
 export type ConfigurationReplacement = typeof ConfigurationReplacement.Type;
 
 /** One configuration entity in both form JSON and editable text, at a stored revision. */
-export class ConfigurationEntityView extends Schema.Class<ConfigurationEntityView>(
-  "ConfigurationEntityView",
-)({
+export class ConfigurationEntityView extends Schema.Class<
+  ConfigurationEntityView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationEntityView">
+>("ConfigurationEntityView")({
   /** The configuration kind and entity identity. */
   key: ConfigurationEntityKey,
   /** The entity as form JSON with parser defaults applied. */
@@ -66,9 +72,10 @@ export class ConfigurationEntityView extends Schema.Class<ConfigurationEntityVie
   number: ConfigurationRevisionNumber,
 }) {}
 
-export class ConfigurationRevisionSummary extends Schema.Class<ConfigurationRevisionSummary>(
-  "ConfigurationRevisionSummary",
-)({
+export class ConfigurationRevisionSummary extends Schema.Class<
+  ConfigurationRevisionSummary,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationRevisionSummary">
+>("ConfigurationRevisionSummary")({
   number: ConfigurationRevisionNumber,
   actor: Schema.NullOr(OperatorActor),
   time: Schema.DateTimeUtc,
@@ -77,18 +84,20 @@ export class ConfigurationRevisionSummary extends Schema.Class<ConfigurationRevi
 }) {}
 
 /** A newest-first page of configuration revisions with a cursor for older revisions. */
-export class ConfigurationRevisionPage extends Schema.Class<ConfigurationRevisionPage>(
-  "ConfigurationRevisionPage",
-)({
+export class ConfigurationRevisionPage extends Schema.Class<
+  ConfigurationRevisionPage,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationRevisionPage">
+>("ConfigurationRevisionPage")({
   /** The matching revisions, newest first. */
   revisions: Schema.Array(ConfigurationRevisionSummary),
   /** The exclusive revision cursor for older results, or null at the end. */
   nextBefore: Schema.NullOr(ConfigurationRevisionNumber),
 }) {}
 
-export class ConfigurationNotFound extends Schema.TaggedError<ConfigurationNotFound>(
-  "ConfigurationNotFound",
-)("ConfigurationNotFound", { message: Schema.String }) {}
+export class ConfigurationNotFound extends Schema.TaggedError<
+  ConfigurationNotFound,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationNotFound">
+>()("ConfigurationNotFound", { message: Schema.String }) {}
 
 /**
  * A configuration revision with JSON-compatible changes for operator clients.
@@ -99,9 +108,10 @@ export class ConfigurationNotFound extends Schema.TaggedError<ConfigurationNotFo
  * @property message - The operator explanation, or null without one.
  * @property entities - The entity keys affected by this revision.
  */
-export class ConfigurationRevisionView extends Schema.Class<ConfigurationRevisionView>(
-  "ConfigurationRevisionView",
-)({
+export class ConfigurationRevisionView extends Schema.Class<
+  ConfigurationRevisionView,
+  Brand.Brand<"@usine/orchestrator/operator/configuration/model/ConfigurationRevisionView">
+>("ConfigurationRevisionView")({
   ...ConfigurationRevisionSummary.fields,
   /** The before and after JSON for each changed entity; null denotes creation or removal. */
   changes: Schema.Array(

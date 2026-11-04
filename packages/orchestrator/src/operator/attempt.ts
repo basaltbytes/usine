@@ -6,44 +6,49 @@ import { RunawayCeiling } from "@usine/core/attempt/failure";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { AttemptStart } from "@usine/core/attempt/start";
 import { MachineProvider, SshDestination, SshPort, WorkerName } from "@usine/core/worker";
-import { Effect, Schema, Struct } from "effect";
+import { type Brand, Effect, Schema, Struct } from "effect";
 
 /** A GitHub push refusal with its repository, ref, and token scope in the message. */
-export class GitHubPushFailureView extends Schema.TaggedClass<GitHubPushFailureView>(
-  "@usine/orchestrator/GitHubPushFailureView",
-)("GitHubPushFailure", {
+export class GitHubPushFailureView extends Schema.TaggedClass<
+  GitHubPushFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/GitHubPushFailureView">
+>("@usine/orchestrator/GitHubPushFailureView")("GitHubPushFailure", {
   /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
 /** An infra failure without its defect cause. */
-export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
-  "@usine/orchestrator/InfraFailureView",
-)("InfraFailure", {
+export class InfraFailureView extends Schema.TaggedClass<
+  InfraFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/InfraFailureView">
+>("@usine/orchestrator/InfraFailureView")("InfraFailure", {
   /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
 /** A temporary model provider capacity refusal. */
-export class ProviderCapacityFailureView extends Schema.TaggedClass<ProviderCapacityFailureView>(
-  "@usine/orchestrator/ProviderCapacityFailureView",
-)("ProviderCapacityFailure", {
+export class ProviderCapacityFailureView extends Schema.TaggedClass<
+  ProviderCapacityFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/ProviderCapacityFailureView">
+>("@usine/orchestrator/ProviderCapacityFailureView")("ProviderCapacityFailure", {
   /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
 /** A captured programmer defect that needs operator intervention, without the original cause. */
-export class DefectFailureView extends Schema.TaggedClass<DefectFailureView>(
-  "@usine/orchestrator/DefectFailureView",
-)("DefectFailure", {
+export class DefectFailureView extends Schema.TaggedClass<
+  DefectFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/DefectFailureView">
+>("@usine/orchestrator/DefectFailureView")("DefectFailure", {
   /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
 
 /** An agent failure message that is safe to show to the operator. */
-export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
-  "@usine/orchestrator/AgentFailureView",
-)("AgentFailure", {
+export class AgentFailureView extends Schema.TaggedClass<
+  AgentFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/AgentFailureView">
+>("@usine/orchestrator/AgentFailureView")("AgentFailure", {
   /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
@@ -52,9 +57,10 @@ export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
  * The blocker an Agent reported when it stopped. The Item's next state opens no Run of the Loop
  * (ADR 0017).
  */
-export class BlockedFailureView extends Schema.TaggedClass<BlockedFailureView>(
-  "@usine/orchestrator/BlockedFailureView",
-)("BlockedFailure", {
+export class BlockedFailureView extends Schema.TaggedClass<
+  BlockedFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/BlockedFailureView">
+>("@usine/orchestrator/BlockedFailureView")("BlockedFailure", {
   /** The diagnostic text to show to the operator. */
   message: Schema.String,
 }) {}
@@ -63,25 +69,28 @@ export class BlockedFailureView extends Schema.TaggedClass<BlockedFailureView>(
  * The question an Agent asked the operator when it stopped. The Item's next state opens no Run of
  * the Loop (ADR 0017).
  */
-export class QuestionFailureView extends Schema.TaggedClass<QuestionFailureView>(
-  "@usine/orchestrator/QuestionFailureView",
-)("QuestionFailure", {
+export class QuestionFailureView extends Schema.TaggedClass<
+  QuestionFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/QuestionFailureView">
+>("@usine/orchestrator/QuestionFailureView")("QuestionFailure", {
   /** The question the agent requires the operator to answer before work can continue. */
   question: Schema.String,
 }) {}
 
 /** The wall-clock or token ceiling that stopped an Attempt. */
-export class RunawayFailureView extends Schema.TaggedClass<RunawayFailureView>(
-  "@usine/orchestrator/RunawayFailureView",
-)("RunawayFailure", {
+export class RunawayFailureView extends Schema.TaggedClass<
+  RunawayFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/RunawayFailureView">
+>("@usine/orchestrator/RunawayFailureView")("RunawayFailure", {
   /** The wall-clock or token limit exceeded by the attempt. */
   ceiling: RunawayCeiling,
 }) {}
 
 /** The configured child-session budget and the spawn count that exceeded it. */
-export class ChildSessionBudgetFailureView extends Schema.TaggedClass<ChildSessionBudgetFailureView>(
-  "@usine/orchestrator/ChildSessionBudgetFailureView",
-)("ChildSessionBudgetFailure", {
+export class ChildSessionBudgetFailureView extends Schema.TaggedClass<
+  ChildSessionBudgetFailureView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/ChildSessionBudgetFailureView">
+>("@usine/orchestrator/ChildSessionBudgetFailureView")("ChildSessionBudgetFailure", {
   /** The configured maximum child sessions per attempt. */
   maxChildren: ChildSessionBudget,
   /** The child-session count requested when the budget was exceeded. */
@@ -104,32 +113,37 @@ export const FailureView = Schema.Union([
 export type FailureView = typeof FailureView.Type;
 
 /** An Attempt that succeeded. */
-export class SucceededAttemptView extends Schema.TaggedClass<SucceededAttemptView>(
-  "@usine/orchestrator/SucceededAttemptView",
-)("Succeeded", {}) {}
+export class SucceededAttemptView extends Schema.TaggedClass<
+  SucceededAttemptView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/SucceededAttemptView">
+>("@usine/orchestrator/SucceededAttemptView")("Succeeded", {}) {}
 
 /** An ended agent session whose pushed head awaits CI. */
-export class AwaitingCiAttemptView extends Schema.TaggedClass<AwaitingCiAttemptView>(
-  "@usine/orchestrator/AwaitingCiAttemptView",
-)("AwaitingCi", {}) {}
+export class AwaitingCiAttemptView extends Schema.TaggedClass<
+  AwaitingCiAttemptView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/AwaitingCiAttemptView">
+>("@usine/orchestrator/AwaitingCiAttemptView")("AwaitingCi", {}) {}
 
 /** An Attempt that failed. */
-export class FailedAttemptView extends Schema.TaggedClass<FailedAttemptView>(
-  "@usine/orchestrator/FailedAttemptView",
-)("Failed", {
+export class FailedAttemptView extends Schema.TaggedClass<
+  FailedAttemptView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/FailedAttemptView">
+>("@usine/orchestrator/FailedAttemptView")("Failed", {
   /** The failure details safe to return to operator clients. */
   failure: FailureView,
 }) {}
 
 /** An Attempt that ended after cancellation. */
-export class CanceledAttemptView extends Schema.TaggedClass<CanceledAttemptView>(
-  "@usine/orchestrator/CanceledAttemptView",
-)("Canceled", {}) {}
+export class CanceledAttemptView extends Schema.TaggedClass<
+  CanceledAttemptView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/CanceledAttemptView">
+>("@usine/orchestrator/CanceledAttemptView")("Canceled", {}) {}
 
 /** An attempt whose failed CI continues in a fix run. */
-export class HandedOffAttemptView extends Schema.TaggedClass<HandedOffAttemptView>(
-  "@usine/orchestrator/HandedOffAttemptView",
-)("HandedOff", {}) {}
+export class HandedOffAttemptView extends Schema.TaggedClass<
+  HandedOffAttemptView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/HandedOffAttemptView">
+>("@usine/orchestrator/HandedOffAttemptView")("HandedOff", {}) {}
 
 /** The terminal outcome of an Attempt. A running Attempt has none. */
 export const AttemptOutcomeView = Schema.Union([
@@ -143,17 +157,19 @@ export const AttemptOutcomeView = Schema.Union([
 export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
 
 /** A Worker on the orchestrator's machine, so its paths are local paths. */
-export class LocalWorkerAccess extends Schema.TaggedClass<LocalWorkerAccess>(
-  "@usine/orchestrator/LocalWorkerAccess",
-)("Local", {}) {}
+export class LocalWorkerAccess extends Schema.TaggedClass<
+  LocalWorkerAccess,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/LocalWorkerAccess">
+>("@usine/orchestrator/LocalWorkerAccess")("Local", {}) {}
 
 /**
  * A Worker on another machine, accessed with `ssh` at `destination`. `port` is null if `usine.yaml`
  * sets none, which uses the client's default.
  */
-export class SshWorkerAccess extends Schema.TaggedClass<SshWorkerAccess>(
-  "@usine/orchestrator/SshWorkerAccess",
-)("Ssh", {
+export class SshWorkerAccess extends Schema.TaggedClass<
+  SshWorkerAccess,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/SshWorkerAccess">
+>("@usine/orchestrator/SshWorkerAccess")("Ssh", {
   /** The SSH host, optionally including the user. */
   destination: SshDestination,
   /** The configured SSH port, or null to use the SSH client default. */
@@ -164,9 +180,10 @@ export class SshWorkerAccess extends Schema.TaggedClass<SshWorkerAccess>(
  * A provisioned Worker, which created a machine for each Attempt at `provider` and deletes it
  * once the Attempt's slot is released, so `usine.yaml` has no address for it.
  */
-export class ProvisionedWorkerAccess extends Schema.TaggedClass<ProvisionedWorkerAccess>(
-  "@usine/orchestrator/ProvisionedWorkerAccess",
-)("Provisioned", {
+export class ProvisionedWorkerAccess extends Schema.TaggedClass<
+  ProvisionedWorkerAccess,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/ProvisionedWorkerAccess">
+>("@usine/orchestrator/ProvisionedWorkerAccess")("Provisioned", {
   /** The provider that creates one machine per attempt. */
   provider: MachineProvider,
 }) {}
@@ -175,9 +192,10 @@ export class ProvisionedWorkerAccess extends Schema.TaggedClass<ProvisionedWorke
  * A Worker that runs each Attempt in its own Cloudflare sandbox, which accepts no operator terminal
  * and is destroyed when the Attempt ends.
  */
-export class SandboxWorkerAccess extends Schema.TaggedClass<SandboxWorkerAccess>(
-  "@usine/orchestrator/SandboxWorkerAccess",
-)("Sandbox", {}) {}
+export class SandboxWorkerAccess extends Schema.TaggedClass<
+  SandboxWorkerAccess,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/SandboxWorkerAccess">
+>("@usine/orchestrator/SandboxWorkerAccess")("Sandbox", {}) {}
 
 /** How the operator accesses a Worker's machine, from its `usine.yaml` entry. */
 export const WorkerAccess = Schema.Union([
@@ -190,7 +208,10 @@ export const WorkerAccess = Schema.Union([
 export type WorkerAccess = typeof WorkerAccess.Type;
 
 /** One Attempt with its Worker, effective brain, start, end, outcome, and salvaged work. */
-export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
+export class AttemptView extends Schema.Class<
+  AttemptView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/AttemptView">
+>("@usine/orchestrator/AttemptView")({
   /** The persistent attempt identity. */
   id: AttemptId,
   /** The one-based attempt number within its run. */
@@ -231,6 +252,7 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
 }) {}
 
 /** Attempt metadata used by polling views; the task is available on run detail. */
-export class AttemptSummaryView extends Schema.Class<AttemptSummaryView>(
-  "@usine/orchestrator/AttemptSummaryView",
-)(Struct.omit(AttemptView.fields, ["task"])) {}
+export class AttemptSummaryView extends Schema.Class<
+  AttemptSummaryView,
+  Brand.Brand<"@usine/orchestrator/operator/attempt/AttemptSummaryView">
+>("@usine/orchestrator/AttemptSummaryView")(Struct.omit(AttemptView.fields, ["task"])) {}

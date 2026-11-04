@@ -104,7 +104,9 @@ describe("instance state", () => {
     // The test process is live, but it doesn't hold the lock: a reused pid never counts.
     writeFileSync(
       files.record,
-      JSON.stringify(Schema.encodeSync(InstanceRecord)(recordFor(process.pid))),
+      JSON.stringify(
+        await Effect.runPromise(Schema.encodeEffect(InstanceRecord)(recordFor(process.pid))),
+      ),
     );
     const state = await probe(directory);
     assert(state._tag === "Stopped");
@@ -151,11 +153,9 @@ describe("instance state", () => {
         const legacy = yield* probeInstance(directory);
         assert(legacy._tag === "Unrecorded");
         assert.deepStrictEqual(legacy.pid, Option.some(process.pid));
+        const valueDecoded1 = yield* Schema.encodeEffect(InstanceRecord)(recordFor(exitedPid()));
         // A record of an exited process, left by a crash before this holder wrote its own.
-        writeFileSync(
-          files.record,
-          JSON.stringify(Schema.encodeSync(InstanceRecord)(recordFor(exitedPid()))),
-        );
+        writeFileSync(files.record, JSON.stringify(valueDecoded1));
         writeFileSync(files.pid, `${exitedPid()}\n`);
         const starting = yield* probeInstance(directory);
         assert.deepStrictEqual(starting, Unrecorded.make({ pid: Option.none() }));

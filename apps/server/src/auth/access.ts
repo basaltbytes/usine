@@ -37,28 +37,31 @@ const grantAdministrators = Effect.fn("MemberAccess.grantAdministrators")(functi
   if (Option.isNone(snapshot.instance))
     return yield* authFailure("Initialize configuration before enrolling members.", 503);
   const bindings = snapshot.instance.value.config.bindings;
-  const changes = members
-    .filter(
+  const changes = yield* Effect.forEach(
+    members.filter(
       (member) =>
         !bindings.some((binding) => binding.member === member.id && binding.role === "admin"),
-    )
-    .map((member) => {
-      const name = `member-${member.id}-admin`;
-      const binding = RoleBinding.make({
-        name,
-        member: member.id,
-        role: "admin",
-        scope: InstanceScope.make(),
-      });
-      return ConfigurationChange.make({
-        key: ConfigurationEntityKey.make({
-          kind: "binding",
-          identifier: ConfigurationEntityId.make(name),
-        }),
-        before: Option.none(),
-        after: Option.some(Schema.encodeSync(RoleBinding)(binding)),
-      });
-    });
+    ),
+    (member) =>
+      Effect.gen(function* () {
+        const name = `member-${member.id}-admin`;
+        const binding = RoleBinding.make({
+          name,
+          member: member.id,
+          role: "admin",
+          scope: InstanceScope.make(),
+        });
+        const after = yield* Schema.encodeEffect(RoleBinding)(binding);
+        return ConfigurationChange.make({
+          key: ConfigurationEntityKey.make({
+            kind: "binding",
+            identifier: ConfigurationEntityId.make(name),
+          }),
+          before: Option.none(),
+          after: Option.some(after),
+        });
+      }),
+  );
   if (changes.length === 0) return;
   yield* store.commit({
     expected: snapshot.number,
@@ -125,18 +128,21 @@ export const memberAccessLayer = Layer.effect(
               "Grant another member instance admin access before removing the last admin.",
               409,
             );
-          const changes = bindings
-            .filter((binding) => binding.member === id)
-            .map((binding) =>
-              ConfigurationChange.make({
-                key: ConfigurationEntityKey.make({
-                  kind: "binding",
-                  identifier: ConfigurationEntityId.make(binding.name),
-                }),
-                before: Option.some(Schema.encodeSync(RoleBinding)(binding)),
-                after: Option.none(),
+          const changes = yield* Effect.forEach(
+            bindings.filter((binding) => binding.member === id),
+            (binding) =>
+              Effect.gen(function* () {
+                const before = yield* Schema.encodeEffect(RoleBinding)(binding);
+                return ConfigurationChange.make({
+                  key: ConfigurationEntityKey.make({
+                    kind: "binding",
+                    identifier: ConfigurationEntityId.make(binding.name),
+                  }),
+                  before: Option.some(before),
+                  after: Option.none(),
+                });
               }),
-            );
+          );
           yield* store.remove(id);
           if (changes.length > 0)
             yield* configuration.commit({

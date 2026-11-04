@@ -19,7 +19,7 @@ import { gitHubCredentialLayer } from "../src/credentials.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 
 const repository = RepositoryName.make("acme/demo");
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [{ name: repository }],
   workers: [{ name: "local", kind: "local" }],
@@ -65,7 +65,10 @@ describe("GitHub credential provider", () => {
       assert.strictEqual(Redacted.value(write.value), "ghs_write");
     }).pipe(
       Effect.provide(
-        gitHubCredentialLayer.pipe(Layer.provide(app), Layer.provide(fixedConfigLayer(config))),
+        gitHubCredentialLayer.pipe(
+          Layer.provide(app),
+          Layer.provide(fixedConfigLayer(Effect.runSync(config))),
+        ),
       ),
     );
   });
@@ -92,7 +95,7 @@ describe("GitHub credential provider failures", () => {
           workerToken: () => Effect.fail(mint),
         }),
       ),
-      Layer.provide(fixedConfigLayer(config)),
+      Layer.provide(fixedConfigLayer(Effect.runSync(config))),
     );
   const issue = CredentialProvider.use((credentials) =>
     credentials.issue(repository, AttemptId.make("implement/1"), "write"),

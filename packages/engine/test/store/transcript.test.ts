@@ -247,7 +247,7 @@ describe("Attempt transcripts", () => {
         });
         yield* store.appendTranscript("outbound", currentEnvelope);
 
-        const encoded = Schema.encodeSync(AttemptChannel.Envelope)(currentEnvelope);
+        const encoded = yield* Schema.encodeEffect(AttemptChannel.Envelope)(currentEnvelope);
         yield* database
           .update(attemptTranscripts)
           .set({ envelope: { ...encoded, version } })
@@ -314,7 +314,7 @@ describe("Attempt transcripts", () => {
           target: _target,
           operator: _operator,
           ...withoutTarget
-        } = Schema.encodeSync(AttemptChannel.InboundEnvelope)(currentEnvelope);
+        } = yield* Schema.encodeEffect(AttemptChannel.InboundEnvelope)(currentEnvelope);
         yield* database
           .update(attemptTranscripts)
           .set({
@@ -322,7 +322,9 @@ describe("Attempt transcripts", () => {
               version === 4
                 ? { ...withoutTarget, version }
                 : {
-                    ...Schema.encodeSync(AttemptChannel.InboundEnvelope)(currentEnvelope),
+                    ...(yield* Schema.encodeEffect(AttemptChannel.InboundEnvelope)(
+                      currentEnvelope,
+                    )),
                     version,
                   },
           })

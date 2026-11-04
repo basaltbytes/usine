@@ -1,5 +1,5 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { Cause, Deferred, Effect, Fiber, Queue, Ref, Schema, Stream } from "effect";
+import { type Brand, Cause, Deferred, Effect, Fiber, Queue, Ref, Schema, Stream } from "effect";
 import { Base64 } from "effect/encoding";
 import { ChildProcessSpawner } from "effect/process";
 import { childPidFile, type RemoteShell, SSH_FAILURE } from "../../child-host/child-host.ts";
@@ -8,9 +8,10 @@ import { type CodexClient, operationError } from "./connection.ts";
 import { CODEX_SUPERVISOR } from "./supervisor.ts";
 import { SessionOperationError } from "../../runtime.ts";
 
-export class RemoteCodexProcessLost extends Schema.TaggedError<RemoteCodexProcessLost>(
-  "@usine/agents/RemoteCodexProcessLost",
-)("RemoteCodexProcessLost", {
+export class RemoteCodexProcessLost extends Schema.TaggedError<
+  RemoteCodexProcessLost,
+  Brand.Brand<"@usine/agents/pi/codex/remote/RemoteCodexProcessLost">
+>("@usine/agents/RemoteCodexProcessLost")("RemoteCodexProcessLost", {
   message: Schema.String,
 }) {}
 
@@ -170,6 +171,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
         );
       failures += 1;
       const delaySeconds = Math.min(30, 2 ** Math.min(failures - 1, 5));
+
       yield* Effect.logWarning("Codex SSH connection dropped; reattaching the running app-server", {
         ...fields,
         failures,

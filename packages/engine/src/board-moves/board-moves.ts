@@ -18,8 +18,8 @@ const BoardMoveRow = Schema.Struct({
 });
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(BoardMoveRow));
-const encodeAdded = Schema.encodeSync(BoardMoveRecord.fields.added);
-const encodeRemoved = Schema.encodeSync(BoardMoveRecord.fields.removed);
+const encodeAdded = Schema.encodeEffect(BoardMoveRecord.fields.added);
+const encodeRemoved = Schema.encodeEffect(BoardMoveRecord.fields.removed);
 
 const persistence =
   (operation: string) =>
@@ -31,6 +31,8 @@ const makeBoardMoves = Effect.gen(function* () {
   return {
     record: Effect.fn("BoardMoves.record")(function* (move: BoardMoveRecord) {
       yield* Effect.annotateCurrentSpan({ repository: move.repository, itemKey: move.itemKey });
+      const addedJson = yield* encodeAdded(move.added);
+      const removedJson = yield* encodeRemoved(move.removed);
       yield* database
         .insert(boardMoves)
         .values({
@@ -39,8 +41,8 @@ const makeBoardMoves = Effect.gen(function* () {
           movedAt: encodeDateTime(move.at),
           fromLane: move.fromLane,
           toLane: move.toLane,
-          addedJson: encodeAdded(move.added),
-          removedJson: encodeRemoved(move.removed),
+          addedJson: addedJson,
+          removedJson: removedJson,
         })
         .execute();
       yield* Effect.logDebug("Recorded a Board move before writing its labels", {
@@ -67,6 +69,7 @@ const makeBoardMoves = Effect.gen(function* () {
         .where(and(eq(boardMoves.itemKey, itemKey), gte(boardMoves.movedAt, encodeDateTime(since))))
         .orderBy(asc(boardMoves.movedAt), asc(boardMoves.moveId))
         .execute();
+
       return (yield* decodeRows(rows, { onExcessProperty: "error" })).map((row) =>
         BoardMoveRecord.make(row),
       );

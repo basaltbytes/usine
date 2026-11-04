@@ -1,5 +1,5 @@
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { Headers, HttpClient, HttpClientRequest } from "effect/http";
 import type { Attachment } from "../attachment/attachment.ts";
 import { absoluteUrl, afterPrefix, type GitHubOrigins, withGitHubCredential } from "./github.ts";
@@ -59,7 +59,10 @@ export const redirectedName = (
   );
 
 /** Why GitHub's API didn't confirm that the attached repository has a redirect's name. */
-class RenameUnconfirmed extends Schema.TaggedError<RenameUnconfirmed>()("RenameUnconfirmed", {
+class RenameUnconfirmed extends Schema.TaggedError<
+  RenameUnconfirmed,
+  Brand.Brand<"@usine/gateway/github/rename/RenameUnconfirmed">
+>()("RenameUnconfirmed", {
   reason: Schema.Literals([
     "former-name-not-redirected",
     "repository-unreadable",

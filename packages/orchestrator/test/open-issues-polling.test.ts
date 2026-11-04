@@ -47,7 +47,7 @@ import {
 } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -79,7 +79,7 @@ const loop = LoopFile.make({
 });
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
   LoadedInstance.make({
-    config,
+    config: Effect.runSync(config),
     agents: [agent],
     invalidAgents: [],
     loops,
@@ -157,6 +157,7 @@ describe("PollingTriggers open-issue check", () => {
     "marks an open issue GitHub no longer has as gone and moves its card out of the open lanes",
     () =>
       Effect.gen(function* () {
+        const fixtureConfig = yield* config;
         const fileSystem = yield* FileSystem.FileSystem;
         const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
           directory: sqliteTempDirectory(),
@@ -222,7 +223,7 @@ describe("PollingTriggers open-issue check", () => {
 
           const stored = yield* items.list(repository, { limit: 10 });
           assert(stored[0] !== undefined && Option.isSome(stored[0].goneAt));
-          const managed = config.repos[0];
+          const managed = fixtureConfig.repos[0];
           assert(managed !== undefined);
           const board = yield* projectBoard(managed, [], stored, []);
           assert.deepStrictEqual(board.lanes[0]?.items, []);

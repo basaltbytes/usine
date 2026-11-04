@@ -28,7 +28,7 @@ import {
   RepositoryNotModified,
   GitHubPolling,
 } from "@usine/github/polling";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { flow, DateTime, Effect, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { memoryCursorStore, pollingTestLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
@@ -51,18 +51,21 @@ const loop = LoopFile.make({
   agent: agent.name,
   body: PromptTemplate.make("Implement it."),
 });
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   labels: [{ name: "ready", color: "A2EEEF" }],
   repos: [{ name: repository }],
 });
-const instance = LoadedInstance.make({
-  config,
-  agents: [agent],
-  invalidAgents: [],
-  loops: [loop],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const fixtureConfig = yield* config;
+  return LoadedInstance.make({
+    config: fixtureConfig,
+    agents: [agent],
+    invalidAgents: [],
+    loops: [loop],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 const emptyCatalog = RepositoryLabelCatalog.make({
   entityTag: Option.none(),
@@ -70,7 +73,10 @@ const emptyCatalog = RepositoryLabelCatalog.make({
 });
 const catalogEntityTag = EntityTag.make('W/"labels"');
 const StoredCatalogEntityTag = Schema.Struct({ labelEntityTag: Schema.NullOr(Schema.String) });
-const decodeStoredCatalogEntityTag = Schema.decodeUnknownSync(StoredCatalogEntityTag);
+const decodeStoredCatalogEntityTag = flow(
+  Schema.decodeUnknownEffect(StoredCatalogEntityTag),
+  Effect.runSync,
+);
 /** Returns the catalog ETag each stored poll cursor sends next cycle. */
 const storedCatalogEntityTags = (
   stored: ReadonlyMap<string, Schema.Json>,
@@ -108,8 +114,10 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(operations, ["catalog", "create:ready", "changes"]);
       assert.deepStrictEqual(cycle.preflightFindings, []);
@@ -142,8 +150,10 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(operations, ["changes"]);
       assert.deepStrictEqual(cycle.preflightFindings, []);
@@ -175,12 +185,17 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(cycle.failures, []);
-      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
-      const sustained = yield* polling.poll(instance);
+
+      const decodedValue1 = yield* polling.poll(fixtureInstance);
+      assert.deepStrictEqual(decodedValue1.failures, []);
+
+      const sustained = yield* polling.poll(fixtureInstance);
       assert.deepStrictEqual(
         sustained.failures.map(({ message }) => message),
         [
@@ -224,14 +239,21 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
-      assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
-      const sustained = yield* polling.poll(instance);
+
+      const decodedValue2 = yield* polling.poll(fixtureInstance);
+      assert.deepStrictEqual(decodedValue2.failures, []);
+
+      const decodedValue3 = yield* polling.poll(fixtureInstance);
+      assert.deepStrictEqual(decodedValue3.failures, []);
+
+      const sustained = yield* polling.poll(fixtureInstance);
       assert.lengthOf(sustained.failures, 1);
       assert.include(sustained.failures[0]?.message ?? "", "list-repository-labels");
       rateLimited = true;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(cycle.failures, sustained.failures);
       assert.deepStrictEqual(cycle.preflightFindings, []);
@@ -277,8 +299,10 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(operations, ["projection"]);
       assert.deepStrictEqual(cycle.preflightFindings, []);
@@ -311,8 +335,10 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(cycle.preflightFindings, []);
       // The creation invalidated GitHub's ETag: the next cycle must refetch the catalog.
@@ -354,18 +380,21 @@ describe("PollingTriggers label preflight", () => {
       };
 
       return Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
         const polling = yield* PollingTriggers;
-        yield* polling.poll(instance);
+
+        yield* polling.poll(fixtureInstance);
         assert.deepStrictEqual(storedCatalogEntityTags(cursors.stored), [catalogEntityTag]);
 
         // The stored catalog is gone while the cursor still has its ETag.
-        const cycle = yield* polling.poll(instance);
+        const cycle = yield* polling.poll(fixtureInstance);
 
         assert.deepStrictEqual(catalogRequests, ["none", catalogEntityTag]);
         assert.deepStrictEqual(cycle.preflightFindings, []);
         assert.deepStrictEqual(cycle.failures, []);
         assert.deepStrictEqual(storedCatalogEntityTags(cursors.stored), [null]);
-        yield* polling.poll(instance);
+
+        yield* polling.poll(fixtureInstance);
         assert.deepStrictEqual(catalogRequests, ["none", catalogEntityTag, "none"]);
       }).pipe(Effect.provide(pollingTestLayer(github, [], writer, undefined, cursors.store)));
     },
@@ -400,8 +429,10 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(operations, ["create", "changes"]);
       assert.deepStrictEqual(
@@ -440,8 +471,10 @@ describe("PollingTriggers label preflight", () => {
     };
 
     return Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instance);
+
+      const cycle = yield* polling.poll(fixtureInstance);
 
       assert.deepStrictEqual(
         cycle.preflightFindings.map(({ label }) => label),

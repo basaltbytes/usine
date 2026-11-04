@@ -145,6 +145,7 @@ export class ConfigurationFolder extends Context.Service<
               return yield* ConfigurationInvalid.make({ problems });
             if (Result.isFailure(config))
               return yield* ConfigurationInvalid.make({ problems: [config.failure] });
+
             return yield* Effect.fromResult(
               migrateProjects(
                 LoadedInstance.make({
@@ -174,7 +175,7 @@ export class ConfigurationFolder extends Context.Service<
           function* (root, instance) {
             yield* Effect.annotateCurrentSpan({ directory: root });
             yield* fs.makeDirectory(root, { recursive: true });
-            const encoded = Schema.encodeSync(UsineConfig)(instance.config);
+            const encoded = yield* Schema.encodeEffect(UsineConfig)(instance.config);
             const exported =
               instance.config.version === 1
                 ? encoded
@@ -201,24 +202,26 @@ export class ConfigurationFolder extends Context.Service<
                   { discard: true },
                 );
               });
-            yield* write(
-              "agents",
-              instance.agents.map((agent) => [agent.name, formatAgent(agent)]),
+            const agents = yield* Effect.forEach(instance.agents, (agent) =>
+              formatAgent(agent).pipe(Effect.map((text) => [agent.name, text] as const)),
             );
+            yield* write("agents", agents);
             if (instance.config.version === 1) {
-              yield* write(
-                "loops",
-                instance.loops.map((loop) => [loop.name, formatLoop(loop)]),
+              const loops = yield* Effect.forEach(instance.loops, (loop) =>
+                formatLoop(loop).pipe(Effect.map((text) => [loop.name, text] as const)),
               );
+              yield* write("loops", loops);
             } else {
               yield* write("loops", []);
               for (const project of instance.config.projects) {
-                yield* write(
-                  `projects/${project.id}/loops`,
-                  instance.loops
-                    .filter((loop) => loop.name.startsWith(`${project.id}/`))
-                    .map((loop) => [loop.name.slice(project.id.length + 1), formatLoop(loop)]),
+                const projectLoops = yield* Effect.forEach(
+                  instance.loops.filter((loop) => loop.name.startsWith(`${project.id}/`)),
+                  (loop) =>
+                    formatLoop(loop).pipe(
+                      Effect.map((text) => [loop.name.slice(project.id.length + 1), text] as const),
+                    ),
                 );
+                yield* write(`projects/${project.id}/loops`, projectLoops);
               }
             }
             yield* Effect.logInfo("Configuration exported", { directory: root });

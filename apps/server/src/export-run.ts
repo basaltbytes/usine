@@ -3,6 +3,7 @@ import { RunId } from "@usine/core/run";
 import { runReaderLayer } from "@usine/engine/local-sqlite";
 import { RunEvidence, RunReader } from "@usine/engine/run-reader";
 import {
+  type Brand,
   Console,
   DateTime,
   Effect,
@@ -28,9 +29,10 @@ export const RunEvidenceFromJson = Schema.fromJsonString(
 );
 
 /** A failure to read, encode, or write Run evidence. */
-export class RunExportError extends Schema.TaggedError<RunExportError>(
-  "@usine/server/RunExportError",
-)("RunExportError", {
+export class RunExportError extends Schema.TaggedError<
+  RunExportError,
+  Brand.Brand<"@usine/server/export-run/RunExportError">
+>("@usine/server/RunExportError")("RunExportError", {
   runId: RunId,
   operation: Schema.Literals(["read", "encode", "write"]),
   path: Schema.String,
@@ -45,6 +47,7 @@ const writeRunEvidence = Effect.fn("RunEvidence.write")(function* (
 ) {
   const runId = evidence.snapshot.run.id;
   yield* Effect.annotateCurrentSpan({ runId, output });
+
   const json = yield* Schema.encodeEffect(RunEvidenceFromJson)({
     version: 1,
     exportedAt: yield* DateTime.now,

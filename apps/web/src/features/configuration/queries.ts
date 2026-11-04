@@ -116,12 +116,12 @@ type ConfigurationAction =
   | {
       readonly action: "delete";
       readonly key: ConfigurationEntityKey;
-      readonly payload: ConfigurationWrite;
+      readonly payload: Pick<ConfigurationWrite, "expected" | "message">;
     }
   | {
       readonly action: "revert";
       readonly number: ConfigurationRevisionNumber;
-      readonly payload: ConfigurationWrite;
+      readonly payload: Pick<ConfigurationWrite, "expected" | "message">;
     };
 
 export const useConfigurationWrite = () => {

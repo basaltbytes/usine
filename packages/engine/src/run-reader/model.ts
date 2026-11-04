@@ -12,11 +12,14 @@ import { RunAgain } from "@usine/core/run/again";
 import { RunApproval } from "@usine/core/run/approval";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Option, Schema, Struct } from "effect";
+import { type Brand, Effect, Option, Schema, Struct } from "effect";
 import { TranscriptEntry } from "../transcript.ts";
 
 /** The full durable view of a Run. */
-export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSnapshot")({
+export class RunSnapshot extends Schema.Class<
+  RunSnapshot,
+  Brand.Brand<"@usine/engine/run-reader/model/RunSnapshot">
+>("@usine/engine/RunSnapshot")({
   /** The event that opened the run, including its saved payload slice. */
   event: Event,
   /** The item identity associated with this run. */
@@ -60,7 +63,10 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
 }) {}
 
 /** A Run and the Event it was opened for; the payload is the Item as the trigger saw it. */
-export class RunEvent extends Schema.Class<RunEvent>("@usine/engine/RunEvent")({
+export class RunEvent extends Schema.Class<
+  RunEvent,
+  Brand.Brand<"@usine/engine/run-reader/model/RunEvent">
+>("@usine/engine/RunEvent")({
   /** The run opened for this event. */
   runId: RunId,
   /** The recorded event, including the payload observed when its trigger matched. */
@@ -68,7 +74,10 @@ export class RunEvent extends Schema.Class<RunEvent>("@usine/engine/RunEvent")({
 }) {}
 
 /** A Run snapshot and all its transcript entries, read in one transaction. */
-export class RunEvidence extends Schema.Class<RunEvidence>("@usine/engine/RunEvidence")({
+export class RunEvidence extends Schema.Class<
+  RunEvidence,
+  Brand.Brand<"@usine/engine/run-reader/model/RunEvidence">
+>("@usine/engine/RunEvidence")({
   /** The run state and attempt history read in the same transaction as the transcript. */
   snapshot: RunSnapshot,
   /** All entries of the run's attempts, sorted by global transcript append order. */
@@ -76,12 +85,16 @@ export class RunEvidence extends Schema.Class<RunEvidence>("@usine/engine/RunEvi
 }) {}
 
 /** Attempt metadata used by polling reads, without prompts or harvested comments. */
-export class AttemptSummary extends Schema.Class<AttemptSummary>("@usine/engine/AttemptSummary")(
-  Struct.omit(Attempt.fields, ["task", "comments"]),
-) {}
+export class AttemptSummary extends Schema.Class<
+  AttemptSummary,
+  Brand.Brand<"@usine/engine/run-reader/model/AttemptSummary">
+>("@usine/engine/AttemptSummary")(Struct.omit(Attempt.fields, ["task", "comments"])) {}
 
 /** The Run view used in operator Run lists. */
-export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
+export class RunSummary extends Schema.Class<
+  RunSummary,
+  Brand.Brand<"@usine/engine/run-reader/model/RunSummary">
+>("@usine/engine/RunSummary")({
   /** The item identity associated with this run. */
   itemKey: ItemKey,
   /** The saved run identity and lifecycle state. */
@@ -122,13 +135,19 @@ export const summarizeRun = (snapshot: RunSnapshot): RunSummary =>
   });
 
 /** The metadata needed to attribute session usage without reading attempt prompts. */
-export class RunUsageSource extends Schema.Class<RunUsageSource>("@usine/engine/RunUsageSource")({
+export class RunUsageSource extends Schema.Class<
+  RunUsageSource,
+  Brand.Brand<"@usine/engine/run-reader/model/RunUsageSource">
+>("@usine/engine/RunUsageSource")({
   run: Schema.Struct({ id: RunId }),
   attempts: Schema.Array(Schema.Struct({ id: AttemptId, ended: Schema.Boolean })),
 }) {}
 
 /** Historical totals and links for one board item, aggregated in storage. */
-export class ItemRunHistory extends Schema.Class<ItemRunHistory>("@usine/engine/ItemRunHistory")({
+export class ItemRunHistory extends Schema.Class<
+  ItemRunHistory,
+  Brand.Brand<"@usine/engine/run-reader/model/ItemRunHistory">
+>("@usine/engine/ItemRunHistory")({
   itemKey: ItemKey,
   runCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   attemptCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -150,15 +169,19 @@ export class ItemRunHistory extends Schema.Class<ItemRunHistory>("@usine/engine/
 }) {}
 
 /** SQL-selected board runs and aggregate history for the selected items. */
-export class BoardRunHistory extends Schema.Class<BoardRunHistory>("@usine/engine/BoardRunHistory")(
-  {
-    runs: Schema.Array(RunSummary),
-    items: Schema.Array(ItemRunHistory),
-  },
-) {}
+export class BoardRunHistory extends Schema.Class<
+  BoardRunHistory,
+  Brand.Brand<"@usine/engine/run-reader/model/BoardRunHistory">
+>("@usine/engine/BoardRunHistory")({
+  runs: Schema.Array(RunSummary),
+  items: Schema.Array(ItemRunHistory),
+}) {}
 
 /** The number of Attempts on a Worker that startup reconciliation still visits, excluding discarded leftovers. */
-export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/WorkerAttempts")(
+export class WorkerAttempts extends Schema.Class<
+  WorkerAttempts,
+  Brand.Brand<"@usine/engine/run-reader/model/WorkerAttempts">
+>("@usine/engine/WorkerAttempts")(
   Schema.Struct({
     /** The configured or removed worker whose attempts still need startup reconciliation. */
     worker: WorkerName,
@@ -176,7 +199,10 @@ export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/
 ) {}
 
 /** A Loop's last sighting of an Item and its result (ADR 0007, ADR 0017). */
-export class LoopSighting extends Schema.Class<LoopSighting>("@usine/engine/LoopSighting")({
+export class LoopSighting extends Schema.Class<
+  LoopSighting,
+  Brand.Brand<"@usine/engine/run-reader/model/LoopSighting">
+>("@usine/engine/LoopSighting")({
   /** The qualified loop identity that last evaluated the item. */
   loop: LoopName,
   /** The evaluated item, used with the loop identity to find the last match. */

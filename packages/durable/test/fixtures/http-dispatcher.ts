@@ -31,7 +31,7 @@ const origin = createServer((request, response) => {
 });
 origin.listen(0, "127.0.0.1");
 await once(origin, "listening");
-const originAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
+const originAddress = Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
   origin.address(),
 );
 
@@ -39,7 +39,7 @@ const tunnels: Array<string | undefined> = [];
 const proxy = createServer();
 proxy.on("connect", (request, socket, head) => {
   tunnels.push(request.url);
-  const upstream = connect(originAddress.port, "127.0.0.1", () => {
+  const upstream = connect(Effect.runSync(originAddress).port, "127.0.0.1", () => {
     socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     upstream.write(head);
     upstream.pipe(socket);
@@ -51,19 +51,21 @@ proxy.on("connect", (request, socket, head) => {
 });
 proxy.listen(0, "127.0.0.1");
 await once(proxy, "listening");
-const proxyAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Finite }))(
+const proxyAddress = Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Finite }))(
   proxy.address(),
 );
-const proxyUrl = `http://127.0.0.1:${proxyAddress.port}`;
+const proxyUrl = Effect.gen(function* () {
+  return `http://127.0.0.1:${(yield* proxyAddress).port}`;
+});
 if (scenario === "environment") {
-  process.env.HTTP_PROXY = proxyUrl;
-  process.env.HTTPS_PROXY = proxyUrl;
+  process.env.HTTP_PROXY = Effect.runSync(proxyUrl);
+  process.env.HTTPS_PROXY = Effect.runSync(proxyUrl);
 }
 await mkdir(join(directory, "pi"));
 await writeFile(
   join(directory, "pi/settings.json"),
   JSON.stringify({
-    httpProxy: scenario === "environment" ? "invalid-proxy" : `  ${proxyUrl}  `,
+    httpProxy: scenario === "environment" ? "invalid-proxy" : `  ${Effect.runSync(proxyUrl)}  `,
   }),
 );
 // Project settings must not control the orchestrator's process-wide proxy.
@@ -88,8 +90,8 @@ try {
   await openHarness();
   const dispatcher = getGlobalDispatcher();
   assert.notStrictEqual(dispatcher, initialDispatcher);
-  assert.strictEqual(process.env.HTTP_PROXY, proxyUrl);
-  assert.strictEqual(process.env.HTTPS_PROXY, proxyUrl);
+  assert.strictEqual(process.env.HTTP_PROXY, Effect.runSync(proxyUrl));
+  assert.strictEqual(process.env.HTTPS_PROXY, Effect.runSync(proxyUrl));
   if (scenario === "custom") assert.strictEqual(globalThis.fetch, customFetch);
   else {
     assert.notStrictEqual(globalThis.fetch, initialFetch);
@@ -98,16 +100,18 @@ try {
   await openHarness();
   assert.strictEqual(getGlobalDispatcher(), dispatcher);
 
-  const direct = await fetch(`http://127.0.0.1:${originAddress.port}/json`);
+  const direct = await fetch(`http://127.0.0.1:${Effect.runSync(originAddress).port}/json`);
   assert.deepStrictEqual(await direct.json(), { ok: true });
   assert.strictEqual(tunnels.length, 0);
-  const proxied = await fetch(`http://pi.invalid:${originAddress.port}/json`);
+  const proxied = await fetch(`http://pi.invalid:${Effect.runSync(originAddress).port}/json`);
   assert.deepStrictEqual(await proxied.json(), { ok: true });
-  assert.deepStrictEqual(tunnels, [`pi.invalid:${originAddress.port}`]);
+  assert.deepStrictEqual(tunnels, [`pi.invalid:${Effect.runSync(originAddress).port}`]);
   await assert.rejects(
-    fetch(`http://127.0.0.1:${originAddress.port}/broken`).then((response) => response.text()),
+    fetch(`http://127.0.0.1:${Effect.runSync(originAddress).port}/broken`).then((response) =>
+      response.text(),
+    ),
   );
-  const recovered = await fetch(`http://127.0.0.1:${originAddress.port}/json`);
+  const recovered = await fetch(`http://127.0.0.1:${Effect.runSync(originAddress).port}/json`);
   assert.deepStrictEqual(await recovered.json(), { ok: true });
 } finally {
   await getGlobalDispatcher().destroy();

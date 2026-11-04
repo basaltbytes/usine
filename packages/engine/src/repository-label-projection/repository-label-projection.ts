@@ -24,7 +24,7 @@ const storedLabels = (
     : labels;
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(RepositoryLabelProjectionRow));
-const encodeLabels = Schema.encodeSync(RepositoryLabelProjection.fields.labels);
+const encodeLabels = Schema.encodeEffect(RepositoryLabelProjection.fields.labels);
 
 const persistence =
   (operation: string) =>
@@ -66,7 +66,7 @@ const makeWriter = Effect.gen(function* () {
       projection: RepositoryLabelProjection,
     ) {
       yield* Effect.annotateCurrentSpan({ repository: projection.repository });
-      const labelsJson = encodeLabels(projection.labels);
+      const labelsJson = yield* encodeLabels(projection.labels);
       const changed = yield* database
         .insert(repositoryLabelProjections)
         .values({ repository: projection.repository, labelsJson })

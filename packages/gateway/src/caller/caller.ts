@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect";
+import { type Brand, Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect";
 import { Base64, Base64Url } from "effect/encoding";
 import { Headers } from "effect/http";
 import { AttachmentId } from "../attachment/attachment.ts";
@@ -10,7 +10,10 @@ import { GatewaySettings } from "../settings.ts";
  * The attachment ID, worker, and repository signed into a caller token. The proxy checks these
  * claims against an active attachment; a new attachment cannot reactivate an old token.
  */
-export class CallerClaims extends Schema.Class<CallerClaims>("@usine/gateway/CallerClaims")({
+export class CallerClaims extends Schema.Class<
+  CallerClaims,
+  Brand.Brand<"@usine/gateway/caller/caller/CallerClaims">
+>("@usine/gateway/CallerClaims")({
   /** The attachment ID whose validity the proxy checks after signature verification. */
   attachment: AttachmentId,
   /** The worker authorized by the attachment. */
@@ -30,13 +33,13 @@ export type CallerToken = typeof CallerToken.Type;
  * The error for a caller token the gateway didn't issue: `malformed` if the format is wrong,
  * `bad-signature` if it wasn't signed with the gateway's key.
  */
-export class CallerTokenRejected extends Schema.TaggedError<CallerTokenRejected>()(
-  "CallerTokenRejected",
-  {
-    /** Whether decoding failed or the signature did not match the gateway caller key. */
-    reason: Schema.Literals(["malformed", "bad-signature"]),
-  },
-) {}
+export class CallerTokenRejected extends Schema.TaggedError<
+  CallerTokenRejected,
+  Brand.Brand<"@usine/gateway/caller/caller/CallerTokenRejected">
+>()("CallerTokenRejected", {
+  /** Whether decoding failed or the signature did not match the gateway caller key. */
+  reason: Schema.Literals(["malformed", "bad-signature"]),
+}) {}
 
 /** The header for tools that can add one, such as git with `http.extraHeader`. */
 export const GATEWAY_TOKEN_HEADER = "x-usine-gateway-token";
@@ -60,7 +63,7 @@ const toArrayBuffer = (value: Uint8Array): ArrayBuffer => {
 };
 
 const ClaimsJson = Schema.fromJsonString(CallerClaims);
-const encodeClaims = Schema.encodeSync(ClaimsJson);
+const encodeClaims = Schema.encodeEffect(ClaimsJson);
 const decodeClaims = Schema.decodeUnknownOption(ClaimsJson);
 
 /**
@@ -109,7 +112,8 @@ export class CallerTokens extends Context.Service<
           worker: claims.worker,
           repository: claims.repository,
         });
-        const signed = `ugw1.${Base64Url.encode(encodeClaims(claims))}`;
+        const encodedClaims = yield* encodeClaims(claims).pipe(Effect.orDie);
+        const signed = `ugw1.${Base64Url.encode(encodedClaims)}`;
         const mac = yield* Effect.promise(() =>
           crypto.subtle.sign("HMAC", key, toArrayBuffer(encoder.encode(signed))),
         );

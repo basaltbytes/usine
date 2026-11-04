@@ -67,7 +67,8 @@ describe("Hetzner Cloud driver", () => {
         });
         assert(Option.isSome(hostKey));
         assert.match(hostKey.value, /^ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]{43}=?$/u);
-        const userDataLines = Schema.decodeUnknownSync(Schema.String)(userData).split("\n");
+        const decodedValue1 = yield* Schema.decodeUnknownEffect(Schema.String)(userData);
+        const userDataLines = decodedValue1.split("\n");
         assert.deepStrictEqual(userDataLines.slice(0, 5), [
           "#cloud-config",
           "ssh_deletekeys: true",
@@ -169,11 +170,14 @@ describe("Hetzner Cloud driver", () => {
           code: "resource_unavailable",
           message: "This product is currently unavailable",
         };
+
         assert.strictEqual((yield* reasonOf()).reason, "capacity");
         providers.hetzner.createFails = { status: 500, code: "server_error", message: "boom" };
+
         assert.strictEqual((yield* reasonOf()).reason, "provider");
         providers.hetzner.createFails = undefined;
         providers.hetzner.unreachable = true;
+
         assert.strictEqual((yield* reasonOf()).reason, "unreachable");
         assert.strictEqual(providers.hetzner.servers.size, 0);
       }).pipe(Effect.provide(providers.layer));
@@ -189,6 +193,7 @@ describe("Hetzner Cloud driver", () => {
           hetznerDriverFor(WORKER, settings, true, HETZNER_TEST_API).pipe(
             Effect.flatMap((driver) => driver.verify(WORKER, 4)),
           );
+
         assert.deepStrictEqual((yield* verify(hetznerSettings())).warnings, []);
         const outOfStock = yield* verify(
           hetznerSettings({ location: HetznerLocation.make("fsn1") }),
@@ -200,23 +205,23 @@ describe("Hetzner Cloud driver", () => {
         const token = yield* refused(hetznerSettings({ token: Redacted.make("wrong") }));
         assert.strictEqual(token.capability, "provider");
         assert.include(token.message, "refused the token");
-        assert.include(
-          (yield* refused(hetznerSettings({ serverType: HetznerServerType.make("cx99") }))).message,
-          'no server type "cx99"',
+        const decodedValue6 = yield* refused(
+          hetznerSettings({ serverType: HetznerServerType.make("cx99") }),
         );
-        assert.include(
-          (yield* refused(hetznerSettings({ location: HetznerLocation.make("hel1") }))).message,
-          "doesn't offer server type cx33 in hel1",
+        assert.include(decodedValue6.message, 'no server type "cx99"');
+        const decodedValue7 = yield* refused(
+          hetznerSettings({ location: HetznerLocation.make("hel1") }),
         );
-        assert.include(
-          (yield* refused(hetznerSettings({ image: HetznerImage.make("missing-snapshot") })))
-            .message,
-          "snapshot.sh",
+        assert.include(decodedValue7.message, "doesn't offer server type cx33 in hel1");
+        const decodedValue8 = yield* refused(
+          hetznerSettings({ image: HetznerImage.make("missing-snapshot") }),
         );
-        assert.include(
-          (yield* refused(hetznerSettings({ sshKey: HetznerResourceName.make("nobody") }))).message,
-          'no SSH key named "nobody"',
+        assert.include(decodedValue8.message, "snapshot.sh");
+        const decodedValue9 = yield* refused(
+          hetznerSettings({ sshKey: HetznerResourceName.make("nobody") }),
         );
+        assert.include(decodedValue9.message, 'no SSH key named "nobody"');
+
         assert.include(
           (yield* refused(
             hetznerSettings({ network: Option.some(HetznerResourceName.make("lan")) }),
@@ -287,6 +292,7 @@ describe("Boat driver", () => {
           "ssh-ed25519 AAAA",
           BOAT_TEST_API,
         );
+
         const endpoint = yield* driver.endpoint((yield* driver.create("x", tags)).id, noWait);
         assert.strictEqual(endpoint.destination, "user@203.0.113.10");
         assert.deepStrictEqual(endpoint.port, Option.some(22001));
@@ -334,10 +340,13 @@ describe("Boat driver", () => {
         code: "no_ready_machine",
         message: "No ready machine of this type",
       };
+
       assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "capacity");
       providers.boat.createFails = { status: 429, code: "limit_reached", message: "limit reached" };
+
       assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "quota");
       providers.boat.createFails = { status: 402, code: "payment_required", message: "Pay" };
+
       assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "quota");
     }).pipe(Effect.provide(providers.layer));
   });
@@ -364,9 +373,11 @@ describe("Boat driver", () => {
         );
         for (const state of ["saving", "failed"]) {
           providers.boat.snapshots.set("usine-attempt", state);
+
           assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, state);
         }
         providers.boat.snapshots.clear();
+
         assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, "404");
       }).pipe(Effect.provide(providers.layer));
     },
@@ -379,8 +390,10 @@ describe("Boat driver", () => {
         boatDriverFor(WORKER, settings, "ssh-ed25519 AAAA", BOAT_TEST_API).pipe(
           Effect.flatMap((driver) => driver.verify(WORKER, maxConcurrentAttempts)),
         );
+
       assert.deepStrictEqual((yield* verify(boatSettings())).warnings, []);
       providers.boat.limits = { ...providers.boat.limits, maxActiveSandboxes: 1, canStart: false };
+
       assert.lengthOf((yield* verify(boatSettings())).warnings, 2);
       const size = yield* verify(boatSettings({ size: "xlarge" })).pipe(Effect.flip);
       assert.strictEqual(size.capability, "provider");

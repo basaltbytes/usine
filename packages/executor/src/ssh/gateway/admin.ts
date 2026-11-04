@@ -8,7 +8,7 @@ import {
   GatewayAdminApi,
   type LlmProviderList,
 } from "@usine/gateway/admin";
-import { DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
+import { type Brand, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import type { SshWorkerGateway } from "../model.ts";
@@ -29,9 +29,10 @@ const ACTIONS = {
  * The error for a failed Gateway admin API request. `message` contains no token; the request
  * and raw failure are discarded because an attach request contains the installation token.
  */
-export class GatewayAdminError extends Schema.TaggedError<GatewayAdminError>(
-  "@usine/executor/GatewayAdminError",
-)("GatewayAdminError", {
+export class GatewayAdminError extends Schema.TaggedError<
+  GatewayAdminError,
+  Brand.Brand<"@usine/executor/ssh/gateway/admin/GatewayAdminError">
+>("@usine/executor/GatewayAdminError")("GatewayAdminError", {
   worker: WorkerName,
   operation: GatewayAdminOperation,
   message: Schema.NonEmptyString,

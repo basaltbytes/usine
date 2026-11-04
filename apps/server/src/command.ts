@@ -1,4 +1,4 @@
-import { Duration, Effect, Fiber, Schema, Stream } from "effect";
+import { type Brand, Duration, Effect, Fiber, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 /** The exit code and output of a finished command. */
@@ -9,10 +9,13 @@ interface CommandResult {
 }
 
 /** A command couldn't run, timed out, or exited non-zero. */
-export class CommandError extends Schema.TaggedError<CommandError>("@usine/server/CommandError")(
-  "CommandError",
-  { command: Schema.String, reason: Schema.String },
-) {}
+export class CommandError extends Schema.TaggedError<
+  CommandError,
+  Brand.Brand<"@usine/server/command/CommandError">
+>("@usine/server/CommandError")("CommandError", {
+  command: Schema.String,
+  reason: Schema.String,
+}) {}
 
 const commandLine = (command: string, args: ReadonlyArray<string>) => [command, ...args].join(" ");
 

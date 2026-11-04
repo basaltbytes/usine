@@ -433,6 +433,7 @@ describe("Provisioned SSH Worker", () => {
           ]);
 
           assert.strictEqual(grant.id, warm.id);
+
           const launch = yield* (yield* executor.prepare(request))
             .launch(sink)
             .pipe(Effect.forkChild);
@@ -473,6 +474,7 @@ describe("Provisioned SSH Worker", () => {
           assert.isTrue(live);
           const hold = yield* machines.adopt(WORKER, request.attemptId);
           assert.isTrue(Option.isSome(hold));
+
           assert.strictEqual((yield* machines.machines)[0]?.attempts, 2);
           const prepared = yield* executor.prepare(
             CheckoutRequest.make({ ...request, reattach: true }),
@@ -504,7 +506,9 @@ describe("Provisioned SSH Worker", () => {
         machine: {
           _tag: "Provisioned",
           provisioner: hetznerSettings({
-            timings: Schema.decodeSync(ProvisionerTimings)({ machineCheckInterval: 60 }),
+            timings: Effect.runSync(
+              Schema.decodeEffect(ProvisionerTimings)({ machineCheckInterval: 60 }),
+            ),
           }),
         },
         container: {
@@ -708,6 +712,7 @@ describe("Provisioned SSH Worker", () => {
         providers.hetzner.deleteFails = { status: 500, code: "server_error", message: "down" };
         yield* machines.release(grant.hold);
         assert.strictEqual(providers.hetzner.servers.size, 1);
+
         assert.deepStrictEqual(
           (yield* machines.machines).map(({ state }) => state),
           ["deleting"],

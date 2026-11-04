@@ -4,17 +4,23 @@ import { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
-import { Context, type Duration, Effect, type Option, Result, Schema } from "effect";
+import { type Brand, Context, type Duration, Effect, type Option, Result, Schema } from "effect";
 
 /** The persisted part of an Attempt's request, without `host`, `machine`, and `environment`. */
-export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/StoredRequest")({
+export class StoredRequest extends Schema.Class<
+  StoredRequest,
+  Brand.Brand<"@usine/durable/attempt-runtime/StoredRequest">
+>("@usine/durable/StoredRequest")({
   spec: AttemptChannel.RunSpec,
   worker: WorkerName,
   /** The absolute path of the Attempt's worktree on the Worker's machine. */
   cwd: Schema.NonEmptyString,
 }) {}
 
-export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable/AttemptRequest")({
+export class AttemptRequest extends Schema.Class<
+  AttemptRequest,
+  Brand.Brand<"@usine/durable/attempt-runtime/AttemptRequest">
+>("@usine/durable/AttemptRequest")({
   ...StoredRequest.fields,
   host: ChildHost,
   /**
@@ -38,7 +44,10 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
 }) {}
 
 /** The parent's final report, without the harvested commits, pull requests, and comments. */
-export class AttemptReport extends Schema.Class<AttemptReport>("@usine/durable/AttemptReport")({
+export class AttemptReport extends Schema.Class<
+  AttemptReport,
+  Brand.Brand<"@usine/durable/attempt-runtime/AttemptReport">
+>("@usine/durable/AttemptReport")({
   message: Schema.NonEmptyString,
   /**
    * Whether the parent's last turn replied to an operator message or steer and delegated nothing
@@ -67,26 +76,28 @@ export const harvestedResult = (
     : Result.succeed(StepResult.make({ message: report.message, facts }));
 
 /** A successful parent report with no stored harvested result. */
-export class ParentReported extends Schema.TaggedClass<ParentReported>(
-  "@usine/durable/ParentReported",
-)("ParentReported", {
+export class ParentReported extends Schema.TaggedClass<
+  ParentReported,
+  Brand.Brand<"@usine/durable/attempt-runtime/ParentReported">
+>("@usine/durable/ParentReported")("ParentReported", {
   report: AttemptReport,
 }) {}
 
 /** A harvested result stored with `recordResult`. */
-export class ResultRecorded extends Schema.TaggedClass<ResultRecorded>(
-  "@usine/durable/ResultRecorded",
-)("ResultRecorded", {
+export class ResultRecorded extends Schema.TaggedClass<
+  ResultRecorded,
+  Brand.Brand<"@usine/durable/attempt-runtime/ResultRecorded">
+>("@usine/durable/ResultRecorded")("ResultRecorded", {
   result: StepResult,
 }) {}
 
-export class ParentFailed extends Schema.TaggedClass<ParentFailed>("@usine/durable/ParentFailed")(
-  "ParentFailed",
-  {
-    /** The failure that `execute` returned. */
-    failure: AttemptFailure,
-  },
-) {}
+export class ParentFailed extends Schema.TaggedClass<
+  ParentFailed,
+  Brand.Brand<"@usine/durable/attempt-runtime/ParentFailed">
+>("@usine/durable/ParentFailed")("ParentFailed", {
+  /** The failure that `execute` returned. */
+  failure: AttemptFailure,
+}) {}
 
 /** The stored state of an Attempt whose terminal envelope was relayed. */
 export const FinishedAttempt = Schema.Union([ParentReported, ResultRecorded, ParentFailed]);

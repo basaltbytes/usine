@@ -33,7 +33,7 @@ import {
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import { Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema } from "effect";
 import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
@@ -60,7 +60,10 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
 const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
 
 /** A registry entry with selector tags and legacy repository lanes (ADR 0031). */
-export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/ManagedRepo")({
+export class ManagedRepo extends Schema.Class<
+  ManagedRepo,
+  Brand.Brand<"@usine/config/factory/ManagedRepo">
+>("@usine/config/ManagedRepo")({
   /** The registered GitHub repository in `owner/repo` form. */
   name: RepositoryName,
   /** Unique selector tags; decoding defaults to an empty list. */
@@ -77,7 +80,10 @@ export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/Manage
 const MaxConcurrentAttempts = PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1)));
 
 /** A worker that runs attempts on the orchestrator's machine. */
-export class LocalWorker extends Schema.Class<LocalWorker>("@usine/config/LocalWorker")({
+export class LocalWorker extends Schema.Class<
+  LocalWorker,
+  Brand.Brand<"@usine/config/factory/LocalWorker">
+>("@usine/config/LocalWorker")({
   /** The worker identifier, unique within the instance. */
   name: WorkerName,
   /** The discriminator that selects the local executor. */
@@ -87,7 +93,10 @@ export class LocalWorker extends Schema.Class<LocalWorker>("@usine/config/LocalW
 }) {}
 
 /** A worker on the exe.dev VM with the same name. */
-export class ExeDevWorker extends Schema.Class<ExeDevWorker>("@usine/config/ExeDevWorker")({
+export class ExeDevWorker extends Schema.Class<
+  ExeDevWorker,
+  Brand.Brand<"@usine/config/factory/ExeDevWorker">
+>("@usine/config/ExeDevWorker")({
   /** The worker identifier, unique within the instance. */
   name: WorkerName,
   /** The discriminator that selects the exe.dev executor. */
@@ -106,7 +115,10 @@ const EnvironmentVariableName = Schema.String.check(
  * The credential proxy for an SSH worker on a private network (ADR 0027). Credential fields
  * contain orchestrator environment-variable names, not secret values.
  */
-export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
+export class WorkerGateway extends Schema.Class<
+  WorkerGateway,
+  Brand.Brand<"@usine/config/factory/WorkerGateway">
+>("@usine/config/WorkerGateway")({
   /** The private DNS domain used for gateway proxy requests. */
   domain: GatewayDomain,
   /** The SSH destination used to forward the gateway admin API. */
@@ -126,41 +138,43 @@ export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/Wo
  * from machine capacity after reserving resources for host processes, divided by worker
  * concurrency.
  */
-export class WorkerContainer extends Schema.Class<WorkerContainer>("@usine/config/WorkerContainer")(
-  {
-    /** The container image override, or `None` to use the executor image for this release. */
-    image: Schema.OptionFromOptionalKey(ContainerImage),
-    /** The CPU limit per attempt container, or `None` to derive it at preflight. */
-    cpus: Schema.OptionFromOptionalKey(ContainerCpus),
-    /** The memory limit per attempt container in MiB, or `None` to derive it at preflight. */
-    memoryMib: Schema.OptionFromOptionalKey(ContainerMemoryMib),
-    /** The process limit per attempt container, or `None` to derive it at preflight. */
-    pids: Schema.OptionFromOptionalKey(ContainerPids),
-    /** The shared-memory capacity in MiB, or `None` for 2048, capped at the memory limit. */
-    shmSizeMib: Schema.OptionFromOptionalKey(ContainerScratchMib),
-    /** The temporary-file capacity in MiB, or `None` for 2048, capped at the memory limit. */
-    tmpfsSizeMib: Schema.OptionFromOptionalKey(ContainerScratchMib),
-  },
-) {}
+export class WorkerContainer extends Schema.Class<
+  WorkerContainer,
+  Brand.Brand<"@usine/config/factory/WorkerContainer">
+>("@usine/config/WorkerContainer")({
+  /** The container image override, or `None` to use the executor image for this release. */
+  image: Schema.OptionFromOptionalKey(ContainerImage),
+  /** The CPU limit per attempt container, or `None` to derive it at preflight. */
+  cpus: Schema.OptionFromOptionalKey(ContainerCpus),
+  /** The memory limit per attempt container in MiB, or `None` to derive it at preflight. */
+  memoryMib: Schema.OptionFromOptionalKey(ContainerMemoryMib),
+  /** The process limit per attempt container, or `None` to derive it at preflight. */
+  pids: Schema.OptionFromOptionalKey(ContainerPids),
+  /** The shared-memory capacity in MiB, or `None` for 2048, capped at the memory limit. */
+  shmSizeMib: Schema.OptionFromOptionalKey(ContainerScratchMib),
+  /** The temporary-file capacity in MiB, or `None` for 2048, capped at the memory limit. */
+  tmpfsSizeMib: Schema.OptionFromOptionalKey(ContainerScratchMib),
+}) {}
 
 /**
  * Orchestrator environment-variable names for API keys delivered to attempts on provisioned
  * workers. Credentials are read when starting or adding the worker.
  */
-export class ProviderApiKeys extends Schema.Class<ProviderApiKeys>("@usine/config/ProviderApiKeys")(
-  {
-    /**
-     * The orchestrator variable containing the Anthropic key to expose as `ANTHROPIC_API_KEY`, or
-     * `None`.
-     */
-    anthropic: Schema.OptionFromOptionalKey(EnvironmentVariableName),
-    /**
-     * The orchestrator variable containing the OpenAI key to expose as `OPENAI_API_KEY`, or
-     * `None`.
-     */
-    openai: Schema.OptionFromOptionalKey(EnvironmentVariableName),
-  },
-) {}
+export class ProviderApiKeys extends Schema.Class<
+  ProviderApiKeys,
+  Brand.Brand<"@usine/config/factory/ProviderApiKeys">
+>("@usine/config/ProviderApiKeys")({
+  /**
+   * The orchestrator variable containing the Anthropic key to expose as `ANTHROPIC_API_KEY`, or
+   * `None`.
+   */
+  anthropic: Schema.OptionFromOptionalKey(EnvironmentVariableName),
+  /**
+   * The orchestrator variable containing the OpenAI key to expose as `OPENAI_API_KEY`, or
+   * `None`.
+   */
+  openai: Schema.OptionFromOptionalKey(EnvironmentVariableName),
+}) {}
 
 const ProviderApiKeysFromYaml = ProviderApiKeys.pipe(
   Schema.withDecodingDefaultKey(Effect.succeed({})),
@@ -179,9 +193,10 @@ const ProvisionerTimingsFromYaml = ProvisionerTimings.pipe(
 /**
  * Settings for Hetzner Cloud machines, with optional reuse across attempts (ADR 0029).
  */
-export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
-  "@usine/config/HetznerProvisioner",
-)({
+export class HetznerProvisioner extends Schema.Class<
+  HetznerProvisioner,
+  Brand.Brand<"@usine/config/factory/HetznerProvisioner">
+>("@usine/config/HetznerProvisioner")({
   /** The discriminator that selects the Hetzner Cloud provisioner. */
   provider: Schema.Literal("hetzner"),
   /** The orchestrator environment variable containing the Hetzner Cloud API token. */
@@ -216,7 +231,10 @@ export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
 }) {}
 
 /** The gateway address and OAuth client variables for a Boat sandbox's tailnet join. */
-export class BoatTailnet extends Schema.Class<BoatTailnet>("@usine/config/BoatTailnet")({
+export class BoatTailnet extends Schema.Class<
+  BoatTailnet,
+  Brand.Brand<"@usine/config/factory/BoatTailnet">
+>("@usine/config/BoatTailnet")({
   /** The gateway address reachable through the tailnet. */
   gatewayAddress: TailnetAddress,
   /** The orchestrator variable containing the Tailscale OAuth client ID. */
@@ -226,42 +244,43 @@ export class BoatTailnet extends Schema.Class<BoatTailnet>("@usine/config/BoatTa
 }) {}
 
 /** Settings for Boat machines, optionally from a snapshot and with bounded reuse (ADR 0029). */
-export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/config/BoatProvisioner")(
-  {
-    /** The discriminator that selects the Boat provisioner. */
-    provider: Schema.Literal("boat"),
-    /** The orchestrator environment variable containing the Boat API token. */
-    tokenEnv: EnvironmentVariableName,
-    /** The Boat sandbox size; decoding defaults to `default`. */
-    size: BoatSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("default"))),
-    /** The Boat snapshot to resume, required with a gateway; `None` uses a new sandbox. */
-    snapshot: Schema.OptionFromOptionalKey(BoatSnapshotName),
-    /**
-     * The gateway address and OAuth variable names for joining the tailnet, or `None` without a
-     * gateway.
-     */
-    tailnet: Schema.OptionFromOptionalKey(
-      BoatTailnet.pipe(
-        Schema.encodeKeys({
-          gatewayAddress: "gateway_address",
-          clientIdEnv: "client_id_env",
-          clientSecretEnv: "client_secret_env",
-        }),
-      ),
+export class BoatProvisioner extends Schema.Class<
+  BoatProvisioner,
+  Brand.Brand<"@usine/config/factory/BoatProvisioner">
+>("@usine/config/BoatProvisioner")({
+  /** The discriminator that selects the Boat provisioner. */
+  provider: Schema.Literal("boat"),
+  /** The orchestrator environment variable containing the Boat API token. */
+  tokenEnv: EnvironmentVariableName,
+  /** The Boat sandbox size; decoding defaults to `default`. */
+  size: BoatSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("default"))),
+  /** The Boat snapshot to resume, required with a gateway; `None` uses a new sandbox. */
+  snapshot: Schema.OptionFromOptionalKey(BoatSnapshotName),
+  /**
+   * The gateway address and OAuth variable names for joining the tailnet, or `None` without a
+   * gateway.
+   */
+  tailnet: Schema.OptionFromOptionalKey(
+    BoatTailnet.pipe(
+      Schema.encodeKeys({
+        gatewayAddress: "gateway_address",
+        clientIdEnv: "client_id_env",
+        clientSecretEnv: "client_secret_env",
+      }),
     ),
-    /** Provider key variable names for attempts that use API keys; decoding defaults to none. */
-    apiKeys: ProviderApiKeysFromYaml,
-    /**
-     * SSH readiness, creation backoff, and machine-check intervals in seconds; decoding applies
-     * the provisioner defaults.
-     */
-    timings: ProvisionerTimingsFromYaml,
-    /** Omitted by default; both limits are required when reuse is enabled. */
-    reuse: Schema.OptionFromOptionalKey(
-      ProvisionerReuse.pipe(Schema.encodeKeys({ maxAge: "max_age" })),
-    ),
-  },
-) {}
+  ),
+  /** Provider key variable names for attempts that use API keys; decoding defaults to none. */
+  apiKeys: ProviderApiKeysFromYaml,
+  /**
+   * SSH readiness, creation backoff, and machine-check intervals in seconds; decoding applies
+   * the provisioner defaults.
+   */
+  timings: ProvisionerTimingsFromYaml,
+  /** Omitted by default; both limits are required when reuse is enabled. */
+  reuse: Schema.OptionFromOptionalKey(
+    ProvisionerReuse.pipe(Schema.encodeKeys({ maxAge: "max_age" })),
+  ),
+}) {}
 
 /** The provider that creates machines for an SSH worker; `provider` selects it. */
 export const WorkerProvisioner = Schema.Union([HetznerProvisioner, BoatProvisioner]);
@@ -285,7 +304,10 @@ const WorkerProvisionerFromYaml = Schema.Union([
  * destination or a provisioner for one machine per attempt; concurrency caps active attempts (ADR
  * 0029).
  */
-export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker")({
+export class SshWorker extends Schema.Class<
+  SshWorker,
+  Brand.Brand<"@usine/config/factory/SshWorker">
+>("@usine/config/SshWorker")({
   /** The worker identifier, unique within the instance. */
   name: WorkerName,
   /** The discriminator that selects the SSH executor. */
@@ -372,9 +394,10 @@ const HttpsUrl = Schema.URLFromString.check(
  * An LLM provider API-key variable for credential injection by the deployed Cloudflare Worker. The
  * key stays outside the attempt sandbox.
  */
-export class CloudflareLlmProviderKey extends Schema.Class<CloudflareLlmProviderKey>(
-  "@usine/config/CloudflareLlmProviderKey",
-)({
+export class CloudflareLlmProviderKey extends Schema.Class<
+  CloudflareLlmProviderKey,
+  Brand.Brand<"@usine/config/factory/CloudflareLlmProviderKey">
+>("@usine/config/CloudflareLlmProviderKey")({
   /** The LLM provider whose outbound requests need an API key. */
   provider: CloudflareLlmProvider,
   /** The orchestrator environment variable containing the provider API key. */
@@ -390,9 +413,10 @@ const uniqueProviders = Schema.makeFilter<ReadonlyArray<CloudflareLlmProviderKey
  * A worker that runs each attempt in a Cloudflare sandbox through a deployed `@usine/cloudflare`
  * Worker. Outbound handlers inject the configured provider credentials (ADR 0029).
  */
-export class CloudflareWorker extends Schema.Class<CloudflareWorker>(
-  "@usine/config/CloudflareWorker",
-)({
+export class CloudflareWorker extends Schema.Class<
+  CloudflareWorker,
+  Brand.Brand<"@usine/config/factory/CloudflareWorker">
+>("@usine/config/CloudflareWorker")({
   /** The worker identifier, unique within the instance. */
   name: WorkerName,
   /** The discriminator that selects the Cloudflare sandbox executor. */
@@ -443,7 +467,9 @@ export const UiOrigin = Schema.String.check(
 export type UiOrigin = typeof UiOrigin.Type;
 
 /** Instance-wide defaults for polling, upgrades, and agent attempts. */
-export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
+export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/factory/Settings">>(
+  "@usine/config/Settings",
+)({
   /** The npm distribution tag for server upgrades; decoding defaults to `latest`. */
   upgradeChannel: UpgradeChannel.pipe(Schema.withDecodingDefaultKey(Effect.succeed("latest"))),
   /**
@@ -497,7 +523,9 @@ const OtlpUrl = Schema.URLFromString.check(
 );
 
 /** Span export over OTLP/HTTP (ADR 0028). */
-export class Tracing extends Schema.Class<Tracing>("@usine/config/Tracing")({
+export class Tracing extends Schema.Class<Tracing, Brand.Brand<"@usine/config/factory/Tracing">>(
+  "@usine/config/Tracing",
+)({
   /**
    * The collector's OTLP/HTTP traces endpoint, used as given, such as
    * `http://localhost:4318/v1/traces`. It has no credentials or query string.
@@ -554,7 +582,10 @@ const ManagedRepos = Schema.Array(ManagedRepo).check(
 const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNames);
 
 /** The decoded `usine.yaml`. */
-export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")(
+export class UsineConfig extends Schema.Class<
+  UsineConfig,
+  Brand.Brand<"@usine/config/factory/UsineConfig">
+>("@usine/config/UsineConfig")(
   Schema.Struct({
     /**
      * The configuration format: 1 for repository lanes, or 2 for projects and qualified loops (ADR

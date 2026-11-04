@@ -91,7 +91,7 @@ const freePort = () =>
   new Promise<Port>((resolve) => {
     const server = createServer();
     server.listen({ host: SERVER_HOST, port: 0 }, () => {
-      const { port } = Schema.decodeUnknownSync(PortAddress)(server.address());
+      const { port } = Effect.runSync(Schema.decodeUnknownEffect(PortAddress)(server.address()));
       server.close(() => resolve(port));
     });
   });

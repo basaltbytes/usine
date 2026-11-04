@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
-import { Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { turnFailure } from "../src/pi/codex/codec.ts";
 import { resultFailure } from "../src/pi/claude/codec.ts";
 import { AgentCapacityError } from "../src/runtime.ts";
@@ -35,13 +35,15 @@ it.each([
     expected: "AgentResultError",
   },
 ])("uses Codex's structured refusal code: $code", ({ code, message, expected }) => {
-  const { turn } = Schema.decodeSync(TurnCompleted)({
-    turn: {
-      id: "turn",
-      status: "failed",
-      error: { message, codexErrorInfo: code, additionalDetails: null },
-    },
-  });
+  const { turn } = Effect.runSync(
+    Schema.decodeEffect(TurnCompleted)({
+      turn: {
+        id: "turn",
+        status: "failed",
+        error: { message, codexErrorInfo: code, additionalDetails: null },
+      },
+    }),
+  );
   assert.strictEqual(turnFailure(AgentSessionId.make("child"), turn.error, message)._tag, expected);
 });
 

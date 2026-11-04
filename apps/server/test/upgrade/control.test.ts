@@ -45,6 +45,7 @@ it("checks the selected channel and waits for all admitted attempts before insta
         yield* upgrades.check();
         const requestsState = yield* Ref.get(f.requests);
         expect(requestsState).toEqual(["next"]);
+
         expect((yield* upgrades.status).phase).toBe("waiting");
         const launchedDone = yield* Deferred.isDone(f.launched);
         expect(launchedDone).toBe(false);
@@ -56,10 +57,12 @@ it("checks the selected channel and waits for all admitted attempts before insta
           ),
         ).toBe(true);
         yield* upgrades.check();
+
         expect((yield* bus.open).revision).toBe(journal.revision);
         yield* Deferred.succeed(f.drained, undefined);
         const launchedResult = yield* Deferred.await(f.launched);
         expect(launchedResult).toBe(target);
+
         expect((yield* bus.open).revision).toBe(journal.revision + 1);
       }),
     ).pipe(Effect.provide(changeBusLayer)),
@@ -79,7 +82,9 @@ it("proposes without draining, and an immediate request bypasses the idle wait",
           resume: Effect.void,
         });
         yield* upgrades.check();
+
         expect((yield* upgrades.status).available).toBe(target);
+
         expect((yield* upgrades.status).phase).toBe("idle");
         yield* upgrades.request(UpgradeRequest.make({ timing: "now", version: Option.none() }));
         const launchedResult = yield* Deferred.await(f.launched);
@@ -126,6 +131,7 @@ it("does not check when off, downgrade automatically, or retry a health-check ro
         );
         yield* Ref.set(settings, { upgradeChannel: "next", upgradeMode: "automatic" } as const);
         yield* upgrades.check();
+
         expect((yield* upgrades.status).outcome?.status).toBe("rolled-back");
         const launchedDone = yield* Deferred.isDone(f.launched);
         expect(launchedDone).toBe(false);
@@ -137,6 +143,7 @@ it("does not check when off, downgrade automatically, or retry a health-check ro
           resume: Effect.void,
         });
         yield* current.check();
+
         expect((yield* current.status).available).toBeNull();
       }),
     ),
@@ -165,6 +172,7 @@ it.each(["idle", "now"] as const)(
             resume: Effect.void,
           });
           yield* upgrades.check();
+
           expect((yield* upgrades.status).available).toBe(target);
           yield* Ref.set(channel, "latest");
           const error = yield* upgrades
@@ -179,6 +187,7 @@ it.each(["idle", "now"] as const)(
           expect(status.phase).toBe("idle");
 
           yield* upgrades.check();
+
           expect((yield* upgrades.status).available).toBe(stable);
           yield* upgrades.request(UpgradeRequest.make({ timing, version: Option.none() }));
           yield* Deferred.succeed(f.drained, undefined);
@@ -280,6 +289,7 @@ it("refuses a missing helper before closing admission", async () => {
         expect(error.message).toBe("Missing helper unit");
         const drainStartedState = yield* Ref.get(drainStarted);
         expect(drainStartedState).toBe(false);
+
         expect((yield* upgrades.status).phase).toBe("idle");
       }),
     ),
@@ -348,12 +358,14 @@ it.each(["propose", "automatic"] as const)(
             resume: Effect.void,
           });
           yield* upgrades.check().pipe(Effect.flip);
+
           expect((yield* upgrades.status).available).toBeNull();
           for (const timing of ["idle", "now"] as const) {
             const error = yield* upgrades
               .request(UpgradeRequest.make({ timing, version: Option.some(target) }))
               .pipe(Effect.flip);
             expect(error.message).toBe("Package unavailable");
+
             expect((yield* upgrades.status).phase).toBe("idle");
           }
           const drainStartedState = yield* Ref.get(drainStarted);
@@ -362,6 +374,7 @@ it.each(["propose", "automatic"] as const)(
           expect(launchedDone).toBe(false);
           yield* Ref.set(ready, true);
           yield* upgrades.check();
+
           expect((yield* upgrades.status).available).toBe(target);
           if (mode === "automatic") {
             const launchedResult = yield* Deferred.await(f.launched);
@@ -371,6 +384,7 @@ it.each(["propose", "automatic"] as const)(
           } else {
             yield* Ref.set(ready, false);
             yield* upgrades.check().pipe(Effect.flip);
+
             expect((yield* upgrades.status).available).toBe(target);
             const nextDrainStartedState = yield* Ref.get(drainStarted);
             expect(nextDrainStartedState).toBe(false);
@@ -429,6 +443,7 @@ it("keeps the verified release and install outcome while a newer release is inco
         });
         yield* upgrades.polling.pipe(Effect.withLogger(logger), Effect.forkScoped);
         yield* Deferred.await(checking);
+
         expect((yield* upgrades.status).available).toBe(target);
         yield* Deferred.succeed(finishCheck, undefined);
         const loggedMessagesResult = yield* Deferred.await(logged);
@@ -442,6 +457,7 @@ it("keeps the verified release and install outcome while a newer release is inco
         expect(launchedDone).toBe(false);
         yield* Ref.set(ready, true);
         yield* upgrades.check();
+
         expect((yield* upgrades.status).available).toBe(next);
       }),
     ),
@@ -461,7 +477,7 @@ it.each([
       Effect.scoped(
         Effect.gen(function* () {
           const f = yield* fixture;
-          const record = Schema.decodeSync(UpgradeRecord)(
+          const record = yield* Schema.decodeEffect(UpgradeRecord)(
             { previous, target, ...persisted },
             { onExcessProperty: "error" },
           );
@@ -510,6 +526,7 @@ it("cancels a pending upgrade, resumes admission, and suppresses automatic re-re
         yield* upgrades.cancel;
         const resumedState = yield* Ref.get(resumed);
         expect(resumedState).toBe(true);
+
         expect((yield* upgrades.status).phase).toBe("idle");
         yield* Deferred.succeed(f.drained, undefined);
         yield* upgrades.check();
@@ -521,6 +538,7 @@ it("cancels a pending upgrade, resumes admission, and suppresses automatic re-re
         yield* Deferred.await(f.launched);
         const error = yield* upgrades.cancel.pipe(Effect.flip);
         expect(error.message).toContain("Only a waiting upgrade");
+
         expect((yield* upgrades.status).phase).toBe("installing");
       }),
     ),

@@ -14,12 +14,12 @@ import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts"
 import packageJson from "../package.json" with { type: "json" };
 
 /** The Claude Code version that the installed Claude Agent SDK bundles. */
-const { claudeCodeVersion } = Schema.decodeSync(
-  Schema.fromJsonString(Schema.Struct({ claudeCodeVersion: Schema.String })),
-)(
-  readFileSync(
-    new URL("../node_modules/@anthropic-ai/claude-agent-sdk/package.json", import.meta.url),
-    "utf8",
+const { claudeCodeVersion } = Effect.runSync(
+  Schema.decodeEffect(Schema.fromJsonString(Schema.Struct({ claudeCodeVersion: Schema.String })))(
+    readFileSync(
+      new URL("../node_modules/@anthropic-ai/claude-agent-sdk/package.json", import.meta.url),
+      "utf8",
+    ),
   ),
 );
 const claudeVersionOutput = `${claudeCodeVersion} (Claude Code)`;
@@ -250,6 +250,7 @@ describe("worker harness readiness", () => {
       );
       yield* Deferred.await(started);
       yield* TestClock.adjust("60 seconds");
+
       assert.strictEqual((yield* Fiber.join(pending))._tag, "SessionOperationError");
       assert.strictEqual(server.closed(), 1);
     }),

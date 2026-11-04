@@ -90,9 +90,10 @@ export const cycleQueries = (database: RunDatabaseClient, record?: RecordChange)
       const previous = current.value.ask.value;
       const ask = previous.recordBlock(submission.loop, submission.event.id);
       if (ask !== previous) {
+        const askJson = yield* Schema.encodeEffect(CycleBudgetAsk)(ask);
         yield* database
           .update(itemCycleBudgets)
-          .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })
+          .set({ askJson: askJson })
           .where(eq(itemCycleBudgets.itemKey, submission.itemKey))
           .execute();
         if (record !== undefined) {
@@ -144,9 +145,10 @@ export const cycleQueries = (database: RunDatabaseClient, record?: RecordChange)
       limit: submission.cycleLimit.value,
       counts: [completed, ...participants.filter(({ loop }) => loop !== submission.loop)],
     }).recordBlock(submission.loop, submission.event.id);
+    const askJson = yield* Schema.encodeEffect(CycleBudgetAsk)(ask);
     yield* database
       .update(itemCycleBudgets)
-      .set({ askJson: Schema.encodeSync(CycleBudgetAsk)(ask) })
+      .set({ askJson: askJson })
       .where(eq(itemCycleBudgets.itemKey, submission.itemKey))
       .execute();
     if (record !== undefined) {
@@ -194,6 +196,7 @@ export const cycleQueries = (database: RunDatabaseClient, record?: RecordChange)
       })
       .onConflictDoNothing()
       .execute();
+
     yield* Effect.logInfo("Item cycle reserved", {
       runId,
       itemKey: submission.itemKey,

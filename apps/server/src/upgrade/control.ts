@@ -1,14 +1,26 @@
+import { InstanceScope } from "@usine/core/access";
 import { ChangeBus } from "@usine/core/changes";
 import type { Settings } from "@usine/config/factory";
 import { ReleaseVersion, UpgradeChannel, type UpgradeRecord } from "@usine/core/upgrade";
 import { UpgradeRequest, UpgradeView } from "@usine/orchestrator/operator/http";
-import { Context, Effect, Equal, Fiber, Layer, Option, Ref, Schema, Semaphore } from "effect";
+import {
+  type Brand,
+  Context,
+  Effect,
+  Equal,
+  Fiber,
+  Layer,
+  Option,
+  Ref,
+  Schema,
+  Semaphore,
+} from "effect";
 import { compareVersions } from "../instance/manifest.ts";
 
-export class UpgradeError extends Schema.TaggedError<UpgradeError>("@usine/server/UpgradeError")(
-  "UpgradeError",
-  { message: Schema.String },
-) {}
+export class UpgradeError extends Schema.TaggedError<
+  UpgradeError,
+  Brand.Brand<"@usine/server/upgrade/control/UpgradeError">
+>("@usine/server/UpgradeError")("UpgradeError", { message: Schema.String }) {}
 
 export interface UpgradePlatform {
   readonly lookup: (channel: UpgradeChannel) => Effect.Effect<ReleaseVersion, UpgradeError>;
@@ -49,7 +61,10 @@ type Progress =
   | { readonly phase: "installing"; readonly target: ReleaseVersion }
   | { readonly phase: "failed"; readonly message: string };
 
-class UpgradeCandidate extends Schema.Class<UpgradeCandidate>("@usine/server/UpgradeCandidate")({
+class UpgradeCandidate extends Schema.Class<
+  UpgradeCandidate,
+  Brand.Brand<"@usine/server/upgrade/control/UpgradeCandidate">
+>("@usine/server/UpgradeCandidate")({
   channel: UpgradeChannel,
   version: ReleaseVersion,
 }) {}
@@ -57,7 +72,7 @@ class UpgradeCandidate extends Schema.Class<UpgradeCandidate>("@usine/server/Upg
 export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options: UpgradeOptions) {
   const bus = yield* ChangeBus;
   const changed = bus.publish([
-    { audience: { _tag: "Instance" }, target: { kind: "configuration", id: "instance" } },
+    { audience: InstanceScope.make(), target: { kind: "configuration", id: "instance" } },
   ]);
   const scope = yield* Effect.scope;
   const lock = yield* Semaphore.make(1);

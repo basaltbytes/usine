@@ -1,3 +1,4 @@
+import { type Brand } from "effect";
 // Imports Option and Schema alone, not the whole `effect` index: the executor's sandbox shell
 // loads this module once per command.
 import * as Option from "effect/Option";
@@ -17,24 +18,36 @@ export {
  * The first text message of an exec stream. The sandbox runs `command` with `sh -c` as the image's
  * user in its home directory, as sshd runs a remote command line.
  */
-export class ExecStart extends Schema.TaggedClass<ExecStart>()("ExecStart", {
+export class ExecStart extends Schema.TaggedClass<
+  ExecStart,
+  Brand.Brand<"@usine/cloudflare/api/stream/ExecStart">
+>()("ExecStart", {
   command: Schema.NonEmptyString,
 }) {}
 
 /** Closes the command's stdin. Binary messages from the client are its stdin bytes. */
-export class StdinEnd extends Schema.TaggedClass<StdinEnd>()("StdinEnd", {}) {}
+export class StdinEnd extends Schema.TaggedClass<
+  StdinEnd,
+  Brand.Brand<"@usine/cloudflare/api/stream/StdinEnd">
+>()("StdinEnd", {}) {}
 
 /** A text message from the client that starts a command or closes its stdin. */
 export const ClientMessage = Schema.Union([ExecStart, StdinEnd]);
 export type ClientMessage = typeof ClientMessage.Type;
 
 /** The command started. Its process files are named after `process`. */
-export class Started extends Schema.TaggedClass<Started>()("Started", {
+export class Started extends Schema.TaggedClass<
+  Started,
+  Brand.Brand<"@usine/cloudflare/api/stream/Started">
+>()("Started", {
   process: ProcessId,
 }) {}
 
 /** The command exited with `exitCode`. The stream closes after this message. */
-export class Exited extends Schema.TaggedClass<Exited>()("Exited", {
+export class Exited extends Schema.TaggedClass<
+  Exited,
+  Brand.Brand<"@usine/cloudflare/api/stream/Exited">
+>()("Exited", {
   exitCode: Schema.Int,
 }) {}
 
@@ -42,7 +55,10 @@ export class Exited extends Schema.TaggedClass<Exited>()("Exited", {
  * The sandbox can't run or follow the command: no sandbox, a stopped container, or an unknown
  * process. The stream closes after this message.
  */
-export class StreamFailed extends Schema.TaggedClass<StreamFailed>()("StreamFailed", {
+export class StreamFailed extends Schema.TaggedClass<
+  StreamFailed,
+  Brand.Brand<"@usine/cloudflare/api/stream/StreamFailed">
+>()("StreamFailed", {
   message: Schema.String,
 }) {}
 
@@ -50,12 +66,12 @@ export class StreamFailed extends Schema.TaggedClass<StreamFailed>()("StreamFail
 export const ServerMessage = Schema.Union([Started, Exited, StreamFailed]);
 export type ServerMessage = typeof ServerMessage.Type;
 
-/** Encodes a client message as JSON text. Throws `SchemaError` if the value doesn't match the schema. */
-export const encodeClientMessage = Schema.encodeSync(Schema.fromJsonString(ClientMessage));
+/** Encodes a client message as JSON text. Fails with `SchemaError` if the value doesn't match the schema. */
+export const encodeClientMessage = Schema.encodeEffect(Schema.fromJsonString(ClientMessage));
 /** Decodes client JSON text, returning `None` for invalid JSON or a message that doesn't match the schema. */
 export const decodeClientMessage = Schema.decodeUnknownOption(Schema.fromJsonString(ClientMessage));
-/** Encodes a server message as JSON text. Throws `SchemaError` if the value doesn't match the schema. */
-export const encodeServerMessage = Schema.encodeSync(Schema.fromJsonString(ServerMessage));
+/** Encodes a server message as JSON text. Fails with `SchemaError` if the value doesn't match the schema. */
+export const encodeServerMessage = Schema.encodeEffect(Schema.fromJsonString(ServerMessage));
 /** Decodes server JSON text, returning `None` for invalid JSON or a message that doesn't match the schema. */
 export const decodeServerMessage = Schema.decodeUnknownOption(Schema.fromJsonString(ServerMessage));
 

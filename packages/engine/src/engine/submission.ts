@@ -14,11 +14,14 @@ import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
-import { Crypto, Effect, Schema } from "effect";
+import { type Brand, Crypto, Effect, Schema } from "effect";
 import { Hex } from "effect/encoding";
 
 /** A matched Event with its Loop, Item, and Run settings. */
-export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
+export class Submission extends Schema.Class<
+  Submission,
+  Brand.Brand<"@usine/engine/engine/submission/Submission">
+>("@usine/engine/Submission")({
   /**
    * The trigger match and its dedup key, recorded before the engine decides whether to open a run.
    */
@@ -108,7 +111,10 @@ export const reopeningOf = (
 };
 
 /** A result for an Event that has a Run; submitting it again returns the same Run ID. */
-export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed")("Claimed", {
+export class Claimed extends Schema.TaggedClass<
+  Claimed,
+  Brand.Brand<"@usine/engine/engine/submission/Claimed">
+>("@usine/engine/Claimed")("Claimed", {
   /** The recorded event associated with the run. */
   eventId: EventId,
   /** The opened or previously claimed run; repeated submissions return this same ID. */
@@ -116,7 +122,10 @@ export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed"
 }) {}
 
 /** A result for an Event that waits until a running Attempt on the same Item finishes. */
-export class Queued extends Schema.TaggedClass<Queued>("@usine/engine/Queued")("Queued", {
+export class Queued extends Schema.TaggedClass<
+  Queued,
+  Brand.Brand<"@usine/engine/engine/submission/Queued">
+>("@usine/engine/Queued")("Queued", {
   /** The recorded event waiting behind an active attempt on this loop and item. */
   eventId: EventId,
 }) {}
@@ -132,7 +141,10 @@ export const IgnoreReason = Schema.Literals(IGNORED_REASONS);
 export type IgnoreReason = typeof IgnoreReason.Type;
 
 /** A result for an Event that is recorded but can't open a Run. */
-export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored")("Ignored", {
+export class Ignored extends Schema.TaggedClass<
+  Ignored,
+  Brand.Brand<"@usine/engine/engine/submission/Ignored">
+>("@usine/engine/Ignored")("Ignored", {
   /** The recorded event that cannot open a run. */
   eventId: EventId,
   /** Why this event was superseded or revoked; see `IgnoreReason`. */
@@ -144,26 +156,26 @@ export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored"
  * blocker. It opens a Run once the operator resolves the stop, or a later Event replaces it when
  * the Item changes (#241, #341).
  */
-export class Suppressed extends Schema.TaggedClass<Suppressed>("@usine/engine/Suppressed")(
-  "Suppressed",
-  {
-    /** The event waiting for suppression to end. */
-    eventId: EventId,
-    /** The run whose unresolved question or blocker suppresses the item. */
-    runId: RunId,
-  },
-) {}
+export class Suppressed extends Schema.TaggedClass<
+  Suppressed,
+  Brand.Brand<"@usine/engine/engine/submission/Suppressed">
+>("@usine/engine/Suppressed")("Suppressed", {
+  /** The event waiting for suppression to end. */
+  eventId: EventId,
+  /** The run whose unresolved question or blocker suppresses the item. */
+  runId: RunId,
+}) {}
 
 /** A result for an Event that opened no Run because the Item needs a cycle-budget reset. */
-export class CycleBlocked extends Schema.TaggedClass<CycleBlocked>("@usine/engine/CycleBlocked")(
-  "CycleBlocked",
-  {
-    /** The event that could not open a run within the cycle budget. */
-    eventId: EventId,
-    /** The open ask that the operator must reset before further admission. */
-    ask: CycleBudgetAsk,
-  },
-) {}
+export class CycleBlocked extends Schema.TaggedClass<
+  CycleBlocked,
+  Brand.Brand<"@usine/engine/engine/submission/CycleBlocked">
+>("@usine/engine/CycleBlocked")("CycleBlocked", {
+  /** The event that could not open a run within the cycle budget. */
+  eventId: EventId,
+  /** The open ask that the operator must reset before further admission. */
+  ask: CycleBudgetAsk,
+}) {}
 
 /**
  * The outcome of recording a trigger match: its run, queued event, suppression, ignore reason, or

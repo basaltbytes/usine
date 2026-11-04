@@ -73,24 +73,26 @@ const settings = Effect.all({
 });
 
 const configFor = (values: Effect.Success<typeof settings>) =>
-  Schema.decodeSync(UsineConfig)({
-    version: 1,
-    repos: [{ name: values.repository }],
-    workers: [
-      {
-        name: WORKER,
-        kind: "ssh",
-        destination: values.destination,
-        root: values.root,
-        max_concurrent_attempts: 1,
-        ...Option.match(values.identityFile, {
-          onNone: () => ({}),
-          onSome: (file) => ({ identity_file: file }),
-        }),
-        ...Option.match(values.port, { onNone: () => ({}), onSome: (port) => ({ port }) }),
-      },
-    ],
-  });
+  Effect.runSync(
+    Schema.decodeEffect(UsineConfig)({
+      version: 1,
+      repos: [{ name: values.repository }],
+      workers: [
+        {
+          name: WORKER,
+          kind: "ssh",
+          destination: values.destination,
+          root: values.root,
+          max_concurrent_attempts: 1,
+          ...Option.match(values.identityFile, {
+            onNone: () => ({}),
+            onSome: (file) => ({ identity_file: file }),
+          }),
+          ...Option.match(values.port, { onNone: () => ({}), onSome: (port) => ({ port }) }),
+        },
+      ],
+    }),
+  );
 
 /** Returns the shared SSH options, with a separate known-hosts file if one is set. */
 const sshFor = (values: Effect.Success<typeof settings>) => ({
@@ -259,6 +261,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           ),
           Layer.provide(FetchHttpClient.layer),
         );
+
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
@@ -279,6 +282,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
+
           const accepted = yield* engine.submit(
             Submission.make({
               event: Event.make({
@@ -335,6 +339,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           assert.strictEqual(observed.worktree, worktree);
           const absent = (path: string) =>
             onMachine(host, { command: "test", args: ["!", "-e", path] });
+
           assert.strictEqual(
             (yield* onMachine(host, {
               command: "test",
@@ -343,20 +348,26 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             0,
             "the cached clone stays for the next Attempt",
           );
+
           assert.strictEqual((yield* absent(worktree)).exitCode, 0, "the worktree is removed");
+
           assert.strictEqual(
             (yield* absent(`${root}/credentials/${safeSegment(attempt.id)}`)).exitCode,
             0,
             "the Attempt's credential is removed",
           );
+
           assert.strictEqual(
             (yield* absent(`${worktree}.child-1.pid`)).exitCode,
             0,
             "the child's pid file is removed",
           );
+          const decodedValue7 = yield* onMachine(host, {
+            command: "kill",
+            args: ["-0", observed.childPid ?? ""],
+          });
           assert.notStrictEqual(
-            (yield* onMachine(host, { command: "kill", args: ["-0", observed.childPid ?? ""] }))
-              .exitCode,
+            decodedValue7.exitCode,
             0,
             "the child that outlived its SSH client is stopped",
           );
@@ -382,6 +393,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
               }),
             ),
         });
+
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
@@ -446,23 +458,25 @@ const gatewaySettings = Effect.all({
  * use their logins on the machine.
  */
 const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
-  Schema.decodeSync(UsineConfig)({
-    version: 1,
-    repos: [{ name: values.repository }],
-    workers: [
-      {
-        name: GATEWAY_WORKER,
-        kind: "ssh",
-        destination: values.destination,
-        root: values.root,
-        gateway: {
-          domain: values.domain,
-          destination: values.gateway,
-          admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
+  Effect.runSync(
+    Schema.decodeEffect(UsineConfig)({
+      version: 1,
+      repos: [{ name: values.repository }],
+      workers: [
+        {
+          name: GATEWAY_WORKER,
+          kind: "ssh",
+          destination: values.destination,
+          root: values.root,
+          gateway: {
+            domain: values.domain,
+            destination: values.gateway,
+            admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
+          },
         },
-      },
-    ],
-  });
+      ],
+    }),
+  );
 
 /**
  * Returns the shared SSH options, with the SSH configuration for the Worker and its bastion if one
@@ -631,6 +645,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           ),
           Layer.provide(FetchHttpClient.layer),
         );
+
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
@@ -651,6 +666,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
+
           const accepted = yield* engine.submit(
             Submission.make({
               event: Event.make({
@@ -731,6 +747,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
               }),
             ),
         });
+
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",

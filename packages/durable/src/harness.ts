@@ -10,12 +10,23 @@ import {
   SessionFailed,
   type Storage,
 } from "@earendil-works/pi-durable";
-import { Context, Deferred, Effect, Layer, Option, Result, Schema, type Scope } from "effect";
+import {
+  type Brand,
+  Context,
+  Deferred,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema,
+  type Scope,
+} from "effect";
 
 /** A failed pi-durable call. */
-export class DurableHarnessError extends Schema.TaggedError<DurableHarnessError>(
-  "@usine/durable/DurableHarnessError",
-)("DurableHarnessError", {
+export class DurableHarnessError extends Schema.TaggedError<
+  DurableHarnessError,
+  Brand.Brand<"@usine/durable/harness/DurableHarnessError">
+>("@usine/durable/DurableHarnessError")("DurableHarnessError", {
   /**
    * A description of the failed operation, such as `open the durable harness`, or the
    * `operation` passed to `use`.
@@ -30,9 +41,10 @@ export class DurableHarnessError extends Schema.TaggedError<DurableHarnessError>
  * A storage error that failed the pi-durable Session. pi-durable then aborts the harness's running
  * tasks and closes it, and every later call on it fails.
  */
-export class DurableStorageFailed extends Schema.TaggedError<DurableStorageFailed>(
-  "@usine/durable/DurableStorageFailed",
-)("DurableStorageFailed", {
+export class DurableStorageFailed extends Schema.TaggedError<
+  DurableStorageFailed,
+  Brand.Brand<"@usine/durable/harness/DurableStorageFailed">
+>("@usine/durable/DurableStorageFailed")("DurableStorageFailed", {
   /** The failed harness's generation: 1 for the first open, and one more for each reopen. */
   generation: Schema.Int,
   /** The storage error's message. */

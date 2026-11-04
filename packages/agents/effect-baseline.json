@@ -1,7 +1,4 @@
 {
-  "src/child-host/child-host.ts": {
-    "schemaClassMissingBrand": 2
-  },
   "src/pi/claude/claude.ts": {
     "asyncFunction": 1,
     "nodeBuiltinImport": 1
@@ -10,26 +7,16 @@
     "asyncFunction": 2,
     "deterministicKeys": 1,
     "globalJson": 1,
-    "newPromise": 1,
-    "schemaSync": 1
-  },
-  "src/pi/codex/account.ts": {
-    "schemaSync": 2,
-    "schemaSyncInEffect": 2
+    "newPromise": 1
   },
   "src/pi/codex/app-server.ts": {
     "globalJson": 2
-  },
-  "src/pi/codex/codec.ts": {
-    "globalJson": 2,
-    "schemaSync": 1
   },
   "src/pi/codex/connection.ts": {
     "deterministicKeys": 1
   },
   "src/pi/codex/remote.ts": {
-    "globalJsonInEffect": 1,
-    "schemaClassMissingBrand": 1
+    "globalJsonInEffect": 1
   },
   "src/pi/codex/supervisor.ts": {
     "globalJson": 1
@@ -39,8 +26,7 @@
     "deterministicKeys": 1
   },
   "src/pi/session.ts": {
-    "globalJson": 2,
-    "schemaSync": 1
+    "globalJson": 2
   },
   "src/pi/turns.ts": {
     "strictBooleanExpressions": 4
@@ -49,8 +35,7 @@
     "globalJson": 1
   },
   "src/runtime.ts": {
-    "deterministicKeys": 5,
-    "schemaClassMissingBrand": 11
+    "deterministicKeys": 5
   },
   "test/child-host.test.ts": {
     "asyncFunction": 2,
@@ -58,28 +43,14 @@
     "newPromise": 4,
     "nodeBuiltinImport": 3
   },
-  "test/integration/claude.test.ts": {
-    "processEnv": 1,
-    "schemaSync": 1
-  },
-  "test/integration/codex.test.ts": {
-    "processEnv": 1,
-    "schemaSync": 1
-  },
   "test/integration/contract.ts": {
     "cryptoRandomUUIDInEffect": 1
-  },
-  "test/integration/pi.test.ts": {
-    "processEnv": 1,
-    "schemaSync": 1
   },
   "test/pi/claude.test.ts": {
     "asyncFunction": 4,
     "globalJson": 2,
     "newPromise": 2,
-    "nodeBuiltinImport": 2,
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
+    "nodeBuiltinImport": 2
   },
   "test/pi/codex/app-server.test.ts": {
     "globalJson": 1,
@@ -95,20 +66,10 @@
     "nodeBuiltinImport": 2,
     "processEnvInEffect": 2
   },
-  "test/pi/usage.test.ts": {
-    "schemaSync": 1
-  },
   "test/preflight.test.ts": {
     "asyncFunction": 5,
     "globalJson": 3,
     "globalJsonInEffect": 1,
-    "nodeBuiltinImport": 2,
-    "schemaSync": 1
-  },
-  "test/provider-capacity.test.ts": {
-    "schemaSync": 1
-  },
-  "test/runtime.test.ts": {
-    "schemaSync": 2
+    "nodeBuiltinImport": 2
   }
 }

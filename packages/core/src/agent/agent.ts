@@ -1,4 +1,4 @@
-import { Schema, Option } from "effect";
+import { type Brand, Schema, Option } from "effect";
 import { BrainSpec, Effort, ModelId } from "./brain.ts";
 
 /** The kebab-case name of an Agent, taken from its filename. */
@@ -23,7 +23,9 @@ export const AgentPersona = Schema.String.check(
 export type AgentPersona = typeof AgentPersona.Type;
 
 /** A named definition of standing instructions and the brain settings for its parent and child sessions. */
-export class Agent extends Schema.Class<Agent>("Agent")({
+export class Agent extends Schema.Class<Agent, Brand.Brand<"@usine/core/agent/agent/Agent">>(
+  "Agent",
+)({
   /** The agent's identity in the roster. */
   name: AgentName,
   /** The harness, model, and effort of the Agent's child sessions. */

@@ -1,4 +1,4 @@
-import { Option, Schema } from "effect";
+import { type Brand, Option, Schema } from "effect";
 import { UsineConfig } from "../factory.ts";
 import { LoopFile, QuarantinedLoop, loopPath } from "../loop.ts";
 import { AgentFile, InvalidAgent } from "../agent.ts";
@@ -9,7 +9,10 @@ import { referenceIndex, loopReferenceFailure } from "./references.ts";
  * A snapshot of an instance folder. Construction fails if a loop references an unknown agent or
  * selector entry.
  */
-export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/LoadedInstance")(
+export class LoadedInstance extends Schema.Class<
+  LoadedInstance,
+  Brand.Brand<"@usine/config/instance/instance/LoadedInstance">
+>("@usine/config/LoadedInstance")(
   Schema.Struct({
     /** The decoded registry, projects, settings, and worker definitions. */
     config: UsineConfig,

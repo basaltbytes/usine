@@ -7,15 +7,16 @@ import {
   GitHubPolling,
   type PayloadSnapshot,
 } from "@usine/github/polling";
-import { Array as Arr, Effect, Option, Result, Schema } from "effect";
+import { type Brand, Array as Arr, Effect, Option, Result, Schema } from "effect";
 import { repositoryFailureLogFields } from "./cycle.ts";
 
 const BASE_REF_CONCURRENCY = 4;
 
 /** An open pull request's last observed base branch, mergeability, and check refresh state. */
-export class OpenPullRequest extends Schema.Class<OpenPullRequest>(
-  "@usine/orchestrator/OpenPullRequest",
-)({
+export class OpenPullRequest extends Schema.Class<
+  OpenPullRequest,
+  Brand.Brand<"@usine/orchestrator/polling/open-pull-requests/OpenPullRequest">
+>("@usine/orchestrator/OpenPullRequest")({
   number: ChangedPullRequest.fields.number,
   updatedAt: Schema.DateTimeUtcFromString,
   /** `None` in a cursor written before polling recorded base branches. */

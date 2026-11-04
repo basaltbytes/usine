@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { RepositoryName } from "../src/repository.ts";
 
 describe("Repository.Name", () => {
   it("rejects a repository without its owner", () => {
-    expect(() => Schema.decodeSync(RepositoryName)("usine")).toThrow(
+    expect(() => Effect.runSync(Schema.decodeEffect(RepositoryName)("usine"))).toThrow(
       "Expected a full GitHub repo name (owner/name)",
     );
   });

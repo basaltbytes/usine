@@ -28,7 +28,7 @@ export const labelTextColor = (hex: string): string => {
 
 type LabelBadgeProps = {
   readonly name: string;
-  readonly label: LabelView | undefined;
+  readonly label: Pick<LabelView, "name" | "color" | "description"> | undefined;
   readonly className?: string;
 };
 

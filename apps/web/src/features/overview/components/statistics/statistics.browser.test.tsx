@@ -9,7 +9,7 @@ import {
   RunStatisticsView,
   StatisticsView,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it } from "vitest";
@@ -48,9 +48,9 @@ declare module "vitest/browser" {
 const now = Date.now();
 const { desk, overview } = deskFixture(now);
 const encode = (statistics: StatisticsView) =>
-  JSON.stringify(Schema.encodeSync(StatisticsView)(statistics));
+  JSON.stringify(Effect.runSync(Schema.encodeEffect(StatisticsView)(statistics)));
 const encodeRuns = (statistics: RunStatisticsView) =>
-  JSON.stringify(Schema.encodeSync(RunStatisticsView)(statistics));
+  JSON.stringify(Effect.runSync(Schema.encodeEffect(RunStatisticsView)(statistics)));
 
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
@@ -63,8 +63,8 @@ const renderOverview = async (
   state: FactoryOverview = overview,
 ) => {
   await commands.statisticsResponses(
-    JSON.stringify(Schema.encodeSync(FactoryOverview)(state)),
-    JSON.stringify(Schema.encodeSync(DeskView)(desk)),
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(state))),
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(DeskView)(desk))),
     statistics,
     runStatistics,
   );
@@ -256,8 +256,8 @@ it("keeps setup mode usable when statistics fail and recovers on refetch", async
     .toBeVisible();
   await expect.element(page.getByRole("heading", { name: "Recent runs" })).toBeVisible();
   await commands.statisticsResponses(
-    JSON.stringify(Schema.encodeSync(FactoryOverview)(state)),
-    JSON.stringify(Schema.encodeSync(DeskView)(desk)),
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(FactoryOverview)(state))),
+    JSON.stringify(await Effect.runPromise(Schema.encodeEffect(DeskView)(desk))),
     {
       "7d": encode(statisticsFixture(now, "7d")),
       "30d": encode(statisticsFixture(now, "30d")),

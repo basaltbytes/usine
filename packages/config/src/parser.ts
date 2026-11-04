@@ -9,6 +9,7 @@ import {
   Source,
 } from "@usine/expression/expression-engine";
 import {
+  type Brand,
   Array as Arr,
   Context,
   Effect,
@@ -67,7 +68,10 @@ const TriggerFromYaml = Schema.Union([
   ),
 ]);
 
-class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopFrontmatter")({
+class LoopFrontmatter extends Schema.Class<
+  LoopFrontmatter,
+  Brand.Brand<"@usine/config/parser/LoopFrontmatter">
+>("@usine/config/LoopFrontmatter")({
   trigger: TriggerFromYaml,
   selector: Schema.OptionFromOptionalKey(ValidSelector),
   approval: LoopApproval.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
@@ -85,7 +89,10 @@ const AuthoredLoopFrontmatter = LoopFrontmatter.pipe(
   Schema.encodeKeys({ maxCycles: "max_cycles" }),
 );
 
-class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("@usine/config/AgentFrontmatter")({
+class AgentFrontmatter extends Schema.Class<
+  AgentFrontmatter,
+  Brand.Brand<"@usine/config/parser/AgentFrontmatter">
+>("@usine/config/AgentFrontmatter")({
   harness: Harness,
   model: ModelId,
   effort: Effort,
@@ -101,15 +108,23 @@ const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
  * Serializes `agent` as YAML frontmatter and a Markdown persona, with snake_case keys. The name
  * remains in the filename.
  */
-export const formatAgent = (agent: AgentFile): string =>
-  `---\n${writeYaml(Schema.encodeSync(AuthoredAgentFrontmatter)(AgentFrontmatter.make(agent)))}---\n${agent.persona}`;
+export const formatAgent = Effect.fn("Config.formatAgent")(function* (agent: AgentFile) {
+  const frontmatter = yield* Schema.encodeEffect(AuthoredAgentFrontmatter)(
+    AgentFrontmatter.make(agent),
+  );
+  return `---\n${writeYaml(frontmatter)}---\n${agent.persona}`;
+});
 
 /**
  * Serializes `loop` as YAML frontmatter and a Markdown prompt, with snake_case keys. The name
  * remains in the filename.
  */
-export const formatLoop = (loop: LoopFile): string =>
-  `---\n${writeYaml(Schema.encodeSync(AuthoredLoopFrontmatter)(LoopFrontmatter.make(loop)))}---\n${loop.body}`;
+export const formatLoop = Effect.fn("Config.formatLoop")(function* (loop: LoopFile) {
+  const frontmatter = yield* Schema.encodeEffect(AuthoredLoopFrontmatter)(
+    LoopFrontmatter.make(loop),
+  );
+  return `---\n${writeYaml(frontmatter)}---\n${loop.body}`;
+});
 
 interface Interpolation {
   readonly source: Source;
@@ -407,6 +422,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
           const fields = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(yaml).pipe(
             Effect.mapError((error) => schemaError(file, error)),
           );
+
           const parsed = Schema.decodeUnknownResult(LoopText)(
             {
               frontmatter: fields,
@@ -470,6 +486,7 @@ const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
       }),
     )(value);
     const approval = Schema.decodeUnknownOption(Schema.Struct({ approval: LoopApproval }))(value);
+
     problems.push(
       ...(yield* checkExpressions(
         engine,

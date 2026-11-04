@@ -1,7 +1,7 @@
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ProviderRetries, TokenCount, UsdAmount } from "@usine/core/agent/session";
-import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import {
   CycleBudgetAsk,
   CycleBudgetAskId,
@@ -17,7 +17,7 @@ import { WorkerName } from "@usine/core/worker";
 import {
   AgentFailureView,
   ApprovalNeed,
-  AttemptView,
+  AttemptSummaryView,
   AwaitingApprovalView,
   AwaitingPollView,
   BlockedFailureView,
@@ -44,7 +44,7 @@ import {
   RunFailedView,
   RunFailureNeed,
   RunningAttemptView,
-  RunView,
+  RunSummaryView,
   StalledItemView,
   SucceededAttemptView,
   SuppressedForOperatorView,
@@ -81,7 +81,7 @@ import {
   WorkerUtilizationView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 const deskRepository = RepositoryName.make("basaltbytes/usine");
 
@@ -95,7 +95,9 @@ const links = new Map<string, BoardItemLink>();
 
 const link = (number: number, title: string) => {
   const item = BoardItemLink.make({
-    itemKey: Schema.encodeSync(GitHubItemKey)(["github", deskRepository, ItemNumber.make(number)]),
+    itemKey: Effect.runSync(
+      Schema.encodeEffect(GitHubItemKey)(["github", deskRepository, ItemNumber.make(number)]),
+    ),
     kind: "issue",
     number: ItemNumber.make(number),
     title,
@@ -106,7 +108,7 @@ const link = (number: number, title: string) => {
   return item;
 };
 
-type Outcome = AttemptView["outcome"];
+type Outcome = AttemptSummaryView["outcome"];
 
 /**
  * Returns a desk with two running Attempts (one on a silent Worker), a stalled Item for each stall
@@ -121,13 +123,13 @@ export const deskFixture = (now: number) => {
     worker = "local",
     ended: number | null = null,
   ) =>
-    AttemptView.make({
+    AttemptSummaryView.make({
       id: AttemptId.make(`${id}-1`),
       number: AttemptNumber.make(1),
       worker: WorkerName.make(worker),
       workerAccess: LocalWorkerAccess.make(),
       brain,
-      task: AttemptTask.make("Implement the issue."),
+
       agent: AgentName.make("developer"),
       operatorIntervened: false,
       startedAt: ago(started),
@@ -139,12 +141,12 @@ export const deskFixture = (now: number) => {
     id: string,
     item: BoardItemLink,
     loop: string,
-    state: RunView["state"],
+    state: RunSummaryView["state"],
     opened: number,
-    attempts: ReadonlyArray<AttemptView>,
+    attempts: ReadonlyArray<AttemptSummaryView>,
     pullRequest: number | null = null,
   ) =>
-    RunView.make({
+    RunSummaryView.make({
       agentBrain: brain,
       id: RunId.make(id),
       itemKey: item.itemKey,
@@ -158,11 +160,10 @@ export const deskFixture = (now: number) => {
         state === "Succeeded" || state === "Failed" || state === "Canceled"
           ? (attempts.at(-1)?.endedAt ?? ago(opened))
           : null,
-      task: "Implement the issue.",
+
       attempts,
       approval: null,
       runAgain: null,
-      resultMessage: null,
       pullRequestUrl:
         pullRequest === null ? null : `https://github.com/${deskRepository}/pull/${pullRequest}`,
       canApprove: state === "Waiting",

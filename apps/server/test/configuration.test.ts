@@ -74,11 +74,13 @@ test(
         .all()
         .map(
           (row) =>
-            Schema.decodeUnknownSync(
-              Schema.Struct({
-                value: Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity)),
-              }),
-            )(row).value,
+            Effect.runSync(
+              Schema.decodeUnknownEffect(
+                Schema.Struct({
+                  value: Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity)),
+                }),
+              )(row),
+            ).value,
         );
       expect(new Set(stored.map(({ key }) => key.kind))).toEqual(
         new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),
@@ -96,8 +98,10 @@ test(
 
       const yaml = join(exported, "usine.yaml");
       const original = await readFile(yaml, "utf8");
-      const config = Schema.encodeSync(UsineConfig)(
-        Schema.decodeUnknownSync(UsineConfig)(parse(original)),
+      const config = await Effect.runPromise(
+        Schema.encodeEffect(UsineConfig)(
+          await Effect.runPromise(Schema.decodeUnknownEffect(UsineConfig)(parse(original))),
+        ),
       );
       await writeFile(
         yaml,
@@ -156,8 +160,10 @@ test(
       const result = run(directory, ["export", exported]);
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain(`Exported revision ${revision}`);
-      const config = Schema.decodeUnknownSync(UsineConfig)(
-        parse(await readFile(join(exported, "usine.yaml"), "utf8")),
+      const config = await Effect.runPromise(
+        Schema.decodeUnknownEffect(UsineConfig)(
+          parse(await readFile(join(exported, "usine.yaml"), "utf8")),
+        ),
       );
       expect(config.workers.map(({ name }) => name)).toEqual(names);
       expect(config.workers.map(({ maxConcurrentAttempts }) => maxConcurrentAttempts)).toEqual([
@@ -255,8 +261,8 @@ test(
     });
     const reservation = createServer();
     await new Promise<void>((resolve) => reservation.listen(0, "127.0.0.1", resolve));
-    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }))(
-      reservation.address(),
+    const { port } = await Effect.runPromise(
+      Schema.decodeUnknownEffect(Schema.Struct({ port: Schema.Int }))(reservation.address()),
     );
     await new Promise<void>((resolve, reject) =>
       reservation.close((error) => (error ? reject(error) : resolve())),
@@ -279,10 +285,14 @@ test(
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     const origin = `http://127.0.0.1:${port}`;
     const harness = async () =>
-      Schema.decodeUnknownSync(AgentView)(
-        await (
-          await fetch(`${origin}/api/configuration`, { headers: await authorization() })
-        ).json(),
+      (
+        await Effect.runPromise(
+          Schema.decodeUnknownEffect(AgentView)(
+            await (
+              await fetch(`${origin}/api/configuration`, { headers: await authorization() })
+            ).json(),
+          ),
+        )
       ).agents[0]?.harness;
     try {
       await expect
@@ -321,8 +331,10 @@ test(
       expect((await consume()).status).toBe(401);
 
       const upgrades = async () =>
-        Schema.decodeUnknownSync(UpgradeView)(
-          await (await fetch(`${origin}/api/upgrade`, { headers: await authorization() })).json(),
+        await Effect.runPromise(
+          Schema.decodeUnknownEffect(UpgradeView)(
+            await (await fetch(`${origin}/api/upgrade`, { headers: await authorization() })).json(),
+          ),
         );
       expect(await upgrades()).toMatchObject({ channel: "latest", mode: "propose" });
       const settingsEditor = join(directory, "settings-editor.mjs");
@@ -358,12 +370,14 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
       await writeFile(join(directory, "usine.yaml"), "invalid");
       await writeFile(join(directory, "agents/developer.md"), "invalid");
       expect(await harness()).toBe("claude");
-      const entity = Schema.decodeUnknownSync(ConfigurationEntityView)(
-        await (
-          await fetch(`${origin}/api/configuration/entities/agent/developer`, {
-            headers: await authorization(),
-          })
-        ).json(),
+      const entity = await Effect.runPromise(
+        Schema.decodeUnknownEffect(ConfigurationEntityView)(
+          await (
+            await fetch(`${origin}/api/configuration/entities/agent/developer`, {
+              headers: await authorization(),
+            })
+          ).json(),
+        ),
       );
       const saved = await fetch(`${origin}/api/configuration/entities/agent/developer`, {
         method: "PUT",
@@ -467,11 +481,12 @@ for (const scenario of [
           const instance = yield* (yield* InstanceFolder).load(root);
           const store = yield* ConfigurationStore;
           const current = yield* store.read;
+          const decodedValue2 = yield* configurationEntities(instance);
           yield* store.commit({
             expected: current.number,
             actor: instance.config.operator,
             message: Option.some("Part 1 configuration"),
-            changes: configurationDiff([], configurationEntities(instance)),
+            changes: configurationDiff([], decodedValue2),
           });
         }).pipe(Effect.provide(legacyStore), Effect.scoped),
       );
@@ -489,8 +504,10 @@ for (const scenario of [
           .all();
         expect(revisions).toHaveLength(2);
         expect(revisions[1]?.value).toContain("Migrated repositories and loops to projects");
-        const config = Schema.decodeUnknownSync(UsineConfig)(
-          parse(await readFile(join(exported, "usine.yaml"), "utf8")),
+        const config = await Effect.runPromise(
+          Schema.decodeUnknownEffect(UsineConfig)(
+            parse(await readFile(join(exported, "usine.yaml"), "utf8")),
+          ),
         );
         expect(config.version).toBe(2);
         expect(config.projects).toHaveLength(scenario.repositories.length);
@@ -551,11 +568,12 @@ for (const scenario of ["empty registry", "unmatched selector"] as const) {
         const instance = yield* (yield* InstanceFolder).load(root);
         const store = yield* ConfigurationStore;
         const current = yield* store.read;
+        const decodedValue4 = yield* configurationEntities(instance);
         yield* store.commit({
           expected: current.number,
           actor: instance.config.operator,
           message: Option.some("Part 1 configuration"),
-          changes: configurationDiff([], configurationEntities(instance)),
+          changes: configurationDiff([], decodedValue4),
         });
       }).pipe(Effect.provide(legacyStore), Effect.scoped),
     );

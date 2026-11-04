@@ -2,7 +2,7 @@ import type { JsonValue } from "@earendil-works/chord";
 import type { AttemptId } from "@usine/core/attempt";
 import { Effect, Option, Schema } from "effect";
 import { type AttemptRequest, StoredRequest } from "../attempt-runtime.ts";
-import type { DurableHarness } from "../harness.ts";
+import { durableError, type DurableHarness } from "../harness.ts";
 import { readRecord } from "./relay.ts";
 
 /**
@@ -11,7 +11,7 @@ import { readRecord } from "./relay.ts";
  */
 export type AttemptTaskInput = typeof StoredRequest.Encoded;
 
-const encodeStored = Schema.encodeSync(StoredRequest);
+const encodeStored = Schema.encodeEffect(StoredRequest);
 const decodeStored = Schema.decodeUnknownEffect(StoredRequest);
 const decodeStoredOption = Schema.decodeUnknownOption(StoredRequest);
 
@@ -19,10 +19,10 @@ const decodeStoredOption = Schema.decodeUnknownOption(StoredRequest);
 export const attemptIdOf = (input: JsonValue): Option.Option<AttemptId> =>
   Option.map(decodeStoredOption(input), ({ spec }) => spec.attemptId);
 
-export const taskInput = (request: AttemptRequest): AttemptTaskInput =>
+export const taskInput = (request: AttemptRequest) =>
   encodeStored(
     StoredRequest.make({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
-  );
+  ).pipe(Effect.mapError((cause) => durableError("encode the Attempt request", cause)));
 
 /** Decodes a stored task input. Dies on a malformed input, since only this package writes it. */
 export const storedRequestOf = (input: AttemptTaskInput | JsonValue) =>

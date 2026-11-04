@@ -13,7 +13,7 @@ import {
   type Stopped,
 } from "@usine/cloudflare";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { type Brand, Effect, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import type { CloudflareWorkerAddress } from "./model.ts";
@@ -46,9 +46,10 @@ const ACTIONS = {
  * are discarded because create and credential requests contain the installation token and the
  * provider keys.
  */
-export class SandboxRequestError extends Schema.TaggedError<SandboxRequestError>(
-  "@usine/executor/SandboxRequestError",
-)("SandboxRequestError", {
+export class SandboxRequestError extends Schema.TaggedError<
+  SandboxRequestError,
+  Brand.Brand<"@usine/executor/cloudflare/client/SandboxRequestError">
+>("@usine/executor/SandboxRequestError")("SandboxRequestError", {
   worker: WorkerName,
   operation: SandboxOperation,
   /** Whether the Worker refused the Access service token. */

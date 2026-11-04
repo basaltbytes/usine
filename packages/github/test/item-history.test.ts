@@ -43,8 +43,10 @@ const TimelineRequest = Schema.Struct({
 
 const variablesOf = (request: HttpClientRequest.HttpClientRequest) => {
   if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
-  return Schema.decodeUnknownSync(TimelineRequest)(
-    JSON.parse(new TextDecoder().decode(request.body.body)),
+  return Effect.runSync(
+    Schema.decodeUnknownEffect(TimelineRequest)(
+      JSON.parse(new TextDecoder().decode(request.body.body)),
+    ),
   ).variables;
 };
 

@@ -1,6 +1,6 @@
 import { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { Schema } from "effect";
+import { type Brand, Schema } from "effect";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -20,7 +20,10 @@ export const AppSlug = Schema.NonEmptyString.pipe(Schema.brand("GitHubAppSlug"))
 export type AppSlug = typeof AppSlug.Type;
 
 /** The App installation, its owner account, and the App's slug. */
-export class Installation extends Schema.Class<Installation>("@usine/github/Installation")({
+export class Installation extends Schema.Class<
+  Installation,
+  Brand.Brand<"@usine/github/installation/Installation">
+>("@usine/github/Installation")({
   /** The installation ID used when minting installation tokens. */
   id: InstallationId,
   /** The GitHub user or organization account that owns the installation. */
@@ -30,14 +33,16 @@ export class Installation extends Schema.Class<Installation>("@usine/github/Inst
 }) {}
 
 /** A token scope that covers every repository of the installation. */
-export class InstallationWide extends Schema.TaggedClass<InstallationWide>(
-  "@usine/github/TokenScope/InstallationWide",
-)("InstallationWide", {}) {}
+export class InstallationWide extends Schema.TaggedClass<
+  InstallationWide,
+  Brand.Brand<"@usine/github/installation/InstallationWide">
+>("@usine/github/TokenScope/InstallationWide")("InstallationWide", {}) {}
 
 /** A token scope restricted to one attempt's repository, at the loop's permission level (`WORKER_TOKEN_PERMISSIONS`). */
-export class SingleRepository extends Schema.TaggedClass<SingleRepository>(
-  "@usine/github/TokenScope/SingleRepository",
-)("SingleRepository", {
+export class SingleRepository extends Schema.TaggedClass<
+  SingleRepository,
+  Brand.Brand<"@usine/github/installation/SingleRepository">
+>("@usine/github/TokenScope/SingleRepository")("SingleRepository", {
   /** The owner/name of the attempt repository. */
   repository: RepositoryName,
   /** The numeric ID that GitHub must confirm as the token's only repository. */
@@ -51,9 +56,10 @@ export const TokenScope = Schema.Union([InstallationWide, SingleRepository]);
 export type TokenScope = typeof TokenScope.Type;
 
 /** A redacted installation token with its expiry and repository scope. */
-export class InstallationToken extends Schema.Class<InstallationToken>(
-  "@usine/github/InstallationToken",
-)({
+export class InstallationToken extends Schema.Class<
+  InstallationToken,
+  Brand.Brand<"@usine/github/installation/InstallationToken">
+>("@usine/github/InstallationToken")({
   /** The bearer token, redacted in diagnostics and excluded from JSON encoding. */
   value: Schema.Redacted(Schema.NonEmptyString, { disallowJsonEncode: true }),
   /** The UTC lease expiry, capped at one hour after minting even when GitHub reports clock skew. */
@@ -67,9 +73,10 @@ export const InstallationDiscoveryReason = Schema.Literals(["missing", "multiple
 export type InstallationDiscoveryReason = typeof InstallationDiscoveryReason.Type;
 
 /** The error when the App has no single active installation. */
-export class InstallationDiscoveryError extends Schema.TaggedError<InstallationDiscoveryError>(
-  "@usine/github/InstallationDiscoveryError",
-)("InstallationDiscoveryError", {
+export class InstallationDiscoveryError extends Schema.TaggedError<
+  InstallationDiscoveryError,
+  Brand.Brand<"@usine/github/installation/InstallationDiscoveryError">
+>("@usine/github/InstallationDiscoveryError")("InstallationDiscoveryError", {
   /** Whether the App has no installation, multiple installations, or a suspended installation. */
   reason: InstallationDiscoveryReason,
   /** An operator-facing explanation of the installation change required. */

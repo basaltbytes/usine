@@ -1,4 +1,4 @@
-import { Option, Result, Schema } from "effect";
+import { type Brand, Option, Result, Schema } from "effect";
 import { AgentFailure } from "./attempt/failure.ts";
 import { ItemNumber } from "./item.ts";
 import { LoopName } from "./loop.ts";
@@ -11,20 +11,27 @@ export const AWAITING_CI_MARKER = "[usine:awaiting-ci]";
 const Labels = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());
 
 /** Labels to change on one item in the run's repository after CI passes. */
-export class CiLabelMutation extends Schema.Class<CiLabelMutation>("CiLabelMutation")({
+export class CiLabelMutation extends Schema.Class<
+  CiLabelMutation,
+  Brand.Brand<"@usine/core/ci/CiLabelMutation">
+>("CiLabelMutation")({
   item: ItemNumber,
   add: Labels,
   remove: Labels,
 }) {}
 
 /** The CI requirement configured on a loop and saved when its event matches. */
-export class CiPolicy extends Schema.Class<CiPolicy>("CiPolicy")({
+export class CiPolicy extends Schema.Class<CiPolicy, Brand.Brand<"@usine/core/ci/CiPolicy">>(
+  "CiPolicy",
+)({
   fixLoop: LoopName,
   timeoutSeconds: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(86400)),
 }) {}
 
 /** The pushed head, fix loop, deadline, and completion actions recorded by an agent. */
-export class CiHandoff extends Schema.Class<CiHandoff>("CiHandoff")({
+export class CiHandoff extends Schema.Class<CiHandoff, Brand.Brand<"@usine/core/ci/CiHandoff">>(
+  "CiHandoff",
+)({
   pullRequest: ItemNumber,
   head: CommitSha,
   ...CiPolicy.fields,
@@ -59,21 +66,33 @@ export const ciHandoff = (
 };
 
 /** CI passed for the recorded head. */
-export class CiPassed extends Schema.TaggedClass<CiPassed>("CiPassed")("CiPassed", {}) {}
+export class CiPassed extends Schema.TaggedClass<
+  CiPassed,
+  Brand.Brand<"@usine/core/ci/CiPassed">
+>()("CiPassed", {}) {}
 
 /** CI failed or exceeded its deadline. */
-export class CiFailed extends Schema.TaggedClass<CiFailed>("CiFailed")("CiFailed", {
+export class CiFailed extends Schema.TaggedClass<
+  CiFailed,
+  Brand.Brand<"@usine/core/ci/CiFailed">
+>()("CiFailed", {
   message: Schema.NonEmptyString,
 }) {}
 
 /** Failed CI accepted by a fix run. */
-export class CiHandedOff extends Schema.TaggedClass<CiHandedOff>("CiHandedOff")("CiHandedOff", {
+export class CiHandedOff extends Schema.TaggedClass<
+  CiHandedOff,
+  Brand.Brand<"@usine/core/ci/CiHandedOff">
+>()("CiHandedOff", {
   reason: Schema.NonEmptyString,
   fixRunId: RunId,
 }) {}
 
 /** A different head replaced the recorded push. */
-export class CiSuperseded extends Schema.TaggedClass<CiSuperseded>("CiSuperseded")("CiSuperseded", {
+export class CiSuperseded extends Schema.TaggedClass<
+  CiSuperseded,
+  Brand.Brand<"@usine/core/ci/CiSuperseded">
+>()("CiSuperseded", {
   head: CommitSha,
 }) {}
 

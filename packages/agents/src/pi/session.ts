@@ -12,7 +12,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
+import { Cause, Deferred, Effect, Option, Queue, Ref, Result, Schema } from "effect";
 import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
 import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
@@ -112,13 +112,15 @@ const PiTextBlock = Schema.Struct({
   type: Schema.Literal("text"),
   text: Schema.String,
 });
-const decodeSerializedJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
+const decodeSerializedJson = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Json));
 type PiToolStartedEvent = Extract<PiSessionEvent, { readonly type: "tool_execution_start" }>;
 type PiToolFinishedEvent = Extract<PiSessionEvent, { readonly type: "tool_execution_end" }>;
 
 const toolInputJson = (event: PiToolStartedEvent): Schema.Json => {
   try {
-    return decodeSerializedJson(JSON.stringify(event.args) ?? "null");
+    return Result.getOrElse(decodeSerializedJson(JSON.stringify(event.args) ?? "null"), () =>
+      String(event.args),
+    );
   } catch {
     return String(event.args);
   }
@@ -126,7 +128,9 @@ const toolInputJson = (event: PiToolStartedEvent): Schema.Json => {
 
 const toolOutputJson = (event: PiToolFinishedEvent): Schema.Json => {
   try {
-    return decodeSerializedJson(JSON.stringify(event.result) ?? "null");
+    return Result.getOrElse(decodeSerializedJson(JSON.stringify(event.result) ?? "null"), () =>
+      String(event.result),
+    );
   } catch {
     return String(event.result);
   }

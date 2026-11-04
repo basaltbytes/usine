@@ -53,7 +53,7 @@ const developer = Agent.make({
   persona: AgentPersona.make("Build it."),
 });
 
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [
     {
@@ -66,13 +66,16 @@ const config = Schema.decodeSync(UsineConfig)({
     },
   ],
 });
-const instance = LoadedInstance.make({
-  config,
-  agents: [],
-  invalidAgents: [],
-  loops: [],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const fixtureConfig = yield* config;
+  return LoadedInstance.make({
+    config: fixtureConfig,
+    agents: [],
+    invalidAgents: [],
+    loops: [],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 
 const at = (iso: string) => DateTime.makeUnsafe(iso);
@@ -80,7 +83,7 @@ const pullUrl = (number: number) => `https://github.com/${repository}/pull/${num
 
 const issue = (number: number, title: string, closingPullRequests: ReadonlyArray<number> = []) =>
   ItemProjection.make({
-    itemKey: gitHubItemKey(repository, number),
+    itemKey: Effect.runSync(gitHubItemKey(repository, number)),
     repository,
     source: ItemProjectionSource.make("issue"),
     number: ItemNumber.make(number),
@@ -119,7 +122,7 @@ const pullRequest = (
   state: { readonly merged: boolean; readonly mergeable: string },
 ) =>
   ItemProjection.make({
-    itemKey: gitHubItemKey(repository, number),
+    itemKey: Effect.runSync(gitHubItemKey(repository, number)),
     repository,
     source: ItemProjectionSource.make("pr"),
     number: ItemNumber.make(number),
@@ -200,7 +203,7 @@ const summary = (
     revision: RepositoryRevision.make("main"),
     permissions: "write",
     parentModel: Option.none(),
-    itemKey: gitHubItemKey(repository, item),
+    itemKey: Effect.runSync(gitHubItemKey(repository, item)),
     run: Run.make({
       id: runId,
       eventId: EventId.make(`event-${id}`),
@@ -457,7 +460,7 @@ const readTask = (
   number: number,
   project: RepositoryName = repository,
   runEvents: ReadonlyArray<RunEvent> = [],
-  loaded: LoadedInstance = instance,
+  loaded: LoadedInstance = Effect.runSync(instance),
 ) =>
   Effect.gen(function* () {
     const requested = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -487,8 +490,9 @@ describe("Task view", () => {
           ["pr", 42, "pr-open", true],
         ],
       );
+      const valueDecoded1 = yield* gitHubItemKey(repository, 42);
       // The open Run on #42 puts the Task in the lane its pull request routes to.
-      assert.strictEqual(task.current, gitHubItemKey(repository, 42));
+      assert.strictEqual(task.current, valueDecoded1);
       assert.strictEqual(task.lane.name, "In review");
       assert.deepStrictEqual(
         task.runs.map(({ id, state }) => [id, state]),
@@ -549,6 +553,7 @@ describe("Task view", () => {
 
   it.effect("names the lane the Board places its running Task in", () =>
     Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
       // fix-ci was triggered while #42 had `ready`; it has `ready-for-review` now.
       const triggered = RunEvent.make({
         runId: RunId.make("run-fix-again"),
@@ -560,23 +565,25 @@ describe("Task view", () => {
         }),
       });
       const labeled = yield* readTask(40, repository, [triggered]);
-      assert.strictEqual(labeled.task.current, gitHubItemKey(repository, 42));
+      const valueDecoded2 = yield* gitHubItemKey(repository, 42);
+      assert.strictEqual(labeled.task.current, valueDecoded2);
       assert.strictEqual(labeled.task.lane.name, "In review");
       // With no lane for `ready-for-review`, the Task is in the lane its Run was triggered from.
+      const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [
+          {
+            name: repository,
+            lanes: [
+              { name: "Ready", sources: [{ label: "ready" }] },
+              { name: "Pull requests", sources: [{ state: "pr-open" }] },
+            ],
+          },
+        ],
+      });
       const unlaned = LoadedInstance.make({
-        ...instance,
-        config: Schema.decodeSync(UsineConfig)({
-          version: 1,
-          repos: [
-            {
-              name: repository,
-              lanes: [
-                { name: "Ready", sources: [{ label: "ready" }] },
-                { name: "Pull requests", sources: [{ state: "pr-open" }] },
-              ],
-            },
-          ],
-        }),
+        ...fixtureInstance,
+        config: decodedValue1,
       });
       const fallback = yield* readTask(40, repository, [triggered], unlaned);
       assert.strictEqual(fallback.task.lane.name, "Ready");

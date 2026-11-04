@@ -1,33 +1,19 @@
 {
   "src/attempt-runtime.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 6
-  },
-  "src/attempt/documents.ts": {
-    "schemaSync": 1
-  },
-  "src/attempt/outcome.ts": {
-    "schemaSync": 2
+    "deterministicKeys": 1
   },
   "src/attempt/relay.ts": {
-    "asyncFunction": 8,
-    "schemaSync": 1
+    "asyncFunction": 8
   },
   "src/attempt/repair.ts": {
     "asyncFunction": 3
   },
-  "src/attempt/request.ts": {
-    "schemaSync": 1
-  },
   "src/attempt/runtime.ts": {
     "asyncFunction": 11,
-    "schemaClassMissingBrand": 1,
-    "schemaSync": 1,
     "strictBooleanExpressions": 1
   },
   "src/attempt/steering.ts": {
-    "asyncFunction": 1,
-    "schemaSync": 1
+    "asyncFunction": 1
   },
   "src/attempt/subagent.ts": {
     "asyncFunction": 5
@@ -39,14 +25,10 @@
     "asyncFunction": 1,
     "newPromise": 1
   },
-  "src/backup.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/harness.ts": {
     "deterministicKeys": 1,
     "globalDate": 3,
     "globalDateInEffect": 2,
-    "schemaClassMissingBrand": 2,
     "strictBooleanExpressions": 2
   },
   "src/http-dispatcher.ts": {
@@ -56,9 +38,7 @@
   "test/attempt-runtime.test.ts": {
     "asyncFunction": 8,
     "globalJson": 5,
-    "globalJsonInEffect": 1,
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
+    "globalJsonInEffect": 1
   },
   "test/fixtures/http-dispatcher.ts": {
     "asyncFunction": 1,
@@ -67,8 +47,7 @@
     "globalTimers": 1,
     "newPromise": 2,
     "nodeBuiltinImport": 3,
-    "processEnv": 4,
-    "schemaSync": 2
+    "processEnv": 4
   },
   "test/harness.test.ts": {
     "asyncFunction": 4,

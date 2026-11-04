@@ -118,7 +118,7 @@ export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAcce
   new Map(workers.map((worker) => [worker.name, workerAccess(worker)]));
 
 const attemptSummaryView = (
-  attempt: RunSummary["attempts"][number],
+  attempt: RunSummary["attempts"][number] | RunSnapshot["attempts"][number],
   workers: WorkerAccesses,
 ): AttemptSummaryView =>
   AttemptSummaryView.make({

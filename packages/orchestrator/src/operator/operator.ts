@@ -617,7 +617,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     }
     const saved = yield* acknowledgements.list;
-    const { needsYou: visible, dismissedNeeds } = partitionNeeds(needsYou, saved);
+    const { needsYou: visible, dismissedNeeds } = yield* partitionNeeds(needsYou, saved);
     const overview = ReadyOverview.make({
       projects: projectAttention(projects, visible),
       loops,
@@ -778,7 +778,9 @@ const makeOperatorObservation = Effect.gen(function* () {
           Effect.flatMap((view) => webhookAttention(view, instance.config.webhooks)),
           Effect.tap(({ needsYou, dismissedNeeds }) =>
             reports.pollReported && reports.scheduleReported
-              ? acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey))
+              ? Effect.forEach([...needsYou, ...dismissedNeeds], attentionKey).pipe(
+                  Effect.flatMap(acknowledgements.prune),
+                )
               : Effect.logDebug("Deferred attention pruning until trigger sources report", reports),
           ),
         ),
@@ -1018,6 +1020,7 @@ const makeOperator = Effect.gen(function* () {
   ) {
     yield* requirePermission("admin", InstanceScope.make());
     yield* Effect.annotateCurrentSpan({ needId: key.id });
+
     yield* acknowledgements.dismiss(
       AttentionAcknowledgement.make({
         ...key,
@@ -1059,6 +1062,7 @@ const makeOperator = Effect.gen(function* () {
     }
     const receivedAt = yield* DateTime.now;
     const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", runId]));
+
     yield* runs.approve(
       runId,
       Event.make({
@@ -1089,6 +1093,7 @@ const makeOperator = Effect.gen(function* () {
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
     yield* requireRunOperation(instance, runId);
     yield* Effect.annotateCurrentSpan({ runId });
+
     yield* runs.retry(
       runId,
       RetryRequest.make({
@@ -1113,6 +1118,7 @@ const makeOperator = Effect.gen(function* () {
         message: `Agent "${edit.agent}" is not in the roster`,
       });
     const agent = file.agent;
+
     yield* runs.retry(
       runId,
       RetryRequest.make({
@@ -1160,6 +1166,7 @@ const makeOperator = Effect.gen(function* () {
       });
     }
     const agent = file.agent;
+
     const result = yield* runs.runAgain(
       runId,
       RunAgainRequest.make({
@@ -1346,6 +1353,7 @@ const makeOperator = Effect.gen(function* () {
     );
     yield* Effect.annotateCurrentSpan({ askId });
     const key = `cycle-budget-reset:${askId}`;
+
     yield* budgets.reset(
       askId,
       Event.make({

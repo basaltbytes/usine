@@ -18,6 +18,7 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { WorkerName } from "@usine/core/worker";
 import { ExecutorError } from "@usine/executor";
 import {
+  type Brand,
   Array as EffectArray,
   Context,
   DateTime,
@@ -44,9 +45,10 @@ import {
 } from "./changes.ts";
 
 /** A reload changed `usine.yaml` in a way that needs a restart, so the running instance is kept. */
-export class RestartRequiredError extends Schema.TaggedError<RestartRequiredError>(
-  "@usine/orchestrator/RestartRequiredError",
-)("RestartRequiredError", {
+export class RestartRequiredError extends Schema.TaggedError<
+  RestartRequiredError,
+  Brand.Brand<"@usine/orchestrator/current-instance/current-instance/RestartRequiredError">
+>("@usine/orchestrator/RestartRequiredError")("RestartRequiredError", {
   /** The configuration blocks whose changes require an orchestrator restart. */
   blocks: Schema.NonEmptyArray(RestartBlock),
   /**
@@ -72,9 +74,10 @@ export const restartRequired = (
  * A reload adds workers or brains, or changes slots, that failed worker preflight, so the running instance is
  * kept.
  */
-export class ReloadPreflightError extends Schema.TaggedError<ReloadPreflightError>(
-  "@usine/orchestrator/ReloadPreflightError",
-)("ReloadPreflightError", {
+export class ReloadPreflightError extends Schema.TaggedError<
+  ReloadPreflightError,
+  Brand.Brand<"@usine/orchestrator/current-instance/current-instance/ReloadPreflightError">
+>("@usine/orchestrator/ReloadPreflightError")("ReloadPreflightError", {
   /**
    * The reloaded Agents with brains that no running Agent has, which preflight checked on every
    * Worker.
@@ -318,6 +321,7 @@ export class CurrentInstance extends Context.Service<
               Effect.gen(function* () {
                 yield* Effect.annotateCurrentSpan({ expectedRevision: request.expected });
                 const snapshot = yield* store.read;
+
                 const candidate = yield* commit(
                   parser,
                   snapshot,

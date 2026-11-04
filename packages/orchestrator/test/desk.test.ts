@@ -1,3 +1,4 @@
+import { AttemptSummary } from "@usine/engine/run-reader";
 import { RequestPermissions, RoleBinding, ProjectScope, GitHubUserId } from "@usine/core/access";
 import { ProjectId } from "@usine/core/project";
 import { configurationLayer } from "./support/configuration.ts";
@@ -101,8 +102,8 @@ const labelled = (name: string, label: string) =>
   });
 const startDev = labelled("start-dev", "ready");
 const review = labelled("review", "review");
-const instance = LoadedInstance.make({
-  config: Schema.decodeSync(UsineConfig)({
+const instance = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(UsineConfig)({
     version: 1,
     repos: [{ name: repository }],
     workers: [
@@ -110,15 +111,18 @@ const instance = LoadedInstance.make({
       { name: "spare", kind: "local", max_concurrent_attempts: 1 },
       { name: "fresh", kind: "local", max_concurrent_attempts: 1 },
     ],
-  }),
-  agents: [developer],
-  invalidAgents: [],
-  loops: [startDev, review],
-  quarantinedLoops: [],
-  warnings: [],
+  });
+  return LoadedInstance.make({
+    config: decodedValue1,
+    agents: [developer],
+    invalidAgents: [],
+    loops: [startDev, review],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 
-const itemKey = (number: number) => gitHubItemKey(repository, number);
+const itemKey = (number: number) => Effect.runSync(gitHubItemKey(repository, number));
 const issue = (number: number, labels: ReadonlyArray<string>, gone = false) =>
   ItemProjection.make({
     itemKey: itemKey(number),
@@ -196,7 +200,7 @@ const summary = (
       openedAt: time(openedAt),
     }),
     pullRequestUrl: null,
-    attempts,
+    attempts: attempts.map((attempt) => AttemptSummary.make(attempt)),
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.none(),
     approval: Option.none(),
@@ -517,7 +521,9 @@ const polled = [RepositoryPoll.make({ repository, completedAt: time("11:59:00") 
 describe("Operator desk", () => {
   it.effect("says why each Item a Loop matches has no Attempt running on it", () =>
     Effect.gen(function* () {
-      const desk = yield* (yield* OperatorObservation).desk(instance);
+      const fixtureInstance = yield* instance;
+
+      const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
       assert.deepStrictEqual(
         desk.notMoving.map(({ loop, item, reason }) => [item.number, loop, reason._tag]),
         [
@@ -552,7 +558,9 @@ describe("Operator desk", () => {
     "says that an Item's open Run waits for the stop of an earlier Attempt on the Item",
     () =>
       Effect.gen(function* () {
-        const desk = yield* (yield* OperatorObservation).desk(instance);
+        const fixtureInstance = yield* instance;
+
+        const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
         const reason = desk.notMoving.find(({ item }) => item.number === 4)?.reason;
         assert(reason?._tag === "WaitingForStop");
         assert.strictEqual(reason.run.id, RunId.make("queued-4"));
@@ -603,7 +611,9 @@ describe("Operator desk", () => {
     "lists Attempts in flight with their last activity and open connectivity warnings",
     () =>
       Effect.gen(function* () {
-        const desk = yield* (yield* OperatorObservation).desk(instance);
+        const fixtureInstance = yield* instance;
+
+        const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
         assert.strictEqual(desk.running.length, 1);
         const [running] = desk.running;
         assert(running !== undefined);
@@ -629,7 +639,9 @@ describe("Operator desk", () => {
     "lists the Runs that closed last, newest first, without those replaced before starting",
     () =>
       Effect.gen(function* () {
-        const desk = yield* (yield* OperatorObservation).desk(instance);
+        const fixtureInstance = yield* instance;
+
+        const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
         assert.deepStrictEqual(
           desk.lastOutcomes.map(({ run, closedAt }) => [run.id, run.state, closedAt]),
           [
@@ -647,23 +659,25 @@ describe("Operator desk", () => {
     const hidden = RepositoryName.make("acme/hidden");
     const second = RepositoryName.make("acme/second");
     const loaded = LoadedInstance.make({
-      ...instance,
+      ...Effect.runSync(instance),
       loops: [],
-      config: Schema.decodeSync(UsineConfig)({
-        version: 2,
-        repos: [{ name: repository }, { name: second }, { name: hidden }],
-        projects: [
-          { id: "visible", name: "Visible", repositories: [repository, second] },
-          { id: "hidden", name: "Hidden", repositories: [hidden] },
-        ],
-      }),
+      config: Effect.runSync(
+        Schema.decodeEffect(UsineConfig)({
+          version: 2,
+          repos: [{ name: repository }, { name: second }, { name: hidden }],
+          projects: [
+            { id: "visible", name: "Visible", repositories: [repository, second] },
+            { id: "hidden", name: "Hidden", repositories: [hidden] },
+          ],
+        }),
+      ),
     });
     const closed = Array.from({ length: 122 }, (_, index) => {
       const repo = index < 110 ? hidden : index % 2 === 0 ? repository : second;
       return RunSummary.make({
         ...summary(`recent-${index}`, index + 100, RunState.Succeeded.make(), "12:00:00"),
         repository: repo,
-        itemKey: gitHubItemKey(repo, index + 100),
+        itemKey: Effect.runSync(gitHubItemKey(repo, index + 100)),
         closedAt: Option.some(DateTime.add(time("13:00:00"), { seconds: -index })),
       });
     });
@@ -700,7 +714,9 @@ describe("Operator desk", () => {
     "reports each Worker's slots and last preflight, and when each repository was polled",
     () =>
       Effect.gen(function* () {
-        const desk = yield* (yield* OperatorObservation).desk(instance);
+        const fixtureInstance = yield* instance;
+
+        const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
         assert.deepStrictEqual(
           desk.workers.map(({ name, slots, preflight }) => [
             `${name} ${slots.leased}/${slots.capacity}`,
@@ -722,7 +738,9 @@ describe("Operator desk", () => {
 
   it.effect("has no poll time for a repository before its first poll ends", () =>
     Effect.gen(function* () {
-      const desk = yield* (yield* OperatorObservation).desk(instance);
+      const fixtureInstance = yield* instance;
+
+      const desk = yield* (yield* OperatorObservation).desk(fixtureInstance);
       assert.deepStrictEqual(
         desk.polls.map(({ polledAt }) => polledAt),
         [null],

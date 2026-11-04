@@ -1,6 +1,6 @@
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha, RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { Clock, Context, Effect, Layer, Schema } from "effect";
+import { type Brand, Clock, Context, Effect, Layer, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
 import type { GitHubAppError } from "./error.ts";
@@ -10,15 +10,19 @@ import { API_ROOT, authorized, invalidResponse, statusError, transportError } fr
 import { ActionsJob, FAILED_CONCLUSIONS, failedStepsExcerpt } from "./actions-log.ts";
 
 /** The current PR head and CI state, including conflicts that prevent checks from starting. */
-export class CheckSnapshot extends Schema.Class<CheckSnapshot>("CheckSnapshot")({
+export class CheckSnapshot extends Schema.Class<
+  CheckSnapshot,
+  Brand.Brand<"@usine/github/checks/CheckSnapshot">
+>("CheckSnapshot")({
   head: CommitSha,
   state: Schema.Literals(["pending", "success", "failure", "conflict"]),
 }) {}
 
 /** Failed check names and a bounded log excerpt for a fix attempt. */
-export class CheckFailureEvidence extends Schema.Class<CheckFailureEvidence>(
-  "CheckFailureEvidence",
-)({
+export class CheckFailureEvidence extends Schema.Class<
+  CheckFailureEvidence,
+  Brand.Brand<"@usine/github/checks/CheckFailureEvidence">
+>("CheckFailureEvidence")({
   jobs: Schema.Array(Schema.NonEmptyString),
   excerpt: Schema.String.check(Schema.isMaxLength(12000)),
 }) {}

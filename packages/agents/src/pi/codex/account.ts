@@ -14,11 +14,11 @@ import type { CodexConnection } from "./app-server.ts";
 export const initializeCodex = Effect.fn("Codex.initialize")(function* (
   connection: CodexConnection,
 ) {
-  const params: InitializeParams = {
+  const params = {
     clientInfo: { name: "usine", title: "usine", version: "0.0.1" },
     capabilities: null,
-  };
-  yield* connection.request("launch", "initialize", Schema.decodeUnknownSync(Schema.Json)(params));
+  } satisfies InitializeParams;
+  yield* connection.request("launch", "initialize", params);
   yield* connection.notify("launch", "initialized", {});
 });
 
@@ -37,12 +37,8 @@ export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
   model: ModelId,
 ) {
   yield* Effect.annotateCurrentSpan({ harness: "codex", model });
-  const params: GetAccountParams = { refreshToken: false };
-  const response = yield* connection.request(
-    "launch",
-    "account/read",
-    Schema.decodeUnknownSync(Schema.Json)(params),
-  );
+  const params = { refreshToken: false } satisfies GetAccountParams;
+  const response = yield* connection.request("launch", "account/read", params);
   const account = yield* Schema.decodeUnknownEffect(AccountResponse)(response).pipe(
     Effect.tapError(() =>
       Effect.logError("Codex returned an unrecognized account status", { model }),

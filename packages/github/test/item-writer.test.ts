@@ -52,8 +52,10 @@ describe("GitHubItemWriter", () => {
       if (request.method === "POST") {
         assert.strictEqual(request.body._tag, "Uint8Array");
         if (request.body._tag === "Uint8Array") {
-          const body = Schema.decodeUnknownSync(LabelRequest)(
-            JSON.parse(new TextDecoder().decode(request.body.body)),
+          const body = Effect.runSync(
+            Schema.decodeUnknownEffect(LabelRequest)(
+              JSON.parse(new TextDecoder().decode(request.body.body)),
+            ),
           );
           body.labels.forEach((label) => current.add(label));
         }
@@ -108,7 +110,7 @@ describe("GitHubItemWriter", () => {
       assert.strictEqual(addRequest.headers.authorization, "Bearer item-writer-token");
       assert.strictEqual(addRequest.body._tag, "Uint8Array");
       if (addRequest.body._tag !== "Uint8Array") return;
-      const body = Schema.decodeUnknownSync(LabelRequest)(
+      const body = yield* Schema.decodeUnknownEffect(LabelRequest)(
         JSON.parse(new TextDecoder().decode(addRequest.body.body)),
       );
       assert.deepStrictEqual(body.labels, ["ready-for-review"]);

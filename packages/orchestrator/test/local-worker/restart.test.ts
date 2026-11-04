@@ -57,7 +57,7 @@ const durableRuntime = (
   steps: ReadonlyArray<ParentStep>,
   credentials: Layer.Layer<CredentialProvider> = credentialLayer,
 ) =>
-  localLayer(instance, config, [], {
+  localLayer(instance, Effect.runSync(config), [], {
     repositoryUrl: () => remote,
     interruptGrace: "1 second",
     harnessReadiness: harnessReady,
@@ -67,7 +67,7 @@ const durableRuntime = (
     Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
     Layer.provide(claudeLoginLockLayer),
     Layer.provide(alwaysHoldsLayer),
-    Layer.provide(fixedConfigLayer(config)),
+    Layer.provide(fixedConfigLayer(Effect.runSync(config))),
     Layer.provide(testAppLayer),
   );
 
@@ -250,6 +250,7 @@ describe("local worker restart", () => {
                 yield* Deferred.succeed(harvesting, undefined);
                 return yield* Effect.never;
               }
+
               return WorkerCredential.make({
                 value: Redacted.make(TOKEN),
                 expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 60000),

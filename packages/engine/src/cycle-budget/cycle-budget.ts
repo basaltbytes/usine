@@ -119,18 +119,20 @@ export class CycleBudgets extends Context.Service<
               });
               return;
             }
+
             const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
             if (ask === undefined) return yield* CycleBudgetResetRejectedError.make({ askId });
             const budget = yield* cycleQueries(transaction).get(ask.itemKey);
             if (Option.isNone(budget))
               return yield* Effect.die(new Error("Open cycle ask has no budget"));
             const generation = budget.value.generation + 1;
+            const answerPayload = yield* encodePayload(answer.payload);
             yield* transaction
               .insert(events)
               .values({
                 eventId: answer.id,
                 dedupKey: answer.dedupKey,
-                payloadJson: encodePayload(answer.payload),
+                payloadJson: answerPayload,
                 receivedAt: encodeDateTime(answer.receivedAt),
               })
               .execute();
@@ -202,7 +204,7 @@ export class CycleBudgets extends Context.Service<
               });
               return false;
             }
-            const askJson = Schema.encodeSync(CycleBudgetAsk)(ask);
+            const askJson = yield* Schema.encodeEffect(CycleBudgetAsk)(ask);
             // An Item that matches again in the same generation raises an Ask with the same ID.
             yield* transaction
               .insert(cycleAskClosures)

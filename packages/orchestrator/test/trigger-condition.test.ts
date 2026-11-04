@@ -25,7 +25,7 @@ import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
 import { unmovedBaseRefHead } from "./support/polling.ts";
 
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [{ name: "basaltbytes/usine" }],
 });
@@ -50,24 +50,32 @@ const issueLoop = LoopFile.make({
   body: PromptTemplate.make("Implement issue {{ item.number }}."),
 });
 
-const scheduleLoop = LoopFile.make({
-  ...issueLoop,
-  name: LoopName.make("nightly"),
-  trigger: ScheduleTrigger.make({
-    on: "schedule",
-    if: Source.make("true"),
-    cron: Schema.decodeSync(Cron)("0 3 * * *"),
-    tz: Schema.decodeSync(TimeZone)("UTC"),
-  }),
+const scheduleLoop = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(Cron)("0 3 * * *");
+  const decodedValue2 = yield* Schema.decodeEffect(TimeZone)("UTC");
+  return LoopFile.make({
+    ...issueLoop,
+    name: LoopName.make("nightly"),
+    trigger: ScheduleTrigger.make({
+      on: "schedule",
+      if: Source.make("true"),
+      cron: decodedValue1,
+      tz: decodedValue2,
+    }),
+  });
 });
 
-const instance = LoadedInstance.make({
-  config,
-  agents: [agent],
-  invalidAgents: [],
-  loops: [issueLoop, scheduleLoop],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const fixtureConfig = yield* config;
+  const fixtureScheduleLoop = yield* scheduleLoop;
+  return LoadedInstance.make({
+    config: fixtureConfig,
+    agents: [agent],
+    invalidAgents: [],
+    loops: [issueLoop, fixtureScheduleLoop],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
 
 const submissionFor = (loop: LoopName, itemKey: string) =>
@@ -91,7 +99,7 @@ const submissionFor = (loop: LoopName, itemKey: string) =>
 
 const layerWith = (
   github: GitHubPolling["Service"],
-  current: Layer.Layer<CurrentInstance> = fixedInstanceLayer(instance),
+  current: Layer.Layer<CurrentInstance> = fixedInstanceLayer(Effect.runSync(instance)),
 ) =>
   triggerConditionLayer.pipe(
     Layer.provide(Layer.succeed(GitHubPolling, github)),
@@ -181,9 +189,10 @@ describe("TriggerCondition", () => {
 
   it.effect("never re-fetches for a schedule Tick, which has no standing condition", () =>
     Effect.gen(function* () {
+      const fixtureScheduleLoop = yield* scheduleLoop;
       const condition = yield* TriggerCondition;
       const recheck = yield* condition.recheck(
-        submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]'),
+        submissionFor(fixtureScheduleLoop.name, '["github","basaltbytes/usine"]'),
       );
       assert.strictEqual(recheck, "matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
@@ -193,7 +202,10 @@ describe("TriggerCondition", () => {
     "re-checks against the current instance, so a reload that removes a Loop drops its Events",
     () =>
       Effect.gen(function* () {
-        const current = yield* SubscriptionRef.make(instance);
+        const fixtureInstance = yield* instance;
+        const fixtureScheduleLoop = yield* scheduleLoop;
+
+        const current = yield* SubscriptionRef.make(fixtureInstance);
         const reloadable = Layer.succeed(CurrentInstance)({
           get: SubscriptionRef.get(current),
           changes: SubscriptionRef.changes(current),
@@ -201,14 +213,17 @@ describe("TriggerCondition", () => {
           registerWorkers: () => Effect.void,
           commit: () => Effect.die("the test swaps the instance itself"),
         });
-        const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
+        const submission = submissionFor(
+          fixtureScheduleLoop.name,
+          '["github","basaltbytes/usine"]',
+        );
         yield* Effect.gen(function* () {
           const condition = yield* TriggerCondition;
           const triggerMatch = yield* condition.recheck(submission);
           assert.strictEqual(triggerMatch, "matches");
           yield* SubscriptionRef.set(
             current,
-            LoadedInstance.make({ ...instance, loops: [issueLoop] }),
+            LoadedInstance.make({ ...fixtureInstance, loops: [issueLoop] }),
           );
           const currentTriggerMatch = yield* condition.recheck(submission);
           assert.strictEqual(currentTriggerMatch, "no-longer-matches");

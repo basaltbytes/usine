@@ -1,12 +1,15 @@
 import { type GatewayCredentialKind, GatewayLlmProvider } from "@usine/core/worker";
-import { Option, Redacted, Schema } from "effect";
+import { type Brand, Option, Redacted, Schema } from "effect";
 import { Headers } from "effect/http";
 import { UpstreamBase } from "../upstream.ts";
 
 const Secret = Schema.Redacted(Schema.NonEmptyString);
 
 /** An Anthropic API key, sent upstream as `x-api-key`. */
-export class AnthropicApiKey extends Schema.TaggedClass<AnthropicApiKey>()("AnthropicApiKey", {
+export class AnthropicApiKey extends Schema.TaggedClass<
+  AnthropicApiKey,
+  Brand.Brand<"@usine/gateway/llm/llm/AnthropicApiKey">
+>()("AnthropicApiKey", {
   /** The nonempty API key sent in the upstream `x-api-key` header. */
   key: Secret,
 }) {}
@@ -17,31 +20,34 @@ export class AnthropicApiKey extends Schema.TaggedClass<AnthropicApiKey>()("Anth
  * doesn't document swapping a placeholder for one through a proxy; `test/placeholder-swap`
  * checks that it works.
  */
-export class AnthropicSubscriptionToken extends Schema.TaggedClass<AnthropicSubscriptionToken>()(
-  "AnthropicSubscriptionToken",
-  {
-    /** The nonempty Claude subscription token sent as a bearer token with the OAuth beta flag. */
-    token: Secret,
-  },
-) {}
+export class AnthropicSubscriptionToken extends Schema.TaggedClass<
+  AnthropicSubscriptionToken,
+  Brand.Brand<"@usine/gateway/llm/llm/AnthropicSubscriptionToken">
+>()("AnthropicSubscriptionToken", {
+  /** The nonempty Claude subscription token sent as a bearer token with the OAuth beta flag. */
+  token: Secret,
+}) {}
 
 /** The credential added to Anthropic requests. */
 export const AnthropicCredential = Schema.Union([AnthropicApiKey, AnthropicSubscriptionToken]);
 export type AnthropicCredential = typeof AnthropicCredential.Type;
 
 /** Claude Code's upstream. On the worker, `ANTHROPIC_BASE_URL` is `http://llm.<domain>/anthropic`. */
-export class AnthropicProvider extends Schema.TaggedClass<AnthropicProvider>()(
-  "AnthropicProvider",
-  {
-    /** The Anthropic-compatible base URL to which allowed API paths are appended. */
-    upstream: UpstreamBase,
-    /** The API key or subscription token that replaces the caller token upstream. */
-    credential: AnthropicCredential,
-  },
-) {}
+export class AnthropicProvider extends Schema.TaggedClass<
+  AnthropicProvider,
+  Brand.Brand<"@usine/gateway/llm/llm/AnthropicProvider">
+>()("AnthropicProvider", {
+  /** The Anthropic-compatible base URL to which allowed API paths are appended. */
+  upstream: UpstreamBase,
+  /** The API key or subscription token that replaces the caller token upstream. */
+  credential: AnthropicCredential,
+}) {}
 
 /** An OpenAI-compatible API key, sent upstream as a bearer token. */
-export class OpenAiApiKey extends Schema.TaggedClass<OpenAiApiKey>()("OpenAiApiKey", {
+export class OpenAiApiKey extends Schema.TaggedClass<
+  OpenAiApiKey,
+  Brand.Brand<"@usine/gateway/llm/llm/OpenAiApiKey">
+>()("OpenAiApiKey", {
   /** The nonempty API key sent in the upstream `Authorization: Bearer` header. */
   key: Secret,
 }) {}
@@ -57,7 +63,10 @@ export type HostFilePath = typeof HostFilePath.Type;
  * keeps its tokens in memory, refreshes them at `tokenUrl` before they expire, and writes the
  * rotated tokens back to `authFile`.
  */
-export class ChatGptLogin extends Schema.TaggedClass<ChatGptLogin>()("ChatGptLogin", {
+export class ChatGptLogin extends Schema.TaggedClass<
+  ChatGptLogin,
+  Brand.Brand<"@usine/gateway/llm/llm/ChatGptLogin">
+>()("ChatGptLogin", {
   /** The absolute path to a Codex ChatGPT auth file. Refreshes require write access to its directory. */
   authFile: HostFilePath,
   /** The OAuth token endpoint used to refresh this login. */
@@ -73,7 +82,10 @@ export type OpenAiCredential = typeof OpenAiCredential.Type;
  * ChatGPT login. On the worker, the `model_provider` `base_url` is `http://llm.<domain>/openai/v1`
  * in both cases.
  */
-export class OpenAiProvider extends Schema.TaggedClass<OpenAiProvider>()("OpenAiProvider", {
+export class OpenAiProvider extends Schema.TaggedClass<
+  OpenAiProvider,
+  Brand.Brand<"@usine/gateway/llm/llm/OpenAiProvider">
+>()("OpenAiProvider", {
   /** The API base URL, or ChatGPT backend URL when using a ChatGPT login. */
   upstream: UpstreamBase,
   /** The API key or refreshable ChatGPT login that replaces the caller token upstream. */

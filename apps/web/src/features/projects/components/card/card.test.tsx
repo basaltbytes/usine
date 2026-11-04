@@ -8,7 +8,7 @@ import { RunLine } from "./run-line";
 import { boardTaskRuns, boardRunSummary, MachineQuotaWait } from "@usine/orchestrator/operator";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
-import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
+import { AttemptNumber, AttemptId } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -25,7 +25,7 @@ import { GitHubLabelName } from "@usine/config/label";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   AgentFailureView,
-  AttemptView,
+  AttemptSummaryView,
   BoardTaskView,
   BoardItemLink,
   BoardLaneId,
@@ -42,13 +42,12 @@ import {
   ReadOnlyBoardLaneView,
   RunFailureNeed,
   RunSummaryView,
-  RunView,
   SucceededAttemptView,
   WritableBoardLaneView,
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { ProjectBoard } from "~/features/projects/board.page";
@@ -69,8 +68,7 @@ const brain = BrainSpec.make({
 });
 
 const attempt = (number: number, message: string | null) =>
-  AttemptView.make({
-    task: AttemptTask.make("Review the task"),
+  AttemptSummaryView.make({
     agent: AgentName.make("developer"),
     operatorIntervened: false,
     id: AttemptId.make(`attempt-${number}`),
@@ -88,10 +86,12 @@ const attempt = (number: number, message: string | null) =>
   });
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
+const itemKey = ItemKey.make(JSON.stringify(["github", repository, 33]));
 const issueLink = (number: number, title: string) =>
   BoardItemLink.make({
-    itemKey: Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
+    itemKey: Effect.runSync(
+      Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
+    ),
     kind: "issue",
     number: ItemNumber.make(number),
     title,
@@ -99,8 +99,8 @@ const issueLink = (number: number, title: string) =>
     state: "issue-open",
   });
 
-const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
-  RunView.make({
+const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptSummaryView>) =>
+  RunSummaryView.make({
     agentBrain: brain,
     id: RunId.make("run-33"),
     itemKey,
@@ -111,11 +111,9 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
     loopPaused: false,
     openedAt: "2026-09-01T12:00:00.000Z",
     closedAt: attempts.at(-1)?.endedAt ?? "2026-09-01T12:00:00.000Z",
-    task: "Review issue 33.",
     attempts,
     approval: null,
     runAgain: null,
-    resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,
     canRetry: state === "Failed",
@@ -124,7 +122,10 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
     canRunAgain: false,
   });
 
-const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
+const itemWithRun = (
+  state: "Failed" | "Succeeded",
+  attempts: ReadonlyArray<AttemptSummaryView>,
+) => {
   const run = runOnItem(state, attempts);
   const items = [issueLink(33, "Board lanes")];
   return BoardTaskView.make({
@@ -402,7 +403,7 @@ describe("Board flow arrows", () => {
 });
 
 describe("Board card stall note", () => {
-  const question = AttemptView.make({
+  const question = AttemptSummaryView.make({
     ...attempt(1, "unused"),
     outcome: FailedAttemptView.make({
       failure: QuestionFailureView.make({ question: "Which lanes stay on the Board?" }),
@@ -586,7 +587,9 @@ describe("Board drag targets", () => {
 describe("Board card link", () => {
   it("opens the Task page under its originating Item, with or without a current Run", () => {
     const withRun = itemWithRun("Failed", [attempt(1, "Checks failed")]);
-    const prKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(40)]);
+    const prKey = Effect.runSync(
+      Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(40)]),
+    );
     const pullRequest = BoardItemLink.make({
       itemKey: prKey,
       kind: "pr",
@@ -604,7 +607,9 @@ describe("Board card link", () => {
       ...boardRunSummary([], null, [...withRun.items, pullRequest]),
       run: null,
     });
-    const quietKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(12)]);
+    const quietKey = Effect.runSync(
+      Schema.encodeEffect(GitHubItemKey)(["github", repository, ItemNumber.make(12)]),
+    );
     const quiet = BoardTaskView.make({
       ...withRun,
       itemKey: quietKey,
@@ -721,7 +726,7 @@ describe("Board card Run line", () => {
 
   it("shows an open Run or a failure that still needs the operator, and no closed Run", () => {
     const card = itemWithRun("Failed", [failed]);
-    const shown = (state: RunView["state"], canResolveFailure = false) =>
+    const shown = (state: RunSummaryView["state"], canResolveFailure = false) =>
       currentRun(
         BoardTaskView.make({
           ...card,
@@ -739,7 +744,7 @@ describe("Board card Run line", () => {
 
   it("counts from the Run's opening, its live Attempt's start, or its last Attempt's end", () => {
     const run = runOnItem("Failed", [failed]);
-    const live = AttemptView.make({ ...attempt(2, null), outcome: null, endedAt: null });
+    const live = AttemptSummaryView.make({ ...attempt(2, null), outcome: null, endedAt: null });
     assert.strictEqual(
       runLineSince(RunSummaryView.make({ ...run, state: "Waiting" })),
       run.openedAt,
@@ -752,7 +757,7 @@ describe("Board card Run line", () => {
     // A retried Run is Running before its next Attempt starts.
     assert.strictEqual(runLineSince(RunSummaryView.make({ ...run, state: "Running" })), null);
     // Attempts that ended before end times were recorded have no end time.
-    const unrecorded = AttemptView.make({ ...failed, endedAt: null });
+    const unrecorded = AttemptSummaryView.make({ ...failed, endedAt: null });
     assert.strictEqual(runLineSince(RunSummaryView.make({ ...run, attempts: [unrecorded] })), null);
   });
 });

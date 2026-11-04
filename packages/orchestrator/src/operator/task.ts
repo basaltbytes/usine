@@ -14,6 +14,7 @@ import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { type RunSnapshot, RunReader } from "@usine/engine/run-reader";
 import {
+  type Brand,
   Array as EffectArray,
   Context,
   DateTime,
@@ -47,7 +48,10 @@ import { RunView } from "./run.ts";
  * @property url - The GitHub URL for the item.
  * @property state - The last polled issue or pull request state used for lane placement.
  */
-export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrator/TaskItemView")({
+export class TaskItemView extends Schema.Class<
+  TaskItemView,
+  Brand.Brand<"@usine/orchestrator/operator/task/TaskItemView">
+>("@usine/orchestrator/TaskItemView")({
   ...BoardItemLink.fields,
   /** The last polled GitHub labels for this item. */
   labels: Schema.Array(GitHubLabelName),
@@ -59,7 +63,10 @@ export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrato
  * The Task's Board lane: its current Item's lane or, while a Run runs and the Item has no lane
  * label, the lane that Run was triggered from.
  */
-export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrator/TaskLaneView")({
+export class TaskLaneView extends Schema.Class<
+  TaskLaneView,
+  Brand.Brand<"@usine/orchestrator/operator/task/TaskLaneView">
+>("@usine/orchestrator/TaskLaneView")({
   /** The lane ID used by board move requests. */
   id: BoardLaneId,
   /** The display name of the task lane. */
@@ -70,9 +77,10 @@ export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrato
  * A comment or review an Attempt posted on its Run's Item. `postedAt` and `attemptEndedAt` are null
  * for records made before those times were stored.
  */
-export class TaskCommentView extends Schema.Class<TaskCommentView>(
-  "@usine/orchestrator/TaskCommentView",
-)({
+export class TaskCommentView extends Schema.Class<
+  TaskCommentView,
+  Brand.Brand<"@usine/orchestrator/operator/task/TaskCommentView">
+>("@usine/orchestrator/TaskCommentView")({
   /** The run associated with this entry. */
   runId: RunId,
   /** Whether the attributed GitHub write is a comment or review. */
@@ -92,7 +100,10 @@ export class TaskCommentView extends Schema.Class<TaskCommentView>(
  * One Task as its page shows it (ADR 0024). Tasks have no stored identity; `number` is the
  * originating Item: the earliest issue, or else the earliest pull request.
  */
-export class TaskView extends Schema.Class<TaskView>("@usine/orchestrator/TaskView")({
+export class TaskView extends Schema.Class<
+  TaskView,
+  Brand.Brand<"@usine/orchestrator/operator/task/TaskView">
+>("@usine/orchestrator/TaskView")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /**

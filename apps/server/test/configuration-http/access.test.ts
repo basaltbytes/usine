@@ -29,32 +29,39 @@ for (const role of ["viewer", "operator", "maintainer"] as const)
         });
         const own = yield* request("GET", "/entities/project/acme-project");
         expect(own.status).toBe(200);
+
         expect((yield* request("GET", "/entities/project/acme-other")).status).toBe(403);
+
         expect((yield* request("GET", "/entities/settings/instance")).status).toBe(403);
+
         expect((yield* request("GET", "/revisions/1")).status).toBe(403);
         const currentResponse = yield* request("GET", "/revisions");
         expect(currentResponse).toMatchObject({
           status: 200,
           body: { revisions: [] },
         });
-        const { value } = Schema.decodeUnknownSync(Schema.Struct({ value: Schema.JsonObject }))(
-          own.body,
-        );
+        const { value } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ value: Schema.JsonObject }),
+        )(own.body);
+
         expect(
           (yield* request("PUT", "/entities/project/acme-project", {
             expected: 1,
             value: { ...value, name: "Renamed" },
           })).status,
         ).toBe(403);
-        expect(
-          (yield* request("DELETE", "/entities/project/acme-project", { expected: 1 })).status,
-        ).toBe(403);
+        const decodedValue5 = yield* request("DELETE", "/entities/project/acme-project", {
+          expected: 1,
+        });
+        expect(decodedValue5.status).toBe(403);
+
         expect(
           (yield* request("PUT", "/entities/binding/escalate", {
             expected: 1,
             value: { name: "escalate", member: 1, role: "admin", scope: { _tag: "Instance" } },
           })).status,
         ).toBe(403);
+
         expect(
           (yield* request("PUT", "/entities/loop/acme-project%2Fimplement", {
             expected: 1,

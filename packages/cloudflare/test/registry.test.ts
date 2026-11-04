@@ -56,9 +56,11 @@ describe("sandbox registry", () => {
     const response = await web.handler(
       new Request(`https://sandboxes.test/v1/sandboxes?owner=${OWNER}`),
     );
-    const list = Schema.decodeUnknownSync(
-      Schema.toCodecJson(Schema.Struct({ sandboxes: Schema.Array(SandboxSummary) })),
-    )(await response.json());
+    const list = await Effect.runPromise(
+      Schema.decodeUnknownEffect(
+        Schema.toCodecJson(Schema.Struct({ sandboxes: Schema.Array(SandboxSummary) })),
+      )(await response.json()),
+    );
 
     expect(list.sandboxes.map(({ name, running }) => [name, running])).toEqual([
       ["github-app-1.cf-one.alive", true],

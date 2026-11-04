@@ -220,6 +220,7 @@ describe("Item cycle budgets", () => {
                 idFor(queued.value.submission),
               );
               assert(Option.isNone(claimedRun));
+
               assert.strictEqual((yield* (yield* CycleBudgets).asks)[0]?.completedCycles, 3);
               const tick = yield* store.nextQueued(idFor(scheduled));
               assert(Option.isSome(tick) && Option.isNone(tick.value.submission.cycleLimit));
@@ -257,11 +258,13 @@ describe("Item cycle budgets", () => {
           yield* budgets.acknowledgeReset(reset);
           const currentClaimedRun = yield* store.claimQueued(queued, idFor(queued));
           assert(Option.isNone(currentClaimedRun));
+
           assert.strictEqual(
             (yield* store.recordAndClaim(queued, idFor(queued))).result._tag,
             "Ignored",
           );
           const fresh = afterReset(queued);
+
           assert.strictEqual(
             (yield* store.recordAndClaim(fresh, idFor(fresh))).result._tag,
             "Claimed",
@@ -296,6 +299,7 @@ describe("Item cycle budgets", () => {
                   [3, 3],
                 ],
               );
+
               assert.strictEqual(
                 (yield* Effect.flip(store.snapshot(idFor(next))))._tag,
                 "RunNotFoundError",
@@ -339,6 +343,7 @@ describe("Item cycle budgets", () => {
             Effect.gen(function* () {
               const store = yield* RunStore;
               const budgets = yield* CycleBudgets;
+
               assert.strictEqual((yield* budgets.pendingResets).length, 1);
               yield* budgets.reset(ask.id, event("operator-reset-1"));
               for (let round = 5; round <= 7; round += 1)
@@ -350,10 +355,10 @@ describe("Item cycle budgets", () => {
               yield* budgets.reset(ask.id, event("operator-reset-1"));
               const currentAsks = yield* budgets.asks;
               assert.deepStrictEqual(currentAsks, [newerAsk]);
-              assert.strictEqual(
-                (yield* Effect.flip(budgets.reset(ask.id, event("different-answer"))))._tag,
-                "CycleBudgetResetRejectedError",
+              const decodedValue6 = yield* Effect.flip(
+                budgets.reset(ask.id, event("different-answer")),
               );
+              assert.strictEqual(decodedValue6._tag, "CycleBudgetResetRejectedError");
             }),
           );
         }),
@@ -382,6 +387,7 @@ describe("Item cycle budgets", () => {
             assert.deepStrictEqual(currentAsks, []);
             const currentClosed = yield* budgets.close(opened.id, "ItemClosed");
             assert.isFalse(currentClosed);
+
             assert.strictEqual(
               (yield* Effect.flip(budgets.reset(opened.id, event("late-reset"))))._tag,
               "CycleBudgetResetRejectedError",
@@ -398,10 +404,8 @@ describe("Item cycle budgets", () => {
         assert.strictEqual(closures[0]?.["ask_id"], ask.id);
         assert.strictEqual(closures[0]?.["item_key"], "pr-72");
         assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
-        assert.deepStrictEqual(
-          JSON.parse(String(closures[0]?.["ask_json"])),
-          Schema.encodeSync(CycleBudgetAsk)(ask),
-        );
+        const decodedValue8 = yield* Schema.encodeEffect(CycleBudgetAsk)(ask);
+        assert.deepStrictEqual(JSON.parse(String(closures[0]?.["ask_json"])), decodedValue8);
         yield* inDatabase(
           directory,
           Effect.gen(function* () {
@@ -453,10 +457,8 @@ describe("Item cycle budgets", () => {
         assert.strictEqual(closures.length, 1);
         assert.strictEqual(closures[0]?.["ask_id"], first.id);
         assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
-        assert.deepStrictEqual(
-          JSON.parse(String(closures[0]?.["ask_json"])),
-          Schema.encodeSync(CycleBudgetAsk)(second),
-        );
+        const decodedValue9 = yield* Schema.encodeEffect(CycleBudgetAsk)(second);
+        assert.deepStrictEqual(JSON.parse(String(closures[0]?.["ask_json"])), decodedValue9);
         assert.isAbove(
           Date.parse(String(closures[0]?.["closed_at"])),
           Date.parse(String(closed?.["closed_at"])),
@@ -520,6 +522,7 @@ describe("Item cycle budgets", () => {
             ...submission("review", 2),
             cycleLimit: first.cycleLimit,
           });
+
           assert.strictEqual(
             (yield* store.recordAndClaim(next, idFor(next))).result._tag,
             "Queued",
@@ -527,6 +530,7 @@ describe("Item cycle budgets", () => {
           yield* store.finishAttempt(started.execution.attempt, success);
           const claimedRun = yield* store.claimQueued(next, idFor(next));
           assert(Option.isNone(claimedRun));
+
           assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
           for (let tick = 1; tick <= 5; tick += 1)
             yield* complete(

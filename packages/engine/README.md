@@ -247,3 +247,7 @@ The domain services are the persistence boundary. `RunDatabase` is the current S
 `src/database/dialect.ts` centralizes SQLite query expressions, including JSON access and aggregation. Keep JSON paths literal where they match expression indexes. The [persistence inventory](../../docs/persistence.md) lists every store and its dialect dependencies.
 
 `test/contracts/persistence.test.ts` registers adapters against the port suites. An adapter fixture supplies service layers, isolated storage, reopening, and write-failure injection. These contracts run through `pnpm test`, alongside SQLite-specific migration and query-plan tests.
+
+## Schema contracts
+
+Engine records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Persistence encoding and decoding run inside Effects and report failures through `EnginePersistenceError`.

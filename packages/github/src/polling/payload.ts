@@ -1,4 +1,4 @@
-import { Effect, Schema, SchemaGetter } from "effect";
+import { type Brand, Effect, Schema, SchemaGetter } from "effect";
 import { BaseRefName } from "./detection.ts";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -176,20 +176,21 @@ export const ContentHash = Schema.String.check(
 export type ContentHash = typeof ContentHash.Type;
 
 /** An issue's payload and the content hash used to decide whether it's new work. */
-export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/github/IssueSnapshot")(
-  "IssueSnapshot",
-  {
-    /** The fetched payload slice for loop selection and prompt rendering, including its timestamps. */
-    payload: IssuePayload,
-    /** The SHA-256 hash of canonical payload content; timestamp-only changes keep the same hash (ADR 0007). */
-    contentHash: ContentHash,
-  },
-) {}
+export class IssueSnapshot extends Schema.TaggedClass<
+  IssueSnapshot,
+  Brand.Brand<"@usine/github/polling/payload/IssueSnapshot">
+>("@usine/github/IssueSnapshot")("IssueSnapshot", {
+  /** The fetched payload slice for loop selection and prompt rendering, including its timestamps. */
+  payload: IssuePayload,
+  /** The SHA-256 hash of canonical payload content; timestamp-only changes keep the same hash (ADR 0007). */
+  contentHash: ContentHash,
+}) {}
 
 /** A pull request's payload and the content hash used to decide whether it's new work. */
-export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>(
-  "@usine/github/PullRequestSnapshot",
-)("PullRequestSnapshot", {
+export class PullRequestSnapshot extends Schema.TaggedClass<
+  PullRequestSnapshot,
+  Brand.Brand<"@usine/github/polling/payload/PullRequestSnapshot">
+>("@usine/github/PullRequestSnapshot")("PullRequestSnapshot", {
   /** The fetched payload slice for loop selection and prompt rendering, including its timestamps. */
   payload: PullRequestPayload,
   /** The SHA-256 hash of canonical payload content; timestamp-only changes keep the same hash (ADR 0007). */

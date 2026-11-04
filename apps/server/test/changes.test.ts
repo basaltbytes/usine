@@ -28,7 +28,7 @@ import { Changes } from "../src/changes/changes.ts";
 const unused = () => Effect.die("unexpected backend read");
 const project = ProjectId.make("visible");
 const repository = RepositoryName.make("owner/visible");
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 2,
   projects: [
     { id: project, name: "Visible", repositories: [repository] },
@@ -39,20 +39,26 @@ const config = Schema.decodeSync(UsineConfig)({
     { name: RepositoryName.make("owner/hidden"), tags: [] },
   ],
 });
-const instance = LoadedInstance.make({
-  config,
-  agents: [],
-  loops: [],
-  invalidAgents: [],
-  quarantinedLoops: [],
-  warnings: [],
+const instance = Effect.gen(function* () {
+  const fixtureConfig = yield* config;
+  return LoadedInstance.make({
+    config: fixtureConfig,
+    agents: [],
+    loops: [],
+    invalidAgents: [],
+    quarantinedLoops: [],
+    warnings: [],
+  });
 });
-const instances = Layer.succeed(CurrentInstance)({
-  get: Effect.succeed(instance),
-  changes: Stream.never,
-  reload: unused(),
-  commit: unused,
-  registerWorkers: () => Effect.void,
+const instances = Effect.gen(function* () {
+  const fixtureInstance = yield* instance;
+  return Layer.succeed(CurrentInstance)({
+    get: Effect.succeed(fixtureInstance),
+    changes: Stream.never,
+    reload: unused(),
+    commit: unused,
+    registerWorkers: () => Effect.void,
+  });
 });
 const request = (cursor?: number | string) =>
   HttpServerRequest.fromWeb(
@@ -71,7 +77,11 @@ const open = (cursor?: number | string, grants = administratorPermissions) =>
       ),
     );
   });
-const live = Changes.layer.pipe(Layer.provide(instances));
+const live = Effect.gen(function* () {
+  const fixtureInstances = yield* instances;
+
+  return Changes.layer.pipe(Layer.provide(fixtureInstances));
+});
 
 it.effect("keeps a connected stream idle for 30 seconds without reading projections", () => {
   const reads = { overview: 0, desk: 0, configuration: 0 };
@@ -114,7 +124,9 @@ it.effect("keeps a connected stream idle for 30 seconds without reading projecti
     assert.deepStrictEqual(frames.slice(1), [": heartbeat\n\n", ": heartbeat\n\n"]);
     assert.deepStrictEqual(reads, { overview: 0, desk: 0, configuration: 0 });
   }).pipe(
-    Effect.provide(live.pipe(Layer.provideMerge(backend), Layer.provideMerge(changeBusLayer))),
+    Effect.provide(
+      Effect.runSync(live).pipe(Layer.provideMerge(backend), Layer.provideMerge(changeBusLayer)),
+    ),
     Effect.scoped,
   );
 });
@@ -151,6 +163,7 @@ it.effect(
       const grants = [
         PermissionGrant.make({ permission: "read", scope: ProjectScope.make({ project }) }),
       ];
+
       const frames = yield* (yield* open(initial.revision, grants)).pipe(
         Stream.take(1),
         Stream.runCollect,
@@ -159,9 +172,13 @@ it.effect(
       for (const [, target] of cases) assert.include(replay, JSON.stringify(target));
       assert.notInclude(replay, "secret");
       assert.notInclude(replay, '"reset":true');
+
       const admin = yield* (yield* open(initial.revision)).pipe(Stream.take(1), Stream.runCollect);
       assert.include(admin.join(""), "secret-worker");
-    }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
+    }).pipe(
+      Effect.provide(Effect.runSync(live).pipe(Layer.provideMerge(changeBusLayer))),
+      Effect.scoped,
+    ),
 );
 
 it.effect("resets expired and future cursors and slow subscribers after a bounded replay gap", () =>
@@ -176,8 +193,12 @@ it.effect("resets expired and future cursors and slow subscribers after a bounde
       const frames = yield* (yield* open(cursor)).pipe(Stream.take(1), Stream.runCollect);
       assert.include(frames.join(""), '"reset":true');
     }
+
     assert.strictEqual((yield* bus.open).history.length, 256);
-  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
+  }).pipe(
+    Effect.provide(Effect.runSync(live).pipe(Layer.provideMerge(changeBusLayer))),
+    Effect.scoped,
+  ),
 );
 
 it.effect("revalidates credentials before a write can reveal an identifier", () =>
@@ -200,13 +221,17 @@ it.effect("revalidates credentials before a write can reveal an identifier", () 
     );
     yield* Effect.yieldNow;
     permitted = false;
+
     yield* (yield* ChangeBus).publish([
       { audience: InstanceScope.make(), target: { kind: "worker", id: "hidden-after-revocation" } },
     ]);
     const exit = yield* Fiber.await(reader);
     assert.strictEqual(exit._tag, "Failure");
     assert.notInclude(frames.join(""), "hidden-after-revocation");
-  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
+  }).pipe(
+    Effect.provide(Effect.runSync(live).pipe(Layer.provideMerge(changeBusLayer))),
+    Effect.scoped,
+  ),
 );
 
 it.effect("resets a live subscriber whose queue drops committed writes", () =>
@@ -215,6 +240,7 @@ it.effect("resets a live subscriber whose queue drops committed writes", () =>
     const entered = yield* Deferred.make<void>();
     const release = yield* Deferred.make<void>();
     let first = true;
+
     const reader = yield* (yield* open()).pipe(
       Stream.tap(() => {
         if (!first) return Effect.void;
@@ -233,7 +259,10 @@ it.effect("resets a live subscriber whose queue drops committed writes", () =>
     yield* Deferred.succeed(release, undefined);
     const frames = yield* Fiber.join(reader);
     assert.include(frames[1] ?? "", '"reset":true');
-  }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
+  }).pipe(
+    Effect.provide(Effect.runSync(live).pipe(Layer.provideMerge(changeBusLayer))),
+    Effect.scoped,
+  ),
 );
 
 it.effect(
@@ -246,6 +275,7 @@ it.effect(
         PermissionGrant.make({ permission: "read", scope: ProjectScope.make({ project }) }),
       ];
       let first = true;
+
       const reader = yield* (yield* open(undefined, grants)).pipe(
         Stream.tap(() => {
           if (!first) return Effect.void;
@@ -276,5 +306,8 @@ it.effect(
       assert.include(liveFrame, '{"kind":"run","id":"preparing-run"}');
       assert.include(liveFrame, '{"kind":"project","id":"visible"}');
       assert.notInclude(liveFrame, '"reset":true');
-    }).pipe(Effect.provide(live.pipe(Layer.provideMerge(changeBusLayer))), Effect.scoped),
+    }).pipe(
+      Effect.provide(Effect.runSync(live).pipe(Layer.provideMerge(changeBusLayer))),
+      Effect.scoped,
+    ),
 );

@@ -11,17 +11,15 @@ export const Params = Schema.Array(
 );
 
 export const Command = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal("Query"),
+  Schema.TaggedStruct("Query", {
     session: Schema.NullOr(Schema.Int),
     sql: Schema.String,
     params: Schema.Array(Schema.Unknown),
     values: Schema.Boolean,
     safeIntegers: Schema.Boolean,
   }),
-  Schema.Struct({ _tag: Schema.Literal("BeginSnapshot") }),
-  Schema.Struct({
-    _tag: Schema.Literal("EndSnapshot"),
+  Schema.TaggedStruct("BeginSnapshot", {}),
+  Schema.TaggedStruct("EndSnapshot", {
     session: Schema.Int,
     commit: Schema.Boolean,
   }),

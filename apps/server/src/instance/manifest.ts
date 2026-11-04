@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative } from "node:path";
-import { Effect, FileSystem, Option, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Option, Schema } from "effect";
 
 /** The package manager that installs the instance's dependencies. */
 export const PackageManager = Schema.Literals(["pnpm", "npm", "yarn", "bun"]);
@@ -28,15 +28,19 @@ const PackageJson = Schema.fromJsonString(
 const LOCAL_SPEC = /^(?:link:|file:|workspace:|portal:|git\+|git:|github:|https?:|\.|\/|~)/u;
 
 /** A `@usine/*` dependency of the instance with a registry spec. */
-export class EnginePin extends Schema.Class<EnginePin>("@usine/server/EnginePin")({
+export class EnginePin extends Schema.Class<
+  EnginePin,
+  Brand.Brand<"@usine/server/instance/manifest/EnginePin">
+>("@usine/server/EnginePin")({
   name: Schema.NonEmptyString,
   spec: Schema.NonEmptyString,
 }) {}
 
 /** The instance folder's `package.json`, as `usine upgrade` reads it. */
-export class InstanceManifest extends Schema.Class<InstanceManifest>(
-  "@usine/server/InstanceManifest",
-)({
+export class InstanceManifest extends Schema.Class<
+  InstanceManifest,
+  Brand.Brand<"@usine/server/instance/manifest/InstanceManifest">
+>("@usine/server/InstanceManifest")({
   path: Schema.String,
   text: Schema.String,
   /** The `@usine/*` dependencies with a registry spec. */
@@ -49,9 +53,13 @@ export class InstanceManifest extends Schema.Class<InstanceManifest>(
 }) {}
 
 /** The instance's `package.json` couldn't be read or parsed. */
-export class InstanceManifestError extends Schema.TaggedError<InstanceManifestError>(
-  "@usine/server/InstanceManifestError",
-)("InstanceManifestError", { path: Schema.String, reason: Schema.String }) {}
+export class InstanceManifestError extends Schema.TaggedError<
+  InstanceManifestError,
+  Brand.Brand<"@usine/server/instance/manifest/InstanceManifestError">
+>("@usine/server/InstanceManifestError")("InstanceManifestError", {
+  path: Schema.String,
+  reason: Schema.String,
+}) {}
 
 export const SERVER_PACKAGE = "@usine/server";
 

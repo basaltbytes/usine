@@ -1,14 +1,14 @@
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
-import { Array as Arr, Option, Result, Schema } from "effect";
+import { Array as Arr, Option, Result } from "effect";
 import { ManagedRepo, UsineConfig } from "../factory.ts";
 import { LoadedInstance } from "../instance/instance.ts";
 import { LoopFile } from "../loop.ts";
 import { DeclaredLabel, canonicalLabelName } from "../label.ts";
 import { ConfigurationInvalid } from "../configuration/model.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
-import { Selector, matchesSelector } from "../selector.ts";
+import { matchesSelector } from "../selector.ts";
 import { Project } from "./project.ts";
 
 export { Project } from "./project.ts";
@@ -73,7 +73,10 @@ export const migrateProjects = (
         message: `Cannot migrate loop ${loop.name}: selector ${JSON.stringify(
           Option.match(loop.selector, {
             onNone: () => null,
-            onSome: Schema.encodeSync(Selector),
+            onSome: ({ repos, tags }) => ({
+              repos: Option.getOrUndefined(repos),
+              tags: Option.getOrUndefined(tags),
+            }),
           }),
         )} matches no registered repository. Register a matching repository or remove the loop before migrating.`,
       }),

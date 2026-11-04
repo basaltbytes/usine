@@ -47,7 +47,7 @@ const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["worke
       prefix: "usine-engine-",
     });
     const directory = InstanceDirectory.make(currentDirectory);
-    const config = Schema.decodeSync(UsineConfig)({ version: 1, repos: [], workers });
+    const config = yield* Schema.decodeEffect(UsineConfig)({ version: 1, repos: [], workers });
     return yield* Layer.build(
       workerEngineLayer(
         directory,
@@ -180,6 +180,7 @@ const assertCredentialIsolation = (variable: string) =>
     assert.strictEqual(unavailable[0]?.worker, failed);
     assert.include(unavailable[0]?.message ?? "", variable);
     const currentInstance = yield* (yield* CurrentInstance).get;
+
     const need = (yield* reads.overview(currentInstance)).needsYou.find(
       (need) => need._tag === "WorkerPreflightNeed",
     );
@@ -212,7 +213,7 @@ esac
 `,
       );
       yield* fs.chmod(`${directory}/ssh`, 0o755);
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [],
         workers: [
@@ -252,7 +253,7 @@ it.effect(
         ACCESS_ID: "id",
         HEALTHY_SECRET: "healthy-secret",
       };
-      const config = Schema.decodeSync(UsineConfig)({
+      const config = yield* Schema.decodeEffect(UsineConfig)({
         version: 1,
         repos: [],
         workers: [
@@ -291,6 +292,7 @@ it.effect(
         const currentUnavailable = yield* status.unavailable;
         assert.deepStrictEqual(currentUnavailable, []);
         const currentInstance = yield* (yield* CurrentInstance).get;
+
         assert.isFalse(
           (yield* reads.overview(currentInstance)).needsYou.some(
             (need) => need._tag === "WorkerPreflightNeed",

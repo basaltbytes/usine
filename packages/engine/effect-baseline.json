@@ -3,32 +3,17 @@
     "deterministicKeys": 1,
     "globalJsonInEffect": 1
   },
-  "src/attention/model.ts": {
-    "schemaClassMissingBrand": 2
-  },
   "src/board-moves/board-moves.ts": {
-    "deterministicKeys": 1,
-    "schemaSync": 2
-  },
-  "src/board-moves/model.ts": {
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 1
   },
   "src/cursor/cursor.ts": {
     "deterministicKeys": 1
   },
   "src/cycle-budget/cycle-budget.ts": {
-    "deterministicKeys": 1,
-    "schemaSync": 1,
-    "schemaSyncInEffect": 1
-  },
-  "src/cycle-budget/model.ts": {
-    "redundantSchemaTagIdentifier": 1,
-    "schemaClassMissingBrand": 2
+    "deterministicKeys": 1
   },
   "src/cycle-budget/queries.ts": {
-    "globalJsonInEffect": 1,
-    "schemaSync": 2,
-    "schemaSyncInEffect": 2
+    "globalJsonInEffect": 1
   },
   "src/database/database.ts": {
     "deterministicKeys": 1,
@@ -39,18 +24,13 @@
     "preferBarrelImport": 2
   },
   "src/database/local-sqlite.ts": {
-    "preferBarrelImport": 1,
-    "schemaClassMissingBrand": 1
+    "preferBarrelImport": 1
   },
   "src/database/project-migration.ts": {
-    "globalJsonInEffect": 4,
-    "schemaClassMissingBrand": 1
+    "globalJsonInEffect": 4
   },
   "src/database/sqlite-reader/connection.ts": {
     "preferBarrelImport": 1
-  },
-  "src/database/sqlite-reader/protocol.ts": {
-    "schemaStructWithTag": 3
   },
   "src/database/sqlite-reader/reader.ts": {
     "preferBarrelImport": 2
@@ -59,27 +39,16 @@
     "deterministicKeys": 1
   },
   "src/database/sqlite-reader/worker.ts": {
-    "schemaSync": 3,
     "strictBooleanExpressions": 1
   },
   "src/engine/admission.ts": {
     "deterministicKeys": 1
   },
-  "src/engine/checkout-recovery.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/engine/engine.ts": {
     "deterministicKeys": 1
   },
-  "src/engine/error.ts": {
-    "schemaClassMissingBrand": 7
-  },
-  "src/engine/retry.ts": {
-    "schemaClassMissingBrand": 1
-  },
   "src/engine/run-again.ts": {
-    "globalJson": 1,
-    "schemaClassMissingBrand": 1
+    "globalJson": 1
   },
   "src/engine/run-driver.ts": {
     "deterministicKeys": 1
@@ -88,63 +57,31 @@
     "deterministicKeys": 1
   },
   "src/engine/submission.ts": {
-    "globalJson": 1,
-    "schemaClassMissingBrand": 6
+    "globalJson": 1
   },
   "src/engine/unconfirmed-stops.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 1
-  },
-  "src/engine/upgrade.ts": {
-    "schemaClassMissingBrand": 2
+    "deterministicKeys": 1
   },
   "src/item-projection/item-projection.ts": {
-    "deterministicKeys": 2,
-    "schemaSync": 2
-  },
-  "src/item-projection/model.ts": {
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 2
   },
   "src/loop-control/loop-control.ts": {
     "deterministicKeys": 1
   },
-  "src/loop-control/model.ts": {
-    "schemaClassMissingBrand": 1
-  },
-  "src/repository-label-projection/model.ts": {
-    "schemaClassMissingBrand": 2
-  },
   "src/repository-label-projection/repository-label-projection.ts": {
-    "deterministicKeys": 2,
-    "schemaSync": 1
-  },
-  "src/run-reader/model.ts": {
-    "schemaClassMissingBrand": 10
+    "deterministicKeys": 2
   },
   "src/run-reader/run-reader.ts": {
     "deterministicKeys": 1
   },
   "src/step-executor.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 1
+    "deterministicKeys": 1
   },
   "src/store/changes.ts": {
     "globalJsonInEffect": 1
   },
-  "src/store/codec.ts": {
-    "schemaSync": 13
-  },
-  "src/store/queries.ts": {
-    "schemaSync": 3,
-    "schemaSyncInEffect": 2
-  },
   "src/store/store.ts": {
-    "deterministicKeys": 1,
-    "schemaClassMissingBrand": 4
-  },
-  "src/transcript.ts": {
-    "schemaClassMissingBrand": 7,
-    "schemaStructWithTag": 1
+    "deterministicKeys": 1
   },
   "src/trigger-condition.ts": {
     "deterministicKeys": 1
@@ -154,9 +91,7 @@
   },
   "test/cycle-budget.test.ts": {
     "globalJsonInEffect": 3,
-    "nodeBuiltinImport": 1,
-    "schemaSync": 2,
-    "schemaSyncInEffect": 2
+    "nodeBuiltinImport": 1
   },
   "test/engine.test.ts": {
     "globalJson": 1
@@ -171,9 +106,7 @@
     "globalJson": 1
   },
   "test/store/migration.test.ts": {
-    "globalJsonInEffect": 11,
-    "schemaSync": 8,
-    "schemaSyncInEffect": 8
+    "globalJsonInEffect": 11
   },
   "test/store/project-migration.test.ts": {
     "globalJsonInEffect": 5
@@ -186,10 +119,7 @@
     "nodeBuiltinImport": 3
   },
   "test/store/read-plans/fixture.ts": {
-    "globalJson": 1,
-    "globalJsonInEffect": 9,
-    "schemaSync": 10,
-    "schemaSyncInEffect": 9
+    "globalJsonInEffect": 9
   },
   "test/store/read-plans/read-plans.test.ts": {
     "globalJsonInEffect": 1
@@ -204,9 +134,5 @@
   "test/store/statement-retention.test.ts": {
     "globalJsonInEffect": 1,
     "nodeBuiltinImport": 1
-  },
-  "test/store/transcript.test.ts": {
-    "schemaSync": 3,
-    "schemaSyncInEffect": 3
   }
 }

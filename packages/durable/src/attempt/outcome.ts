@@ -7,7 +7,8 @@ import {
   InfraFailure,
 } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
-import { Match, Option, Result, Schema } from "effect";
+import { Effect, Match, Option, Result, Schema } from "effect";
+import { durableError } from "../harness.ts";
 import {
   AttemptReport,
   type FinishedAttempt,
@@ -20,7 +21,7 @@ import type { AttemptRecord, AttemptResult } from "./documents.ts";
 export type Settled = Result.Result<AttemptReport, AttemptFailure>;
 
 const failureJson = Schema.fromJsonString(AttemptFailure);
-const encodeFailure = Schema.encodeSync(failureJson);
+const encodeFailure = Schema.encodeEffect(failureJson);
 const decodeFailure = Schema.decodeUnknownOption(failureJson);
 const decodeResult = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -45,13 +46,19 @@ const failureMessage = (failure: AttemptFailure): string =>
   }) || failure._tag;
 
 /** Returns the terminal task state for `failure`. */
-export const failedOutcome = (failure: AttemptFailure): NextTaskState<never, AttemptResult> => ({
-  status: "terminal",
-  outcome: {
-    status: "failed",
-    error: { message: failureMessage(failure), detail: encodeFailure(failure) },
-  },
-});
+export const failedOutcome = (failure: AttemptFailure) =>
+  encodeFailure(failure).pipe(
+    Effect.mapBoth({
+      onSuccess: (detail): NextTaskState<never, AttemptResult> => ({
+        status: "terminal",
+        outcome: {
+          status: "failed",
+          error: { message: failureMessage(failure), detail },
+        },
+      }),
+      onFailure: (cause) => durableError("encode the failed outcome", cause),
+    }),
+  );
 
 /** Returns the terminal task state for a parent that finished with `message`. */
 export const completedOutcome = (
@@ -115,7 +122,7 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
 const resultJson = Schema.fromJsonString(StepResult);
 
 /** Encodes a harvested result for `AttemptRecord.result`. */
-export const encodeResult = Schema.encodeSync(resultJson);
+export const encodeResult = Schema.encodeEffect(resultJson);
 const decodeHarvested = Schema.decodeUnknownOption(resultJson);
 
 /**

@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "@effect/vitest";
-import { DateTime, Duration, Effect, Option, Redacted, Schema } from "effect";
+import { flow, DateTime, Duration, Effect, Option, Redacted, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { TestClock } from "effect/testing";
 import { ProcessStatus, SandboxSummary } from "../src/api/api.ts";
@@ -58,7 +58,10 @@ const served = (allowedHosts?: ReadonlyArray<string>) => {
   return { ...sandbox, call };
 };
 
-const decodeSummary = Schema.decodeUnknownSync(Schema.toCodecJson(SandboxSummary));
+const decodeSummary = flow(
+  Schema.decodeUnknownEffect(Schema.toCodecJson(SandboxSummary)),
+  Effect.runSync,
+);
 
 describe("sandbox routes", () => {
   it("starts the container without internet and routes its traffic through the handlers", async () => {
@@ -290,7 +293,9 @@ describe("sandbox routes", () => {
     const { state, call } = served();
     await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
     const process = "0123456789abcdef0123456789abcdef";
-    const files = processFiles(Schema.decodeSync(ProcessStatus.fields.process)(process));
+    const files = processFiles(
+      await Effect.runPromise(Schema.decodeEffect(ProcessStatus.fields.process)(process)),
+    );
     state.files.set(files.pid, text("4242"));
     state.files.set(files.stdout, text("hello\n"));
     const running = await call("GET", `/v1/sandboxes/${NAME}/processes/${process}`);

@@ -1,14 +1,15 @@
 import { backup as backupDatabase, DatabaseSync } from "node:sqlite";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Effect, FileSystem, Option, Path, type PlatformError, Schema } from "effect";
+import { type Brand, Effect, FileSystem, Option, Path, type PlatformError, Schema } from "effect";
 import { durableStoragePath } from "./storage-path.ts";
 
 /**
  * A failed durable storage backup, with both paths because a copy error can come from either file.
  */
-export class DurableStorageBackupError extends Schema.TaggedError<DurableStorageBackupError>(
-  "@usine/durable/DurableStorageBackupError",
-)("DurableStorageBackupError", {
+export class DurableStorageBackupError extends Schema.TaggedError<
+  DurableStorageBackupError,
+  Brand.Brand<"@usine/durable/backup/DurableStorageBackupError">
+>("@usine/durable/DurableStorageBackupError")("DurableStorageBackupError", {
   /**
    * The failed step: `open` (the storage file), `stage` (the temporary copy), `copy` (SQLite's
    * backup), or `publish` (the hard link to `destination`, which fails if the file exists).

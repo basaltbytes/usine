@@ -12,10 +12,10 @@ import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { Effect, Option, Schema } from "effect";
 
 /** Keeps the repository editor's lane fields working for a project with one repository. */
-export const repositoryEditorEntity = (
+export const repositoryEditorEntity = Effect.fn("ConfigurationEditor.repositoryEntity")(function* (
   snapshot: Configuration,
   entity: ConfigurationEntity,
-): ConfigurationEntity => {
+) {
   if (entity.key.kind !== "repository" || Option.isNone(snapshot.instance)) return entity;
   const { config } = snapshot.instance.value;
   const repository = config.repos.find(({ name }) => name === String(entity.key.identifier));
@@ -24,13 +24,20 @@ export const repositoryEditorEntity = (
     (project) => project.repositories.length === 1 && project.includes(repository.name),
   );
   if (project === undefined) return entity;
+  const value = yield* Schema.encodeEffect(ManagedRepo)(
+    ManagedRepo.make({ ...repository, lanes: project.lanes }),
+  ).pipe(
+    Effect.mapError((error) =>
+      ConfigurationInvalid.make({
+        problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
+      }),
+    ),
+  );
   return ConfigurationEntity.make({
     ...entity,
-    value: Schema.encodeSync(ManagedRepo)(
-      ManagedRepo.make({ ...repository, lanes: project.lanes }),
-    ),
+    value: value,
   });
-};
+});
 
 export const repositoryEditorChanges = (snapshot: Configuration, entity: ConfigurationEntity) =>
   Effect.gen(function* () {
@@ -49,7 +56,7 @@ export const repositoryEditorChanges = (snapshot: Configuration, entity: Configu
       project.includes(repository.name),
     );
     if (project === undefined || project.repositories.length !== 1) return { entity, changes: [] };
-    const before = Schema.encodeSync(Project)(project);
+    const before = yield* Schema.encodeEffect(Project)(project);
     const key = ConfigurationEntityKey.make({
       kind: "project",
       identifier: ConfigurationEntityId.make(project.id),

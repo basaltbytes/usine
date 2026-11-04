@@ -1,5 +1,6 @@
 import type { Tracing } from "@usine/config/factory";
 import {
+  type Brand,
   Config,
   ConfigProvider,
   Effect,
@@ -16,9 +17,10 @@ import { type CliVersionError, packageVersion } from "./cli.ts";
 const RESOURCE_ATTRIBUTES = "OTEL_RESOURCE_ATTRIBUTES";
 
 /** `OTEL_RESOURCE_ATTRIBUTES` has a key or value that isn't valid percent-encoding. */
-export class ResourceAttributesError extends Schema.TaggedError<ResourceAttributesError>(
-  "@usine/server/ResourceAttributesError",
-)("ResourceAttributesError", {
+export class ResourceAttributesError extends Schema.TaggedError<
+  ResourceAttributesError,
+  Brand.Brand<"@usine/server/tracing/ResourceAttributesError">
+>("@usine/server/ResourceAttributesError")("ResourceAttributesError", {
   variable: Schema.Literal(RESOURCE_ATTRIBUTES),
   /** The parse problem, with the key at fault. */
   message: Schema.String,
@@ -36,10 +38,10 @@ const ResourceAttributes = Schema.String.pipe(
 const resourceAttributes = Effect.fn("Tracing.resourceAttributes")(function* () {
   const refuse = (error: { readonly message: string }) =>
     ResourceAttributesError.make({ variable: RESOURCE_ATTRIBUTES, message: error.message });
-  const value = yield* Config.option(Config.String(RESOURCE_ATTRIBUTES)).pipe(
+  const configuredAttributes = yield* Config.option(Config.String(RESOURCE_ATTRIBUTES)).pipe(
     Effect.mapError(refuse),
   );
-  return yield* Option.match(value, {
+  return yield* Option.match(configuredAttributes, {
     onNone: () => Effect.succeed({}),
     onSome: (attributes) =>
       Schema.decodeEffect(ResourceAttributes)(attributes).pipe(Effect.mapError(refuse)),

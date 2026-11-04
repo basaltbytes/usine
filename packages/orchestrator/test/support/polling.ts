@@ -106,13 +106,18 @@ export const memoryCursorStore = () => {
   const stored = new Map<string, Schema.Json>();
   const store: CursorStore["Service"] = {
     read: (key, schema) =>
-      Effect.sync(() =>
-        Option.map(Option.fromNullishOr(stored.get(key)), Schema.decodeUnknownSync(schema)),
-      ),
-    write: (key, schema, value) =>
-      Effect.sync(() => {
-        stored.set(key, Schema.encodeSync(schema)(value));
+      Effect.gen(function* () {
+        const value = stored.get(key);
+        if (value === undefined) return Option.none();
+        return yield* Schema.decodeUnknownEffect(schema)(value).pipe(Effect.asSome, Effect.orDie);
       }),
+    write: (key, schema, value) =>
+      Schema.encodeEffect(schema)(value).pipe(
+        Effect.orDie,
+        Effect.map((encoded) => {
+          stored.set(key, encoded);
+        }),
+      ),
   };
   return { store, stored };
 };

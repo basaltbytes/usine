@@ -1,6 +1,6 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
+import { type Brand, DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { UiOrigin } from "@usine/config/factory";
 import { DEFAULT_LOG_LEVEL, Port, type UpCommand, UpLogLevel } from "../cli.ts";
 import { SystemdUnit } from "./systemd.ts";
@@ -10,7 +10,10 @@ export const ProcessId = Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.b
 export type ProcessId = typeof ProcessId.Type;
 
 /** The command that started a `usine up`, which `usine restart` runs again. */
-export class InstanceLaunch extends Schema.Class<InstanceLaunch>("@usine/server/InstanceLaunch")({
+export class InstanceLaunch extends Schema.Class<
+  InstanceLaunch,
+  Brand.Brand<"@usine/server/instance/record/InstanceLaunch">
+>("@usine/server/InstanceLaunch")({
   /** The Node.js binary, from `process.execPath`. */
   node: Schema.NonEmptyString,
   /** The Node.js options, from `process.execArgv`. */
@@ -52,7 +55,10 @@ export const currentLaunch = ({ port, origin, logLevel, allowVolatileInstance }:
  * reads the record that an older engine wrote, so a field added after the first version decodes
  * with a default.
  */
-export class InstanceRecord extends Schema.Class<InstanceRecord>("@usine/server/InstanceRecord")({
+export class InstanceRecord extends Schema.Class<
+  InstanceRecord,
+  Brand.Brand<"@usine/server/instance/record/InstanceRecord">
+>("@usine/server/InstanceRecord")({
   pid: ProcessId,
   /** The `@usine/server` version of the process. */
   version: Schema.NonEmptyString,
@@ -70,9 +76,13 @@ export class InstanceRecord extends Schema.Class<InstanceRecord>("@usine/server/
 }) {}
 
 /** `.usine/instance.json` exists but doesn't decode as an `InstanceRecord`. */
-export class InstanceRecordError extends Schema.TaggedError<InstanceRecordError>(
-  "@usine/server/InstanceRecordError",
-)("InstanceRecordError", { path: Schema.String, reason: Schema.String }) {}
+export class InstanceRecordError extends Schema.TaggedError<
+  InstanceRecordError,
+  Brand.Brand<"@usine/server/instance/record/InstanceRecordError">
+>("@usine/server/InstanceRecordError")("InstanceRecordError", {
+  path: Schema.String,
+  reason: Schema.String,
+}) {}
 
 /** The files that a `usine up` keeps in the instance's `.usine` folder. */
 export interface InstanceFiles {
@@ -101,8 +111,10 @@ export const instanceFiles = (directory: string): InstanceFiles => {
   };
 };
 
-const encodeRecord = (record: InstanceRecord): string =>
-  `${JSON.stringify(Schema.encodeSync(InstanceRecord)(record), null, 2)}\n`;
+const encodeRecord = (record: InstanceRecord) =>
+  Schema.encodeEffect(InstanceRecord)(record).pipe(
+    Effect.map((encoded) => `${JSON.stringify(encoded, null, 2)}\n`),
+  );
 
 const RecordFromJson = Schema.fromJsonString(InstanceRecord);
 
@@ -116,7 +128,8 @@ export const writeRecord = Effect.fn("Instance.writeRecord")(function* (
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const staging = `${files.record}.${record.pid}`;
-  yield* fileSystem.writeFileString(staging, encodeRecord(record), { mode: 0o600 });
+  const encodedRecord = yield* encodeRecord(record);
+  yield* fileSystem.writeFileString(staging, encodedRecord, { mode: 0o600 });
   yield* fileSystem.rename(staging, files.record);
 });
 
@@ -131,7 +144,7 @@ export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): 
     systemdUnit: record.systemdUnit,
     stoppingSince: DateTime.nowUnsafe(),
   });
-  writeFileSync(staging, encodeRecord(stopping), { mode: 0o600 });
+  writeFileSync(staging, Effect.runSync(encodeRecord(stopping)), { mode: 0o600 });
   renameSync(staging, files.record);
 };
 

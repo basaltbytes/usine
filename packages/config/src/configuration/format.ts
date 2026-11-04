@@ -15,21 +15,14 @@ export const formatConfigurationEntity = (
 ): Effect.Effect<string, ConfigurationInvalid> => {
   const source =
     entity.key.kind === "agent"
-      ? Schema.decodeEffect(AgentJson)(entity.value).pipe(Effect.map(formatAgent))
+      ? Schema.decodeEffect(AgentJson)(entity.value).pipe(Effect.flatMap(formatAgent))
       : entity.key.kind === "loop"
-        ? Schema.decodeEffect(LoopJson)(entity.value).pipe(Effect.map(formatLoop))
+        ? Schema.decodeEffect(LoopJson)(entity.value).pipe(Effect.flatMap(formatLoop))
         : Effect.succeed(writeYaml(entity.value));
   return source.pipe(
     Effect.mapError((error) =>
       ConfigurationInvalid.make({
-        problems: [
-          ConfigFileError.make({
-            file: InstancePath.make(entity.key.key),
-            stage: "schema",
-            expression: Option.none(),
-            message: error.message,
-          }),
-        ],
+        problems: [ConfigFileError.fromSchema(InstancePath.make(entity.key.key), error)],
       }),
     ),
   );
@@ -46,14 +39,14 @@ export const parseConfigurationEntity = (
   source: string,
 ): Effect.Effect<ConfigurationEntity, ConfigurationInvalid> => {
   const file = InstancePath.make(`${key.kind}/${key.identifier}`);
-  const value: Effect.Effect<Schema.Json, ConfigFileError> =
+  const value: Effect.Effect<Schema.Json, ConfigFileError | Schema.SchemaError> =
     key.kind === "agent"
       ? parser
           .parseAgentFile(InstancePath.make(`agents/${key.identifier}.md`), source)
-          .pipe(Effect.map(Schema.encodeSync(AgentJson)))
+          .pipe(Effect.flatMap(Schema.encodeEffect(AgentJson)))
       : key.kind === "loop"
         ? parseLoopDraft(InstancePath.make(`loops/${key.identifier}.md`), source).pipe(
-            Effect.map(Schema.encodeSync(LoopJson)),
+            Effect.flatMap(Schema.encodeEffect(LoopJson)),
           )
         : parseYamlDocument(file, source).pipe(
             Effect.flatMap((document) =>
@@ -72,7 +65,14 @@ export const parseConfigurationEntity = (
   return value.pipe(
     Effect.mapBoth({
       onSuccess: (value) => ConfigurationEntity.make({ key, value }),
-      onFailure: (problem) => ConfigurationInvalid.make({ problems: [problem] }),
+      onFailure: (problem) =>
+        ConfigurationInvalid.make({
+          problems: [
+            Schema.is(ConfigFileError)(problem)
+              ? problem
+              : ConfigFileError.fromSchema(file, problem),
+          ],
+        }),
     }),
   );
 };

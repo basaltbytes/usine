@@ -44,27 +44,29 @@ const POOL = WorkerName.make("pool");
 const unused = () => Effect.die("unused");
 
 const configWithTimings = (timings: Record<string, number>, slots = 1) =>
-  Schema.decodeSync(UsineConfig)({
-    version: 1,
-    repos: [{ name: "acme/demo" }],
-    workers: [
-      {
-        name: "pool",
-        kind: "ssh",
-        max_concurrent_attempts: slots,
-        root: "/srv/usine",
-        provisioner: {
-          provider: "hetzner",
-          token_env: "TOKEN",
-          server_type: "cx33",
-          location: "nbg1",
-          image: "image",
-          ssh_key: "key",
-          timings,
+  Effect.runSync(
+    Schema.decodeEffect(UsineConfig)({
+      version: 1,
+      repos: [{ name: "acme/demo" }],
+      workers: [
+        {
+          name: "pool",
+          kind: "ssh",
+          max_concurrent_attempts: slots,
+          root: "/srv/usine",
+          provisioner: {
+            provider: "hetzner",
+            token_env: "TOKEN",
+            server_type: "cx33",
+            location: "nbg1",
+            image: "image",
+            ssh_key: "key",
+            timings,
+          },
         },
-      },
-    ],
-  });
+      ],
+    }),
+  );
 
 /**
  * A fake `WorkerMachines` that records each call, fails the creations in `failures`, and gives
@@ -252,6 +254,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
         assert(Schema.is(InfraFailure)(failure), failure._tag);
         assert.include(fake.calls, `create pool ${run} ${attempt}`);
         assert.include(prepared, attempt);
+
         const checked = (yield* status.preflights).find(({ worker }) => worker === POOL);
         assert.deepStrictEqual(checked?.containerLimits, Option.some(limits));
 
@@ -368,20 +371,21 @@ describe("Worker scheduler on a provisioned Worker", () => {
           } else assert.isTrue((yield* status.provisioning)[0]?.blocked);
           yield* Ref.set(fake.provisioned, false);
           if (transition === "revision") {
+            const decodedValue2 = yield* Schema.decodeEffect(UsineConfig)({
+              version: 1,
+              repos: [{ name: "acme/demo" }],
+              workers: [
+                {
+                  name: "pool",
+                  kind: "ssh",
+                  destination: "usine@203.0.113.7",
+                  root: "/srv/usine",
+                },
+              ],
+            });
             const changed = LoadedInstance.make({
               ...initial,
-              config: Schema.decodeSync(UsineConfig)({
-                version: 1,
-                repos: [{ name: "acme/demo" }],
-                workers: [
-                  {
-                    name: "pool",
-                    kind: "ssh",
-                    destination: "usine@203.0.113.7",
-                    root: "/srv/usine",
-                  },
-                ],
-              }),
+              config: decodedValue2,
             });
             const reload = yield* Deferred.await(registered);
             const apply = yield* reload(initial, changed);
@@ -412,21 +416,22 @@ describe("Worker scheduler on a provisioned Worker", () => {
             yield* TestClock.adjust("10 seconds");
             yield* Ref.set(fake.provisioned, true);
             const reload = yield* Deferred.await(registered);
+            const decodedValue3 = yield* Schema.decodeEffect(UsineConfig)({
+              version: 1,
+              repos: [{ name: "acme/demo" }],
+              workers: [
+                {
+                  name: "pool",
+                  kind: "ssh",
+                  destination: "usine@203.0.113.7",
+                  root: "/srv/usine",
+                },
+              ],
+            });
             const apply = yield* reload(
               LoadedInstance.make({
                 ...initial,
-                config: Schema.decodeSync(UsineConfig)({
-                  version: 1,
-                  repos: [{ name: "acme/demo" }],
-                  workers: [
-                    {
-                      name: "pool",
-                      kind: "ssh",
-                      destination: "usine@203.0.113.7",
-                      root: "/srv/usine",
-                    },
-                  ],
-                }),
+                config: decodedValue3,
               }),
               initial,
             );
@@ -513,16 +518,18 @@ describe("Worker scheduler on a provisioned Worker", () => {
         steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip),
       );
       yield* settle;
+      const decodedValue4 = yield* Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [{ name: "acme/demo" }],
+        workers: [
+          { name: "pool", kind: "ssh", destination: "usine@203.0.113.7", root: "/srv/usine" },
+        ],
+      });
       const changed = LoadedInstance.make({
         ...initial,
-        config: Schema.decodeSync(UsineConfig)({
-          version: 1,
-          repos: [{ name: "acme/demo" }],
-          workers: [
-            { name: "pool", kind: "ssh", destination: "usine@203.0.113.7", root: "/srv/usine" },
-          ],
-        }),
+        config: decodedValue4,
       });
+
       const apply = yield* (yield* Deferred.await(registered))(initial, changed);
       yield* Ref.set(current, changed);
       yield* apply;
@@ -641,6 +648,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
         yield* assertNotice;
         const pausedRevision = (yield* bus.open).revision;
         yield* TestClock.adjust("29 seconds");
+
         assert.strictEqual((yield* bus.open).revision, pausedRevision);
         assert.isUndefined(waiting.pollUnsafe());
         yield* TestClock.adjust("1 second");
@@ -659,6 +667,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
         assert.lengthOf(currentProvisioning, 0);
         const nextProvisioning = yield* status.provisioning;
         assert.strictEqual(quotaWaits(nextProvisioning).size, 0);
+
         assert.lengthOf((yield* refresh(overview, [], [POOL])).needsYou, 0);
         assert.strictEqual(fake.calls.filter((call) => call.startsWith("create")).length, 4);
         yield* lease.release;
@@ -685,12 +694,15 @@ describe("Worker scheduler on a provisioned Worker", () => {
         steps.execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink),
       );
       yield* settle;
+
       assert.isTrue((yield* status.provisioning)[0]?.blocked);
       yield* Fiber.interrupt(waiting);
       yield* lease.release;
+
       assert.strictEqual((yield* status.slots)[0]?.leased, 0);
       const currentProvisioning = yield* status.provisioning;
       assert.strictEqual(quotaWaits(currentProvisioning).size, 0, "canceling clears the run wait");
+
       assert(
         Option.isSome((yield* status.provisioning)[0]?.quota ?? Option.none()),
         "canceling retains worker attention",
@@ -703,6 +715,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
       assert.isUndefined(next.pollUnsafe(), "new reservations wait for the pause to end");
       yield* TestClock.adjust("1 second");
       yield* settle;
+
       assert.isFalse((yield* status.provisioning)[0]?.blocked);
       const resumed = yield* Fiber.join(next);
       assert.strictEqual(resumed.worker, POOL);

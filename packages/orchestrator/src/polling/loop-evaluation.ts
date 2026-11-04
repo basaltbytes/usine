@@ -225,7 +225,7 @@ export const revokeMissingItem = Effect.fn("PollingTriggers.revokeMissingItem")(
 ) {
   yield* Effect.annotateCurrentSpan({ repository: repository.name, item: number });
   const runs = yield* RunEngine;
-  const itemKey = gitHubItemKey(repository.name, number);
+  const itemKey = yield* gitHubItemKey(repository.name, number);
   let revokedRuns = 0;
   for (const { agent, loop } of resolved.filter(({ loop }) => loop.trigger.on === stream)) {
     const revoked = yield* runs.revoke(loop.name, itemKey);

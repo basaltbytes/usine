@@ -20,7 +20,7 @@ import { configurationDiff, configurationEntities } from "../src/configuration/e
 const parser = makeConfigParser(makeExpressionEngine());
 const legacy = (repositories: ReadonlyArray<string>, names: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const config = Schema.decodeSync(UsineConfig)({
+    const config = yield* Schema.decodeEffect(UsineConfig)({
       version: 1,
       repos: repositories.map((name) => ({
         name,
@@ -50,7 +50,7 @@ const legacy = (repositories: ReadonlyArray<string>, names: ReadonlyArray<string
 it.effect("restricts a project's loops to its repositories before applying selectors", () =>
   Effect.gen(function* () {
     const original = yield* legacy(["acme/one", "acme/two", "acme/orphan"], ["implement"]);
-    const config = Schema.decodeSync(UsineConfig)({
+    const config = yield* Schema.decodeEffect(UsineConfig)({
       version: 2,
       repos: original.config.repos.map(({ name }) => ({ name })),
       projects: [
@@ -65,9 +65,10 @@ it.effect("restricts a project's loops to its repositories before applying selec
     const source = original.loops[0];
     if (source === undefined) return yield* Effect.die("fixture loop missing");
     const loop = LoopFile.make({ ...source, name: LoopName.make("workspace/implement") });
+    const decodedValue1 = yield* Schema.decodeEffect(Selector)({ repos: ["acme/two"] });
     const selected = LoopFile.make({
       ...loop,
-      selector: Option.some(Schema.decodeSync(Selector)({ repos: ["acme/two"] })),
+      selector: Option.some(decodedValue1),
     });
     expect(
       config.repos.filter((repo) => matchesLoop(config, loop, repo)).map(({ name }) => name),
@@ -98,9 +99,9 @@ it.effect(
         five.loops.map(({ name }) => `basaltbytes-usine/${name}`),
       );
       const decoded = yield* Effect.fromResult(migrateProjects(migrated));
-      expect(
-        configurationDiff(configurationEntities(migrated), configurationEntities(decoded)),
-      ).toEqual([]);
+      const valueDecoded2 = yield* configurationEntities(migrated);
+      const valueDecoded1 = yield* configurationEntities(decoded);
+      expect(configurationDiff(valueDecoded2, valueDecoded1)).toEqual([]);
       const legacyInstance = yield* legacy(["acme/one", "acme/two"], ["start-dev"]);
       const two = yield* Effect.fromResult(migrateProjects(legacyInstance));
       expect(two.loops.map(({ name }) => name)).toEqual([

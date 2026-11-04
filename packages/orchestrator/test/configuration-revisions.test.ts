@@ -23,6 +23,9 @@ const dependencies = Layer.mergeAll(memoryConfigurationLayer, ConfigurationFolde
 
 it.live("applies committed agent brains and webhook settings live", () =>
   Effect.gen(function* () {
+    const fixtureValue1 = yield* Effect.context<never>();
+    const runFixture = Effect.runSyncWith(fixtureValue1);
+
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
     const root = InstanceDirectory.make(directory);
     yield* writeInstanceFiles(root, [
@@ -42,9 +45,10 @@ it.live("applies committed agent brains and webhook settings live", () =>
     const services = yield* Layer.build(dependencies);
     const store = Context.get(services, ConfigurationStore);
     const initial = yield* Context.get(services, ConfigurationFolder).load(root);
+    const decodedValue2 = yield* configurationEntities(initial);
     const revision = yield* store.commit({
       expected: ConfigurationRevisionNumber.make(0),
-      changes: configurationDiff([], configurationEntities(initial)),
+      changes: configurationDiff([], decodedValue2),
       actor: initial.config.operator,
       message: Option.none(),
     });
@@ -78,7 +82,7 @@ it.live("applies committed agent brains and webhook settings live", () =>
           ...agent,
           before: agent.after,
           after: Option.map(agent.after, (value) => ({
-            ...Schema.decodeUnknownSync(Schema.JsonObject)(value),
+            ...runFixture(Schema.decodeUnknownEffect(Schema.JsonObject)(value)),
             harness: "claude",
           })),
         }),
@@ -86,6 +90,7 @@ it.live("applies committed agent brains and webhook settings live", () =>
     });
     yield* Fiber.join(next);
     expect(preflighted).toEqual(["claude"]);
+
     expect((yield* current.get).agents[0]?.agent.brain.harness).toBe("claude");
     const settings = revision.changes.find(({ key }) => key.kind === "settings");
     if (settings === undefined) return yield* Effect.die("missing settings fixture");
@@ -98,14 +103,16 @@ it.live("applies committed agent brains and webhook settings live", () =>
           ...settings,
           before: settings.after,
           after: Option.map(settings.after, (value) => ({
-            ...Schema.decodeUnknownSync(Schema.JsonObject)(value),
+            ...runFixture(Schema.decodeUnknownEffect(Schema.JsonObject)(value)),
             webhooks: { mode: "deliveries" },
           })),
         }),
       ],
     });
     yield* current.reload;
+
     expect((yield* current.get).config.webhooks.mode).toBe("deliveries");
+
     expect(Option.map((yield* store.read).instance, ({ config }) => config.webhooks.mode)).toEqual(
       Option.some("deliveries"),
     );

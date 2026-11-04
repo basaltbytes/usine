@@ -1,4 +1,4 @@
-import { Option, Result, Schema } from "effect";
+import { type Brand, Option, Result, Schema } from "effect";
 
 /** A lowercase DNS host name without a trailing dot. */
 export const HostName = Schema.String.check(
@@ -24,7 +24,10 @@ const DEFAULT_PORTS = [Port.make(443), Port.make(80)] as const;
  * An allowlist line. `exact` permits only that host; `subdomains` permits every name below the
  * domain (`*.pythonhosted.org`) but not the domain itself.
  */
-export class EgressRule extends Schema.Class<EgressRule>("@usine/gateway/EgressRule")({
+export class EgressRule extends Schema.Class<
+  EgressRule,
+  Brand.Brand<"@usine/gateway/egress/egress/EgressRule">
+>("@usine/gateway/EgressRule")({
   /** The lowercase host or base domain, without the wildcard prefix or trailing dot. */
   host: HostName,
   /** Whether to match only `host` or its subdomains, excluding the base domain itself. */
@@ -39,18 +42,21 @@ export class EgressRule extends Schema.Class<EgressRule>("@usine/gateway/EgressR
 }
 
 /** The error for an invalid allowlist rule, with its line number and validation failure. */
-export class EgressAllowlistError extends Schema.TaggedError<EgressAllowlistError>()(
-  "EgressAllowlistError",
-  {
-    /** The one-based line number of the first invalid rule, including blank and comment lines. */
-    line: Schema.Int,
-    /** The invalid rule or port and the expected format. */
-    message: Schema.String,
-  },
-) {}
+export class EgressAllowlistError extends Schema.TaggedError<
+  EgressAllowlistError,
+  Brand.Brand<"@usine/gateway/egress/egress/EgressAllowlistError">
+>()("EgressAllowlistError", {
+  /** The one-based line number of the first invalid rule, including blank and comment lines. */
+  line: Schema.Int,
+  /** The invalid rule or port and the expected format. */
+  message: Schema.String,
+}) {}
 
 /** A permitted destination and the rule that permits it. */
-export class EgressPermitted extends Schema.TaggedClass<EgressPermitted>()("EgressPermitted", {
+export class EgressPermitted extends Schema.TaggedClass<
+  EgressPermitted,
+  Brand.Brand<"@usine/gateway/egress/egress/EgressPermitted">
+>()("EgressPermitted", {
   /** The normalized lowercase destination host, without a trailing dot. */
   host: HostName,
   /** The destination port permitted by the matching rule. */
@@ -77,7 +83,10 @@ export const EgressRefusalReason = Schema.Literals([
 export type EgressRefusalReason = typeof EgressRefusalReason.Type;
 
 /** A refused destination. `host` is the raw host the client requested. */
-export class EgressRefused extends Schema.TaggedClass<EgressRefused>()("EgressRefused", {
+export class EgressRefused extends Schema.TaggedClass<
+  EgressRefused,
+  Brand.Brand<"@usine/gateway/egress/egress/EgressRefused">
+>()("EgressRefused", {
   /** The requested host before normalization, for diagnostics. */
   host: Schema.String,
   /** The requested port, which may be outside the valid TCP range. */
@@ -98,9 +107,10 @@ const isPort = Schema.is(Port);
  * The hosts workers can connect to through the forward proxy. Unlisted hosts and all IP addresses
  * are refused.
  */
-export class EgressAllowlist extends Schema.Class<EgressAllowlist>(
-  "@usine/gateway/EgressAllowlist",
-)({
+export class EgressAllowlist extends Schema.Class<
+  EgressAllowlist,
+  Brand.Brand<"@usine/gateway/egress/egress/EgressAllowlist">
+>("@usine/gateway/EgressAllowlist")({
   /** Rules in evaluation order; an empty list refuses every destination. */
   rules: Schema.Array(EgressRule),
 }) {

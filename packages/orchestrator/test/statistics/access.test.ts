@@ -25,55 +25,62 @@ import { emptyCycleBudgets } from "../support/polling.ts";
 const repository = RepositoryName.make("acme/visible");
 const id = RunId.make("visible-run");
 const time = DateTime.makeUnsafe("2026-11-01T00:00:00Z");
-const summary = RunSummary.make({
-  itemKey: ItemKey.make("visible-item"),
-  repository,
-  run: Run.make({
-    id,
-    eventId: EventId.make("event"),
-    loop: LoopName.make("alpha/work"),
-    state: RunState.Succeeded.make(),
-    openedAt: time,
-  }),
-  pullRequestUrl: null,
-  attempts: [],
-  resolvedFailureAttemptId: Option.none(),
-  closedAt: Option.some(time),
-  approval: Option.none(),
-  runAgain: Option.none(),
-  agent: Schema.decodeSync(Agent)({
+const summary = Effect.gen(function* () {
+  const decodedValue1 = yield* Schema.decodeEffect(Agent)({
     name: "developer",
     brain: { harness: "codex", model: "test", effort: "high" },
     parentModel: null,
     persona: "Work.",
-  }),
+  });
+  return RunSummary.make({
+    itemKey: ItemKey.make("visible-item"),
+    repository,
+    run: Run.make({
+      id,
+      eventId: EventId.make("event"),
+      loop: LoopName.make("alpha/work"),
+      state: RunState.Succeeded.make(),
+      openedAt: time,
+    }),
+    pullRequestUrl: null,
+    attempts: [],
+    resolvedFailureAttemptId: Option.none(),
+    closedAt: Option.some(time),
+    approval: Option.none(),
+    runAgain: Option.none(),
+    agent: decodedValue1,
+  });
 });
 
 it.effect("isolates project statistics from cached admin results and hides worker capacity", () =>
   Effect.gen(function* () {
+    const fixtureValue1 = yield* Effect.context<never>();
+    const runFixture = Effect.runSyncWith(fixtureValue1);
+
     const hidden = RepositoryName.make("acme/hidden");
+    const decodedValue2 = yield* Schema.decodeEffect(UsineConfig)({
+      version: 2,
+      repos: [{ name: repository }, { name: hidden }],
+      projects: [
+        { id: "alpha", name: "Alpha", repositories: [repository] },
+        { id: "beta", name: "Beta", repositories: [hidden] },
+      ],
+      bindings: [
+        {
+          name: "beta-viewer",
+          member: 2,
+          role: "viewer",
+          scope: { _tag: "Project", project: "beta" },
+        },
+      ],
+    });
     const loaded = LoadedInstance.make({
       agents: [],
       loops: [],
       invalidAgents: [],
       quarantinedLoops: [],
       warnings: [],
-      config: Schema.decodeSync(UsineConfig)({
-        version: 2,
-        repos: [{ name: repository }, { name: hidden }],
-        projects: [
-          { id: "alpha", name: "Alpha", repositories: [repository] },
-          { id: "beta", name: "Beta", repositories: [hidden] },
-        ],
-        bindings: [
-          {
-            name: "beta-viewer",
-            member: 2,
-            role: "viewer",
-            scope: { _tag: "Project", project: "beta" },
-          },
-        ],
-      }),
+      config: decodedValue2,
     });
     const grants = RoleBinding.make({
       name: "viewer",
@@ -84,11 +91,11 @@ it.effect("isolates project statistics from cached admin results and hides worke
     const reader = Layer.mock(RunReader)({
       closedSince: () =>
         Effect.succeed([
-          summary,
+          runFixture(summary),
           RunSummary.make({
-            ...summary,
+            ...runFixture(summary),
             repository: hidden,
-            run: Run.make({ ...summary.run, id: RunId.make("hidden-run") }),
+            run: Run.make({ ...runFixture(summary).run, id: RunId.make("hidden-run") }),
           }),
         ]),
       list: () => Effect.succeed([]),
@@ -107,11 +114,11 @@ it.effect("isolates project statistics from cached admin results and hides worke
         assert.equal(scoped.runs.succeeded, 1);
         assert.deepEqual(scoped.utilization, []);
         assert.deepEqual(scoped.machineStarts, []);
-        assert.equal(
-          (yield* runStatistics(loaded, "all").pipe(Effect.provideService(RequestPermissions, [])))
-            .runs.succeeded,
-          0,
+        const decodedValue3 = yield* runStatistics(loaded, "all").pipe(
+          Effect.provideService(RequestPermissions, []),
         );
+        assert.equal(decodedValue3.runs.succeeded, 0);
+
         assert.equal((yield* runStatistics(loaded, "all")).runs.succeeded, 2);
       }),
     ).pipe(

@@ -4,7 +4,7 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
 import { OperatorActor } from "@usine/core/operator";
 import { StepName } from "@usine/core/step";
-import { type DateTime, Schema } from "effect";
+import { type Brand, type DateTime, Schema } from "effect";
 import type { RunSnapshot } from "../run-reader/model.ts";
 import { Claimed, CycleBlocked, Submission } from "./submission.ts";
 
@@ -12,24 +12,25 @@ import { Claimed, CycleBlocked, Submission } from "./submission.ts";
  * An operator request to run a succeeded or canceled Run again with the Loop's current settings
  * (#152). `requestedBy` is `None` if `usine.yaml` sets no operator login.
  */
-export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engine/RunAgainRequest")(
-  {
-    /** The current loop step name to use for the new run. */
-    step: StepName,
-    /** The current loop approval requirement, applied again to the new run. */
-    approval: ApprovalRequirement,
-    approvalReason: Submission.fields.approvalReason,
-    /** The cycle limit, or `None` for a schedule Loop. */
-    cycleLimit: Schema.Option(CycleLimit),
-    /** The current loop repository access granted to the new run's attempts. */
-    permissions: LoopPermissions,
-    ciPolicy: Submission.fields.ciPolicy,
-    /** The task, agent, and parent model to save as the new run's effective context. */
-    context: AttemptContext,
-    /** The operator who requested the new run, or `None` when no login was recorded. */
-    requestedBy: Schema.Option(OperatorActor),
-  },
-) {}
+export class RunAgainRequest extends Schema.Class<
+  RunAgainRequest,
+  Brand.Brand<"@usine/engine/engine/run-again/RunAgainRequest">
+>("@usine/engine/RunAgainRequest")({
+  /** The current loop step name to use for the new run. */
+  step: StepName,
+  /** The current loop approval requirement, applied again to the new run. */
+  approval: ApprovalRequirement,
+  approvalReason: Submission.fields.approvalReason,
+  /** The cycle limit, or `None` for a schedule Loop. */
+  cycleLimit: Schema.Option(CycleLimit),
+  /** The current loop repository access granted to the new run's attempts. */
+  permissions: LoopPermissions,
+  ciPolicy: Submission.fields.ciPolicy,
+  /** The task, agent, and parent model to save as the new run's effective context. */
+  context: AttemptContext,
+  /** The operator who requested the new run, or `None` when no login was recorded. */
+  requestedBy: Schema.Option(OperatorActor),
+}) {}
 
 /**
  * The result of a run again: `Claimed` with the new Run, or `CycleBlocked` with the Ask opened

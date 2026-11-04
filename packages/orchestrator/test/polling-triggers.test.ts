@@ -104,7 +104,7 @@ const emptyLabelCatalog = RepositoryLabelCatalog.make({
   labels: [],
 });
 
-const config = Schema.decodeSync(UsineConfig)({
+const config = Schema.decodeEffect(UsineConfig)({
   version: 1,
   repos: [
     { name: watchedRepository, tags: ["active"] },
@@ -134,7 +134,9 @@ const issueLoop = (name: string) =>
     }),
     selector: Option.some(
       Selector.make({
-        repos: Option.some([config.repos[0]?.name ?? assert.fail("missing watched repo")]),
+        repos: Option.some([
+          Effect.runSync(config).repos[0]?.name ?? assert.fail("missing watched repo"),
+        ]),
         tags: Option.none(),
       }),
     ),
@@ -146,7 +148,7 @@ const issueLoop = (name: string) =>
 
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
   LoadedInstance.make({
-    config,
+    config: Effect.runSync(config),
     agents: [agent],
     invalidAgents: [],
     loops,
@@ -240,6 +242,9 @@ const runtimeLayer = (
 describe("PollingTriggers", () => {
   it.live("opens a conflict Run within one poll after a sibling merge moves the base branch", () =>
     Effect.gen(function* () {
+      const fixtureValue1 = yield* Effect.context<never>();
+      const runFixture = Effect.runSyncWith(fixtureValue1);
+
       const fileSystem = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
@@ -307,25 +312,27 @@ describe("PollingTriggers", () => {
                   .update(JSON.stringify([item.number, pullRequest]))
                   .digest("hex"),
               ),
-              payload: Schema.decodeSync(PullRequestPayload)({
-                ...issuePayload([], item.number),
-                ...pullRequest,
-                mergeStateStatus: "UNKNOWN",
-                isDraft: false,
-                merged: pullRequest.state === "MERGED",
-                mergedAt: null,
-                baseRefName: "main",
-                headRefName: `feature-${item.number}`,
-                additions: 1,
-                deletions: 0,
-                changedFiles: 1,
-                reviewDecision: null,
-                statusCheckRollup: null,
-                reviewThreads: { totalCount: 0, nodes: [] },
-                reviewRequests: { totalCount: 0, nodes: [] },
-                reviews: { totalCount: 0, nodes: [] },
-                closingIssuesReferences: { totalCount: 0, nodes: [] },
-              }),
+              payload: runFixture(
+                Schema.decodeEffect(PullRequestPayload)({
+                  ...issuePayload([], item.number),
+                  ...pullRequest,
+                  mergeStateStatus: "UNKNOWN",
+                  isDraft: false,
+                  merged: pullRequest.state === "MERGED",
+                  mergedAt: null,
+                  baseRefName: "main",
+                  headRefName: `feature-${item.number}`,
+                  additions: 1,
+                  deletions: 0,
+                  changedFiles: 1,
+                  reviewDecision: null,
+                  statusCheckRollup: null,
+                  reviewThreads: { totalCount: 0, nodes: [] },
+                  reviewRequests: { totalCount: 0, nodes: [] },
+                  reviews: { totalCount: 0, nodes: [] },
+                  closingIssuesReferences: { totalCount: 0, nodes: [] },
+                }),
+              ),
             });
           }),
       };
@@ -339,7 +346,9 @@ describe("PollingTriggers", () => {
         assert.deepStrictEqual(initial.fetched, [28, 29]);
         // The first read of the base branch head can't prove the branch stood still since the
         // last fetch, so both pull requests are fetched again once.
+
         assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, [28, 29]);
+
         assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, []);
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
 
@@ -389,8 +398,10 @@ describe("PollingTriggers", () => {
 
         update(28, { state: "CLOSED" });
         detected = [28];
+
         assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, [28]);
         const reads = base.reads.length;
+
         assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, []);
         assert.strictEqual(base.reads.length, reads);
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
@@ -399,6 +410,9 @@ describe("PollingTriggers", () => {
 
   it.live("drops an open pull request GitHub no longer has and revokes its unstarted Run", () =>
     Effect.gen(function* () {
+      const fixtureValue2 = yield* Effect.context<never>();
+      const runFixture = Effect.runSyncWith(fixtureValue2);
+
       const fileSystem = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
@@ -450,26 +464,28 @@ describe("PollingTriggers", () => {
               : Effect.succeed(
                   PullRequestSnapshot.make({
                     contentHash: ContentHash.make("a".repeat(64)),
-                    payload: Schema.decodeSync(PullRequestPayload)({
-                      ...issuePayload([]),
-                      mergeable: "MERGEABLE",
-                      mergeStateStatus: "CLEAN",
-                      isDraft: false,
-                      merged: false,
-                      mergedAt: null,
-                      baseRefName: "main",
-                      headRefName: "feature",
-                      headRefOid: "a".repeat(40),
-                      additions: 1,
-                      deletions: 0,
-                      changedFiles: 1,
-                      reviewDecision: null,
-                      statusCheckRollup: null,
-                      reviewThreads: { totalCount: 0, nodes: [] },
-                      reviewRequests: { totalCount: 0, nodes: [] },
-                      reviews: { totalCount: 0, nodes: [] },
-                      closingIssuesReferences: { totalCount: 0, nodes: [] },
-                    }),
+                    payload: runFixture(
+                      Schema.decodeEffect(PullRequestPayload)({
+                        ...issuePayload([]),
+                        mergeable: "MERGEABLE",
+                        mergeStateStatus: "CLEAN",
+                        isDraft: false,
+                        merged: false,
+                        mergedAt: null,
+                        baseRefName: "main",
+                        headRefName: "feature",
+                        headRefOid: "a".repeat(40),
+                        additions: 1,
+                        deletions: 0,
+                        changedFiles: 1,
+                        reviewDecision: null,
+                        statusCheckRollup: null,
+                        reviewThreads: { totalCount: 0, nodes: [] },
+                        reviewRequests: { totalCount: 0, nodes: [] },
+                        reviews: { totalCount: 0, nodes: [] },
+                        closingIssuesReferences: { totalCount: 0, nodes: [] },
+                      }),
+                    ),
                   }),
                 );
           }),
@@ -506,6 +522,9 @@ describe("PollingTriggers", () => {
 
   it.live("opens exactly one finish Run when the finisher pushes before it relabels", () =>
     Effect.gen(function* () {
+      const fixtureValue3 = yield* Effect.context<never>();
+      const runFixture = Effect.runSyncWith(fixtureValue3);
+
       const fileSystem = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
         directory: sqliteTempDirectory(),
@@ -553,27 +572,29 @@ describe("PollingTriggers", () => {
             const relabeled = remote.labels.includes("ready-to-merge");
             return PullRequestSnapshot.make({
               contentHash: ContentHash.make(`${remote.head}${relabeled ? "f" : "0"}`.repeat(32)),
-              payload: Schema.decodeSync(PullRequestPayload)({
-                ...issuePayload(remote.labels, 162),
-                state: "OPEN",
-                mergeable: "MERGEABLE",
-                mergeStateStatus: "CLEAN",
-                isDraft: false,
-                merged: false,
-                mergedAt: null,
-                baseRefName: "main",
-                headRefName: "fix/162",
-                headRefOid: remote.head.repeat(40),
-                additions: 1,
-                deletions: 0,
-                changedFiles: 1,
-                reviewDecision: null,
-                statusCheckRollup: null,
-                reviewThreads: { totalCount: 0, nodes: [] },
-                reviewRequests: { totalCount: 0, nodes: [] },
-                reviews: { totalCount: 0, nodes: [] },
-                closingIssuesReferences: { totalCount: 0, nodes: [] },
-              }),
+              payload: runFixture(
+                Schema.decodeEffect(PullRequestPayload)({
+                  ...issuePayload(remote.labels, 162),
+                  state: "OPEN",
+                  mergeable: "MERGEABLE",
+                  mergeStateStatus: "CLEAN",
+                  isDraft: false,
+                  merged: false,
+                  mergedAt: null,
+                  baseRefName: "main",
+                  headRefName: "fix/162",
+                  headRefOid: remote.head.repeat(40),
+                  additions: 1,
+                  deletions: 0,
+                  changedFiles: 1,
+                  reviewDecision: null,
+                  statusCheckRollup: null,
+                  reviewThreads: { totalCount: 0, nodes: [] },
+                  reviewRequests: { totalCount: 0, nodes: [] },
+                  reviews: { totalCount: 0, nodes: [] },
+                  closingIssuesReferences: { totalCount: 0, nodes: [] },
+                }),
+              ),
             });
           }),
       };
@@ -689,6 +710,7 @@ describe("PollingTriggers", () => {
         assert.strictEqual(changeRequests, 4);
         yield* TestClock.adjust("180 seconds");
         assert.strictEqual(changeRequests, 6);
+
         assert.strictEqual(
           (yield* bus.open).history.length,
           0,
@@ -760,7 +782,10 @@ describe("PollingTriggers", () => {
       };
       const onlyWatched = LoadedInstance.make({
         ...instanceWith([]),
-        config: UsineConfig.make({ ...config, repos: config.repos.slice(0, 1) }),
+        config: UsineConfig.make({
+          ...Effect.runSync(config),
+          repos: Effect.runSync(config).repos.slice(0, 1),
+        }),
       });
 
       return Effect.gen(function* () {
@@ -792,6 +817,7 @@ describe("PollingTriggers", () => {
     "keeps Board Items current for paused Loops and repositories without matching Loops",
     () =>
       Effect.gen(function* () {
+        const fixtureConfig = yield* config;
         const fileSystem = yield* FileSystem.FileSystem;
         const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
           directory: sqliteTempDirectory(),
@@ -837,7 +863,7 @@ describe("PollingTriggers", () => {
           assert.strictEqual(cycle.changedItems, 2);
           assert.strictEqual(cycle.submissions.length, 0);
           assert.deepStrictEqual(cycle.failures, []);
-          for (const repository of config.repos) {
+          for (const repository of fixtureConfig.repos) {
             const projected = yield* items.list(repository.name, { limit: 10 });
             assert.strictEqual(projected.length, 1);
             assert.deepStrictEqual(projected[0]?.payload, payload);
@@ -908,6 +934,7 @@ describe("PollingTriggers", () => {
         changes: (repository, cursor) =>
           Effect.gen(function* () {
             yield* recordFor(repository, cursorsSeen)(cursor.entityTag);
+
             const entityTag = EntityTag.make(
               `W/"${repository}-${String((yield* Ref.get(cursorsReturned)).length)}"`,
             );
@@ -971,6 +998,7 @@ describe("PollingTriggers", () => {
       assert.notStrictEqual(secondRun, firstRun);
       yield* waitForState(engine, secondRun, "Waiting");
       assert.deepStrictEqual(degraded.failures, []);
+
       assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
       const sustained = yield* polling.poll(instance);
       assert.deepStrictEqual(
@@ -998,6 +1026,7 @@ describe("PollingTriggers", () => {
       const seen = yield* Ref.get(cursorsSeen);
       const returned = yield* Ref.get(cursorsReturned);
       assert.deepStrictEqual(seen[2], Option.some(returned[1]));
+
       assert.deepStrictEqual(
         (yield* Ref.get(labelEntityTagsSeen))[2],
         Option.some(catalogEntityTag),
@@ -1116,6 +1145,7 @@ describe("PollingTriggers", () => {
 
         const duplicate = yield* firstPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(duplicate), originalRun);
+
         assert.strictEqual((yield* Ref.get(seenLabelEntityTags)).filter(Option.isSome).length, 2);
         yield* Scope.close(firstScope, Exit.void);
 
@@ -1141,6 +1171,7 @@ describe("PollingTriggers", () => {
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);
+
         assert.strictEqual((yield* Ref.get(seenLabelEntityTags)).filter(Option.isSome).length, 4);
         const restoredSnapshot = yield* secondEngine.inspect(originalRun);
         assert.strictEqual(restoredSnapshot.task, "Implement issue 28.");
@@ -1160,6 +1191,7 @@ describe("PollingTriggers", () => {
         const newLoopRun = newLoopColdStart.submissions[1];
         assert(newLoopRun !== undefined && newLoopRun._tag === "Claimed");
         yield* waitForState(secondEngine, newLoopRun.runId, "Waiting");
+
         assert.strictEqual(
           (yield* Ref.get(seenCursors)).filter(({ entityTag }) => Option.isNone(entityTag)).length,
           3,
@@ -1202,11 +1234,13 @@ describe("PollingTriggers", () => {
   );
 
   it.effect("isolates one repository's failure from its siblings", () => {
-    const multiConfig = Schema.decodeSync(UsineConfig)({
-      version: 1,
-      repos: [{ name: "basaltbytes/failing" }, { name: "basaltbytes/healthy" }],
-      settings: { poll_interval: 60 },
-    });
+    const multiConfig = Effect.runSync(
+      Schema.decodeEffect(UsineConfig)({
+        version: 1,
+        repos: [{ name: "basaltbytes/failing" }, { name: "basaltbytes/healthy" }],
+        settings: { poll_interval: 60 },
+      }),
+    );
     const loop = LoopFile.make({
       name: LoopName.make("watch-open"),
       trigger: IssueTrigger.make({ on: "issue", if: Source.make('item.state == "OPEN"') }),
@@ -1317,6 +1351,7 @@ describe("PollingTriggers", () => {
       const first = yield* polling.poll(instance);
       assert.deepStrictEqual(first.failures, []);
       assert.strictEqual(first.submissions.length, 1);
+
       assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
       const cycle = yield* polling.poll(instance);
       assert.strictEqual(cycle.repositories, 2);
@@ -1336,6 +1371,7 @@ describe("PollingTriggers", () => {
       // A repository whose poll fails keeps the time its last poll completed.
       failing = false;
       yield* TestClock.adjust("1 minute");
+
       assert.deepStrictEqual((yield* polling.poll(instance)).failures, []);
       failing = true;
       yield* TestClock.adjust("1 minute");
@@ -1350,6 +1386,9 @@ describe("PollingTriggers", () => {
 
   it.effect("retains the cursor until every Item's durable Run decision succeeds", () =>
     Effect.gen(function* () {
+      const fixtureValue4 = yield* Effect.context<never>();
+      const runFixture = Effect.runSyncWith(fixtureValue4);
+
       const cursors = memoryCursorStore();
       const projections = new Map<number, ItemProjection>();
       const observedCursors: Array<PollCursor> = [];
@@ -1463,8 +1502,10 @@ describe("PollingTriggers", () => {
         ),
       );
       const savedCursor = () =>
-        Schema.decodeUnknownSync(Schema.Struct({ cursor: PollCursor }))(
-          cursors.stored.get(`github-poll:${watchedRepository}`),
+        runFixture(
+          Schema.decodeUnknownEffect(Schema.Struct({ cursor: PollCursor }))(
+            cursors.stored.get(`github-poll:${watchedRepository}`),
+          ),
         ).cursor;
 
       yield* Effect.gen(function* () {
@@ -1628,7 +1669,7 @@ describe("PollingTriggers", () => {
         prefix: "usine-polling-multi-",
       });
       const directory = InstanceDirectory.make(currentDirectory);
-      const multiConfig = Schema.decodeSync(UsineConfig)({
+      const multiConfig = yield* Schema.decodeEffect(UsineConfig)({
         version: 2,
         projects: [
           {
@@ -1792,9 +1833,13 @@ describe("PollingTriggers", () => {
             submission._tag === "Claimed" && submission.runId !== openRun ? [submission.runId] : [],
           )[0];
           assert(nextRun !== undefined, "issue 29 opens a Run");
+
           assert.strictEqual((yield* engine.inspect(nextRun)).agent.brain.model, "gpt-5.7-sol");
+
           assert.strictEqual((yield* engine.inspect(openRun)).agent.brain.model, "gpt-5.6-sol");
+
           assert.strictEqual((yield* engine.inspect(nextRun)).permissions, "write");
+
           assert.strictEqual((yield* engine.inspect(openRun)).permissions, "read");
 
           const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", openRun]));

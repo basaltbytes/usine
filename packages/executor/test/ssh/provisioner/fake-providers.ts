@@ -268,7 +268,7 @@ export const fakeProviders = () => {
     if (call.method === "POST" && call.path === "/servers") {
       if (hetzner.createFails !== undefined)
         return [hetzner.createFails.status, hetznerError(hetzner.createFails)];
-      const body = Schema.decodeUnknownSync(CreateServerBody)(call.body);
+      const body = Effect.runSync(Schema.decodeUnknownEffect(CreateServerBody)(call.body));
       const id = hetzner.nextId++;
       const server: FakeServer = {
         id,
@@ -306,7 +306,9 @@ export const fakeProviders = () => {
         return [200, { server: serverJson(server) }];
       }
       if (call.method === "PUT") {
-        server.labels = { ...Schema.decodeUnknownSync(LabelsBody)(call.body).labels };
+        server.labels = {
+          ...Effect.runSync(Schema.decodeUnknownEffect(LabelsBody)(call.body)).labels,
+        };
         return [200, { server: serverJson(server) }];
       }
       if (call.method === "DELETE") {
@@ -378,7 +380,7 @@ export const fakeProviders = () => {
       const id = `bx_${"23456789abcdefgh".slice(0, 8 - String(boat.nextId).length)}${String(boat.nextId++)}`;
       const sandbox: FakeSandbox = {
         id,
-        name: Schema.decodeUnknownSync(NamedBody)(call.body).name,
+        name: Effect.runSync(Schema.decodeUnknownEffect(NamedBody)(call.body)).name,
         state: "provisioning",
         createdAt: "2026-10-25T12:00:00Z",
         provisioningReads: boat.provisioningReads,
@@ -436,7 +438,7 @@ export const fakeProviders = () => {
         ];
       }
       if (call.method === "PATCH") {
-        sandbox.name = Schema.decodeUnknownSync(NamedBody)(call.body).name;
+        sandbox.name = Effect.runSync(Schema.decodeUnknownEffect(NamedBody)(call.body)).name;
         return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
       }
       if (call.method === "DELETE") {

@@ -38,11 +38,12 @@ import {
 } from "@usine/orchestrator/operator";
 import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
-import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import { type Brand, Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 
-export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
-  "@usine/server/BackendUnavailableError",
-)("BackendUnavailableError", {
+export class BackendUnavailableError extends Schema.TaggedError<
+  BackendUnavailableError,
+  Brand.Brand<"@usine/server/backend/BackendUnavailableError">
+>("@usine/server/BackendUnavailableError")("BackendUnavailableError", {
   message: Schema.String,
 }) {}
 
@@ -199,6 +200,7 @@ export const needsSetupBackendLayer = (
     dismissNeed: Effect.fn("FactoryBackend.dismissNeed")(function* (key) {
       yield* Effect.annotateCurrentSpan({ needId: key.id });
       const instance = yield* instances.get;
+
       yield* acknowledgements.dismiss(
         AttentionAcknowledgement.make({
           ...key,

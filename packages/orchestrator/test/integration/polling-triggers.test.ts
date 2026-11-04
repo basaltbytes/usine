@@ -79,11 +79,13 @@ const repositoryApi = (repository: RepositoryName): string =>
     .join("/")}`;
 
 const makeInstance = (repository: RepositoryName, label: string): LoadedInstance => {
-  const config = Schema.decodeSync(UsineConfig)({
-    version: 1,
-    repos: [{ name: repository, tags: ["integration"] }],
-    settings: { poll_interval: 15 },
-  });
+  const config = Effect.runSync(
+    Schema.decodeEffect(UsineConfig)({
+      version: 1,
+      repos: [{ name: repository, tags: ["integration"] }],
+      settings: { poll_interval: 15 },
+    }),
+  );
   const agent = AgentFile.make({
     name: AgentName.make("integration-agent"),
     harness: "codex",
@@ -255,7 +257,7 @@ describe("live GitHub polling", () => {
                     assert(Option.isSome(originalRun), "the label change did not produce an Event");
                     const runId = originalRun.value;
                     const snapshot = yield* engine.inspect(runId);
-                    const eventPayload = Schema.decodeUnknownSync(IssuePayload)(
+                    const eventPayload = yield* Schema.decodeUnknownEffect(IssuePayload)(
                       snapshot.event.payload,
                     );
                     assert(eventPayload.labels.nodes.some(({ name }) => name === label));
@@ -285,6 +287,7 @@ describe("live GitHub polling", () => {
                       Option.isNone(restartedRun) || restartedRun.value === first.runId,
                       "a restart must not open a second run for the same state",
                     );
+
                     assert.strictEqual(
                       (yield* engine.inspect(first.runId)).event.id,
                       first.eventId,

@@ -235,22 +235,22 @@ describe("Boat tailnet", () => {
           (call) => call.method === "POST" && call.path.endsWith("/keys"),
         );
         assert(creation !== undefined);
-        assert.deepInclude(
-          Schema.decodeSync(Schema.fromJsonString(Schema.JsonObject))(creation.body),
-          {
-            capabilities: {
-              devices: {
-                create: {
-                  reusable: false,
-                  ephemeral: true,
-                  preauthorized: true,
-                  tags: ["tag:usine-attempt"],
-                },
+        const valueDecoded1 = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.JsonObject))(
+          creation.body,
+        );
+        assert.deepInclude(valueDecoded1, {
+          capabilities: {
+            devices: {
+              create: {
+                reusable: false,
+                ephemeral: true,
+                preauthorized: true,
+                tags: ["tag:usine-attempt"],
               },
             },
-            expirySeconds: 600,
           },
-        );
+          expirySeconds: 600,
+        });
         assert.isTrue(api.calls.some((call) => call.method === "DELETE"));
         api.state.refuseKeys = true;
         const error = yield* client.withKey(() => Effect.void).pipe(Effect.flip);
@@ -258,6 +258,7 @@ describe("Boat tailnet", () => {
         assert.notInclude(JSON.stringify(error), "test-client-secret");
         yield* client.verifyGateway(GatewayDomain.make("gw.test"));
         api.state.gatewayAnswers = false;
+
         assert.include(
           (yield* client.verifyGateway(GatewayDomain.make("gw.test")).pipe(Effect.flip)).message,
           "missing caller token",

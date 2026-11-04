@@ -3,15 +3,16 @@ import { RepositoryName } from "@usine/core/repository";
 import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection";
 import { GitHubLabelWriter, NewRepositoryLabel } from "@usine/github/label-writer";
 import { RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling";
-import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
+import { type Brand, Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 
 /**
  * A declared label that could not be created in a managed repo. Trigger evaluation continues
  * despite the finding.
  */
-export class LabelPreflightFinding extends Schema.Class<LabelPreflightFinding>(
-  "@usine/orchestrator/LabelPreflightFinding",
-)({
+export class LabelPreflightFinding extends Schema.Class<
+  LabelPreflightFinding,
+  Brand.Brand<"@usine/orchestrator/label-reconciler/LabelPreflightFinding">
+>("@usine/orchestrator/LabelPreflightFinding")({
   /** The managed repo, in `owner/name` form. */
   repository: RepositoryName,
   /** The GitHub label name. */

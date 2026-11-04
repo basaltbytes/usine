@@ -199,12 +199,17 @@ const containerOf = (
             ),
           ),
         Provider: ({ host, provider, credential }) =>
-          tryContainer("intercept", () =>
-            container.interceptOutboundHttp(
-              host,
-              exports.ProviderOutbound({
-                props: { provider, credential: Schema.encodeSync(ProviderCredential)(credential) },
-              }),
+          Schema.encodeEffect(ProviderCredential)(credential).pipe(
+            Effect.mapError((cause) => containerFailure("intercept")(cause)),
+            Effect.flatMap((encoded) =>
+              tryContainer("intercept", () =>
+                container.interceptOutboundHttp(
+                  host,
+                  exports.ProviderOutbound({
+                    props: { provider, credential: encoded },
+                  }),
+                ),
+              ),
             ),
           ),
         Allowed: ({ host }) =>
@@ -222,7 +227,7 @@ const containerOf = (
 };
 
 const STORED_KEY = "sandbox";
-const encodeStored = Schema.encodeSync(Schema.toCodecJson(StoredSandbox));
+const encodeStored = Schema.encodeEffect(Schema.toCodecJson(StoredSandbox));
 const decodeStored = Schema.decodeUnknownOption(Schema.toCodecJson(StoredSandbox));
 
 /** Returns `SandboxStorage` over the Durable Object's storage, with the sandbox as JSON. */
@@ -233,10 +238,13 @@ const storageOf = (storage: DurableObjectStorage): SandboxStorage["Service"] => 
   // No other request runs between the read and the write: the input gate holds events while a
   // storage read runs, and nothing but storage is awaited until the write.
   modify: (change) =>
-    Effect.promise(async () => {
-      const value = await storage.get(STORED_KEY);
-      const [result, changed] = change(value === undefined ? Option.none() : decodeStored(value));
-      if (Option.isSome(changed)) await storage.put(STORED_KEY, encodeStored(changed.value));
+    Effect.gen(function* () {
+      const stored = yield* Effect.promise(() => storage.get(STORED_KEY));
+      const [result, changed] = change(stored === undefined ? Option.none() : decodeStored(stored));
+      if (Option.isSome(changed)) {
+        const encoded = yield* encodeStored(changed.value).pipe(Effect.orDie);
+        yield* Effect.promise(() => storage.put(STORED_KEY, encoded));
+      }
       return result;
     }),
   clear: Effect.promise(async () => {
@@ -246,7 +254,7 @@ const storageOf = (storage: DurableObjectStorage): SandboxStorage["Service"] => 
   alarmAt: (at) => Effect.promise(() => storage.setAlarm(DateTime.toEpochMillis(at))),
 });
 
-const encodeSummary = Schema.encodeSync(Schema.toCodecJson(SandboxSummary));
+const encodeSummary = Schema.encodeEffect(Schema.toCodecJson(SandboxSummary));
 const decodeSummary = Schema.decodeUnknownOption(Schema.toCodecJson(SandboxSummary));
 
 /** Returns a `StreamSocket` over the server end of a `WebSocketPair`, which it accepts. */
@@ -298,10 +306,14 @@ export class AttemptSandbox extends DurableObject<Env> {
     const registry = env.REGISTRY.getByName(REGISTRY);
     const directory: SandboxDirectory["Service"] = {
       record: (sandbox) =>
-        Effect.tryPromise({
-          try: () => registry.record(encodeSummary(sandbox)),
-          catch: (cause) => RegistryRequestFailed.make({ cause }),
-        }).pipe(
+        encodeSummary(sandbox).pipe(
+          Effect.mapError((cause) => RegistryRequestFailed.make({ cause })),
+          Effect.flatMap((encoded) =>
+            Effect.tryPromise({
+              try: () => registry.record(encoded),
+              catch: (cause) => RegistryRequestFailed.make({ cause }),
+            }),
+          ),
           Effect.tapError(() =>
             Effect.logError("Could not record the sandbox in the registry", {
               sandbox: sandbox.name,
@@ -404,7 +416,12 @@ export class SandboxRegistry extends DurableObject<Env> {
         ),
       ),
       put: (sandbox) =>
-        Effect.promise(() => ctx.storage.put(`sandbox:${sandbox.name}`, encodeSummary(sandbox))),
+        encodeSummary(sandbox).pipe(
+          Effect.orDie,
+          Effect.flatMap((encoded) =>
+            Effect.promise(() => ctx.storage.put(`sandbox:${sandbox.name}`, encoded)),
+          ),
+        ),
       remove: (name) =>
         Effect.promise(() => ctx.storage.delete(`sandbox:${name}`)).pipe(Effect.asVoid),
     };
@@ -458,7 +475,10 @@ export class SandboxRegistry extends DurableObject<Env> {
   async record(sandbox: Schema.Json): Promise<void> {
     const decoded = decodeSummary(sandbox);
     if (Option.isSome(decoded))
-      await this.ctx.storage.put(`sandbox:${decoded.value.name}`, encodeSummary(decoded.value));
+      await this.ctx.storage.put(
+        `sandbox:${decoded.value.name}`,
+        await Effect.runPromise(encodeSummary(decoded.value)),
+      );
   }
 
   async forget(name: string): Promise<void> {
@@ -490,7 +510,7 @@ const logForwarded = (handler: string, request: Request, response: Response) =>
 /** Adds the Attempt's installation token to the sandbox's requests for GitHub. */
 export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    const props = Schema.decodeSync(GitHubProps)(this.ctx.props);
+    const props = await Effect.runPromise(Schema.decodeEffect(GitHubProps)(this.ctx.props));
     const response = await fetch(gitHubRequest(request, props.host, Redacted.make(props.token)));
     await logForwarded("github", request, response);
     return response;
@@ -503,7 +523,7 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
  */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
-    const props = Schema.decodeSync(ProviderProps)(this.ctx.props);
+    const props = await Effect.runPromise(Schema.decodeEffect(ProviderProps)(this.ctx.props));
     const forwarded = providerRequest(request, props.provider, props.credential);
     if (Option.isNone(forwarded)) {
       await run(
