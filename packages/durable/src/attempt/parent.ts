@@ -14,16 +14,18 @@ import {
   UnsupportedEffortError,
 } from "@usine/agents/runtime";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ParentSession } from "@usine/core/agent/session";
+import { AgentSessionId, EndpointName, ParentSession } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
+import type { AttemptRecord } from "./documents.ts";
 
 /** The parent model, validated against the effort and credential. */
 interface ResolvedParent {
   readonly ref: ModelRef;
   readonly model: ModelId;
   readonly pool: PiPool;
+  readonly endpoint: Option.Option<EndpointName>;
 }
 
 /** Returns the session ID of the Attempt's Pi parent, the default target of operator input. */
@@ -31,10 +33,16 @@ export const parentSessionId = (attemptId: AttemptId): AgentSessionId =>
   AgentSessionId.make(`parent:${attemptId}`);
 
 /** Returns the parent session with the rostered Agent and the resolved model. */
-export const parentSession = (spec: RunSpec, model: ModelId): ParentSession =>
+export const parentSession = (
+  spec: RunSpec,
+  model: ModelId,
+  record: Pick<AttemptRecord, "parentPool" | "parentEndpoint">,
+): ParentSession =>
   ParentSession.make({
     id: parentSessionId(spec.attemptId),
     agent: spec.agent.name,
+    pool: Option.fromUndefinedOr(record.parentPool),
+    endpoint: Option.fromNullishOr(record.parentEndpoint),
     brain: BrainSpec.make({ harness: Harness.make("pi"), model, effort: spec.parentEffort }),
   });
 
@@ -152,5 +160,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
     ref: { provider: selected.provider, modelId: selected.id },
     model,
     pool,
+    endpoint:
+      pool === "apiKeys" ? Option.some(EndpointName.make(selected.provider)) : Option.none(),
   } satisfies ResolvedParent;
 });

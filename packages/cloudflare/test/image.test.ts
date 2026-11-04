@@ -23,7 +23,7 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 const dockerfile = read("../image/Dockerfile");
 const npmPins = (source: string) =>
   Object.fromEntries(
-    [...source.matchAll(/(pnpm|@anthropic-ai\/claude-code|@openai\/codex)@(\S+)/gu)].map(
+    [...source.matchAll(/(pnpm|@anthropic-ai\/claude-code|@openai\/codex)@([^\s"]+)/gu)].map(
       ([, name, version]) => [name, version],
     ),
   );

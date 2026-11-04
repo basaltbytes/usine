@@ -62,7 +62,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     process.stdout.write(JSON.stringify({ id: request.id, result: { data: [{ id: 'test-model', model: 'test-model' }], nextCursor: null } }) + '\\n');
   } else if (request.method === 'thread/start') {
     fs.appendFileSync(process.env.CODEX_HOME + '/threads', 'thread-one\\n');
-    process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one' }, model: 'test-model', instructionSources: [] } }) + '\\n');
+    process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one' }, model: 'test-model', modelProvider: 'openai', instructionSources: [] } }) + '\\n');
     if ('${failure}' === 'before-initial-turn-exit') process.exit(0);
   } else if (request.method === 'thread/resume') {
     if (['supervisor-exit', 'app-server-zero-exit'].includes('${failure}')) {
@@ -78,7 +78,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     const turns = fs.existsSync(process.env.CODEX_HOME + '/saved-inputs')
       ? fs.readFileSync(process.env.CODEX_HOME + '/saved-inputs', 'utf8').trim().split('\\n').map(line => ({ items: [{ type: 'userMessage', content: JSON.parse(line) }] }))
       : [];
-    process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one', turns }, model: 'test-model', instructionSources: [] } }) + '\\n');
+    process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one', turns }, model: 'test-model', modelProvider: 'openai', instructionSources: [] } }) + '\\n');
   } else if (request.method === 'turn/start') {
     fs.appendFileSync(process.env.CODEX_HOME + '/turn-started', 'yes\\n');
     if (['initial-turn-exit', 'resume-exit'].includes('${failure}') && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {

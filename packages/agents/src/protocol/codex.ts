@@ -1,4 +1,4 @@
-import { HarnessSessionId } from "@usine/core/agent/session";
+import { EndpointName, HarnessSessionId } from "@usine/core/agent/session";
 import { Schema } from "effect";
 import { UsageCount } from "./count.ts";
 
@@ -114,6 +114,7 @@ export const ModelListResponse = Schema.Struct({
 });
 /** The thread ID and effective model returned when a child thread starts. */
 export const ThreadStartResponse = Schema.Struct({
+  modelProvider: EndpointName,
   thread: Schema.Struct({ id: HarnessSessionId }),
   model: Schema.NonEmptyString,
   instructionSources: Schema.Array(Schema.String),

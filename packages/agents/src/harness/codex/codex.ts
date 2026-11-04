@@ -200,6 +200,8 @@ const makeCodexChild = Effect.gen(function* () {
           effort: request.session.brain.effort,
         }),
         gatewayCredential: request.session.gatewayCredential,
+        pool: Option.some(billing.pool),
+        endpoint: billing.pool === "apiKeys" ? Option.some(thread.modelProvider) : Option.none(),
       });
       const channel = yield* sessionChannel({
         label: "Codex child session",
@@ -217,6 +219,8 @@ const makeCodexChild = Effect.gen(function* () {
         SessionStarted.make({ session, harnessSession: Option.some(harnessSession) }),
       );
       yield* Effect.logInfo("Codex child session saved", {
+        pool: billing.pool,
+        endpoint: Option.getOrUndefined(session.endpoint),
         sessionId: session.id,
         parentSessionId: session.parentId,
         harnessSessionId: harnessSession.id,

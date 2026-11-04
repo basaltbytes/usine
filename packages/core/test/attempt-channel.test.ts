@@ -4,6 +4,10 @@ import { Agent, AgentPersona, AgentName } from "../src/agent/agent.ts";
 import { Harness, BrainSpec, ModelId } from "../src/agent/brain.ts";
 import {
   AgentSessionId,
+  AgentSession,
+  ChildSession,
+  EndpointName,
+  sessionPool,
   ChildSessionBudget,
   ChildSessionCount,
   ParentSession,
@@ -382,6 +386,75 @@ describe("attempt channel", () => {
           home: Option.some(""),
         }),
       );
+    }),
+  );
+
+  it.effect("preserves launch billing while reading sessions recorded before pools", () =>
+    Effect.gen(function* () {
+      const parent = ParentSession.make({
+        id: AgentSessionId.make("parent"),
+        agent: agent.name,
+        brain: BrainSpec.make({
+          harness: Harness.make("pi"),
+          model: ModelId.make("openai-codex/gpt-5"),
+          effort: "high",
+        }),
+      });
+      const child = ChildSession.make({
+        id: AgentSessionId.make("child"),
+        parentId: parent.id,
+        agent: agent.name,
+        brain: agent.brain,
+      });
+      for (const [session, expected] of [
+        [parent, "chatgptPlan"],
+        [child, "claudePlan"],
+        [ChildSession.make({ ...child, gatewayCredential: Option.some("api-key") }), "apiKeys"],
+        [
+          ChildSession.make({
+            ...child,
+            brain: BrainSpec.make({ ...child.brain, harness: Harness.make("codex") }),
+          }),
+          "chatgptPlan",
+        ],
+      ] as const) {
+        const encoded = yield* Schema.encodeEffect(AgentSession)(session);
+        assert.isFalse("pool" in encoded);
+        assert.isFalse("endpoint" in encoded);
+        const legacy = yield* Schema.decodeEffect(AgentSession)(encoded);
+        assert.isTrue(Option.isNone(legacy.pool));
+        assert.strictEqual(sessionPool(legacy), expected);
+      }
+      for (const session of [
+        ParentSession.make({
+          ...parent,
+          pool: Option.some("apiKeys"),
+          endpoint: Option.some(EndpointName.make("ollama")),
+        }),
+        ChildSession.make({
+          ...child,
+          brain: BrainSpec.make({ ...child.brain, harness: Harness.make("new-harness") }),
+          pool: Option.some("apiKeys"),
+          endpoint: Option.some(EndpointName.make("local")),
+        }),
+      ]) {
+        const encoded = yield* Schema.encodeEffect(AgentSession)(session);
+        assert.strictEqual(encoded.pool, "apiKeys");
+        const stored = yield* Schema.decodeEffect(AgentSession)(encoded);
+        assert.deepStrictEqual(stored, session);
+        assert.strictEqual(sessionPool(stored), "apiKeys");
+      }
+      const invalid = yield* Effect.flip(
+        Schema.decodeUnknownEffect(ParentSession)({
+          _tag: "ParentSession",
+          id: "parent",
+          agent: "developer",
+          brain: { harness: "pi", model: "ollama/qwen", effort: "high" },
+          pool: "invalid",
+        }),
+      );
+      assert.strictEqual(invalid._tag, "SchemaError");
+      assert.throws(() => EndpointName.make(""));
     }),
   );
 

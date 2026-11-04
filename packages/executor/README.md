@@ -4,7 +4,7 @@ Worker execution for [usine](https://github.com/basaltbytes/usine). The platform
 
 0.x APIs can change. Supply `effect` at the workspace's pinned version.
 
-Harness credential providers, login mounts, and login egress hosts come from the platform-free `@usine/agents/harness` catalog. Worker preflight and credential preparation use the same descriptor data.
+Harness credential providers, login mounts, and login egress hosts come from the platform-free `@usine/agents/harness` catalog. Worker preflight and credential preparation use the same descriptor data. Credential preparation records which harnesses receive provisioned API keys. Child adapters resolve and record the billing pool from the injected credential kind.
 
 ## Attempt lifetime
 
@@ -164,7 +164,7 @@ Preflight checks the SSH connection, a writable root, Git, memory for `maxConcur
 
 ### Attempt containers
 
-With a container runtime on the machine, each attempt runs in its own container from `SshWorkerAddress.container.image`, or `ATTEMPT_IMAGE`, the image of `infra/worker-image/Dockerfile` with this release's harness versions, with CPU, memory, and process limits. The container mounts the attempt's checkout and the SSH user's login files for the attempt's harness read-write, and its cached clone and credential directory read-only; behind a gateway, also gh's configuration directory and socket read-only. It uses the machine's network, and gets the attempt's variables, secrets included, on the runtime's `run` command's standard input. Every command for the attempt runs in it through the shell's `container` (`<runtime> exec -i <name> sh -c <command line>`): the children, the checkout's git, the harvest, the salvage, the pre-push hook, and the attempt's harness probe, which runs once the checkout exists. Only the container's start and removal and the cached clone's fetch run as the SSH user.
+With a container runtime on the machine, each attempt runs in its own container from `SshWorkerAddress.container.image`, or `ATTEMPT_IMAGE`, the image of `infra/worker-image/Dockerfile` with this release's harness versions, with CPU, memory, and process limits. `ATTEMPT_IMAGE` derives its tag from the harness descriptors, matching the generated `infra/worker-image/tag.txt` that image publishing and snapshot creation read. The container mounts the attempt's checkout and the SSH user's login files for the attempt's harness read-write, and its cached clone and credential directory read-only; behind a gateway, also gh's configuration directory and socket read-only. It uses the machine's network, and gets the attempt's variables, secrets included, on the runtime's `run` command's standard input. Every command for the attempt runs in it through the shell's `container` (`<runtime> exec -i <name> sh -c <command line>`): the children, the checkout's git, the harvest, the salvage, the pre-push hook, and the attempt's harness probe, which runs once the checkout exists. Only the container's start and removal and the cached clone's fetch run as the SSH user.
 
 `SshWorkerAddress.container` sets each limit as an `Option`. Preflight derives each one that is `None` from the machine: it runs `nproc` and reads `/proc/sys/kernel/threads-max`, `/proc/sys/kernel/pid_max`, and `/proc/meminfo` over SSH, and divides the machine's total, less a reserve for the machine's own processes, by `maxConcurrentAttempts`:
 

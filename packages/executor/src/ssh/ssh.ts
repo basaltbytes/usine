@@ -330,13 +330,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         Option.match(machine.gateway, {
           onNone: () => Effect.succeed(Option.none<GatewayCredentialKind>()),
           onSome: (gateway) => gatewayCredentialFor(gateway, harness),
-        }).pipe(
-          Effect.map((kind): Option.Option<GatewayCredentialKind> =>
-            Option.isSome(kind) || Option.isNone(provisionedApiKey(machine, harness))
-              ? kind
-              : Option.some("api-key"),
-          ),
-        ),
+        }),
       grantFor,
       readOnlyAccessGap: Option.none(),
       reclaim,

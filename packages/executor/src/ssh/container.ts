@@ -4,6 +4,7 @@ import { detectRuntime, verifyPodmanLimits } from "./runtime.ts";
 import { type ContainerRuntime, runtimeOptions } from "../remote/runtime.ts";
 import { boatTailnetOf } from "./model.ts";
 import { SSH_FAILURE } from "@usine/agents/child-host";
+import { catalog, workerImageInputs } from "@usine/agents/harness";
 import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
@@ -36,7 +37,7 @@ import type { SshMachine, SshWorkerAddress } from "./model.ts";
  * `infra/worker-image/Dockerfile` with this release's harness versions.
  */
 export const ATTEMPT_IMAGE = ContainerImage.make(
-  "ghcr.io/basaltbytes/usine-worker:claude-2.1.311-codex-0.164.0",
+  `ghcr.io/basaltbytes/usine-worker:${workerImageInputs(catalog).tag}`,
 );
 
 /** Prints the host UID/GID and image UID/GID, separated by spaces. */

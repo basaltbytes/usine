@@ -75,3 +75,9 @@ A remote Claude Code child whose SSH client exits with 255 no longer fails. Its 
 The Agent SDK exposes Claude Code's subscription allowance through `rate_limit_event`, so the Claude plan can use the existing pool-health projection without querying the undocumented OAuth usage endpoint. The adapter records five-hour usage as the primary window and the latest reported seven-day usage, including model-specific allowances, as the secondary window. Each event includes only the reported window. The pool-health projection merges these partial observations atomically, so a child cannot overwrite a newer observation from another child with a cached window. Unreported windows retain their reset notifications.
 
 The adapter converts utilization fractions to percentages and epoch-second reset timestamps to UTC. Missing utilization does not imply zero usage or exhaustion, and a missing reset time remains unknown. API-key sessions do not update Claude plan windows. The reports drive the existing display and warnings; scheduling continues to ignore pool health.
+
+## Amendment (2026-11-04, #954): session billing facts
+
+Adapters record each session's billing pool from the resolved credential at launch. Usage reads this fact instead of deriving the pool from the harness or model. The durable parent record preserves the launch pool across restarts, and older session records use one compatibility rule in the session module. Credential preparation records injected API keys; worker executors do not assign pools.
+
+OpenAI-compatible endpoints and local models use `apiKeys`, with the endpoint's provider name recorded on the session when available. Endpoint names exclude URLs and credentials.

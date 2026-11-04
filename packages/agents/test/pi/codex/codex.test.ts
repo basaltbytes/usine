@@ -122,6 +122,7 @@ const successfulResponses = (
     },
     "model/list": { data: models, nextCursor: null },
     "thread/start": {
+      modelProvider: "openai",
       thread: { id: "thread-1" },
       model: "gpt-5.6-terra",
       instructionSources: ["/workspace/repo/AGENTS.md"],
@@ -1172,6 +1173,12 @@ describe("Codex child backend", () => {
             const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
             assert(limits?._tag === "PoolRateLimitsUpdated");
             assert.strictEqual(limits.pool, pool);
+            assert.deepStrictEqual(running.session.pool, Option.some(pool));
+            assert.deepStrictEqual(
+              running.session.endpoint,
+              pool === "apiKeys" ? Option.some("openai") : Option.none(),
+            );
+            assert.deepStrictEqual(limits.session.pool, Option.some(pool));
             assert(Option.isNone(limits.login));
             const started = events[0];
             assert(started?._tag === "SessionStarted" && started.session._tag === "ChildSession");
