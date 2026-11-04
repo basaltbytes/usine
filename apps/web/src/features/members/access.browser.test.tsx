@@ -147,6 +147,7 @@ it.each([1440, 390])(
             params: { binding: binding.name },
           });
           await page.getByRole("button", { name: "Edit", exact: true }).click();
+          await page.getByRole("button", { name: "Edit as text", exact: true }).click();
           const source = page.getByRole("textbox", { name: "Configuration text", exact: true });
           await expect
             .element(source)

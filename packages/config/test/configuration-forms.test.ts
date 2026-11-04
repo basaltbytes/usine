@@ -135,3 +135,35 @@ it.effect("keeps repository tag edits from writing project lanes", () =>
     expect(draft).toEqual({ name: "acme/api", tags: ["backend"] });
   }),
 );
+
+it.effect(
+  "preserves binding identities and enforces scope and role rules through the form codec",
+  () =>
+    Effect.gen(function* () {
+      const key = ConfigurationEntityKey.make({
+        kind: "binding",
+        identifier: ConfigurationEntityId.make("project-reader"),
+      });
+      const value = yield* parseConfigurationForm(
+        key,
+        "name: project-reader\nmember: 42\nrole: viewer\nscope: { _tag: Project, project: product }\n",
+      );
+      const validated = yield* validateConfigurationForm(key, value);
+      expect(validated).toEqual({
+        name: "project-reader",
+        member: 42,
+        role: "viewer",
+        scope: { _tag: "Project", project: "product" },
+      });
+      const mismatch = yield* validateConfigurationForm(key, { ...value, role: "admin" }).pipe(
+        Effect.flip,
+      );
+      expect(mismatch.message).toContain("Admin bindings require instance scope");
+      const typo = yield* validateConfigurationForm(key, { ...value, login: "alice" }).pipe(
+        Effect.flip,
+      );
+      expect(typo.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: ["login"] })]),
+      );
+    }),
+);

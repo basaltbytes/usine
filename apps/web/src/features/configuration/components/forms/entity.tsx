@@ -2,6 +2,7 @@ import { LoopFields } from "~/features/configuration/components/forms/loop/field
 import type { ConfigurationEntityKey } from "@usine/config/configuration";
 import { ProjectFields } from "~/features/configuration/components/forms/project/fields";
 import type { FormFieldsProps } from "~/features/configuration/lib/forms";
+import { BindingFields } from "~/features/configuration/components/forms/binding/fields";
 import { AgentFields } from "./agent";
 import { WorkerFields } from "./worker";
 import { SettingsFields } from "./settings";
@@ -10,6 +11,8 @@ import { RepositoryFields } from "./repository";
 type EntityFieldsProps = FormFieldsProps & { readonly entity: ConfigurationEntityKey };
 export const EntityFields = ({ entity, ...fields }: EntityFieldsProps) => {
   switch (entity.kind) {
+    case "binding":
+      return <BindingFields {...fields} />;
     case "loop":
       return <LoopFields {...fields} name={entity.identifier} />;
     case "agent":

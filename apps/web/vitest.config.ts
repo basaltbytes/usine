@@ -1,3 +1,4 @@
+import { bindingEditorResponses } from "./src/features/configuration/components/forms/binding/browser-fixture.ts";
 import { accessResponses } from "./src/features/members/browser-fixture.ts";
 import {
   workerPreflightResponses,
@@ -117,6 +118,7 @@ export default mergeConfig(
               ),
               commands: {
                 accessResponses,
+                bindingEditorResponses,
                 sessionPermissions: async ({ page }) => {
                   const { administratorPermissions } = await import("@usine/core/access");
                   await page.route("**/api/auth/session", (route) =>

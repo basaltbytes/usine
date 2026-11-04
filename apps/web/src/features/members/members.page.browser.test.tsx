@@ -1,6 +1,6 @@
 import { configurationQuery } from "~/lib/configuration/queries";
 import { configurationFixture } from "~/lib/configuration/fixture";
-import { administratorPermissions } from "@usine/core/access";
+import { administratorPermissions, GitHubUserId } from "@usine/core/access";
 import { PermissionsContext } from "~/lib/permissions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReadyOverview } from "@usine/orchestrator/operator";
@@ -12,7 +12,7 @@ import { PageCommandsProvider } from "~/components/command-palette/context";
 import { CommandPalette } from "~/components/command-palette/palette";
 import { WithRouter } from "~/lib/testing/memory-router";
 import { MembersPage } from "./members.page";
-import { membersQuery } from "./queries";
+import { membersQuery } from "~/lib/members/queries";
 import "~/index.css";
 
 it("offers enabled member actions, preserves pending states, and confirms removal", async () => {
@@ -21,8 +21,8 @@ it("offers enabled member actions, preserves pending states, and confirms remova
   });
   client.setQueryData(configurationQuery().queryKey, configurationFixture());
   let members = [
-    { id: 1, login: "operator", addedAt: 0, addedBy: "operator" },
-    { id: 2, login: "developer", addedAt: 0, addedBy: "operator" },
+    { id: GitHubUserId.make(1), login: "operator", addedAt: 0, addedBy: "operator" },
+    { id: GitHubUserId.make(2), login: "developer", addedAt: 0, addedBy: "operator" },
   ];
   client.setQueryData(membersQuery().queryKey, members);
   const requests: string[] = [];
@@ -35,7 +35,10 @@ it("offers enabled member actions, preserves pending states, and confirms remova
       await new Promise<void>((resolve) => {
         finish = resolve;
       });
-      members = [...members, { id: 3, login: "reviewer", addedAt: 0, addedBy: "operator" }];
+      members = [
+        ...members,
+        { id: GitHubUserId.make(3), login: "reviewer", addedAt: 0, addedBy: "operator" },
+      ];
     } else members = members.filter(({ id }) => id !== 2);
     return Response.json({ ok: true });
   };
