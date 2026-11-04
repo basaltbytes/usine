@@ -1,4 +1,4 @@
-import { Array as Arr, Cause, Config, Effect, Fiber, Option, Stream } from "effect";
+import { Array as Arr, type Brand, Cause, Config, Effect, Option, Schema, Stream } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { ExecutorOperationError, type ExecutorOperation } from "./executor.ts";
 
@@ -9,6 +9,28 @@ export interface CommandResult {
 }
 
 const COMMAND_TIMEOUT = "10 minutes";
+
+export class CommandOutputLimitExceeded extends Schema.TaggedError<
+  CommandOutputLimitExceeded,
+  Brand.Brand<"@usine/executor/child-command/CommandOutputLimitExceeded">
+>()("CommandOutputLimitExceeded", {
+  maxBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+}) {}
+
+const readText = <E>(stream: Stream.Stream<Uint8Array, E>, maxBytes: number | undefined) =>
+  Effect.suspend(() => {
+    let bytes = 0;
+    return stream.pipe(
+      Stream.mapEffect((chunk) => {
+        bytes += chunk.byteLength;
+        return maxBytes !== undefined && bytes > maxBytes
+          ? Effect.fail(CommandOutputLimitExceeded.make({ maxBytes }))
+          : Effect.succeed(chunk);
+      }),
+      Stream.decodeText(),
+      Stream.mkString,
+    );
+  });
 
 /** Returns the variables in `names` that are set in the process environment. */
 export const allowlistedEnvironment = (
@@ -25,7 +47,8 @@ export const allowlistedEnvironment = (
 
 /**
  * Runs `command` with a 10-minute timeout and returns its exit code and output without checking
- * the exit code. Fails with `ExecutorOperationError` if the command can't run or times out.
+ * the exit code. When `maxOutputBytes` is set, caps each output stream before decoding it.
+ * Fails with `ExecutorOperationError` if the command can't run or times out.
  */
 export const collectCommand = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
@@ -33,25 +56,19 @@ export const collectCommand = (
   command: string,
   args: ReadonlyArray<string>,
   options: ChildProcess.CommandOptions,
+  maxOutputBytes?: number,
 ): Effect.Effect<CommandResult, ExecutorOperationError> =>
   Effect.scoped(
     Effect.gen(function* () {
       const handle = yield* spawner.spawn(ChildProcess.make(command, args, options));
-      const stdoutFiber = yield* handle.stdout.pipe(
-        Stream.decodeText(),
-        Stream.mkString,
-        Effect.forkChild,
+      const [exitCode, stdout, stderr] = yield* Effect.all(
+        [
+          handle.exitCode,
+          readText(handle.stdout, maxOutputBytes),
+          readText(handle.stderr, maxOutputBytes),
+        ],
+        { concurrency: "unbounded" },
       );
-      const stderrFiber = yield* handle.stderr.pipe(
-        Stream.decodeText(),
-        Stream.mkString,
-        Effect.forkChild,
-      );
-      const exitCode = yield* handle.exitCode;
-      const [stdout, stderr] = yield* Effect.all([
-        Fiber.join(stdoutFiber),
-        Fiber.join(stderrFiber),
-      ]);
       return { exitCode: Number(exitCode), stderr, stdout } satisfies CommandResult;
     }),
   ).pipe(
@@ -61,7 +78,9 @@ export const collectCommand = (
         operation,
         message: Cause.isTimeoutError(cause)
           ? `${command} didn't finish within ${COMMAND_TIMEOUT}`
-          : `Can't run ${command}`,
+          : Schema.is(CommandOutputLimitExceeded)(cause)
+            ? `${command} output exceeds ${cause.maxBytes} bytes`
+            : `Can't run ${command}`,
         cause,
       }),
     ),

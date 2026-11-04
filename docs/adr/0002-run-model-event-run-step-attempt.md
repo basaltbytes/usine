@@ -31,3 +31,7 @@ usine adapts Inngest's run model, not n8n's or Temporal's ([run-model research](
   Harness adapters classify capacity using provider error codes when available, and narrow message matching otherwise. A dedicated failure and child report marker preserve the classification through the Pi parent and durable storage. Task, authentication, and usage-limit failures keep their existing behavior.
 
   Capacity retries use the existing three-attempt cap, with delays of two minutes after attempt 1 and five minutes after attempt 2. A running run with a closed capacity-failed attempt waits without a worker reservation; its persisted end time determines the retry deadline after a restart. The next attempt resumes from the newest pushed salvage. Cancellation interrupts the wait, and the run page shows the provider message and the next try. This extends the infrastructure-only automatic retry rule above; it adds no run state or stored timer.
+
+## Amendment (2026-11-04): step outputs
+
+[ADR 0034](./0034-step-outputs.md) adds typed JSON documents written in the attempt's checkout and collected before cleanup. The durable completion stores full documents for restart recovery; the step result stores refs. Gzip bodies use a separate output store and migration ledger in the runtime database. Idempotent body writes precede attempt completion, and reads expose only outputs of succeeded attempts. This extends the result beyond harvested facts without adding large bodies to run reads or requiring the parent model to emit them.

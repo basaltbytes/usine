@@ -47,3 +47,7 @@ A `Steer` addressed to the parent is forwarded as a `Steer` to its single live c
 When forwarding is refused, no single child is live, or the child stops before reading the steer, the runtime queues a separate parent turn with the guidance. The parent's earlier answer cannot complete the attempt while this turn is pending. The parent must delegate the remaining work or answer the operator. The attempt also waits for unresolved forwarded steers before completing, so a late child receipt can still require that turn.
 
 The guidance, its request ID, and unread receipts are durable. After a restart, a steer whose child is gone requires a parent turn. An explicit interruption withdraws unread steers, including guidance queued for a separate parent turn, and preserves the pause instead. The run page presents the latest receipt once, showing delivery to the parent, forwarding to the child, or that the steer was not acted on.
+
+## Amendment (2026-11-04, #851): step outputs count as delivered work
+
+[ADR 0034](./0034-step-outputs.md) adds collected JSON documents as evidence of an attempt's work. An attempt that ends with an answer to the operator succeeds when it has a valid step output, even without a commit, pull request, or comment. A document remains useful after checkout cleanup, so the empty-result guard counts outputs alongside harvested facts.

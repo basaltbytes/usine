@@ -23,7 +23,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
-import { PullRequest, StepResult } from "@usine/core/step/result";
+import { PullRequest, StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunEngine, Submission } from "@usine/engine/engine";
@@ -171,6 +171,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     execute: (execution) =>
       Ref.updateAndGet(tasks, (all) => [...all, execution.task]).pipe(
         Effect.flatMap((all) => (all.length === 1 ? Effect.succeed(result) : fixCompletion)),
+        Effect.map(StepCompletion.fromResult),
       ),
   });
   const checks = Layer.succeed(GitHubChecks)({

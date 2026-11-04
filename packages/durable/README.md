@@ -60,7 +60,7 @@ Children aren't resumed after a restart: the tool call ends as interrupted with 
 - Input to a paused or waiting parent, or an idle or paused child, starts its next turn.
 - `Interrupt` aborts the parent's turn and children, withdraws queued input, and holds the parent until a `Steer`, `OperatorMessage`, or `Release` resumes it.
 
-`AttemptReport.answeredOperator` is true if the parent's last turn replied to an operator message or steer, not to the release guidance, without delegating after it. `harvestedResult(report, facts)` builds the `StepResult`, and fails such a report with `AgentFailure` if the checkout has no facts.
+`AttemptReport.answeredOperator` is true if the parent's last turn replied to an operator message or steer, not to the release guidance, without delegating after it. `harvestedResult(report, facts, outputs)` builds a `StepCompletion`, and fails such a report with `AgentFailure` if the checkout has no facts or outputs.
 
 `cancel(attemptId)` aborts the task bottom-up, waits until it's terminal, and ends `execute` with `Interrupted`. A child whose launch hasn't returned, such as a Claude child waiting to relaunch, starts no process.
 
@@ -119,3 +119,7 @@ The `/backup` operation requires `FileSystem` and `Path`. Provide `NodeServices.
 Attempt runtime records and errors use nominal Schema brands. Task-input and failed-outcome encoders are pure functions over validated values. Encoding failures in runtime operations are defects; storage failures use the durable harness error channel.
 
 Run `pnpm --filter @usine/durable check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+## Step outputs
+
+`AttemptRuntime.recordResult` stores a `StepCompletion` containing the step result and full output documents. `finished` returns that completion after a restart, so the engine can persist bodies before recording success even after checkout cleanup. Durable records containing an older step result decode as completions with no output bodies.

@@ -5,7 +5,7 @@ import { ChildBackend } from "@usine/agents/runtime";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
-import type { StepResult } from "@usine/core/step/result";
+import type { StepCompletion } from "@usine/core/step/result";
 import { type Brand, Deferred, Duration, Effect, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, AttemptRuntime, type FinishedAttempt } from "../attempt-runtime.ts";
 import { DurableHarness, type DurableHarnessError, type DurableStorageFailed } from "../harness.ts";
@@ -194,7 +194,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
   );
 
   const recordResult = Effect.fn("AttemptRuntime.recordResult")(
-    function* (attemptId: AttemptId, result: StepResult) {
+    function* (attemptId: AttemptId, result: StepCompletion) {
       yield* Effect.annotateCurrentSpan({ attemptId });
       const encoded = yield* encodeResult(result).pipe(Effect.orDie);
       yield* durable.use("record the Attempt's result", (harness, context) =>
@@ -205,7 +205,8 @@ const makeAttemptRuntime = Effect.gen(function* () {
       );
       yield* Effect.logInfo("Recorded the Attempt's harvested result", {
         attemptId,
-        facts: result.facts.length,
+        facts: result.result.facts.length,
+        outputs: result.outputs.length,
       });
     },
     Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),

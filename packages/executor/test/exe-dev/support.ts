@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -226,6 +227,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         return oneShotHandle(json1, 0);
       }
       if (line === "exec 'printenv' 'HOME'") return oneShotHandle("/home/exedev\n", 0);
+      if (line.includes("const collect = () =>")) return oneShotHandle('{"outputs":[]}', 0);
       if (line === "exec 'git' '--version'") {
         return oneShotHandle("git version 2.50.1\n", 0);
       }
@@ -371,6 +373,7 @@ export const runtime = (
     interruptGrace: "2 seconds",
   }).pipe(
     Layer.provide(sshLayer),
+    Layer.provide(NodeCrypto.layer),
     Layer.provide(wrap(stubAttemptRuntime(storage, parent))),
     Layer.provide(claudeLoginLockLayer),
   );

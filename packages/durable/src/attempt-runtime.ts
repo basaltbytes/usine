@@ -2,7 +2,8 @@ import { ChildHost } from "@usine/agents/child-host";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
-import { StepResult, type StepResultFact } from "@usine/core/step/result";
+import { StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
+import type { StepOutput } from "@usine/core/step/output";
 import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Context, type Duration, Effect, type Option, Result, Schema } from "effect";
 
@@ -60,20 +61,23 @@ export class AttemptReport extends Schema.Class<
 }) {}
 
 /**
- * Returns the Attempt's StepResult. Fails with `AgentFailure` if `answeredOperator` is true and
- * `facts` is empty (ADR 0018).
+ * Returns the attempt's completion. Fails with `AgentFailure` if `answeredOperator` is true and
+ * both `facts` and `outputs` are empty (ADR 0018).
  */
 export const harvestedResult = (
   report: AttemptReport,
   facts: ReadonlyArray<StepResultFact>,
-): Result.Result<StepResult, AgentFailure> =>
-  report.answeredOperator && facts.length === 0
+  outputs: ReadonlyArray<StepOutput> = [],
+): Result.Result<StepCompletion, AgentFailure> =>
+  report.answeredOperator && facts.length === 0 && outputs.length === 0
     ? Result.fail(
         AgentFailure.make({
-          message: `The parent ended with an answer to the operator, and the attempt produced no commit, pull request, or comment. Answer: ${report.message}`,
+          message: `The parent ended with an answer to the operator, and the attempt produced no commit, pull request, comment, or step output. Answer: ${report.message}`,
         }),
       )
-    : Result.succeed(StepResult.make({ message: report.message, facts }));
+    : Result.succeed(
+        StepCompletion.fromResult(StepResult.make({ message: report.message, facts }), outputs),
+      );
 
 /** A successful parent report with no stored harvested result. */
 export class ParentReported extends Schema.TaggedClass<
@@ -88,7 +92,7 @@ export class ResultRecorded extends Schema.TaggedClass<
   ResultRecorded,
   Brand.Brand<"@usine/durable/attempt-runtime/ResultRecorded">
 >("@usine/durable/ResultRecorded")("ResultRecorded", {
-  result: StepResult,
+  result: StepCompletion,
 }) {}
 
 export class ParentFailed extends Schema.TaggedClass<
@@ -132,7 +136,7 @@ export class AttemptRuntime extends Context.Service<
     /** Stores the harvested result, which `finished` then returns as `ResultRecorded`. */
     readonly recordResult: (
       attemptId: AttemptId,
-      result: StepResult,
+      result: StepCompletion,
     ) => Effect.Effect<void, AttemptFailure>;
     /**
      * Stores the runaway guard's unsupervised time so a reattached guard resumes from it (#178).

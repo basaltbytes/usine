@@ -504,7 +504,7 @@ describe("local worker", () => {
           yield* TestClock.adjust("2 minutes");
           yield* Deferred.succeed(finishCleanup, undefined);
           const result = yield* Fiber.join(running);
-          assert.strictEqual(result.message, "Completed: Complete local task 7");
+          assert.strictEqual(result.result.message, "Completed: Complete local task 7");
           assert.throws(() => Redacted.value(credential));
           const entries = yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`);
           assert.deepStrictEqual(entries, []);

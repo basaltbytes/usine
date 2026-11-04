@@ -13,7 +13,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, FileSystem, Layer, Option, Ref, TxRef } from "effect";
 import { layer, localSqliteLayer } from "../src/database/local-sqlite.ts";
@@ -69,8 +69,10 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
         const [next, ...rest] = remaining;
         return [next, rest] as const;
       }).pipe(
-        Effect.flatMap(
-          (plan) => plan ?? Effect.die("The test StepExecutor ran out of scripted attempts"),
+        Effect.flatMap((plan) =>
+          plan === undefined
+            ? Effect.die("The test StepExecutor ran out of scripted attempts")
+            : plan.pipe(Effect.map(StepCompletion.fromResult)),
         ),
       ),
   });
@@ -120,8 +122,10 @@ export const slottedExecutor = Effect.fn("test.slottedExecutor")(function* (
       io.checkoutAcquired.pipe(
         Effect.andThen(
           Ref.modify(remaining, ([next, ...rest]) => [next, rest] as const).pipe(
-            Effect.flatMap(
-              (plan) => plan ?? Effect.die("The test StepExecutor ran out of scripted attempts"),
+            Effect.flatMap((plan) =>
+              plan === undefined
+                ? Effect.die("The test StepExecutor ran out of scripted attempts")
+                : plan.pipe(Effect.map(StepCompletion.fromResult)),
             ),
           ),
         ),

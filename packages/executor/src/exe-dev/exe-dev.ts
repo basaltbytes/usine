@@ -2,7 +2,7 @@ import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Effect, Layer, Option } from "effect";
+import { type Crypto, Effect, Layer, Option } from "effect";
 import type { ChildProcessSpawner } from "effect/process";
 import { CredentialUnavailableError, Executor } from "../executor.ts";
 import type { RemoteAccess, RemoteGrant, RemoteMachine } from "../remote/machine.ts";
@@ -112,7 +112,7 @@ export const layer = (
 ): Layer.Layer<
   Executor,
   never,
-  AttemptRuntime | ClaudeLoginLock | ChildProcessSpawner.ChildProcessSpawner
+  AttemptRuntime | ClaudeLoginLock | ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
 > => Layer.effect(Executor, makeExeDevExecutor(options));
 
 export {

@@ -6,9 +6,12 @@ import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { Option } from "effect";
 import { assembleChildPrompt, assemblePrompt } from "../src/prompt.ts";
 
+const BASE = CommitSha.make("a".repeat(40));
+
 describe("assemblePrompt", () => {
   it("prepends the repository and payload snapshot before the persona and rendered task", () => {
     const prompt = assemblePrompt({
+      baseCommit: BASE,
       repository: RepositoryName.make("acme/demo"),
       payload: { number: 30, title: "Build the agent layer" },
       agent: AgentName.make("developer"),
@@ -40,6 +43,8 @@ describe("assemblePrompt", () => {
         "",
         "# Task completion",
         "",
+        `To return a step output, write .usine/outputs/<name>.json as { "type": "your.type", "commit": "${BASE}", "content": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal ${BASE}, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.`,
+        "",
         "Run gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.",
         "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
         "When the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.",
@@ -60,6 +65,7 @@ describe("assemblePrompt", () => {
   it("names the salvage the Attempt resumes from right after the repository", () => {
     const commit = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
     const prompt = assemblePrompt({
+      baseCommit: BASE,
       repository: RepositoryName.make("acme/demo"),
       payload: {},
       agent: AgentName.make("developer"),
@@ -70,6 +76,7 @@ describe("assemblePrompt", () => {
       ),
       conflictingSalvage: Option.none(),
     });
+    assert.include(prompt, `"commit": "${BASE}"`);
     assert(
       prompt.startsWith(
         [
@@ -88,6 +95,7 @@ describe("assemblePrompt", () => {
   it("names the previous work a retry starts without because it conflicts", () => {
     const commit = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
     const prompt = assemblePrompt({
+      baseCommit: BASE,
       repository: RepositoryName.make("acme/demo"),
       payload: {},
       agent: AgentName.make("developer"),
@@ -98,6 +106,7 @@ describe("assemblePrompt", () => {
         SalvagePushed.make({ ref: SalvageRef.make("usine/salvage/run-1/2"), commit }),
       ),
     });
+    assert.include(prompt, `"commit": "${BASE}"`);
     assert(
       prompt.startsWith(
         [
@@ -115,6 +124,7 @@ describe("assemblePrompt", () => {
   it("injects the rostered persona and GitHub signature into child work", () => {
     assert.strictEqual(
       assembleChildPrompt({
+        baseCommit: BASE,
         agent: AgentName.make("implementation-agent"),
         persona: AgentPersona.make("You implement focused TypeScript changes."),
         task: AttemptTask.make("Add the session interrupt adapter."),
@@ -136,6 +146,8 @@ describe("assemblePrompt", () => {
         "Add the session interrupt adapter.",
         "",
         "# Task completion",
+        "",
+        `To return a step output, write .usine/outputs/<name>.json as { "type": "your.type", "commit": "${BASE}", "content": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal ${BASE}, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.`,
         "",
         "Run gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.",
         "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",

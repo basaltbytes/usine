@@ -1,3 +1,4 @@
+import { StepOutputStore } from "../step-outputs/store.ts";
 import type { CiResolution } from "@usine/core/ci";
 import type { CommitSha } from "@usine/core/repository";
 import type { ReleaseVersion } from "@usine/core/upgrade";
@@ -422,7 +423,7 @@ export class RunEngine extends Context.Service<
  * for Run IDs, `StepExecutor` for Workers, and `TriggerCondition` to re-check queued Events.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
-  database: Layer.Layer<RunDatabase, DatabaseError, DatabaseRequirements>,
+  database: Layer.Layer<RunDatabase | StepOutputStore, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
   | AttentionAcknowledgements
   | BoardMoves
@@ -435,6 +436,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   | RepositoryLabelProjectionWriter
   | RunEngine
   | RunReader
+  | StepOutputStore
   | UnconfirmedStops,
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | TriggerCondition | DatabaseRequirements
@@ -445,6 +447,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),
     Layer.provide(itemWriter),
+    Layer.provide(database),
   );
   const runEngine = Layer.mergeAll(
     Layer.effect(RunEngine, makeRunEngine),
@@ -458,6 +461,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   ).pipe(Layer.provide(driver));
   return Layer.mergeAll(
     runEngine,
+    Layer.effect(StepOutputStore, StepOutputStore).pipe(Layer.provide(database)),
     AttentionAcknowledgements.layer.pipe(Layer.provide(database)),
     BoardMoves.layer.pipe(Layer.provide(database)),
     CycleBudgets.layer.pipe(Layer.provide(database)),

@@ -266,3 +266,7 @@ Run `pnpm --filter @usine/server check` after building dependencies to check Typ
 ## Tests
 
 `pnpm turbo run test --filter=@usine/server` builds the server and runs the functional Vitest project. `pnpm --filter @usine/server test:latency` runs the latency project, the 500 ms concurrent overview and desk read budget; its result depends on the machine, so it isn't part of the local gate. CI runs the functional project on pull requests and `main`, and the latency project in a separate job on `main`.
+
+## Step outputs
+
+Attempts can return typed JSON documents from `.usine/outputs/`. The runtime database stores gzip bodies separately from run snapshots, while run evidence and `usine export-run` include output refs. See [agent step outputs](https://docs.usine.dev/reference/configuration/agents/#step-outputs) for the format and limits.

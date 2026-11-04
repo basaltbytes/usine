@@ -112,3 +112,7 @@ Attempt timing and provider-retry helpers accept the metadata they use, so polli
 Domain records and tagged errors use nominal Schema brands. Construct validated records with their schema’s `make` method, or decode input with `Schema.decodeUnknownEffect`; a structurally matching object does not satisfy the record type.
 
 Run `pnpm --filter @usine/core check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+## Step outputs
+
+`@usine/core/step/output` exports `StepOutput`, `StepOutputRef`, their branded fields, and the output limits. `StepResult.outputs` contains metadata only and defaults to an empty array when reading older results. `StepCompletion` (`/step/result`) contains the result and full output documents for executor transport and durable recovery.

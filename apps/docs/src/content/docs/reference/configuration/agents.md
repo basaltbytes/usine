@@ -69,3 +69,21 @@ Preflight checks tools and credentials; it does not install harnesses. Startup c
 For local and SSH subscription workers, Claude Code must report a first-party subscription login, and Codex must report a ChatGPT login. Gateway-injected providers need the harness binary and a configured gateway credential. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
 
 Every GitHub comment, issue, pull request, and review written by an agent ends with `— usine agent: <name>`. Agents share the App identity, so this signature attributes their work to an attempt. Commits use the App's bot identity.
+
+## Step outputs
+
+An agent returns a JSON document by writing `.usine/outputs/<name>.json` in its checkout. Use a lowercase slug containing letters and digits separated by hyphens or underscores. For example, write `.usine/outputs/walkthrough.json`:
+
+```json
+{
+  "type": "balade.walkthrough",
+  "content": {
+    "title": "Change walkthrough",
+    "sections": []
+  }
+}
+```
+
+`type` is an opaque, non-empty string of at most 128 UTF-16 code units. `content` is any JSON value. An optional `commit` must equal the attempt's pinned base commit, which is the pull request head for a pull request run. Parent and child completion instructions include the pinned base commit, including when a retry resumes from salvage. The limit is ten output files per attempt. Both each file, including its envelope, and its compact JSON content must be at most 8 MiB. Invalid outputs fail the attempt with the file path and reason, including the invalid or unexpected envelope field; unfinished repository work follows the usual salvage procedure.
+
+Keep a child's output documents in place until the parent returns. Preparation excludes `.usine/` from commits and salvage. A missing output directory counts as zero outputs. Replacing the directory with a file or writing unreadable output files fails the attempt with `AgentFailure`. Other filesystem errors fail output collection. The checkout environment needs Node.js on its command path, including inside the attempt container. The orchestrator collects outputs on local, SSH, exe.dev, and Cloudflare workers, stores document bodies separately, and includes refs in the step result. Refs contain the name, type, optional commit, compact JSON content's UTF-8 byte count, and SHA-256. The orchestrator caps collection stdout and stderr, then independently checks the output count and content sizes. Collection redacts attempt credentials before calculating the stored content's byte count and SHA-256. Output reads return documents from succeeded attempts.

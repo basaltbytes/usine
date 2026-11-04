@@ -1,6 +1,6 @@
-import { catalog } from "@usine/agents/harness";
 import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
 import { codexConfigArgs } from "@usine/agents/codex";
+import { catalog } from "@usine/agents/harness";
 import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import {
@@ -27,6 +27,7 @@ import {
   Array as Arr,
   Cache,
   Context,
+  Crypto,
   DateTime,
   Deferred,
   Effect,
@@ -55,6 +56,7 @@ import {
   WorkerCapabilityError,
 } from "../executor.ts";
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
+import { prepareOutputs, readOutputs } from "../outputs.ts";
 import {
   cacheDirectoryName,
   keptCheckoutRecovery,
@@ -208,6 +210,7 @@ const versionProbe =
 
 const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
   Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
     const commands = yield* remoteCommandsFor;
     const credentialProvider = yield* CredentialProvider;
     const logins = yield* ClaudeLoginLock;
@@ -486,6 +489,26 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           ),
         );
 
+    const checkoutCommand =
+      (
+        operation: ExecutorOperation,
+        worker: CloudflareWorker,
+        name: SandboxName,
+        worktree: string,
+        access: SandboxAccess,
+      ) =>
+      (command: string, args: ReadonlyArray<string>, maxOutputBytes?: number) =>
+        access.refresh.pipe(
+          Effect.andThen(
+            commands.run(operation, worker.shellFor(name), command, args, {
+              maxOutputBytes,
+              cwd: worktree,
+              environment: sandboxEnvironment(worker),
+              scrub: access.scrub,
+            }),
+          ),
+        );
+
     const harvestCommand =
       (
         operation: ExecutorOperation,
@@ -495,14 +518,13 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         access: SandboxAccess,
       ) =>
       (command: "git" | "gh", args: ReadonlyArray<string>) =>
-        access.refresh.pipe(
-          Effect.andThen(
-            commands.run(operation, worker.shellFor(name), command, args, {
-              cwd: worktree,
-              environment: sandboxEnvironment(worker),
-              scrub: access.scrub,
-            }),
-          ),
+        checkoutCommand(
+          operation,
+          worker,
+          name,
+          worktree,
+          access,
+        )(command, args).pipe(
           Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
         );
 
@@ -1048,6 +1070,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         ),
       );
       const prepared = provisioned.workspace;
+      yield* prepareOutputs(checkoutCommand("prepare", worker, name, prepared.worktree, access));
       yield* Effect.logInfo("Cloudflare Attempt sandbox ready", {
         ...fields,
         sandbox: name,
@@ -1067,6 +1090,11 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           ),
           gatewayCredential: Effect.succeed(
             gatewayCredential(worker, prepared.spec.agent.brain.harness),
+          ),
+          readOutputs: readOutputs(
+            prepared.spec,
+            checkoutCommand("launch", worker, name, prepared.worktree, access),
+            crypto,
           ),
           harvest: (windows) =>
             harvestFacts(
@@ -1168,6 +1196,7 @@ export const layer = (
   | ClaudeLoginLock
   | ChildProcessSpawner.ChildProcessSpawner
   | CredentialProvider
+  | Crypto.Crypto
   | HttpClient.HttpClient
 > => Layer.effectContext(makeCloudflareExecutor(options));
 

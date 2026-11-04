@@ -150,3 +150,7 @@ If the supervisor or app-server exits after the thread is saved, including an un
 ## Amendment (2026-11-04, #951): harness descriptor catalog
 
 The executor reads credential provider mappings, login file mounts, and login egress hosts from the platform-free catalog in `@usine/agents/harness`. These values describe a harness independently of a worker platform, so a shared catalog replaces the executor’s duplicate tables. The catalog also supplies labels, install versions, accepted versions, price tables, and terminal resume commands to operator reads. Core harness IDs are branded strings; configuration checks their membership in the catalog. Preflight and launch retain their existing runtime paths and version policies.
+
+## Amendment (2026-11-04): step outputs
+
+[ADR 0034](./0034-step-outputs.md) adds typed JSON documents written in the attempt's checkout and collected before cleanup. The durable completion stores full documents for restart recovery; the step result stores refs. Gzip bodies use a separate output store and migration ledger in the runtime database. Idempotent body writes precede attempt completion, and reads expose only outputs of succeeded attempts. This extends the result beyond harvested facts without adding large bodies to run reads or requiring the parent model to emit them.

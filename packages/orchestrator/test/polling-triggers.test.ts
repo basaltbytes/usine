@@ -19,7 +19,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
@@ -640,7 +640,7 @@ describe("PollingTriggers", () => {
             executions += 1;
             if (executions > 1) return yield* Effect.die("a second finish Run must not start");
             yield* Deferred.await(finishing);
-            return StepResult.make({ message: "Finished", facts: [] });
+            return StepCompletion.fromResult(StepResult.make({ message: "Finished", facts: [] }));
           }),
       });
       const condition = triggerConditionLayer.pipe(
@@ -1847,7 +1847,9 @@ describe("PollingTriggers", () => {
             Effect.sync(() => {
               models.push(execution.agent.brain.model);
               permissions.push(execution.permissions);
-              return StepResult.make({ message: "Implemented", facts: [] });
+              return StepCompletion.fromResult(
+                StepResult.make({ message: "Implemented", facts: [] }),
+              );
             }),
         });
 

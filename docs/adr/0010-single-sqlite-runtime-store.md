@@ -52,3 +52,7 @@ Before making a snapshot, the helper checks that both the backup and instance fi
 ## Amendment (2026-10-11, #176): the cluster tables are removed
 
 A migration drops `usine_workflow_commands` and Effect's `cluster_messages`, `cluster_replies`, and `cluster_migrations` with the Effect workflow (ADR 0003 amendment of the same date), leaving only usine's tables; pi-durable's storage is the second file.
+
+## Amendment (2026-11-04): step outputs
+
+[ADR 0034](./0034-step-outputs.md) adds typed JSON documents written in the attempt's checkout and collected before cleanup. The durable completion stores full documents for restart recovery; the step result stores refs. Gzip bodies use a separate output store and migration ledger in the runtime database. Idempotent body writes precede attempt completion, and reads expose only outputs of succeeded attempts. This extends the result beyond harvested facts without adding large bodies to run reads or requiring the parent model to emit them.

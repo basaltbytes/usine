@@ -335,6 +335,7 @@ export const attemptTask = (
     const content =
       message ??
       assemblePrompt({
+        baseCommit: spec.baseCommit,
         repository: spec.repository,
         payload: spec.payload,
         agent: spec.agent.name,

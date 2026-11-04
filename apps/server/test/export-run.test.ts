@@ -1,3 +1,9 @@
+import {
+  StepOutput,
+  StepOutputName,
+  StepOutputType,
+  StepOutputSha256,
+} from "@usine/core/step/output";
 import { Schedule, DateTime, Effect, Layer, Option, Schema, FileSystem } from "effect";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
@@ -22,7 +28,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
@@ -49,7 +55,19 @@ const agent = Agent.make({
   persona: AgentPersona.make("Implement the issue."),
 });
 const parent = ParentSession.make({ id: AgentSessionId.make("parent"), agent: agent.name, brain });
-const result = StepResult.make({ message: "Evidence retained", facts: [] });
+const document = StepOutput.make({
+  name: StepOutputName.make("walkthrough"),
+  type: StepOutputType.make("balade.walkthrough"),
+  commit: Option.none(),
+  content: { title: "Exported output ref" },
+  size: 31,
+  sha256: StepOutputSha256.make("a".repeat(64)),
+});
+const completion = StepCompletion.fromResult(
+  StepResult.make({ message: "Evidence retained", facts: [] }),
+  [document],
+);
+const result = completion.result;
 
 const executor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
@@ -84,7 +102,7 @@ const executor = Layer.succeed(StepExecutor)({
       }
       if (execution.attempt.number === 1)
         return yield* AgentFailure.make({ message: "Retry explicitly" });
-      return result;
+      return completion;
     }),
 });
 
@@ -201,6 +219,8 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
 
       assert.strictEqual(evidence.version, 1);
       assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
+      assert.deepStrictEqual(evidence.snapshot.step.result, Option.some(result));
+      assert.notInclude(awaited1, "Exported output ref");
       assert.deepStrictEqual(evidence.transcript, saved.transcript);
       assert.strictEqual(evidence.snapshot.attempts.length, 2);
       assert.strictEqual(evidence.transcript.length, 504);

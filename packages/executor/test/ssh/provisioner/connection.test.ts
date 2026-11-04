@@ -70,7 +70,10 @@ describe("Boat SSH connection recovery", () => {
         );
 
         yield* Deferred.succeed(done, undefined);
-        assert.strictEqual((yield* Fiber.join(launch)).message, `Completed: ${request.task}`);
+        assert.strictEqual(
+          (yield* Fiber.join(launch)).result.message,
+          `Completed: ${request.task}`,
+        );
         assert.strictEqual(
           machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`),
           `usine-boat-${grant.id} ${providers.boat.hostKey ?? ""}\n`,
@@ -138,7 +141,10 @@ describe("Boat SSH connection recovery", () => {
           const recovered = notices.at(-1);
           assert(recovered?._tag === "WorkerResponsive" && recovered.recovered);
           yield* Deferred.succeed(done, undefined);
-          assert.strictEqual((yield* Fiber.join(launch)).message, `Completed: ${request.task}`);
+          assert.strictEqual(
+            (yield* Fiber.join(launch)).result.message,
+            `Completed: ${request.task}`,
+          );
           yield* machines.release(grant.hold);
         }).pipe(
           Effect.scoped,
@@ -245,7 +251,10 @@ describe("Boat SSH connection recovery", () => {
         yield* TestClock.adjust("1 minute");
         assert.strictEqual((yield* Fiber.join(firstLaunch).pipe(Effect.flip))._tag, "InfraFailure");
         yield* Deferred.succeed(done, undefined);
-        assert.strictEqual((yield* Fiber.join(otherLaunch)).message, `Completed: ${request.task}`);
+        assert.strictEqual(
+          (yield* Fiber.join(otherLaunch)).result.message,
+          `Completed: ${request.task}`,
+        );
         yield* machines.release(first.hold);
         yield* machines.release(other.hold);
       }).pipe(

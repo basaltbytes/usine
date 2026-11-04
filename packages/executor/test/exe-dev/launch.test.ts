@@ -147,7 +147,7 @@ describe("exe.dev launch", () => {
         const executor = yield* Executor;
         const prepared = yield* executor.prepare(request);
         const result = yield* prepared.launch(sink);
-        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.strictEqual(result.result.message, `Completed: ${request.task}`);
         const live = yield* executor.isLive(ATTEMPT_ID);
         assert.isTrue(live);
       }).pipe(
@@ -166,7 +166,7 @@ describe("exe.dev launch", () => {
           CheckoutRequest.make({ ...request, reattach: true }),
         );
         const result = yield* prepared.launch(sink);
-        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.strictEqual(result.result.message, `Completed: ${request.task}`);
         const live = yield* executor.isLive(ATTEMPT_ID);
         assert.isFalse(live);
         assert(
@@ -325,8 +325,8 @@ describe("exe.dev launch", () => {
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const prepared = yield* executor.prepare(request);
         const result = yield* prepared.launch(sink);
-        assert.strictEqual(result.message, `Completed: ${request.task}`);
-        assert.deepStrictEqual(result.facts, []);
+        assert.strictEqual(result.result.message, `Completed: ${request.task}`);
+        assert.deepStrictEqual(result.result.facts, []);
         assert.deepStrictEqual(transcript.at(0)?.[1].payload._tag, "Started");
         assert.deepStrictEqual(transcript.at(-1)?.[1].payload._tag, "Final");
 
@@ -475,7 +475,7 @@ describe("exe.dev launch", () => {
         const succeeded = yield* attempt(completes);
         assert(Result.isSuccess(succeeded));
         assert.deepStrictEqual(
-          succeeded.success.facts.flatMap((fact) =>
+          succeeded.success.result.facts.flatMap((fact) =>
             fact._tag === "Comment" ? [fact.url.href] : [],
           ),
           [COMMENT],
@@ -743,7 +743,7 @@ describe("exe.dev launch", () => {
           assert(issued.some(({ args }) => args.includes("attach")));
           assert.strictEqual(prepared.workspace.worktree, WORKTREE);
           const result = yield* prepared.launch(sink);
-          assert.strictEqual(result.message, `Completed: ${request.task}`);
+          assert.strictEqual(result.result.message, `Completed: ${request.task}`);
           assert(
             transcript.some(
               ([, envelope]) =>
