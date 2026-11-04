@@ -66,8 +66,10 @@ jobs:
       matrix:
         include:
           - leg: web
+            playwright: true
             filters: --filter=@usine/web
           - leg: server
+            playwright: true
             filters: --filter=@usine/server
             args: -- --project=server
           - leg: engine
@@ -91,14 +93,14 @@ jobs:
             turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: matrix.leg == 'web'
+        if: matrix.playwright
         id: playwright
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-      - if: matrix.leg == 'web' && steps.playwright.outputs.cache-hit != 'true'
+      - if: matrix.playwright && steps.playwright.outputs.cache-hit != 'true'
         run: pnpm --filter @usine/web exec playwright install --with-deps chromium
-      - if: matrix.leg == 'web' && steps.playwright.outputs.cache-hit == 'true'
+      - if: matrix.playwright && steps.playwright.outputs.cache-hit == 'true'
         run: pnpm --filter @usine/web exec playwright install-deps chromium
       - run: pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
