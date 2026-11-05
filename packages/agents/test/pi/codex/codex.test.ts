@@ -195,79 +195,91 @@ describe("Codex child backend", () => {
     ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
   });
 
-  it.effect("keeps a restored paused Codex child idle until operator guidance", () =>
-    Effect.gen(function* () {
-      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
-      const calls: string[] = [];
-      const saved = HarnessSession.make({
-        id: HarnessSessionId.make("paused-codex"),
-        cwd: request().cwd,
-      });
-      const responses = new Map(
-        Object.entries({
-          ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-          "thread/resume": { thread: { id: saved.id, turns: [] } },
-        }),
-      );
-      const server = Layer.succeed(CodexAppServer)({
-        open: () =>
-          Effect.succeed({
-            notifications: Stream.fromQueue(notifications),
-            notify: () => Effect.void,
-            close: Queue.end(notifications).pipe(Effect.asVoid),
-            request: (_operation, method, params) =>
-              Effect.sync(() => {
-                calls.push(method);
-                if (method === "turn/start")
-                  assert.include(jsonKey(params), "Continue with the correction.");
-                const response = responses.get(method);
-                assert(response !== undefined);
-                return response;
-              }),
-          }),
-      });
-      yield* Effect.gen(function* () {
-        const running = yield* (yield* ChildBackend).launch(
-          ChildRequest.make({
-            ...request(),
-            resume: Option.some(saved),
-            paused: true,
+  for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
+    it.effect(`restores a ${supervision} Codex child without starting a turn`, () =>
+      Effect.gen(function* () {
+        const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+        const calls: string[] = [];
+        const saved = HarnessSession.make({
+          id: HarnessSessionId.make("paused-codex"),
+          cwd: request().cwd,
+        });
+        const responses = new Map(
+          Object.entries({
+            ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+            "thread/resume": { thread: { id: saved.id, turns: [] } },
           }),
         );
-        const seen = yield* running.events.pipe(Stream.take(2), Stream.runCollect);
-        assert.deepStrictEqual(
-          seen.map((event) => event._tag),
-          ["SessionStarted", "SessionIdle"],
-        );
-        assert.notInclude(calls, "turn/start");
-        const state = yield* running.intervene(Release.make(), noDelivery);
-        assert.isTrue(state.paused);
-        assert.notInclude(calls, "turn/start");
-        yield* running.intervene(
-          OperatorMessage.make({ message: "Continue with the correction." }),
-          noDelivery,
-        );
-        assert.lengthOf(
-          calls.filter((method) => method === "turn/start"),
-          1,
-        );
-        yield* Queue.offer(notifications, {
-          method: "item/completed",
-          params: {
-            threadId: saved.id,
-            turnId: "turn-1",
-            item: { type: "agentMessage", id: "report", text: "Corrected." },
-          },
+        const server = Layer.succeed(CodexAppServer)({
+          open: () =>
+            Effect.succeed({
+              notifications: Stream.fromQueue(notifications),
+              notify: () => Effect.void,
+              close: Queue.end(notifications).pipe(Effect.asVoid),
+              request: (_operation, method, params) =>
+                Effect.sync(() => {
+                  calls.push(method);
+                  if (method === "turn/start")
+                    assert.include(jsonKey(params), "Continue with the correction.");
+                  const response = responses.get(method);
+                  assert(response !== undefined);
+                  return response;
+                }),
+            }),
         });
-        yield* Queue.offer(notifications, {
-          method: "turn/completed",
-          params: { turn: { id: "turn-1", status: "completed", error: null } },
-        });
-        yield* running.intervene(Release.make(), noDelivery);
-        assert.strictEqual((yield* running.result).message, "Corrected.");
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
-    }).pipe(Effect.scoped),
-  );
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({
+              ...request(),
+              resume: Option.some(saved),
+              held: supervision !== "paused",
+              paused: supervision === "paused",
+              idle: supervision === "paused" ? Option.none() : Option.some("Saved final report."),
+            }),
+          );
+          const seen = yield* running.events.pipe(Stream.take(2), Stream.runCollect);
+          assert.deepStrictEqual(
+            seen.map((event) => event._tag),
+            ["SessionStarted", "SessionIdle"],
+          );
+          assert.notInclude(calls, "turn/start");
+          if (supervision === "held-idle") {
+            yield* running.intervene(Release.make(), noDelivery);
+            assert.strictEqual((yield* running.result).message, "Saved final report.");
+            assert.notInclude(calls, "turn/start");
+            return;
+          }
+          if (supervision === "paused") {
+            const state = yield* running.intervene(Release.make(), noDelivery);
+            assert.isTrue(state.paused);
+            assert.notInclude(calls, "turn/start");
+          }
+          yield* running.intervene(
+            OperatorMessage.make({ message: "Continue with the correction." }),
+            noDelivery,
+          );
+          assert.lengthOf(
+            calls.filter((method) => method === "turn/start"),
+            1,
+          );
+          yield* Queue.offer(notifications, {
+            method: "item/completed",
+            params: {
+              threadId: saved.id,
+              turnId: "turn-1",
+              item: { type: "agentMessage", id: "report", text: "Corrected." },
+            },
+          });
+          yield* Queue.offer(notifications, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-1", status: "completed", error: null } },
+          });
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* running.result).message, "Corrected.");
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+      }).pipe(Effect.scoped),
+    );
+  }
 
   it.effect(
     "pauses without closing Codex and resumes a held conversation on its existing thread",

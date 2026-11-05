@@ -20,6 +20,8 @@ type SubagentRecord = {
   count: number | null;
   saved: typeof SavedChild.Encoded | null;
   output: string;
+  /** Absent on older delegations; the child had no committed idle report. */
+  idle?: string | null;
 };
 
 export const SubagentDoc = defineDoc<SubagentRecord>({
@@ -27,5 +29,5 @@ export const SubagentDoc = defineDoc<SubagentRecord>({
   version: 1,
   scope: "task",
   checkpointWhen: () => false,
-  initial: () => ({ count: null, saved: null, output: "" }),
+  initial: () => ({ count: null, saved: null, output: "", idle: null }),
 });

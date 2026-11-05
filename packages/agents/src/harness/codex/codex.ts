@@ -403,6 +403,7 @@ const makeCodexChild = Effect.gen(function* () {
         channel,
         held: request.held,
         paused: request.paused,
+        idle: request.idle,
         send: steer,
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
         beforeFinish: Effect.suspend(() => connection.close),
@@ -519,7 +520,8 @@ const makeCodexChild = Effect.gen(function* () {
         );
         yield* conversation.read(() => unread.length);
       });
-      if (!request.paused) yield* startTurn(request.prompt).pipe(Effect.catch(resume));
+      if (!request.paused && Option.isNone(request.idle))
+        yield* startTurn(request.prompt).pipe(Effect.catch(resume));
       const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {

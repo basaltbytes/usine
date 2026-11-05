@@ -16,9 +16,16 @@ import { DurableHarness, durableError, layer as harnessLayer } from "../src/harn
 import { answer, delegate, fauxParent, type ParentStep } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-for (const supervision of ["held", "paused", "held-paused"] as const) {
-  const paused = supervision !== "held";
+for (const supervision of [
+  "held",
+  "paused",
+  "held-paused",
+  "held-idle",
+  "held-idle-steer",
+] as const) {
+  const paused = supervision === "paused" || supervision === "held-paused";
   const held = supervision !== "paused";
+  const heldIdle = supervision === "held-idle" || supervision === "held-idle-steer";
   it.live(`restores a ${supervision} child before starting another turn`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -68,7 +75,9 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
                   tools: ["read", "bash", "edit", "write"],
                   harnessSession: Option.some(saved),
                   session: {
-                    messages: [answer("The child's final report.")],
+                    messages: [
+                      answer(resumed ? "The corrected child report." : "The child's final report."),
+                    ],
                     subscribe: (callback) => {
                       listeners.add(callback);
                       return () => {
@@ -172,8 +181,8 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
                 yield* operator(
                   AttemptChannel.OperatorMessage.make({ message: "Wait for my release." }),
                 );
-              if (paused) {
-                yield* operator(AttemptChannel.Interrupt.make());
+              if (paused || heldIdle) {
+                if (paused) yield* operator(AttemptChannel.Interrupt.make());
                 yield* Deferred.succeed(turn, undefined);
                 yield* Deferred.await(idle);
               }
@@ -181,7 +190,18 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
               return;
             }
             assert.deepStrictEqual(Option.some(sessionId), firstSession);
-            if (paused) {
+            if (heldIdle) {
+              yield* Effect.raceFirst(Deferred.await(idle), Deferred.await(prompted));
+              assert.deepStrictEqual(prompts, [], "A held idle child must not start another turn");
+              assert.isUndefined(execution.pollUnsafe());
+              if (supervision === "held-idle-steer") {
+                yield* operator(
+                  AttemptChannel.Steer.make({ message: "Continue with my correction." }),
+                );
+                yield* Deferred.await(prompted);
+                assert.deepStrictEqual(prompts, ["Continue with my correction."]);
+              }
+            } else if (paused) {
               yield* Effect.raceFirst(Deferred.await(idle), Deferred.await(prompted));
               assert.deepStrictEqual(
                 prompts,
@@ -251,9 +271,12 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
       );
       assert.deepStrictEqual(
         usage.map(({ totalTokens }) => totalTokens),
-        [1000, 1500],
+        supervision === "held-idle" ? [1000] : [1000, 1500],
       );
-      assert.deepStrictEqual(usage.at(-1)?.costUsd, Option.some(0.375));
+      assert.deepStrictEqual(
+        usage.at(-1)?.costUsd,
+        Option.some(supervision === "held-idle" ? 0.25 : 0.375),
+      );
       assert(!outbound.some(({ payload }) => payload._tag === "InterventionRejected"));
       const finished = outbound.flatMap(({ payload }) =>
         payload._tag === "SessionEvent" && payload.event._tag === "ToolFinished"
@@ -261,7 +284,10 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
           : [],
       );
       assert.lengthOf(finished, 1);
-      assert.include(jsonKey(finished[0]?.output), "The child's final report.");
+      assert.include(
+        jsonKey(finished[0]?.output),
+        supervision === "held-idle" ? "The child's final report." : "The corrected child report.",
+      );
       assertAdmitted(request.spec.attemptId, outbound);
     }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
   );

@@ -72,6 +72,8 @@ Codex starts its app server in `/` and applies checkout trust through a top-leve
 
 Child output becomes typed events: `SessionStarted`, `TextOutput` for completed assistant text (streaming deltas stay out of the transcript), tool calls, pool observations, and `SessionFinished`. Each child session has one parent session; recursive child events can't enter the public model.
 
+`ChildRequest.idle` restores a completed report without starting a turn. Release returns that report unless the child is paused; operator guidance starts another turn. `SessionIdle.message` supplies the report for durable recovery.
+
 `RunningSession.intervene(action, onDelivery)` applies steer, interrupt, and holds. A message to an idle or paused child starts a turn and emits `SessionResumed`. A message to a working child joins the turn and returns `InterventionState.queued`; `onDelivery` runs once, with the child's state when the harness reads it, or with none if the child stops first. Pi reads it when the queued steering message starts, Codex when it records a `userMessage` item, and Claude Code with a result whose `queued_turn_count` no longer counts it. A finished turn has read all its queued messages.
 
 ## Host login lock

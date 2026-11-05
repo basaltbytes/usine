@@ -190,6 +190,7 @@ const makePiChild = Effect.gen(function* () {
               session,
               held: request.held,
               paused: request.paused,
+              idle: request.idle,
               sdk: started.session,
               channel,
               gate,

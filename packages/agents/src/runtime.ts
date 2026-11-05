@@ -63,6 +63,10 @@ export class ChildRequest extends Schema.Class<
   held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** Waits for operator guidance before starting a turn in a restored paused child. */
   paused: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /** Restores an idle child's completed report without starting another turn. */
+  idle: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /**
    * The complete environment of the child process and its commands: the worker's allowlisted
    * variables plus the attempt's credential configuration, with nothing inherited from the launching

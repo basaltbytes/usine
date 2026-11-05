@@ -47740,6 +47740,10 @@
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
               }
             ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [

@@ -541,7 +541,7 @@ const makeClaudeChild = Effect.gen(function* () {
       let current = yield* launchWithRetries(
         request,
         options,
-        request.paused ? [] : [request.prompt],
+        request.paused || Option.isSome(request.idle) ? [] : [request.prompt],
         scope,
       );
 
@@ -567,13 +567,14 @@ const makeClaudeChild = Effect.gen(function* () {
       channel.onTerminal(() => {
         current.input.end();
       });
-      if (request.paused)
+      if (request.paused || Option.isSome(request.idle))
         yield* channel.emit(SessionStarted.make({ session, harnessSession: request.resume }));
       const conversation = yield* sessionConversation({
         session,
         channel,
         held: request.held,
         paused: request.paused,
+        idle: request.idle,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
         send: (message, activity) =>
           Effect.try({
@@ -596,7 +597,7 @@ const makeClaudeChild = Effect.gen(function* () {
       let reportsSessionState = false;
       let completedTurn = Option.none<string>();
       // Claude sends `init` with one session ID before each turn; the first is the launch record.
-      const launched = yield* Ref.make(request.paused);
+      const launched = yield* Ref.make(request.paused || Option.isSome(request.idle));
       // API retries reported in the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;

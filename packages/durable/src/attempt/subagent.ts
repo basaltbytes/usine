@@ -129,7 +129,11 @@ export const subagentTool = (services: ExtensionServices) => {
         api.commit(async (tx) => {
           const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
           const delegation = await tx.doc(SubagentDoc, api.taskId);
-          const previous = { output: delegation.output, saved: copyJson(delegation.saved) };
+          const previous = {
+            output: delegation.output,
+            saved: copyJson(delegation.saved),
+            idle: delegation.idle,
+          };
           if (delegation.count !== null)
             return {
               childCount: delegation.count,
@@ -305,12 +309,14 @@ export const subagentTool = (services: ExtensionServices) => {
         paused: hold?.pausedChildren?.includes(sessionId) ?? false,
       };
     });
-    if (held || paused)
+    const idle = Option.fromNullishOr(previous.idle);
+    if (held || paused || Option.isSome(idle))
       yield* Effect.logInfo("Restoring the child's operator supervision before launch", {
         attemptId: spec.attemptId,
         sessionId,
         held,
         paused,
+        idle: Option.isSome(idle),
       });
     if (Option.isSome(saved) && Option.isSome(saved.value.usage))
       yield* Effect.logInfo("Restoring the child's committed usage before launch", {
@@ -330,6 +336,7 @@ export const subagentTool = (services: ExtensionServices) => {
       usage: Option.flatMap(saved, (child) => child.usage),
       held,
       paused,
+      idle,
       prompt: assembleChildPrompt({
         baseCommit: spec.baseCommit,
         agent: spec.agent.name,
@@ -413,6 +420,20 @@ export const subagentTool = (services: ExtensionServices) => {
       let cumulativeUsage = childRequest.usage;
       const forward = (event: AgentSessionEvent) =>
         Effect.gen(function* () {
+          if (
+            event._tag === "SessionIdle" ||
+            event._tag === "SessionResumed" ||
+            event._tag === "SessionFinished"
+          )
+            yield* checkpoint(
+              call("save the child's idle report", () =>
+                api.commit(async (tx) => {
+                  const record = await tx.doc(SubagentDoc, api.taskId);
+                  record.idle =
+                    event._tag === "SessionIdle" ? Option.getOrNull(event.message) : null;
+                }, context),
+              ),
+            );
           if (
             event._tag === "SessionStarted" &&
             event.session._tag === "ChildSession" &&
