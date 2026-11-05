@@ -82,7 +82,8 @@ const waitFor = (path: string) =>
     for (let tries = 0; tries < 100 && !existsSync(path); tries++) yield* Effect.sleep(50);
   });
 
-describe("sandbox process files", () => {
+// The container scripts require GNU tee, /proc, and setsid.
+describe.skipIf(process.platform !== "linux")("sandbox process files (Linux only)", () => {
   it.live(
     "passes stdin, output, and the exit code through, and records them in the process files",
     () =>

@@ -27,6 +27,10 @@
       "types": "./dist/harness.d.ts",
       "default": "./dist/harness.js"
     },
+    "./parent": {
+      "types": "./dist/parent.d.ts",
+      "default": "./dist/parent.js"
+    },
     "./live": {
       "types": "./dist/live.d.ts",
       "default": "./dist/live.js"

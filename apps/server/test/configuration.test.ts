@@ -70,6 +70,35 @@ const directoryFixture = Effect.gen(function* () {
       "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement #{{ item.number }}.\n",
     ),
   );
+  const fs = yield* FileSystem.FileSystem;
+  yield* fs.makeDirectory(join(directory, "pi"));
+  yield* fs.writeFileString(
+    join(directory, "pi/settings.json"),
+    jsonKey({ defaultProvider: "local", defaultModel: "parent-test" }),
+  );
+  yield* fs.writeFileString(
+    join(directory, "pi/models.json"),
+    jsonKey({
+      providers: {
+        local: {
+          baseUrl: "http://127.0.0.1:1/v1",
+          api: "openai-completions",
+          apiKey: "test-key",
+          models: [
+            {
+              id: "parent-test",
+              name: "Parent test",
+              reasoning: true,
+              input: ["text"],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 32768,
+              maxTokens: 1024,
+            },
+          ],
+        },
+      },
+    }),
+  );
   return directory;
 });
 
@@ -78,8 +107,107 @@ const run = (directory: string, args: ReadonlyArray<string>, editor = "") =>
     cwd: directory,
     encoding: "utf8",
     timeout: 20_000,
-    env: { ...process.env, EDITOR: editor },
+    env: {
+      ...process.env,
+      EDITOR: editor,
+      PI_CODING_AGENT_DIR: join(directory, "pi"),
+      PI_OFFLINE: "1",
+    },
   });
+
+const storedConfiguration = (directory: string) => {
+  const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+  try {
+    return {
+      revisions: database.prepare("SELECT * FROM usine_configuration_revisions").all(),
+      entities: database.prepare("SELECT * FROM usine_configuration_entities").all(),
+    };
+  } finally {
+    database.close();
+  }
+};
+
+it.live(
+  "rejects an invalid parent on the first import",
+  () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const fs = yield* FileSystem.FileSystem;
+      const agent = join(directory, "agents/developer.md");
+      const original = yield* fs.readFileString(agent);
+      yield* fs.writeFileString(
+        agent,
+        original.replace("effort: high", "effort: high\nparent_model: unknown/x"),
+      );
+      const rejected = run(directory, ["import", directory]);
+      expect(rejected.status).not.toBe(0);
+      expect(rejected.stdout + rejected.stderr).toContain("cannot run as coordinator");
+      const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+      try {
+        expect(database.prepare("SELECT * FROM usine_configuration_revisions").all()).toHaveLength(
+          0,
+        );
+      } finally {
+        database.close();
+      }
+      yield* fs.writeFileString(agent, original);
+      const accepted = run(directory, ["import", directory]);
+      expect(accepted.status, accepted.stderr).toBe(0);
+      expect(accepted.stdout).toContain("Revision 1:");
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  { timeout: 60_000 },
+);
+
+it.live.each(["agent", "settings"] as const)(
+  "rejects an imported %s parent before writing a revision",
+  (source) =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      const fs = yield* FileSystem.FileSystem;
+      const exported = join(directory, "exported");
+      const initial = run(directory, ["export", exported]);
+      expect(initial.status, initial.stderr).toBe(0);
+      const before = storedConfiguration(directory);
+      const file = join(exported, source === "agent" ? "agents/developer.md" : "usine.yaml");
+      const original = yield* fs.readFileString(file);
+      yield* fs.writeFileString(
+        file,
+        source === "agent"
+          ? original.replace("effort: high", "effort: high\nparent_model: unknown/x")
+          : stringify({
+              ...parse(original),
+              settings: { ...parse(original).settings, parent_model: "unknown/x" },
+            }),
+      );
+      const rejected = run(directory, ["import", exported]);
+      expect(rejected.status).not.toBe(0);
+      expect(rejected.stdout + rejected.stderr).toContain("cannot run as coordinator");
+      expect(rejected.stdout + rejected.stderr).toContain("unknown/x");
+      expect(storedConfiguration(directory)).toEqual(before);
+      yield* fs.writeFileString(file, original);
+      expect(run(directory, ["import", exported]).status).toBe(0);
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  { timeout: 60_000 },
+);
+
+it.live(
+  "rejects an edited parent before writing a revision",
+  () =>
+    Effect.gen(function* () {
+      const directory = yield* directoryFixture;
+      expect(run(directory, ["log"]).status).toBe(0);
+      const before = storedConfiguration(directory);
+      const rejected = run(
+        directory,
+        ["edit", "agent", "developer"],
+        `sed -i 's|effort: high|effort: high\\nparent_model: unknown/x|'`,
+      );
+      expect(rejected.status).not.toBe(0);
+      expect(rejected.stdout + rejected.stderr).toContain("cannot run as coordinator");
+      expect(storedConfiguration(directory)).toEqual(before);
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  { timeout: 60_000 },
+);
 
 it.live(
   "round-trips all entity kinds and records only an added or removed worker",

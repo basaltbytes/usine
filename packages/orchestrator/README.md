@@ -12,9 +12,11 @@ Operator usage reads use each session's recorded billing pool. Older sessions wi
 
 Operator usage reads use each harness descriptor’s token price table when the session reports a token breakdown without its own USD cost. The configuration capabilities API includes harness display labels and saved-session resume commands from the same catalog.
 
+Startup resolves each rostered agent's parent model and effort from agent overrides and instance settings, then validates the coordinator's model, effort, and credentials before the engine starts. A refused parent quarantines its agent and dependent loops, which appear in Needs attention. Other agents and the operator UI remain available. Configuration reloads and saved edits repeat validation before storing or applying a revision; a refusal preserves the running configuration. A corrected reload restores quarantined agents and loops. `/parent-admission` exports `parentAdmissionProblems` for hosts that validate configuration writes without opening durable storage.
+
 ## Coordinator credentials
 
-`runtimeLayer` connects the coordinator to the first gateway declared by the SSH workers. Startup checks the model proxy and configured parent providers before durable tasks resume. The coordinator uses the gateway's credentials with a caller token, and the orchestrator host needs no provider login. Usage follows the gateway credential into `apiKeys` or `chatgptPlan`. Instances without a gateway retain Pi's local login. Restart after changing the selected gateway.
+`runtimeLayer` connects the coordinator to the first gateway declared by the SSH workers. Startup checks the model proxy before durable tasks resume and validates each agent's parent using the gateway's credentials. The orchestrator host needs no provider login. Usage follows the gateway credential into `apiKeys` or `chatgptPlan`. Instances without a gateway retain Pi's local login. Restart after changing the selected gateway. `/parent-models` exports `parentModels` to open the same scoped gateway access for CLI configuration validation.
 
 ## Conditional approval
 

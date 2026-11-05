@@ -34,9 +34,17 @@ export const harnessPresentations = catalog.descriptors.map((descriptor) =>
   HarnessPresentation.make(descriptor),
 );
 
+export { admitBrain, AdmittedBrain, AdmissionContext, BrainRefused, Role } from "./admission.ts";
+export {
+  Capability,
+  CapabilityProfile,
+  CredentialRoute,
+  Lacking,
+  Placement,
+} from "./capability.ts";
+
 export {
   CredentialWiring,
-  HarnessCapability,
   HarnessCredential,
   HarnessCatalog,
   HarnessDescriptor,

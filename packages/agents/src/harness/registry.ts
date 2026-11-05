@@ -1,7 +1,8 @@
 import { Harness } from "@usine/core/agent/brain";
 import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
 import { HarnessCatalog } from "./harness.ts";
-import type { HarnessRuntime } from "./runtime.ts";
+import { admitPreflight, type HarnessRuntime } from "./runtime.ts";
+import { admitChild } from "./launch.ts";
 
 /** A descriptor and its runtime cannot be registered together. */
 export class HarnessRegistrationError extends Schema.TaggedError<
@@ -44,7 +45,16 @@ export class Harnesses extends Context.Service<
         yield* Effect.logError("Harness registration failed", { harness: runtime.id, message });
         return yield* HarnessRegistrationError.make({ harness: runtime.id, message });
       }
-      registered.set(runtime.id, runtime);
+      registered.set(runtime.id, {
+        id: runtime.id,
+        launch: (request) =>
+          admitChild(catalog, request).pipe(Effect.andThen(() => runtime.launch(request))),
+        preflight: (brain, target) =>
+          admitPreflight(catalog, brain, target).pipe(
+            Effect.andThen(() => runtime.preflight(brain, target)),
+            Effect.catchTag("HarnessUnavailableError", (error) => Effect.succeed(error)),
+          ),
+      });
     }
     for (const id of catalog.ids) {
       if (!registered.has(id)) {

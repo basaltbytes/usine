@@ -2,7 +2,12 @@ import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { InstancePath } from "@usine/config/file";
 import { GitHubLabelName } from "@usine/config/label";
+import { DurableHarness } from "@usine/durable/harness";
+import { gatewayModelAccess } from "@usine/durable/gateway";
+import { fauxParent } from "@usine/durable/testing";
+import { parentAdmissionLayer } from "../src/current-instance/parents.ts";
 import { AgentName } from "@usine/core/agent";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
@@ -56,13 +61,14 @@ const withFolder = <A, E>(
   test: (
     root: InstanceDirectory,
   ) => Effect.Effect<A, E, CurrentInstance | FileSystem.FileSystem | Path.Path>,
+  files: ReadonlyArray<readonly [string, string]> = initialFiles,
 ) =>
   Effect.gen(function* () {
     const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
       prefix: "usine-reload-",
     });
     const root = InstanceDirectory.make(directory);
-    yield* writeInstanceFiles(root, initialFiles);
+    yield* writeInstanceFiles(root, files);
     return yield* test(root).pipe(Effect.provide(reloadableInstanceLayer(root)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
@@ -115,6 +121,228 @@ const startWorkers = (preflighted: Array<string>) =>
   });
 
 describe("CurrentInstance", () => {
+  it.live.each(["model", "effort", "credential"] as const)(
+    "quarantines a refused parent at startup (%s) and restores it on a corrected reload",
+    (reason) =>
+      withFolder(
+        (root) =>
+          Effect.gen(function* () {
+            const instances = yield* CurrentInstance;
+            const parent = fauxParent([]);
+            const provider = parent.models.getProvider("faux");
+            assert(provider !== undefined);
+            if (reason === "credential") parent.models.setProvider({ ...provider, auth: {} });
+            yield* Layer.build(parentAdmissionLayer).pipe(
+              Effect.provideService(DurableHarness, {
+                ...parent,
+                install: unused,
+                resume: unused,
+                use: unused,
+                subscribe: unused,
+              }),
+            );
+            const quarantined = yield* instances.get;
+            assert.lengthOf(quarantined.agents, reason === "credential" ? 0 : 1);
+            assert.lengthOf(quarantined.loops, reason === "credential" ? 0 : 1);
+            assert.include(
+              quarantined.invalidAgents.map(({ file }) => file),
+              InstancePath.make("agents/developer.md"),
+            );
+            assert.include(
+              quarantined.quarantinedLoops.map(({ file }) => file),
+              InstancePath.make("loops/start-dev.md"),
+            );
+            assert.include(
+              quarantined.invalidAgents[0]?.error.message ?? "",
+              "cannot run as coordinator",
+            );
+            parent.models.setProvider(provider);
+            yield* writeInstanceFiles(root, [["agents/developer.md", agentFile("gpt-5.6-sol")]]);
+            yield* instances.reload;
+            const restored = yield* instances.get;
+            assert.lengthOf(restored.agents, 2);
+            assert.lengthOf(restored.loops, 2);
+            assert.lengthOf(restored.invalidAgents, 0);
+            assert.lengthOf(restored.quarantinedLoops, 0);
+          }).pipe(Effect.scoped),
+        [
+          ...initialFiles.filter(([file]) => file !== "agents/developer.md"),
+          [
+            "agents/developer.md",
+            agentFile("gpt-5.6-sol").replace(
+              "effort: high",
+              reason === "model"
+                ? "effort: high\nparent_model: unknown/x"
+                : reason === "effort"
+                  ? "effort: high\nparent_effort: max"
+                  : "effort: high",
+            ),
+          ],
+          ["agents/healthy.md", agentFile("gpt-5.6-sol")],
+          ["loops/healthy.md", loopFile("healthy")],
+        ],
+      ),
+  );
+
+  it.live("validates gateway credentials at startup and reload without a local login", () =>
+    withFolder(
+      () =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          let connected = false;
+          const access = gatewayModelAccess({
+            credential: (protocol) =>
+              Promise.resolve(
+                protocol === "anthropic-messages"
+                  ? "api-key"
+                  : connected
+                    ? "subscription"
+                    : undefined,
+              ),
+            request: () => Promise.reject(new Error("admission does not send model requests")),
+          });
+          yield* Layer.build(parentAdmissionLayer).pipe(
+            Effect.provideService(DurableHarness, {
+              ...fauxParent([]),
+              models: access.models,
+              parentAuthentication: access.authentication,
+              install: unused,
+              resume: unused,
+              use: unused,
+              subscribe: unused,
+            }),
+          );
+          const quarantined = yield* instances.get;
+          assert.deepStrictEqual(
+            quarantined.agents.map(({ name }) => name),
+            ["healthy"],
+          );
+          assert.include(
+            quarantined.invalidAgents[0]?.error.message ?? "",
+            'Gateway credential unavailable for provider "openai-codex"',
+          );
+          connected = true;
+          yield* instances.reload;
+          const running = yield* instances.get;
+          assert.lengthOf(running.agents, 2);
+          assert.lengthOf(running.invalidAgents, 0);
+          connected = false;
+          const failure = yield* Effect.flip(instances.reload);
+          assert.include(
+            failure.message,
+            'Gateway credential unavailable for provider "openai-codex"',
+          );
+          const rejected = yield* instances.get;
+          assert.strictEqual(rejected, running);
+        }).pipe(Effect.scoped),
+      [
+        ...initialFiles.filter(([file]) => file !== "agents/developer.md"),
+        [
+          "agents/developer.md",
+          agentFile("gpt-5.6-sol").replace(
+            "effort: high",
+            "effort: high\nparent_model: openai-codex/gpt-5.6-sol",
+          ),
+        ],
+        [
+          "agents/healthy.md",
+          agentFile("gpt-5.6-sol").replace(
+            "effort: high",
+            "effort: high\nparent_model: anthropic/claude-fable-5-1",
+          ),
+        ],
+        ["loops/healthy.md", loopFile("healthy")],
+      ],
+    ),
+  );
+
+  it.live.each([
+    ["agent", "parent_model", "unknown-provider/nonexistent-model", "no model"],
+    ["settings", "parent_model", "unknown-provider/nonexistent-model", "no model"],
+    ["agent", "parent_effort", "max", "doesn't support effort"],
+    ["settings", "parent_effort", "max", "doesn't support effort"],
+  ] as const)(
+    "refuses an invalid %s %s before installing a reload",
+    ([source, field, value, diagnostic]) =>
+      withFolder((root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const running = yield* instances.get;
+          yield* Layer.build(parentAdmissionLayer).pipe(
+            Effect.provideService(DurableHarness, {
+              ...fauxParent([]),
+              install: unused,
+              resume: unused,
+              use: unused,
+              subscribe: unused,
+            }),
+          );
+          yield* writeInstanceFiles(
+            root,
+            source === "agent"
+              ? [
+                  [
+                    "agents/developer.md",
+                    agentFile("gpt-5.6-sol").replace(
+                      "effort: high",
+                      `effort: high\n${field}: ${value}`,
+                    ),
+                  ],
+                ]
+              : [["usine.yaml", `${usineYaml()}settings:\n  ${field}: ${value}\n`]],
+          );
+          const failure = yield* Effect.flip(instances.reload);
+          assert(failure._tag === "FactoryConfigError", failure._tag);
+          assert.include(failure.message, diagnostic);
+          assert.include(failure.message, 'Agent "developer" cannot run as coordinator');
+          const rejected = yield* instances.get;
+          assert.strictEqual(rejected, running);
+
+          yield* writeInstanceFiles(root, [
+            [
+              "agents/developer.md",
+              agentFile("gpt-5.6-sol").replace(
+                "effort: high",
+                "effort: high\nparent_model: faux/faux-1\nparent_effort: high",
+              ),
+            ],
+            ["usine.yaml", usineYaml()],
+          ]);
+          yield* instances.reload;
+          const accepted = yield* instances.get;
+          assert.notStrictEqual(accepted, running);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.live("keeps the running configuration when a parent credential becomes unavailable", () =>
+    withFolder(() =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const parent = fauxParent([]);
+        yield* Layer.build(parentAdmissionLayer).pipe(
+          Effect.provideService(DurableHarness, {
+            ...parent,
+            install: unused,
+            resume: unused,
+            use: unused,
+            subscribe: unused,
+          }),
+        );
+        yield* instances.reload;
+        const running = yield* instances.get;
+        const provider = parent.models.getProvider("faux");
+        assert(provider !== undefined);
+        parent.models.setProvider({ ...provider, auth: {} });
+        const failure = yield* Effect.flip(instances.reload);
+        assert(failure._tag === "FactoryConfigError", failure._tag);
+        assert.include(failure.message, "requires a credential");
+        const rejected = yield* instances.get;
+        assert.strictEqual(rejected, running);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
   it.live("reports the Loops, Agents, and labels a reload added or changed", () =>
     withFolder((root) =>
       Effect.gen(function* () {

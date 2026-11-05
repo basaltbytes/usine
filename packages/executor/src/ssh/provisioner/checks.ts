@@ -1,9 +1,14 @@
-import { type HarnessCatalog, type HarnessCredential } from "@usine/agents/harness";
+import {
+  admitBrain,
+  AdmissionContext,
+  type HarnessCatalog,
+  type HarnessCredential,
+} from "@usine/agents/harness";
 import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import type { RemoteCommands } from "../../remote/commands.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { Array as Arr, DateTime, Effect, Option, Duration } from "effect";
+import { Array as Arr, DateTime, Effect, Option, Duration, Result } from "effect";
 import {
   MachineCheck,
   WorkerCapabilityError,
@@ -32,7 +37,26 @@ export const harnessCredentialGap = (
       ? `${head} Add ${protocol} to the gateway's llm_providers, with a subscription credential or an API key on the gateway, or set provisioner.api_keys.${provider}.`
       : `${head} Set provisioner.api_keys.${provider}. ${noGateway}`;
   };
-  for (const harness of Arr.dedupe(brains.map((brain) => brain.harness))) {
+  for (const brain of Arr.dedupe(brains)) {
+    const harness = brain.harness;
+    const admitted = admitBrain(
+      catalog,
+      "coding-agent",
+      brain,
+      AdmissionContext.make({
+        placement: "container",
+        credential: gatewayHolds(catalog, entry.gateway, harness) ? "gateway" : "api-key",
+      }),
+    );
+    if (Result.isFailure(admitted))
+      return Option.some(
+        WorkerCapabilityError.make({
+          worker,
+          capability: "toolchain",
+          message: admitted.failure.message,
+          cause: admitted.failure,
+        }),
+      );
     if (
       gatewayHolds(catalog, entry.gateway, harness) ||
       Option.isSome(provisionedApiKey(catalog, entry, harness))

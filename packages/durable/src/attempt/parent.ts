@@ -1,5 +1,7 @@
 // Pi authentication uses Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+
+import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
 import { getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import {
@@ -49,10 +51,12 @@ export const parentSession = (
     brain: BrainSpec.make({ harness: Harness.make("pi"), model, effort: spec.parentEffort }),
   });
 
-const launchError = (spec: RunSpec, message: string, cause: unknown) =>
+export type ParentBrainOptions = Pick<RunSpec, "parentModel" | "parentEffort">;
+
+const launchError = (sessionId: Option.Option<AgentSessionId>, message: string, cause: unknown) =>
   SessionOperationError.make({
     operation: "launch",
-    sessionId: Option.some(parentSessionId(spec.attemptId)),
+    sessionId,
     message,
     cause,
   });
@@ -60,7 +64,8 @@ const launchError = (spec: RunSpec, message: string, cause: unknown) =>
 const selectModel = Effect.fn("ParentModel.select")(function* (
   models: Models,
   defaultModel: Option.Option<ModelRef>,
-  spec: RunSpec,
+  spec: ParentBrainOptions,
+  sessionId: Option.Option<AgentSessionId> = Option.none(),
 ) {
   if (Option.isSome(spec.parentModel)) {
     const named = spec.parentModel.value;
@@ -87,7 +92,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
   const available = yield* Effect.tryPromise({
     try: (signal) => models.getAvailable(undefined, { signal }),
     catch: (cause) =>
-      launchError(spec, "Can't list the models that have a configured credential", cause),
+      launchError(sessionId, "Can't list the models that have a configured credential", cause),
   });
   const first = available[0];
   if (first === undefined) {
@@ -111,16 +116,41 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
 export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
   models: Models,
   defaultModel: Option.Option<ModelRef>,
-  spec: RunSpec,
+  spec: ParentBrainOptions,
+  sessionId: Option.Option<AgentSessionId> = Option.none(),
   gatewayAuthentication?: ParentModelAccess["authentication"],
 ) {
   yield* Effect.annotateCurrentSpan({
-    attemptId: spec.attemptId,
+    sessionId: Option.getOrUndefined(sessionId),
     parentEffort: spec.parentEffort,
     parentModel: Option.getOrUndefined(spec.parentModel),
   });
-  const selected = yield* selectModel(models, defaultModel, spec);
+  const selected = yield* selectModel(models, defaultModel, spec, sessionId);
   const model = ModelId.make(`${selected.provider}/${selected.id}`);
+  yield* Effect.fromResult(
+    admitBrain(
+      catalog,
+      "coordinator",
+      BrainSpec.make({
+        harness: Harness.make("pi"),
+        model,
+        effort: spec.parentEffort,
+      }),
+      AdmissionContext.make({
+        placement: "orchestrator",
+        credential: gatewayAuthentication === undefined ? "host-login" : "gateway",
+      }),
+    ),
+  ).pipe(
+    Effect.tapError((error) =>
+      Effect.logWarning("Coordinator brain refused", {
+        role: error.role,
+        model,
+        missing: error.missing,
+      }),
+    ),
+    Effect.mapError((cause) => launchError(sessionId, cause.message, cause)),
+  );
   const supported = getSupportedThinkingLevels(selected);
   if (!supported.includes(spec.parentEffort)) {
     yield* Effect.logError("Pi parent rejected an unsupported effort", {
@@ -143,7 +173,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
             models.getProvider(selected.provider)?.auth.oauth?.isSubscription === true,
           )
         : gatewayAuthentication(selected.provider, signal),
-    catch: (cause) => launchError(spec, "Can't check the parent model's credential", cause),
+    catch: (cause) => launchError(sessionId, "Can't check the parent model's credential", cause),
   });
   const required = requiredPiPool(selected.provider);
   const pool = resolvePiPool(selected.provider, authentication);

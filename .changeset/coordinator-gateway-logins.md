@@ -1,4 +1,5 @@
 ---
+"@usine/agents": patch
 "@usine/durable": minor
 "@usine/executor": minor
 "@usine/orchestrator": patch

@@ -24,8 +24,9 @@ import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer } from "effect";
 import { gitHubCredentialLayer } from "./credentials.ts";
+import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
-import { externalHttpClientLayer, sshHttpClientLayer } from "./http-client.ts";
+import { externalHttpClientLayer } from "./http-client.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
 import { OperatorConfiguration } from "./operator/configuration/view.ts";
@@ -99,7 +100,7 @@ export const runtimeLayer = (
       return durableAttemptRuntimeLayer(instanceDirectory, access);
     }),
   ).pipe(
-    Layer.provide(sshHttpClientLayer),
+    (runtime) => parentAdmissionLayer.pipe(Layer.provideMerge(runtime)),
     Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),
     Layer.provide(NodeServices.layer),

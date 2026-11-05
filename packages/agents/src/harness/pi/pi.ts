@@ -1,3 +1,5 @@
+import { HarnessCatalog } from "../harness.ts";
+import { admitChild } from "../launch.ts";
 import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
@@ -10,7 +12,6 @@ import {
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Layer, Match, Option, type Scope, Stream } from "effect";
 import {
-  AgentResultError,
   type AgentSessionError,
   type ChildRequest,
   ChildBackend,
@@ -64,6 +65,8 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
   });
 });
 
+const piCatalog = HarnessCatalog.make({ descriptors: [pi] });
+
 const makePiChild = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
@@ -77,16 +80,7 @@ const makePiChild = Effect.gen(function* () {
         parentSessionId: request.session.parentId,
         sessionId: request.session.id,
       });
-      if (request.host._tag === "RemoteShell") {
-        yield* Effect.logError("Pi child refused a remote host", {
-          destination: request.host.destination,
-        });
-        return yield* AgentResultError.make({
-          sessionId: Option.some(request.session.id),
-          message:
-            "Pi children run only on local workers: their tools run in the orchestrator process, not on the worker",
-        });
-      }
+      yield* admitChild(piCatalog, request);
       yield* Effect.logInfo(
         "Starting Pi child session",
         Match.valueTags(storage, {

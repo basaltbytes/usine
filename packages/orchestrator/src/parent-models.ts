@@ -1,12 +1,13 @@
-import { gatewayModelAccess, preflightGatewayModels } from "@usine/durable/gateway";
+import { gatewayModelAccess } from "@usine/durable/gateway";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { InstanceId } from "@usine/core/instance";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { GatewayModelError, gatewayModelRouteFor } from "@usine/executor/gateway";
-import { Config, Effect, Option } from "effect";
+import { Config, Effect, Layer, Option } from "effect";
+import { sshHttpClientLayer } from "./http-client.ts";
 
-/** Checks the configured coordinator providers before the durable runtime resumes attempts. */
+/** Opens gateway model access for coordinator startup and configuration validation. */
 export const parentModels = Effect.fn("Orchestrator.parentModels")(function* (
   startup: LoadedInstance,
   instanceId: InstanceId,
@@ -23,11 +24,12 @@ export const parentModels = Effect.fn("Orchestrator.parentModels")(function* (
       }),
     ),
   );
+  const http = yield* Layer.build(sshHttpClientLayer);
   const route = yield* gatewayModelRouteFor(
     WorkerName.make(`coordinator-${instanceId}`),
     RepositoryName.make("usine/coordinator"),
     { ...gateway, adminToken },
-  );
+  ).pipe(Effect.provideContext(http));
   const context = yield* Effect.context<never>();
   const access = gatewayModelAccess({
     credential: (protocol, signal) =>
@@ -38,12 +40,5 @@ export const parentModels = Effect.fn("Orchestrator.parentModels")(function* (
     request: (protocol, body, headers, signal) =>
       Effect.runPromiseWith(context)(route.request(protocol, body, headers, signal), { signal }),
   });
-  const named = [
-    ...Option.toArray(startup.config.settings.parentModel),
-    ...startup.agents.flatMap(({ parentModel }) => Option.toArray(parentModel)),
-  ];
-  yield* preflightGatewayModels(access, named).pipe(
-    Effect.mapError(({ message }) => GatewayModelError.make({ message })),
-  );
   return access;
 });

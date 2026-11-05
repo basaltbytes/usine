@@ -13,15 +13,9 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
-import {
-  type PiAuthentication,
-  resolvePiPool,
-  splitPiModel,
-} from "@usine/agents/pi/authentication";
-import type { ModelId } from "@usine/core/agent/brain";
-import { durableError } from "./harness.ts";
+import { type PiAuthentication } from "@usine/agents/pi/authentication";
 import type { GatewayCredentialKind, GatewayLlmProtocol } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 
 /** Model and credential access used by the durable coordinator. */
 export interface ParentModelAccess {
@@ -141,47 +135,3 @@ export const gatewayModelAccess = (transport: GatewayModelTransport): ParentMode
   }
   return { models, authentication };
 };
-
-/** Checks configured coordinator providers before durable tasks resume. */
-export const preflightGatewayModels = Effect.fn("GatewayModels.preflight")(function* (
-  access: ParentModelAccess,
-  named: ReadonlyArray<ModelId>,
-) {
-  for (const model of new Set(named)) {
-    const ref = splitPiModel(model);
-    if (ref === undefined)
-      return yield* durableError(
-        "check coordinator gateway",
-        `Invalid coordinator model "${model}"; use provider/model.`,
-      );
-    const authentication = yield* Effect.tryPromise({
-      try: (signal) => access.authentication(ref.provider, signal),
-      catch: () =>
-        durableError(
-          "check coordinator gateway",
-          `Can't check gateway credential for provider "${ref.provider}".`,
-        ),
-    });
-    if (resolvePiPool(ref.provider, authentication) === undefined)
-      return yield* durableError(
-        "check coordinator gateway",
-        `Gateway credential unavailable for provider "${ref.provider}" (coordinator model "${model}"). Connect this provider on the gateway.`,
-      );
-    yield* Effect.logInfo("Coordinator gateway credential checked", { model });
-  }
-  if (named.length === 0) {
-    const available = yield* Effect.tryPromise({
-      try: (signal) => access.models.getAvailable(undefined, { signal }),
-      catch: () =>
-        durableError(
-          "check coordinator gateway",
-          "Can't list coordinator models with gateway credentials.",
-        ),
-    });
-    if (available.length === 0)
-      return yield* durableError(
-        "check coordinator gateway",
-        "Gateway credential unavailable for coordinator providers: connect an Anthropic API key, an OpenAI API key, or a ChatGPT login.",
-      );
-  }
-});

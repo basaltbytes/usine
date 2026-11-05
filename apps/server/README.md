@@ -271,9 +271,13 @@ Run `pnpm --filter @usine/server check` after building dependencies to check Typ
 
 `pnpm turbo run test --filter=@usine/server` builds the server and runs the functional Vitest project. `pnpm --filter @usine/server test:latency` runs the latency project, the 500 ms concurrent overview and desk read budget; its result depends on the machine, so it isn't part of the local gate. CI runs the functional project on pull requests and `main`, and the latency project in a separate job on `main`.
 
+The upgrade helper shell scenarios require GNU coreutils, GNU findutils, and `flock` on PATH. They skip when these tools are unavailable, including on a standard macOS checkout. The upgrade HTTP health checks run independently of these tools.
+
 Provider connections are available in setup and Configuration > Settings. `usine login claude` and `usine login chatgpt` authorize subscription logins; `--api-key` reads a masked API key. `usine logout <provider>` disconnects them. Run these commands from the instance folder while the server runs. The server sends completed logins to configured gateways over their authenticated admin APIs, or writes the local harness credential files when no gateway is configured.
 
-With a gateway configured, the coordinator also uses the gateway's provider credentials. Startup checks its connection and configured coordinator providers before resuming attempts. A failed check names the gateway or missing provider; the orchestrator host needs no provider login. Without a gateway, the coordinator uses its local Pi login.
+With a gateway configured, the coordinator also uses the gateway's provider credentials. Startup checks its connection before resuming attempts and validates each agent's parent using the gateway credential. A missing provider credential quarantines the affected agent and its loops; the orchestrator host needs no provider login. Without a gateway, the coordinator uses its local Pi login.
+
+Local provider status checks report missing Claude Code and Codex commands separately, with an installation instruction for the affected provider. Availability changes log once at Info, including recovery; unchanged errors remain quiet across polls. ChatGPT authorization reports a missing Codex command before starting sign-in.
 
 ## Step outputs
 

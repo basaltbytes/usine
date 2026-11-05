@@ -11,7 +11,12 @@ import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { AttemptTask } from "@usine/core/attempt";
-import { ModelId } from "@usine/core/agent/brain";
+import { Agent } from "@usine/core/agent";
+import { catalog, HarnessCatalog, HarnessDescriptor } from "@usine/agents/harness";
+import { Harnesses } from "@usine/agents/harness/node";
+import { childDispatcherLayer } from "@usine/agents/children";
+import { HarnessReady } from "@usine/core/agent/capability";
+import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
@@ -142,6 +147,68 @@ const refusingSteerBackend = Layer.effectContext(
 ).pipe(Layer.provide(stubChildBackendLayer));
 
 describe("durable AttemptRuntime", () => {
+  it.live("admits a registered extension through the subagent tool", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const id = Harness.make("example");
+      const descriptor = catalog.descriptors[0];
+      assert(descriptor !== undefined);
+      const activeCatalog = HarnessCatalog.make({
+        descriptors: [HarnessDescriptor.make({ ...descriptor, id })],
+      });
+      const backend = Layer.unwrap(
+        Effect.gen(function* () {
+          const stub = yield* ChildBackend;
+          return childDispatcherLayer.pipe(
+            Layer.provide(
+              Harnesses.layerFrom(activeCatalog, [
+                {
+                  id,
+                  launch: stub.launch,
+                  preflight: () => Effect.succeed(HarnessReady.make({ harness: id })),
+                },
+              ]),
+            ),
+          );
+        }),
+      ).pipe(Layer.provideMerge(stubChildBackendLayer));
+      const services = attemptRuntimeLayer.pipe(
+        Layer.provideMerge(
+          durableHarnessLayer({
+            ...fauxParent([
+              delegate("Use the registered extension"),
+              answer("Extension completed"),
+            ]),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open the durable storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const initial = attemptRequest("extension/step/1");
+        const request = AttemptRequest.make({
+          ...initial,
+          spec: AttemptChannel.RunSpec.make({
+            ...initial.spec,
+            agent: Agent.make({
+              ...initial.spec.agent,
+              brain: BrainSpec.make({ ...initial.spec.agent.brain, harness: id }),
+            }),
+          }),
+        });
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        const child = yield* (yield* StubChildren).next;
+        assert.strictEqual(child.request.session.brain.harness, id);
+        yield* child.reply("Extension result");
+        assert.strictEqual((yield* Fiber.join(execution)).message, "Extension completed");
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.scoped),
+  );
+
   it.live("preserves the task when the parent delegates a summary", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;

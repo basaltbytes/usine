@@ -36,6 +36,12 @@ The runtime includes the stored rendered loop task unchanged in every child's in
 
 The durable runtime records the exact child prompt on `SessionStarted.prompt`, alongside saved harness session metadata. The run page displays it in the attempt details, including when the launch is outside the loaded transcript page. Older transcripts omit the prompt.
 
+## Amendment (2026-11-05, #953): role admission
+
+Harness descriptors declare capabilities for each credential route and placement. One `admitBrain` policy checks configuration, worker preflight, coordinator start, and child launch. The coordinator requires `durable-coordination`; Pi on the orchestrator provides it through pi-durable. Claude Code and Codex resume conversations without a journal of usine tool intents and results, so their descriptors refuse that role with a reason. The supervisor role runs on the orchestrator through gateway credentials, which keeps subscription credentials on the gateway.
+
+This replaces harness-specific placement refusals with role requirements. `parent_model` and `parent_effort` remain the parent settings because only Pi provides durable coordination. Startup validates every rostered agent's resolved parent model, effort, and credential before the engine starts. A refusal quarantines that agent and its loops and appears in Needs attention. The operator UI remains available so the operator can repair a bad model or missing credential without recovering the server through the filesystem. Configuration imports, reloads, and saved edits repeat the check before accepting a revision, including changes to instance defaults or agent overrides. CLI imports and saved edits reject invalid parent brains before writing to the store, so an offline edit cannot leave a refused revision waiting for the next restart. A corrected reload restores quarantined agents and loops. Each attempt repeats admission to detect changed credentials.
+
 ## Amendment (2026-11-05, #959): saved Pi child conversations
 
 Pi children persist conversations in a session directory under each attempt checkout and expose an explicit resume operation by saved Pi ID. This makes a child conversation available after its process exits, while keeping the files with the attempt that owns them. `SessionStarted.harnessSession` records the ID and directory, and the Pi descriptor declares `resume-session`. Preflight probes remain in memory because they have no conversation to continue.

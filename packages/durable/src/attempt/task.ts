@@ -183,6 +183,7 @@ export const attemptTask = (
       runtime.models,
       services.defaultModel,
       spec,
+      Option.some(parentSessionId(spec.attemptId)),
       services.parentAuthentication,
     ).pipe(Effect.result);
     if (Result.isFailure(resolved)) {

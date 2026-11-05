@@ -7,7 +7,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { RunSpec } from "@usine/core/attempt/channel";
 import type { GatewayCredentialKind } from "@usine/core/worker";
 import { Effect, Layer, Option, Schema } from "effect";
-import { gatewayModelAccess, preflightGatewayModels } from "../src/gateway.ts";
+import { gatewayModelAccess } from "../src/gateway.ts";
 import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
@@ -92,6 +92,7 @@ it.live.each(["api-key", "subscription"] as const)(
           access.models,
           Option.none(),
           request.spec,
+          Option.none(),
           access.authentication,
         );
         assert.strictEqual(selected.pool, pool);
@@ -102,6 +103,7 @@ it.live.each(["api-key", "subscription"] as const)(
           access.models,
           Option.none(),
           request.spec,
+          Option.none(),
           access.authentication,
         ).pipe(Effect.flip);
         assert.include(
@@ -165,14 +167,16 @@ it.effect("startup reports a missing gateway credential by coordinator provider"
       credential: async () => undefined,
       request: async () => response(),
     });
-    const failure = yield* preflightGatewayModels(access, [
-      ModelId.make("openai-codex/gpt-5.6-sol"),
-    ]).pipe(Effect.flip);
+    const failure = yield* resolveParent(
+      access.models,
+      Option.none(),
+      {
+        parentModel: Option.some(ModelId.make("openai-codex/gpt-5.6-sol")),
+        parentEffort: "high",
+      },
+      Option.none(),
+      access.authentication,
+    ).pipe(Effect.flip);
     assert.include(failure.message, 'Gateway credential unavailable for provider "openai-codex"');
-    const noDefault = yield* preflightGatewayModels(access, []).pipe(Effect.flip);
-    assert.include(
-      noDefault.message,
-      "connect an Anthropic API key, an OpenAI API key, or a ChatGPT login",
-    );
   }),
 );

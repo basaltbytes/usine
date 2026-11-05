@@ -5,7 +5,7 @@ import { strict as assert } from "node:assert";
 import { once } from "node:events";
 // The standalone SDK fixture writes its bootstrap files synchronously before opening the harness.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
@@ -15,10 +15,13 @@ import { connect } from "node:net";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
+import { ModelId } from "@usine/core/agent/brain";
+import { resolveParent } from "../../src/parent.ts";
 import { EnvHttpProxyAgent, fetch as undiciFetch, getGlobalDispatcher } from "undici";
+import { gatewayModelAccess } from "../../src/gateway.ts";
 import { DurableHarness } from "../../src/harness.ts";
-import { harnessLayer } from "../../src/live.ts";
+import { loadParentModels, harnessLayer } from "../../src/live.ts";
 
 assert(process.argv[2]);
 const directory = InstanceDirectory.make(process.argv[2]);
@@ -94,18 +97,57 @@ writeFileSync(
   jsonKey({ httpProxy: "invalid-project-proxy" }),
 );
 
+const access =
+  scenario === "gateway"
+    ? gatewayModelAccess({
+        credential: async () => "subscription",
+        request: async () => {
+          throw new Error("model requests are not used by this fixture");
+        },
+      })
+    : undefined;
+
 const openHarness = () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const harness = yield* DurableHarness;
+      if (access !== undefined) {
+        assert.strictEqual(harness.models, access.models);
+        const resolved = yield* resolveParent(
+          harness.models,
+          harness.defaultModel,
+          {
+            parentModel: Option.some(ModelId.make("openai-codex/gpt-5.6-sol")),
+            parentEffort: "high",
+          },
+          Option.none(),
+          harness.parentAuthentication,
+        );
+        assert.strictEqual(resolved.pool, "chatgptPlan");
+      }
       yield* harness.use("check the HTTP dispatcher", async () => {
         assert(getGlobalDispatcher() instanceof EnvHttpProxyAgent);
       });
-    }).pipe(Effect.provide(harnessLayer(directory)), Effect.scoped),
+    }).pipe(Effect.provide(harnessLayer(directory, access)), Effect.scoped),
   );
 
 try {
   assert.strictEqual(getGlobalDispatcher(), initialDispatcher);
+  if (scenario === "unknown-parent") {
+    await assert.rejects(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const parents = yield* loadParentModels(directory);
+          yield* resolveParent(parents.models, parents.defaultModel, {
+            parentModel: Option.some(ModelId.make("missing/parent-model")),
+            parentEffort: "high",
+          });
+        }),
+      ),
+      /Pi has no model "missing\/parent-model"/u,
+    );
+    assert.strictEqual(existsSync(join(directory, ".usine/durable.sqlite")), false);
+  }
   await openHarness();
   const dispatcher = getGlobalDispatcher();
   assert.notStrictEqual(dispatcher, initialDispatcher);

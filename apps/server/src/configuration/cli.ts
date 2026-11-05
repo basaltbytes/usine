@@ -1,5 +1,12 @@
+import { loadParentModels } from "@usine/durable/live";
+import { parentModels } from "@usine/orchestrator/parent-models";
+import type { LoadedInstance } from "@usine/config/instance";
+import { parentAdmissionProblems } from "@usine/orchestrator/parent-admission";
 import { localActor } from "@usine/core/operator";
 import {
+  Configuration,
+  ConfigurationInvalid,
+  commit,
   StaleRevision,
   ConfigurationStore,
   ConfigurationStoreError,
@@ -16,9 +23,20 @@ import {
   parseConfigurationEntity,
 } from "@usine/config/folder-codec";
 import { ConfigParser } from "@usine/config/parser";
-import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceId, InstanceDirectory } from "@usine/core/instance";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
-import { Config, Console, DateTime, Effect, FileSystem, Layer, Option, Path } from "effect";
+import {
+  Array as EffectArray,
+  Config,
+  Crypto,
+  Console,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { ConfigCommand, ConfigCommandError } from "./command.ts";
 import { configurationLayer, initializeConfiguration } from "./runtime.ts";
@@ -28,6 +46,31 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     const path = yield* Path.Path;
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
+    const admitParents = Effect.fn("Cli.config.admitParents")(function* (loaded: LoadedInstance) {
+      const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+      const instanceId = InstanceId.make(uuid);
+      const access = yield* parentModels(loaded, instanceId);
+      const parents = yield* loadParentModels(directory, access);
+      return yield* parentAdmissionProblems(loaded, parents);
+    }, Effect.scoped);
+    if (command._tag === "ConfigImportCommand") {
+      const current = yield* store.read;
+      if (Option.isNone(current.instance)) {
+        const imported = yield* folder.load(InstanceDirectory.make(path.resolve(command.folder)));
+        const problems = yield* admitParents(imported);
+        if (EffectArray.isArrayNonEmpty(problems))
+          return yield* ConfigurationInvalid.make({ problems });
+        const revision = yield* store.commit({
+          expected: current.number,
+          changes: configurationDiff([], configurationEntities(imported)),
+          message: command.message,
+          actor: Option.some(localActor),
+        });
+        return yield* Console.log(
+          `Revision ${revision.number}: ${revision.changes.length} change(s).`,
+        );
+      }
+    }
     const { instance, number } = yield* initializeConfiguration(directory);
     const entities = configurationEntities(instance);
     const resolveKey = (
@@ -48,6 +91,19 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         if (changes.length === 0) {
           yield* Console.log("No configuration changes.");
           return;
+        }
+        const parser = yield* ConfigParser;
+        const candidate = yield* commit(
+          parser,
+          Configuration.make({ number, instance: Option.some(instance) }),
+          expected,
+          changes,
+          { actor, message, time: yield* DateTime.now },
+        );
+        if (Option.isSome(candidate.configuration.instance)) {
+          const problems = yield* admitParents(candidate.configuration.instance.value);
+          if (EffectArray.isArrayNonEmpty(problems))
+            return yield* ConfigurationInvalid.make({ problems });
         }
         const revision = yield* store.commit({
           expected,
