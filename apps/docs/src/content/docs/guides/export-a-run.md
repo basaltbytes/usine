@@ -22,4 +22,4 @@ Access to the instance folder, a known run ID from its drawer URL, and a new out
 
 ## Check the result
 
-The command creates a private JSON file containing the run snapshot and transcript. Step results include output refs with the name, type, optional commit, content size, and SHA-256; the export does not include output bodies. It refuses an existing output path or unknown run. The operation reads the runtime store without starting the orchestrator.
+The command creates a private JSON file containing the run snapshot and transcript. Step results include output refs with the name, type, optional commit, content size, and SHA-256; the export does not include output bodies. It refuses an existing output path or unknown run. The operation reads the runtime store without starting the orchestrator. It includes the complete transcript, including compressed segments of ended attempts and messages received after compression.

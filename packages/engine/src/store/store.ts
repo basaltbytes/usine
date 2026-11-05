@@ -1,3 +1,4 @@
+import { TranscriptCodec } from "./transcript/codec.ts";
 import { InstanceScope } from "@usine/core/access";
 import type { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { latestPoolRateLimits } from "../run-reader/pool-rate-limits.ts";
@@ -44,7 +45,7 @@ import {
   Result,
   Schema,
 } from "effect";
-import { RunDatabase } from "../database/database.ts";
+import { ReadSnapshot, RunDatabase } from "../database/database.ts";
 import {
   Claimed,
   CycleBlocked,
@@ -143,11 +144,13 @@ export type CancelOutcome =
 
 const makeRunStore = Effect.gen(function* () {
   const database = yield* RunDatabase;
+  const readSnapshot = yield* ReadSnapshot;
   const bus = yield* ChangeBus;
   const poolResets = yield* FiberMap.make<string>();
   const transact = changeTransaction(database, bus);
   const crypto = yield* Crypto.Crypto;
-  const queries = queriesFor(database);
+  const codec = yield* Effect.serviceOption(TranscriptCodec);
+  const queries = queriesFor(database, undefined, codec);
 
   const schedulePoolResets = Effect.fn("RunStore.schedulePoolResets")(function* (
     event: PoolRateLimitsUpdated,
@@ -1097,7 +1100,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("append attempt transcript"));
 
   const transcript = Effect.fn("RunStore.transcript")(function* (query: TranscriptQuery) {
-    return yield* queries.transcript(query);
+    return yield* readSnapshot.run(database, queries.transcript(query));
   }, persistence("read attempt transcript"));
 
   return {

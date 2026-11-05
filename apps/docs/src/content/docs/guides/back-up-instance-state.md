@@ -23,6 +23,6 @@ Access to the instance folder, an existing backup directory on persistent storag
 
 ## Check the result
 
-The backup files exist with owner-only access and the command did not overwrite an existing backup. The runtime database includes configuration revisions, events, runs, and transcripts; the durable database includes Pi parent tasks.
+The backup files exist with owner-only access and the command did not overwrite an existing backup. The runtime database includes configuration revisions, events, runs, and transcripts; the durable database includes Pi parent tasks. The runtime backup omits unused database pages, including pages freed when the orchestrator compresses ended attempts' transcripts. Both compressed transcript segments and late messages are included.
 
 An export is useful for configuration review, but excludes history and pause state. [Restore instance state](/guides/restore-instance-state/) describes restoring the databases. Transcripts can contain repository content and tool output; protect them with the same access controls as source code.

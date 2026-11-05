@@ -1,3 +1,4 @@
+import { TranscriptCodec } from "../store/transcript/codec.ts";
 import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { eq } from "drizzle-orm";
@@ -26,7 +27,8 @@ import { queriesFor } from "../store/queries.ts";
 
 const makeRunReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
-  const queries = queriesFor(database);
+  const codec = yield* Effect.serviceOption(TranscriptCodec);
+  const queries = queriesFor(database, undefined, codec);
   const snapshot = yield* ReadSnapshot;
 
   const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>
@@ -140,7 +142,7 @@ const makeRunReader = Effect.gen(function* () {
     queries.runEvents(runIds).pipe(persistence("read the events of runs")),
   );
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
-    queries.transcript(query).pipe(persistence("read attempt transcript")),
+    snapshot.run(database, queries.transcript(query)).pipe(persistence("read attempt transcript")),
   );
   const attemptsByWorker = Effect.suspend(() =>
     leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count attempts by worker")),
