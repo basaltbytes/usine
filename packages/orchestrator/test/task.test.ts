@@ -225,7 +225,9 @@ const summary = (
       openedAt: at(openedAt),
     }),
     step: Step.make({ runId, name: StepName.make("run"), result }),
-    attempts: attempts(runId),
+    attempts: attempts(runId).map((attempt, index, all) =>
+      index === all.length - 1 ? Attempt.make({ ...attempt, result }) : attempt,
+    ),
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.none(),
     approval: Option.none(),
@@ -680,6 +682,12 @@ describe("Task view", () => {
           ...original.step,
           result: Option.some(StepResult.make({ message: "Legacy result", facts: [legacy] })),
         }),
+        attempts: original.attempts.map((attempt) =>
+          Attempt.make({
+            ...attempt,
+            result: Option.some(StepResult.make({ message: "Legacy result", facts: [legacy] })),
+          }),
+        ),
       });
       assert.deepStrictEqual(harvestedAttemptChanges(snapshot), []);
     }),
@@ -689,7 +697,7 @@ describe("Task view", () => {
     AttemptCanceled.make(),
     AttemptFailed.make({ failure: AgentFailure.make({ message: "CI failed" }) }),
   ])("preserves recorded attempt changes after CI settles as $_tag", (outcome) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const original = runs[0];
       assert(original !== undefined);
       assert(Option.isSome(original.step.result));
@@ -715,7 +723,11 @@ describe("Task view", () => {
         step: Step.make({ ...original.step, result: Option.some(result) }),
         attempts: original.attempts.map((attempt) =>
           attempt.id === producerId
-            ? Attempt.make({ ...attempt, outcome: Option.some(AttemptAwaitingCi.make()) })
+            ? Attempt.make({
+                ...attempt,
+                outcome: Option.some(AttemptAwaitingCi.make()),
+                result: Option.some(result),
+              })
             : attempt,
         ),
       });
@@ -739,18 +751,6 @@ describe("Task view", () => {
         ),
       });
       assert.deepStrictEqual(harvestedAttemptChanges(settled), expected);
-      const encoded = yield* Schema.encodeEffect(StepResult)(original.step.result.value);
-      const legacy = yield* Schema.decodeEffect(StepResult)(encoded);
-      assert.isTrue(Option.isNone(legacy.attemptId));
-      assert.deepStrictEqual(
-        harvestedAttemptChanges(
-          RunSnapshot.make({
-            ...settled,
-            step: Step.make({ ...settled.step, result: Option.some(legacy) }),
-          }),
-        ),
-        expected,
-      );
       if (outcome._tag === "Failed") {
         const retrying = RunSnapshot.make({
           ...settled,
@@ -761,6 +761,35 @@ describe("Task view", () => {
           ],
         });
         assert.deepStrictEqual(harvestedAttemptChanges(retrying), expected);
+        const nextBase = CommitSha.make("a".repeat(40));
+        const nextHead = CommitSha.make("b".repeat(40));
+        const nextResult = StepResult.make({
+          message: "Retry succeeded",
+          facts: [
+            PullRequest.make({
+              number: 41,
+              url: new URL(pullUrl(41)),
+              base: Option.some(nextBase),
+              head: Option.some(nextHead),
+            }),
+          ],
+        });
+        const completed = RunSnapshot.make({
+          ...retrying,
+          run: Run.make({ ...retrying.run, state: RunState.Succeeded.make() }),
+          step: Step.make({ ...retrying.step, result: Option.some(nextResult) }),
+          attempts: retrying.attempts.map((attempt) =>
+            attempt.number === 3
+              ? Attempt.make({ ...attempt, outcome: succeeded, result: Option.some(nextResult) })
+              : attempt,
+          ),
+        });
+        const changes = harvestedAttemptChanges(completed);
+        assert.deepStrictEqual(changes.slice(0, 1), expected);
+        assert.strictEqual(changes.length, 2);
+        assert.strictEqual(changes[1]?.number, 3);
+        assert.strictEqual(changes[1]?.base, nextBase);
+        assert.strictEqual(changes[1]?.head, nextHead);
       }
     }),
   );

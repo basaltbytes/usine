@@ -47,7 +47,7 @@ Session records in transcripts and usage responses include an optional `pool` re
 
 The task page lists **Changes** beneath each pull request. Open the disclosure and use **Compare** to select the whole PR or an attempt with recorded commits. Files are collapsed initially, show added and removed counts, and mark test and generated files. The latest polled CI checks and review decision appear beside the diff. Open a file to read the patch without leaving usine.
 
-Recorded attempt changes remain available after CI fails or a newer push cancels the CI wait. The stored step result identifies the producing attempt, so a later retry retains the comparison's original attempt number and commit range.
+Recorded attempt changes remain available after CI fails or a newer push cancels the CI wait. Each result is stored with the producing attempt. A successful retry adds a comparison and retains earlier attempt numbers and commit ranges.
 
 `GET /api/projects/:project/pull-requests/:repository/:item/files` requires read access to the project. Encode the repository (`owner/name`) as one path segment. The query's `_tag` selects `PullRequestFiles` for the whole PR or `CommitRangeFiles` for an attempt. Both require `base` and `head` as full commit SHAs. Use the projected PR base for whole-PR reads and the recorded checkout base for attempts. Older attempts without a recorded base are omitted from the selector. Task detail provides those commit selections in `attemptChanges`, including runs beyond the first history page.
 

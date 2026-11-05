@@ -95,6 +95,7 @@ export const AttemptRow = Schema.Struct({
   parentModel: Schema.NullOr(ModelId),
   startedAt: Schema.DateTimeUtcFromString,
   outcome: Schema.NullOr(AttemptOutcome),
+  result: Schema.NullOr(StepResult),
   endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   salvage: Schema.NullOr(AttemptSalvage),
   start: Schema.NullOr(AttemptStart),
@@ -113,7 +114,7 @@ export const RunSummaryRow = Schema.Struct({
 export type RunSummaryRow = typeof RunSummaryRow.Type;
 
 export const AttemptSummaryRow = Schema.Struct(
-  Struct.omit(AttemptRow.fields, ["task", "comments"]),
+  Struct.omit(AttemptRow.fields, ["task", "comments", "result"]),
 );
 export type AttemptSummaryRow = typeof AttemptSummaryRow.Type;
 export const decodeRunSummaryRows = Schema.decodeUnknownEffect(Schema.Array(RunSummaryRow));
@@ -288,7 +289,12 @@ const attemptSummaryFromRow = (row: AttemptSummaryRow): AttemptSummary =>
   });
 
 export const attemptFromRow = (row: AttemptRow): Attempt =>
-  Attempt.make({ ...attemptSummaryFromRow(row), task: row.task, comments: row.comments ?? [] });
+  Attempt.make({
+    ...attemptSummaryFromRow(row),
+    task: row.task,
+    comments: row.comments ?? [],
+    result: Option.fromNullishOr(row.result),
+  });
 
 export const runSummaryFromRow = (
   row: RunSummaryRow,

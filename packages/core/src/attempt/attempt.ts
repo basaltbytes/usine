@@ -5,7 +5,7 @@ import { closedStruct } from "../closed-struct.ts";
 import { OperatorActor } from "../operator.ts";
 import type { RunState } from "../run/state.ts";
 import { RunId } from "../run/run.ts";
-import { Comment } from "../step/result.ts";
+import { Comment, StepResult } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
 import { ContainerId, ContainerMemoryMib, WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
@@ -146,6 +146,11 @@ export class Attempt extends Schema.Class<
   startedAt: Schema.DateTimeUtc,
   /** The terminal result, or `None` while the attempt is open. */
   outcome: Schema.Option(AttemptOutcome),
+  /** The harvested result retained independently of later retries and CI settlement. */
+  result: Schema.Option(StepResult).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The time the outcome was recorded, or `None` while open or for older records. */
   endedAt: Schema.Option(Schema.DateTimeUtc),
   /** The workspace recovery result after an unsuccessful end, or `None` if none was recorded. */

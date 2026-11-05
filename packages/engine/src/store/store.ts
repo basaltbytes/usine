@@ -437,11 +437,9 @@ const makeRunStore = Effect.gen(function* () {
     yield* tx.closeAttempt(attempt.id, outcome, endedAt);
     if (decision._tag === "RetryAttempt") return;
     if (decision._tag === "RunSucceeded" || decision._tag === "RunAwaitingCi") {
-      yield* tx.updateStepResult(
-        runId,
-        attempt.stepName,
-        StepResult.make({ ...decision.result, attemptId: Option.some(attempt.id) }),
-      );
+      const result = StepResult.make({ ...decision.result, attemptId: Option.some(attempt.id) });
+      yield* tx.recordAttemptResult(attempt.id, result);
+      yield* tx.updateStepResult(runId, attempt.stepName, result);
     }
     yield* tx.updateState(runId, decision.state, endedAt);
   });

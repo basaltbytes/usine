@@ -1,6 +1,6 @@
-import { Diff } from "balade/viewer";
+import { Diff } from "@balade/viewer";
 import type { FileChanges } from "@usine/github/files";
-import "balade/viewer.css";
+import "@balade/viewer/viewer.css";
 import "~/features/tasks/components/pull-request/diff.css";
 
 type PullRequestDiffProps = {

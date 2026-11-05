@@ -176,6 +176,7 @@ export const attemptSelection = {
   parentModel: attempts.parentModel,
   startedAt: attempts.startedAt,
   outcome: attempts.outcomeJson,
+  result: attempts.resultJson,
   endedAt: attempts.endedAt,
   salvage: attempts.salvageJson,
   start: attempts.startJson,
@@ -194,7 +195,7 @@ const runSummarySelection = {
   pullRequestUrl: runPullRequestUrl,
 } as const;
 
-const attemptSummarySelection = Struct.omit(attemptSelection, ["task", "comments"]);
+const attemptSummarySelection = Struct.omit(attemptSelection, ["task", "comments", "result"]);
 
 const storedStateTag = jsonExtract(runs.stateJson, "$._tag");
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
@@ -857,6 +858,20 @@ export const queriesFor = (
     yield* changedAttempt(attemptId);
   });
 
+  const recordAttemptResult = Effect.fn("RunStoreQueries.recordAttemptResult")(function* (
+    attemptId: AttemptId,
+    result: StepResult,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const resultJson = yield* encodeStepResult(result);
+    yield* database
+      .update(attempts)
+      .set({ resultJson })
+      .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.resultJson)))
+      .execute();
+    yield* changedAttempt(attemptId);
+  });
+
   const updateStepResult = Effect.fn("RunStoreQueries.updateStepResult")(function* (
     runId: RunId,
     stepName: StepName,
@@ -1298,6 +1313,7 @@ export const queriesFor = (
     runEvents,
     runForEvent,
     snapshot,
+    recordAttemptResult,
     updateStepResult,
     updateAttemptParentModel,
     updateState,

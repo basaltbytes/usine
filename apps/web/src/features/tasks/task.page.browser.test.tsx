@@ -526,10 +526,12 @@ it("shows whole-PR and attempt changes in place and reuses the immutable query",
     .not.toBeInTheDocument();
   await changes.getByRole("button", { name: /src\/reader.ts/u }).click();
   await expect.element(changes.getByText("whole PR change", { exact: false })).toBeVisible();
+  const changesRow = changes.element().closest("tr");
+  expect(changesRow).not.toBeNull();
+  if (changesRow !== null) {
+    expect(getComputedStyle(changesRow).backgroundColor).toBe("rgba(0, 0, 0, 0)");
+  }
   expect(fileRequests).toHaveLength(1);
-  await page.screenshot({
-    path: "../../../node_modules/.cache/vitest/screenshots/usine-932-desktop.png",
-  });
   await changes.getByRole("combobox", { name: "Compare" }).selectOptions(attemptId);
   await expect
     .element(changes.getByText("GitHub limited this file list.", { exact: false }))
@@ -600,9 +602,6 @@ it("shows file marks and patch availability on a phone without widening the task
   await changes.getByRole("button", { name: /pnpm-lock.yaml/u }).click();
   await expect.element(changes.getByText("No diff available for this file.")).toBeVisible();
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
-  await page.screenshot({
-    path: "../../../node_modules/.cache/vitest/screenshots/usine-932-mobile.png",
-  });
 });
 
 it("keeps errors local with retry and shows an empty commit comparison", async () => {

@@ -56,7 +56,7 @@ export const TaskPullRequests = ({ task, project }: TaskPullRequestsProps) => {
                     </TableCell>
                   </TableRow>
                   {project !== undefined && (
-                    <TableRow className="hover:bg-transparent">
+                    <TableRow className="hover:bg-transparent has-aria-expanded:bg-transparent">
                       <TableCell colSpan={3} className="max-w-0 pt-0 pb-1">
                         <PullRequestChanges
                           project={project}
