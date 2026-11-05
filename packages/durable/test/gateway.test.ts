@@ -15,7 +15,7 @@ import { resolveParent } from "../src/attempt/parent.ts";
 import { stubChildBackendLayer } from "../src/testing.ts";
 import { attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-const response = () => {
+const response = (terminal: "response.completed" | "response.done" = "response.completed") => {
   const item = {
     id: "msg_1",
     type: "message",
@@ -39,7 +39,7 @@ const response = () => {
     },
     { type: "response.output_item.done", output_index: 0, item },
     {
-      type: "response.completed",
+      type: terminal,
       response: {
         id: "resp_1",
         status: "completed",
@@ -48,14 +48,31 @@ const response = () => {
       },
     },
   ];
-  return new Response(events.map((event) => `data: ${jsonKey(event)}\n\n`).join(""), {
+  const bytes = new TextEncoder().encode(
+    events.map((event) => `event: ${event.type}\r\ndata: ${jsonKey(event)}\r\n\r\n`).join("") +
+      "data: [DONE]\r\n\r\n",
+  );
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let offset = 0; offset < bytes.length; offset += 17) {
+        controller.enqueue(bytes.slice(offset, offset + 17));
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream, {
     headers: { "content-type": "text/event-stream" },
   });
 };
 
-it.live.each(["api-key", "subscription"] as const)(
-  "runs a coordinator with a gateway %s credential and records its pool",
-  (credential) =>
+it.live.each([
+  { credential: "api-key", terminal: "response.completed" },
+  { credential: "subscription", terminal: "response.completed" },
+  { credential: "api-key", terminal: "response.done" },
+  { credential: "subscription", terminal: "response.done" },
+] as const)(
+  "runs a coordinator with a gateway $credential credential and $terminal terminal event and records its pool",
+  ({ credential, terminal }) =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const sent: Array<{ protocol: string; body: string }> = [];
@@ -64,7 +81,7 @@ it.live.each(["api-key", "subscription"] as const)(
         credential: async () => current,
         request: async (protocol, body) => {
           sent.push({ protocol, body });
-          return response();
+          return response(terminal);
         },
       });
       const model = ModelId.make("openai-codex/gpt-5.6-sol");

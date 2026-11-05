@@ -15,7 +15,9 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { type PiAuthentication } from "@usine/agents/pi/authentication";
 import type { GatewayCredentialKind, GatewayLlmProtocol } from "@usine/core/worker";
-import { Schema } from "effect";
+import { jsonKey } from "@usine/core/json-key";
+import { Effect, Schema, Stream } from "effect";
+import { Sse } from "effect/encoding";
 
 /** Model and credential access used by the durable coordinator. */
 export interface ParentModelAccess {
@@ -42,6 +44,41 @@ export interface GatewayModelTransport {
 }
 
 const Payload = Schema.Record(Schema.String, Schema.Unknown);
+
+const codexResponse = (response: Response): Response => {
+  const body = response.body;
+  if (!response.ok || body === null) return response;
+  const normalized = Stream.fromReadableStream({
+    evaluate: () => body,
+    onError: (cause) => cause,
+  }).pipe(
+    Stream.decodeText(),
+    Stream.pipeThroughChannel(Sse.decode()),
+    Stream.mapEffect((event) =>
+      event.data === "[DONE]"
+        ? Effect.succeed(event)
+        : Schema.decodeEffect(Schema.fromJsonString(Payload))(event.data).pipe(
+            Effect.map((payload) =>
+              payload.type === "response.done"
+                ? {
+                    ...event,
+                    event: "response.completed",
+                    data: jsonKey({ ...payload, type: "response.completed" }),
+                  }
+                : event,
+            ),
+          ),
+    ),
+    Stream.map(Sse.encoder.write),
+    Stream.encodeText,
+    Stream.toReadableStream,
+  );
+  return new Response(normalized, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+};
 
 /** Builds Pi providers that only send model requests through the gateway transport. */
 export const gatewayModelAccess = (transport: GatewayModelTransport): ParentModelAccess => {
@@ -74,12 +111,13 @@ export const gatewayModelAccess = (transport: GatewayModelTransport): ParentMode
         ...options,
         fetch: async (input, init) => {
           const request = new Request(input, init);
-          return transport.request(
+          const response = await transport.request(
             protocol,
             await request.text(),
             Object.fromEntries(request.headers),
             request.signal,
           );
+          return provider.id === "openai-codex" ? codexResponse(response) : response;
         },
       };
       if (provider.id === "openai-codex") {

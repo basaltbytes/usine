@@ -35,6 +35,7 @@
           "effect/Path",
           "effect/PlatformError",
           "effect/cli",
+          "effect/encoding/Sse",
           "effect/http",
           "effect/http-api",
           "effect/net",
