@@ -7,7 +7,7 @@ Install a selected usine release and verify the restarted instance.
 
 ## Prerequisites
 
-Access to the instance machine, a recoverable backup, and either a global installation managed by systemd with the upgrade helper or an instance-local registry pin. A checkout installation must be pulled and built separately.
+Access to the instance machine, a recoverable backup, and either a global installation managed by systemd or launchd with the upgrade helper or an instance-local registry pin. A checkout installation must be pulled and built separately.
 
 ## Procedure
 
@@ -25,7 +25,7 @@ Access to the instance machine, a recoverable backup, and either a global instal
    ```
 
    Use `usine upgrade <version>` to select a release. `--force` requests immediate restart and reattachment. Local pin upgrades refuse running attempts unless forced; global managed upgrades wait for idle by default.
-4. For systemd, inspect **Settings** and `journalctl -u usine-upgrade.service -f` for the final outcome. For local pins, inspect the command output and `.usine/usine.log`.
+4. For systemd, inspect **Settings** and `journalctl -u usine-upgrade.service -f` for the final outcome. For launchd, inspect **Settings** and `.usine/upgrade/helper.log`. For local pins, inspect the command output and `.usine/usine.log`.
 
 ## Check the result
 
@@ -37,9 +37,11 @@ Startup applies runtime database migrations before readiness. The transcript mig
 
 ## Managed upgrade backups
 
-The helper creates private `backup.XXXXXXXX` directories under `.usine/upgrade/` in the instance folder. After a successful upgrade, it keeps the newest three backups, always including the current upgrade backup, and removes older ones. Failed upgrades and rollbacks retain all backups. The helper journal reports backup paths and cleanup failures. After a backup or space-check failure, free the required space and restart the server service to resume attempt admission before retrying the upgrade.
+The helper creates private `backup.XXXXXXXX` directories under `.usine/upgrade/` in the instance folder. After a successful upgrade, it keeps the newest three backups, always including the current upgrade backup, and removes older ones. Failed upgrades and rollbacks retain all backups. The helper output reports backup paths and cleanup failures. After a backup or space-check failure, free the required space and restart the server service to resume attempt admission before retrying the upgrade.
 
-To store backups outside the instance folder or change the retention count, run `sudo systemctl edit usine-upgrade.service` and add a drop-in:
+On macOS, set the variables below in the upgrade LaunchAgent's `EnvironmentVariables` dictionary and reload that job while idle, as described in [macOS hosting](/guides/host-usine-on-macos/).
+
+On Linux, to store backups outside the instance folder or change the retention count, run `sudo systemctl edit usine-upgrade.service` and add a drop-in:
 
 ```ini
 [Service]

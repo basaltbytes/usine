@@ -5,12 +5,18 @@ import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { runCommand } from "../command.ts";
 import { realPathOrSelf, SERVER_PACKAGE } from "../instance/manifest.ts";
 import type { InstanceRecord } from "../instance/record.ts";
-import { SystemdUnit, supervisingUnit, systemctl, unitState } from "../instance/systemd.ts";
+import { SystemdUnit, systemctl } from "../instance/systemd.ts";
+import { LaunchdService, launchctl, launchdPlist } from "../instance/launchd.ts";
+import { type ServiceError, supervisingService, serviceState } from "../instance/service.ts";
 import { dependenciesOf, resolveVersion } from "../registry.ts";
 import { UpgradeError, type UpgradePlatform } from "./control.ts";
 
 const failure = (error: { readonly message: string }) =>
   UpgradeError.make({ message: error.message });
+const serviceFailure = (error: ServiceError) =>
+  UpgradeError.make({
+    message: `${error.command} failed: ${error.reason}`,
+  });
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(function* (
@@ -20,15 +26,16 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const path = yield* Path.Path;
   const provideSpawner = Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner);
-  const unit = yield* supervisingUnit(record.pid, record.systemdUnit).pipe(
-    Effect.mapError(failure),
-  );
+  const unit = yield* supervisingService(record).pipe(Effect.mapError(serviceFailure));
   const script = yield* realPathOrSelf(record.launch.script);
   const suffix = "/lib/node_modules/@usine/server/dist/main.js";
   if (Option.isNone(unit) || !script.endsWith(suffix)) return Option.none<UpgradePlatform>();
   const prefix = script.slice(0, -suffix.length);
   const service = unit.value;
-  const helperUnit = SystemdUnit.make(`${service.slice(0, -".service".length)}-upgrade.service`);
+  const launchd = Schema.is(LaunchdService)(service);
+  const helperUnit = launchd
+    ? LaunchdService.make(`${service}-upgrade`)
+    : SystemdUnit.make(`${service.slice(0, -".service".length)}-upgrade.service`);
   const previous = yield* Schema.decodeEffect(ReleaseVersion)(record.version).pipe(
     Effect.mapError(failure),
   );
@@ -82,14 +89,14 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   const outcome = Effect.gen(function* () {
     const result = yield* readOutcome;
     if (Option.isSome(result) && result.value.status === "installing") {
-      const state = yield* unitState(helperUnit).pipe(Effect.mapError(failure));
+      const state = yield* serviceState(helperUnit).pipe(Effect.mapError(serviceFailure));
       if (state.active !== "active" && state.active !== "activating") {
         return Option.some(
           UpgradeRecord.make({
             ...result.value,
             status: "failed",
             reason:
-              "The upgrade helper stopped before recording an outcome. Check its service journal.",
+              "The upgrade helper stopped before recording an outcome. Check its service output.",
           }),
         );
       }
@@ -98,47 +105,81 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   });
   const preflight = Effect.fn("Server.upgradePreflight")(function* () {
     yield* Effect.annotateCurrentSpan({ previous, unit: service, helperUnit, prefix });
-    const loaded = yield* systemctl(helperUnit, ["show", "--property=LoadState", "--value"]).pipe(
-      Effect.mapError(failure),
-    );
-    if (loaded.trim() !== "loaded") {
-      return yield* UpgradeError.make({
-        message: `Install ${helperUnit} and its polkit rule before upgrading. See the server setup guide.`,
-      });
+    if (Schema.is(LaunchdService)(helperUnit)) {
+      yield* launchctl(helperUnit, ["print", helperUnit]).pipe(Effect.mapError(serviceFailure));
+    } else {
+      const loaded = yield* systemctl(helperUnit, ["show", "--property=LoadState", "--value"]).pipe(
+        Effect.mapError(serviceFailure),
+      );
+      if (loaded.trim() !== "loaded") {
+        return yield* UpgradeError.make({
+          message: `Install ${helperUnit} and its polkit rule before upgrading. See the server setup guide.`,
+        });
+      }
+    }
+    if (launchd) {
+      yield* runCommand(
+        "bash",
+        [
+          "-c",
+          'for executable in stat df find sort; do "$executable" --version >/dev/null || exit 1; done',
+        ],
+        directory,
+        "10 seconds",
+      ).pipe(
+        Effect.mapError(() =>
+          UpgradeError.make({
+            message:
+              "Managed macOS upgrades require GNU coreutils and findutils on the service PATH. See the macOS hosting guide.",
+          }),
+        ),
+      );
     }
     yield* runCommand(
       "bash",
       [
         "-c",
-        'for executable in npm curl timeout flock; do command -v "$executable" >/dev/null || { printf "Missing required executable: %s\\n" "$executable" >&2; exit 1; }; done',
+        'for executable in node npm curl timeout flock stat df find sort; do command -v "$executable" >/dev/null || { printf "Missing required executable: %s\\n" "$executable" >&2; exit 1; }; done',
       ],
       directory,
       "10 seconds",
     ).pipe(Effect.mapError(({ reason }) => UpgradeError.make({ message: reason })));
   });
+  const plist = Schema.is(LaunchdService)(service) ? yield* launchdPlist(service) : "";
   const launch = Effect.fn("Server.launchUpgradeHelper")(function* (target: ReleaseVersion) {
     yield* Effect.annotateCurrentSpan({ previous, target, unit: service, prefix });
     yield* fs.makeDirectory(folder, { recursive: true, mode: 0o700 });
     const helperPath = yield* path.fromFileUrl(new URL("./helper.sh", import.meta.url));
     const helper = yield* fs.readFileString(helperPath);
+    const adapter = launchd
+      ? yield* path
+          .fromFileUrl(new URL("./launchd.sh", import.meta.url))
+          .pipe(Effect.flatMap((file) => fs.readFileString(file)))
+      : "";
     const variables = Object.entries({
       folder,
       previous,
       target,
       prefix,
       unit: service,
+      service_manager: launchd ? "launchd" : "systemd",
+      plist,
       port: String(record.launch.port),
     })
       .map(([key, value]) => `${key}=${quote(value)}`)
       .join("\n");
-    yield* fs.writeFileString(path.join(folder, "run.sh"), `${variables}\n${helper}`, {
+    yield* fs.writeFileString(path.join(folder, "run.sh"), `${variables}\n${adapter}\n${helper}`, {
       mode: 0o700,
     });
     const serializedRecord = yield* Schema.encodeEffect(Schema.fromJsonString(UpgradeRecord))(
       UpgradeRecord.make({ previous, target, status: "installing" }),
     ).pipe(Effect.orDie);
     yield* fs.writeFileString(resultPath, serializedRecord, { mode: 0o600 });
-    yield* systemctl(helperUnit, ["start", "--no-block"]);
+    if (Schema.is(LaunchdService)(helperUnit)) {
+      yield* launchctl(helperUnit, ["kickstart", helperUnit]).pipe(Effect.mapError(serviceFailure));
+    } else {
+      yield* systemctl(helperUnit, ["start", "--no-block"]).pipe(Effect.mapError(serviceFailure));
+    }
     yield* Effect.logInfo("Started the independent upgrade helper", {
       previous,
       target,

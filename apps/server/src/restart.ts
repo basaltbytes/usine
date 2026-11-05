@@ -17,7 +17,7 @@ import {
   currentLaunch,
 } from "./instance/record.ts";
 import { probeInstance } from "./instance/state.ts";
-import { type SystemdUnit, supervisingUnit } from "./instance/systemd.ts";
+import { type ServiceUnit, supervisingService } from "./instance/service.ts";
 import {
   InstanceNotRunningError,
   UnrecordedInstanceError,
@@ -80,7 +80,7 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
     return {
       pid: record.pid,
       record: Option.some(record),
-      unit: yield* supervisingUnit(record.pid, record.systemdUnit),
+      unit: yield* supervisingService(record),
       port: Option.some(record.launch.port),
       launch: record.launch,
     };
@@ -121,7 +121,7 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
   return {
     pid,
     record: Option.none<InstanceRecord>(),
-    unit: Option.none<SystemdUnit>(),
+    unit: Option.none<ServiceUnit>(),
     port,
     launch,
   };

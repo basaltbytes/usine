@@ -39,6 +39,11 @@ import { assert, expect, it } from "@effect/vitest";
 
 const helper = readFileSync(new URL("../../src/upgrade/helper.sh", import.meta.url), "utf8");
 
+const launchdAdapter = readFileSync(
+  new URL("../../src/upgrade/launchd.sh", import.meta.url),
+  "utf8",
+);
+
 const run = (
   scenario:
     | "good"
@@ -76,6 +81,7 @@ const run = (
     | "missing-backup"
     | "missing-durable-backup",
   shutdown: "normal" | "exit-term" | "exit-kill" | "stuck" = "normal",
+  manager: "systemd" | "launchd" = "systemd",
 ) => {
   const root = mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-helper-"));
   const executables = mkdtempSync(join(tmpdir(), "usine-upgrade-commands-"));
@@ -235,6 +241,28 @@ if [ "$1" = start ]; then
 fi
 if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
     );
+    if (manager === "launchd") {
+      writeFileSync(join(folder, "state"), "active");
+      command(
+        "launchctl",
+        `echo "launchctl $*" >> "$folder/commands"
+case "$1" in
+  print)
+    if [ -f "$folder/unloaded" ]; then exit 113; fi
+    if [ "$(cat "$folder/state")" = active ]; then echo 'state = running'; else echo 'state = waiting'; fi;;
+  bootout)
+    if [ "$scenario" = bad-stop ]; then exit 1; fi
+    systemctl stop
+    touch "$folder/unloaded";;
+  bootstrap)
+    if [ ! -f "$folder/unloaded" ]; then exit 5; fi
+    rm "$folder/unloaded"
+    systemctl start;;
+  kickstart) exit 0;;
+  *) exit 1;;
+esac`,
+      );
+    }
     command(
       "curl",
       `url=\${!#}
@@ -298,10 +326,13 @@ if (existsSync(folder + "/../durable.sqlite")) {
     const script = join(folder, "run.sh");
     writeFileSync(
       script,
-      `folder='${folder}'\nprevious=1.0.0\ntarget=2.0.0\nprefix='${prefix}'\nunit=usine.service\nport=7331
+      `folder='${folder}'\nprevious=1.0.0\ntarget=2.0.0\nprefix='${prefix}'\nunit=${manager === "launchd" ? "gui/501/dev.usine" : "usine.service"}\nport=7331
 unset SECONDS
 SECONDS=0
 sleep() { command sleep "$@"; SECONDS=$((SECONDS+$1)); }
+service_manager=${manager}
+plist='/tmp/dev.usine.plist'
+${manager === "launchd" ? launchdAdapter : ""}
 ${helper}`,
     );
     const environment: NodeJS.ProcessEnv = {
@@ -447,7 +478,7 @@ it("records a healthy upgrade when an old backup cannot be removed", slowCli, ()
   expect(result.running).toBe("@usine/server@2.0.0");
   expect(result.retained).toHaveLength(4);
   expect(result.retained).toContain(result.current);
-  expect(result.output).toContain("status=failed; check the upgrade service journal");
+  expect(result.output).toContain("status=failed; check the upgrade service output");
 });
 
 it("retains every backup when an upgrade rolls back", slowCli, () => {
@@ -640,7 +671,7 @@ it(
     const result = run("unchanged-unhealthy");
     expect(result.failed).toBe(true);
     assert(result.record.status === "failed");
-    expect(result.record.reason).toBe("Rollback failed. Check the upgrade service journal.");
+    expect(result.record.reason).toBe("Rollback failed. Check the upgrade service output.");
     expect(result.running).toBe("");
   },
 );
@@ -799,4 +830,28 @@ healthy 1.0.0 version
       rmSync(root, { recursive: true, force: true });
     }
   }),
+);
+
+it.each(["good", "bad-install", "migrated-api", "migrated-startup-exit", "bad-stop"] as const)(
+  "runs launchd upgrade and recovery through the independent helper: %s",
+  slowCli,
+  (scenario) => {
+    const result = run(scenario, "normal", "launchd");
+    expect(result.commands).toContain("launchctl bootout gui/501/dev.usine");
+    if (scenario === "bad-stop") {
+      expect(result.failed).toBe(true);
+      expect(result.record.status).toBe("failed");
+      expect(result.commands).not.toContain("install --global");
+      return;
+    }
+    expect(result.failed, result.output).toBe(false);
+    expect(result.commands).toContain("launchctl bootstrap");
+    expect(result.commands).toContain("launchctl kickstart");
+    expect(result.record.status).toBe(scenario === "good" ? "good" : "rolled-back");
+    expect(result.running).toBe(
+      scenario === "good" ? "@usine/server@2.0.0" : "@usine/server@1.0.0",
+    );
+    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+    expect(result.durable).toEqual([{ value: "before" }]);
+  },
 );

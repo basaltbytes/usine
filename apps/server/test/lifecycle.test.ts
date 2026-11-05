@@ -1,5 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
-import { type Brand, DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
+import { type Brand, Config, DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
 // The test fixture uses native subprocess handles and synchronous process operations.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { execFile } from "node:child_process";
@@ -45,6 +45,7 @@ import {
   ProcessId,
   instanceFiles,
 } from "../src/instance/record.ts";
+import { LaunchdService } from "../src/instance/launchd.ts";
 import { probeInstance } from "../src/instance/state.ts";
 import { restart } from "../src/restart.ts";
 import { stop } from "../src/stop.ts";
@@ -217,6 +218,49 @@ if (verb === "show" && args.includes("--property=MainPID")) {
 const systemctlCalls = (directory: InstanceDirectory) =>
   readFileSync(join(directory, "systemctl.log"), "utf8").trim().split("\n");
 
+const LAUNCHD_SERVICE = "gui/501/dev.usine-test";
+
+const fakeLaunchctl = (directory: InstanceDirectory, launch: InstanceLaunch) => {
+  const bin = join(directory, "bin");
+  mkdirSync(bin);
+  const script = join(bin, "launchctl");
+  writeFileSync(
+    script,
+    `#!${process.execPath}
+const { appendFileSync, existsSync, openSync, readFileSync, writeFileSync, rmSync } = require("node:fs");
+const { spawn } = require("node:child_process");
+const { join } = require("node:path");
+const directory = ${jsonKey(directory)};
+const args = process.argv.slice(2);
+appendFileSync(join(directory, "launchctl.log"), args.join(" ") + "\\n");
+const file = (name) => join(directory, name);
+const flag = (name) => existsSync(file(name));
+const pidFile = file(".usine/instance.pid");
+const pid = () => flag(".usine/instance.pid") ? Number(readFileSync(pidFile, "utf8")) : 0;
+if (flag("launchctl-denied")) { console.error("Operation not permitted"); process.exit(1); }
+if (args[0] === "print") {
+  if (flag("launchctl-unloaded")) process.exit(113);
+  if (flag("launchctl-failing")) console.log("state = spawn scheduled\\nlast exit code = 1");
+  else console.log("state = running\\npid = " + (flag("launchctl-other-main") ? 1 : pid()));
+} else if (args[0] === "bootout") {
+  writeFileSync(file("launchctl-unloaded"), "");
+  if (pid() !== 0) process.kill(pid(), "SIGTERM");
+} else if (args[0] === "bootstrap") {
+  if (!flag("launchctl-unloaded")) process.exit(5);
+  rmSync(file("launchctl-unloaded"));
+} else if (args[0] === "kickstart" && !flag("launchctl-failing")) {
+  const log = openSync(file(".usine/usine.log"), "a");
+  spawn(${jsonKey(launch.node)}, ${jsonKey([...launch.nodeOptions, launch.script, "up", "--port", String(launch.port)])}, { cwd: directory, detached: true, stdio: ["ignore", log, log] }).unref();
+}
+`,
+  );
+  chmodSync(script, 0o755);
+  writeFileSync(join(directory, ".env"), `USINE_LAUNCHD_SERVICE=${LAUNCHD_SERVICE}\n`);
+  // Native CLI subprocesses receive the fake executable through their environment.
+  // @effect-diagnostics-next-line processEnv:off
+  return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+};
+
 const pid1OfAnotherUser =
   process.platform === "linux" && statSync("/proc/1").uid !== process.getuid?.();
 
@@ -230,6 +274,19 @@ const alive = (pid: number) => {
 };
 
 describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
+  it("rejects launchd targets that cannot identify a per-user GUI job", () => {
+    for (const target of [
+      "dev.usine",
+      "system/dev.usine",
+      "gui/user/dev.usine",
+      "gui/501/../dev.usine",
+      "gui/501/dev.usine/extra",
+    ]) {
+      assert.isTrue(Option.isNone(Schema.decodeOption(LaunchdService)(target)));
+    }
+    assert.isTrue(Option.isSome(Schema.decodeOption(LaunchdService)(LAUNCHD_SERVICE)));
+  });
+
   it.live("starts in the background, records the new process, and stops it after the drain", () =>
     Effect.gen(function* () {
       const directory = instanceFolder();
@@ -732,5 +789,79 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
           [`stop --no-block ${UNIT}`, `start ${UNIT}`, `stop --no-block ${UNIT}`],
         );
       }),
+  );
+  it.live("restarts, reports, stops, and starts a launchd instance through launchctl", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      writeFileSync(join(directory, "fixture-launchd"), LAUNCHD_SERVICE);
+      const first = yield* startFixture(directory);
+      const environment = fakeLaunchctl(directory, first.launch);
+      const restarted = yield* runCli(directory, ["restart", "--timeout", "20"], environment);
+      assert.include(restarted, `with launchctl bootout ${LAUNCHD_SERVICE}`);
+      const state = yield* probeInstance(directory).pipe(Effect.provide(services));
+      assert(state._tag === "Running");
+      pids.add(state.record.pid);
+      assert.notStrictEqual(state.record.pid, first.pid);
+      assert.isFalse(alive(first.pid));
+      assert.deepStrictEqual(Option.getOrUndefined(state.record.launchdService), LAUNCHD_SERVICE);
+      const report = yield* runCli(directory, ["status"], environment);
+      assert.include(report, `${LAUNCHD_SERVICE}, managed with launchctl`);
+      yield* runCli(directory, ["stop", "--timeout", "20"], environment);
+      assert.isFalse(alive(state.record.pid));
+      const started = yield* runCli(directory, ["up", "--detach"], environment);
+      assert.include(started, `in ${LAUNCHD_SERVICE}`);
+      const again = yield* probeInstance(directory).pipe(Effect.provide(services));
+      assert(again._tag === "Running");
+      pids.add(again.record.pid);
+      yield* runCli(directory, ["stop", "--timeout", "20"], environment);
+      const home = yield* Config.String("HOME");
+      const calls = readFileSync(join(directory, "launchctl.log"), "utf8").trim().split("\n");
+      assert.deepStrictEqual(
+        calls.filter((call) => !call.startsWith("print")),
+        [
+          `bootout ${LAUNCHD_SERVICE}`,
+          `bootstrap gui/501 ${join(home, "Library/LaunchAgents/dev.usine-test.plist")}`,
+          `kickstart ${LAUNCHD_SERVICE}`,
+          `bootout ${LAUNCHD_SERVICE}`,
+          `bootstrap gui/501 ${join(home, "Library/LaunchAgents/dev.usine-test.plist")}`,
+          `kickstart ${LAUNCHD_SERVICE}`,
+          `bootout ${LAUNCHD_SERVICE}`,
+        ],
+      );
+    }),
+  );
+
+  it.live("reports launchctl denial without signaling the supervised process", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      writeFileSync(join(directory, "fixture-launchd"), LAUNCHD_SERVICE);
+      const record = yield* startFixture(directory);
+      const environment = fakeLaunchctl(directory, record.launch);
+      writeFileSync(join(directory, "launchctl-denied"), "");
+      const failed = yield* runCli(directory, ["stop"], environment).pipe(
+        Effect.match({ onSuccess: () => "", onFailure: (error) => error.message }),
+      );
+      assert.include(failed, "launchctl print");
+      assert.include(failed, "Operation not permitted");
+      assert.isTrue(alive(record.pid));
+      const report = yield* runCli(directory, ["status"], environment);
+      assert.include(report, `${LAUNCHD_SERVICE}, unknown:`);
+    }),
+  );
+
+  it.live("unloads a launchd job that waits to retry a failed start", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      writeFileSync(join(directory, "fixture-launchd"), LAUNCHD_SERVICE);
+      const first = yield* startFixture(directory);
+      const environment = fakeLaunchctl(directory, first.launch);
+      yield* runCli(directory, ["stop", "--timeout", "20"], environment);
+      writeFileSync(join(directory, "launchctl-failing"), "");
+      const failed = yield* runCli(directory, ["up", "--detach"], environment).pipe(
+        Effect.match({ onSuccess: () => "", onFailure: (error) => error.message }),
+      );
+      assert.include(failed, "activating (auto-restart)");
+      assert.isTrue(existsSync(join(directory, "launchctl-unloaded")));
+    }),
   );
 });

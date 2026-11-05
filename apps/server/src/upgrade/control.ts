@@ -138,7 +138,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     function* (input: UpgradeRequest) {
       if (Option.isNone(options.platform)) {
         return yield* UpgradeError.make({
-          message: "App upgrades require a global npm install managed by systemd.",
+          message: "App upgrades require a global npm install managed by systemd or launchd.",
         });
       }
       const platform = options.platform.value;

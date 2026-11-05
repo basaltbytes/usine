@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { type Brand, DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { UiOrigin } from "@usine/config/factory";
 import { DEFAULT_LOG_LEVEL, Port, type UpCommand, UpLogLevel } from "../cli.ts";
+import { LaunchdService } from "./launchd.ts";
 import { SystemdUnit } from "./systemd.ts";
 
 /** An operating system process ID. */
@@ -74,6 +75,9 @@ export class InstanceRecord extends Schema.Class<
    */
   systemdUnit: Schema.OptionFromOptionalKey(SystemdUnit).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<SystemdUnit>())),
+  ),
+  launchdService: Schema.OptionFromOptionalKey(LaunchdService).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<LaunchdService>())),
   ),
   /** When the process received its first `SIGINT` or `SIGTERM`. */
   stoppingSince: Schema.optionalKey(Schema.DateTimeUtcFromString),
@@ -144,6 +148,7 @@ export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): 
     startedAt: record.startedAt,
     launch: record.launch,
     systemdUnit: record.systemdUnit,
+    launchdService: record.launchdService,
     stoppingSince: DateTime.nowUnsafe(),
   });
   // The signal listener writes the already validated record synchronously.
