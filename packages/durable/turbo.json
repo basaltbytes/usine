@@ -1,0 +1,20 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "check": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/agents/test/replay/**",
+        "$TURBO_ROOT$/packages/agents/test/fixtures/replay/**"
+      ]
+    },
+    "test": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/agents/test/replay/**",
+        "$TURBO_ROOT$/packages/agents/test/fixtures/replay/**"
+      ]
+    }
+  }
+}
