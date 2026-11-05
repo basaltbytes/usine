@@ -1,4 +1,4 @@
-import { boatTailnetOf } from "./model.ts";
+import { tailnetOf } from "./model.ts";
 import type { SshCommand } from "@usine/agents/child-host";
 import { safeSegment } from "@usine/core/repository";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
@@ -191,7 +191,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       gateway: {
         settings: {
           ...settings,
-          egress: Option.isSome(boatTailnetOf(address)) ? "direct" : "proxy",
+          egress: Option.isSome(tailnetOf(address)) ? "direct" : "proxy",
         },
         forward,
         admin,

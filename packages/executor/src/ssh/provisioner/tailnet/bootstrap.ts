@@ -3,43 +3,8 @@ import { HttpClient } from "effect/http";
 import { WorkerCapabilityError } from "../../../executor.ts";
 import type { RemoteCommands } from "../../../remote/commands.ts";
 import { boatTailnetOf, type SshMachine, type SshWorkerAddress } from "../../model.ts";
-import { GATEWAY_SENT_VARIABLES } from "../../gateway/environment.ts";
+import { configureTailnetGateway } from "../../gateway/tailnet.ts";
 import { tailscaleClientFor } from "./client.ts";
-
-const CONFIGURE = String.raw`
-set -eu
-address=$1
-domain=$2
-variables=$3
-work=$(mktemp)
-trap 'rm -f "$work"' EXIT
-grep -v '# usine-tailnet$' /etc/hosts > "$work" || true
-printf '%s git.%s llm.%s # usine-tailnet\n' "$address" "$domain" "$domain" >> "$work"
-cat "$work" > /etc/hosts
-mkdir -p /etc/ssh/sshd_config.d
-printf 'AcceptEnv %s\n' "$variables" > /etc/ssh/sshd_config.d/40-usine-gateway.conf
-sshd -t
-systemctl reload ssh
-cat > /etc/systemd/system/usine-gateway-http.socket <<UNIT
-[Socket]
-ListenStream=/run/usine-gateway/http.sock
-SocketMode=0666
-DirectoryMode=0755
-[Install]
-WantedBy=sockets.target
-UNIT
-cat > /etc/systemd/system/usine-gateway-http.service <<UNIT
-[Unit]
-Requires=usine-gateway-http.socket
-After=usine-gateway-http.socket
-[Service]
-ExecStart=/usr/lib/systemd/systemd-socket-proxyd $address:80
-DynamicUser=yes
-PrivateTmp=yes
-UNIT
-systemctl daemon-reload
-systemctl enable --now usine-gateway-http.socket
-`.trim();
 
 /** Configures Boat machines before checkout and removes their ephemeral nodes at cleanup. */
 export const boatTailnetsFor = Effect.fn("SshExecutor.boatTailnetsFor")(function* (
@@ -105,15 +70,7 @@ export const boatTailnetsFor = Effect.fn("SshExecutor.boatTailnetsFor")(function
           key,
         ),
       );
-      yield* commands.run("prepare", machine.shell, "sudo", [
-        "sh",
-        "-c",
-        CONFIGURE,
-        "sh",
-        settings.value.gatewayAddress,
-        domain,
-        GATEWAY_SENT_VARIABLES.join(" "),
-      ]);
+      yield* configureTailnetGateway(commands, "prepare", machine, settings.value, domain);
       const response = yield* commands.run("prepare", machine.shell, "curl", [
         "--silent",
         "--show-error",

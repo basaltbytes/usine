@@ -157,3 +157,9 @@ The gateway can therefore connect to hosts outside the egress allowlist when Git
 Podman workers supersede the root-equivalent SSH user assumption of the #548 amendment: `usine` has no Docker group membership or system Docker socket access. Containers keep host networking, so the worker's nftables output policy, gateway DNS, metadata protection, and gh socket continue to apply. Podman pulls through the SSH session's `/etc/environment`; only Docker workers install a daemon proxy drop-in and `daemon.json`. The executor disables Podman's implicit proxy forwarding and supplies the attempt environment explicitly, with secrets on stdin.
 
 The gateway credential contract and Boat tailnet routing stay unchanged. Disposable-worker validation must test gateway access from both container startup and a later `exec` over fresh SSH, including cold GHCR blob downloads, metadata denial, and the Boat path. Host networking still exposes host loopback services; rootless mode does not change that accepted boundary.
+
+## Amendment (2026-11-05, #661): long-lived workers over the tailnet
+
+A fixed SSH worker outside the gateway's private network can use the same credential routing as Boat. Its operator joins the Linux machine to Tailscale once and sets worker-level `tailnet.gateway_address`. Preflight uses passwordless sudo to apply the shared gateway configuration and verifies the missing-caller-token refusal. The existing machine identity needs no OAuth client and remains joined after attempt cleanup.
+
+These workers retain direct internet access. Tailnet grants restrict worker access to gateway TCP port 80, while nftables rules in a home VM refuse private address ranges for attempt processes. This extends the #647 amendment's credential protection to long-lived machines; it does not provide the egress isolation of a private Hetzner worker. The operator manages VM networking and firewall policy.
