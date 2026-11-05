@@ -1,3 +1,4 @@
+import type { Harness } from "@usine/core/agent/brain";
 import { type HarnessCatalog, gatewayTokenVariables } from "@usine/agents/harness";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayDomain, GatewayLlmProtocol } from "@usine/core/worker";
@@ -79,28 +80,18 @@ export interface GatewayEnvironment {
   readonly sent: Readonly<Record<string, Redacted.Redacted<string>>>;
 }
 
-/**
- * Returns the variables of `gatewayEnvironment` without a caller token or Codex's home, which
- * only an Attempt has, for commands that reach the Gateway's forward proxy but no attachment,
- * such as a preflight's harness probes.
- */
+/** Returns the base proxy, git, and gh environment for commands without a harness. */
 export const gatewayExportedEnvironment = (
   settings: Pick<GatewayEnvironmentOptions, "catalog" | "domain" | "llmProviders" | "egress">,
   ghConfigDirectory: string,
-): Readonly<Record<string, string>> => {
-  const { exported } = gatewayEnvironment({
+): Readonly<Record<string, string>> =>
+  gatewayEnvironment({
     ...settings,
+    harness: Option.none(),
     ghConfigDirectory,
     homes: {},
     callerToken: Redacted.make(""),
-  });
-  const homeVariables = settings.catalog.descriptors.flatMap(({ worker }) =>
-    Option.toArray(worker.credential).flatMap(({ home }) => Option.toArray(home)),
-  );
-  return Object.fromEntries(
-    Object.entries(exported).filter(([key]) => !homeVariables.includes(key)),
-  );
-};
+  }).exported;
 
 /**
  * Returns the environment that points git, gh, package managers, and Claude Code at the
@@ -120,7 +111,9 @@ export const gatewayExportedEnvironment = (
  * - A harness whose provider the Gateway has no credential for uses its own login through the
  *   forward proxy, whose allowlist must include the login's hosts.
  */
-export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayEnvironment => {
+export const gatewayEnvironment = (
+  options: GatewayEnvironmentOptions & { readonly harness: Option.Option<Harness> },
+): GatewayEnvironment => {
   const { domain, callerToken } = options;
   const gitBase = `http://git.${domain}/`;
   const proxy = options.egress === "direct" ? "" : forwardProxyUrl(domain);
@@ -147,7 +140,9 @@ export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayE
     GH_ENTERPRISE_TOKEN: callerToken,
     GH_TOKEN: callerToken,
   };
-  const harnesses = gatewayWirings(options);
+  const harnesses = gatewayWirings(options).filter(({ harness }) =>
+    Option.contains(options.harness, harness),
+  );
   return {
     exported: {
       ...exported,
@@ -169,7 +164,8 @@ const gatewayWirings = (
   options.catalog.descriptors.flatMap(({ id, worker }) =>
     Option.toArray(worker.credential)
       .filter(({ protocol }) => options.llmProviders.includes(protocol))
-      .map(({ gateway, gatewayPath }) =>
-        gateway.render(`http://llm.${options.domain}/${gatewayPath}`, options.homes[id] ?? ""),
-      ),
+      .map(({ gateway, gatewayPath }) => ({
+        harness: id,
+        ...gateway.render(`http://llm.${options.domain}/${gatewayPath}`, options.homes[id] ?? ""),
+      })),
   );

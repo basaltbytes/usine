@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { DateTime, Option, Redacted, Effect } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { ApiKeyCredential, ProviderGrant, SandboxCredentials } from "../src/api/api.ts";
+import { Harness } from "@usine/core/agent/brain";
 import { harnessEnvironment, PROVIDER_HOSTS } from "../src/api/harness.ts";
 import {
   allowedHostsOf,
@@ -192,11 +193,18 @@ describe("sandbox outbound handlers", () => {
   });
 
   it("points only the configured providers' harnesses at their handlers", () => {
-    const claudeOnly = harnessEnvironment(["anthropic"]);
+    const claudeOnly = harnessEnvironment(
+      ["anthropic", "openai"],
+      Option.some(Harness.make("claude")),
+    );
 
     expect(claudeOnly["ANTHROPIC_BASE_URL"]).toBe("http://anthropic.usine.internal");
     expect(claudeOnly["OPENAI_API_KEY"]).toBeUndefined();
     expect(claudeOnly["SSL_CERT_FILE"]).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
-    expect(harnessEnvironment(["openai"])["ANTHROPIC_BASE_URL"]).toBeUndefined();
+    expect(
+      harnessEnvironment(["anthropic", "openai"], Option.some(Harness.make("codex")))[
+        "ANTHROPIC_BASE_URL"
+      ],
+    ).toBeUndefined();
   });
 });

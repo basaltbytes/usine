@@ -97,12 +97,15 @@ export class HarnessSession extends Schema.Class<
   /** The worker checkout directory from which to resume the conversation. */
   cwd: Schema.NonEmptyString,
   /**
-   * The directory the harness saved the conversation in, if the Attempt set one in place of the
-   * harness's default: Codex's `CODEX_HOME` or Pi's session directory. `None` for the default
-   * or an older record.
+   * The directory the harness saved the conversation in: its configured home or a known host
+   * default, such as `HOME/.codex`. `None` when the host's default is unknown or in older records.
    */
   home: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<string>())),
+  ),
+  /** The native model provider ID checked on continuation, separate from its credential. */
+  modelProvider: Schema.OptionFromOptionalKey(EndpointName).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
   ),
 }) {}
 

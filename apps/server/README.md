@@ -4,6 +4,8 @@ The foreground CLI for a local [usine](https://github.com/basaltbytes/usine) fac
 
 The overview and desk API responses contain run and attempt summaries. Read run or task detail for prompts and result text. The board loads the saved task from run detail when **Run again** is clicked.
 
+Saved harness session records include the home location and optional Codex `modelProvider` ID used to validate continuation. A moved home or changed provider ID refuses the resume before another turn starts.
+
 The run reader matches GitHub changes to each attempt's worker identity, including exe.dev's integration bot. Board moves retain their operator attribution.
 
 Create an instance folder and run its pinned installation:

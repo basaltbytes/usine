@@ -427,6 +427,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             attempt.permissions,
             machine,
             "cleanup",
+            Option.none(),
           );
           yield* stopChildren("cleanup", machine, worktree, attempt.attemptId, isolation);
           const checkoutScope = yield* Effect.scope;
@@ -458,6 +459,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               attempt.permissions,
               machine,
               "cleanup",
+              Option.none(),
             );
             const checkoutScope = yield* Effect.scope;
             const workerIsolation = yield* worker.isolation(machine);
@@ -875,6 +877,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           request.permissions,
           machine,
           "prepare",
+          Option.some(harness),
         );
         // Forked before the checkout's release is registered, so the container is removed after
         // the release salvages the checkout in it.

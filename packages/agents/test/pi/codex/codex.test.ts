@@ -4,6 +4,7 @@ import { Harness, BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
+  EndpointName,
   HarnessSession,
   HarnessSessionId,
   PoolLogin,
@@ -142,18 +143,130 @@ const successfulResponses = (
   }) satisfies Readonly<Record<string, Schema.Json>>;
 
 describe("Codex child backend", () => {
+  for (const field of ["home", "default-home", "model_provider"] as const) {
+    it.effect(`refuses a saved Codex continuation after its ${field} changes`, () => {
+      const original = request(
+        "gpt-5.6-terra",
+        "off",
+        RemoteShell.make({
+          ssh: { command: "ssh", args: [] },
+          sshEnvironment: {},
+          destination: "worker",
+        }),
+      );
+      const saved = HarnessSession.make({
+        id: HarnessSessionId.make("saved-codex"),
+        cwd: original.cwd,
+        home: Option.some(
+          field === "default-home" ? "/old-home/.codex" : "/attempt/original-codex",
+        ),
+        modelProvider: Option.some(EndpointName.make("usine-gateway")),
+      });
+      const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+      const clients: Array<CodexClient> = [];
+      const server = connectionLayer(
+        {
+          ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+          "thread/resume": {
+            modelProvider: "changed-provider",
+            thread: { id: saved.id, turns: [] },
+          },
+        },
+        [],
+        calls,
+        Effect.void,
+        clients,
+      );
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const error = yield* (yield* ChildBackend)
+            .launch(
+              ChildRequest.make({
+                ...original,
+                resume: Option.some(saved),
+                environment:
+                  field === "default-home"
+                    ? { ...original.environment, HOME: "/new-home", CODEX_HOME: "" }
+                    : {
+                        ...original.environment,
+                        CODEX_HOME:
+                          field === "home" ? "/attempt/moved-codex" : "/attempt/original-codex",
+                      },
+              }),
+            )
+            .pipe(Effect.flip);
+          assert.strictEqual(error._tag, "ContinuationMismatchError");
+          assert.include(error.message, `${field === "default-home" ? "home" : field} mismatch`);
+          assert.include(
+            error.message,
+            field === "home"
+              ? "/attempt/original-codex"
+              : field === "default-home"
+                ? "/old-home/.codex"
+                : "usine-gateway",
+          );
+          assert.include(
+            error.message,
+            field === "home"
+              ? "/attempt/moved-codex"
+              : field === "default-home"
+                ? "/new-home/.codex"
+                : "changed-provider",
+          );
+          assert(!calls.some(({ method }) => method === "turn/start"));
+          assert.strictEqual(clients.length, 1, "the old transport is replaced before refusal");
+          assert.strictEqual(clients[0]?.transport, "replace");
+          assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
+        }),
+      ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+    });
+  }
+
+  it.effect("stops a retained remote child without resuming its conversation", () => {
+    const original = request(
+      "gpt-5.6-terra",
+      "off",
+      RemoteShell.make({
+        ssh: { command: "ssh", args: [] },
+        sshEnvironment: {},
+        destination: "worker",
+      }),
+    );
+    const clients: Array<CodexClient> = [];
+    const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+    let closed = false;
+    const server = connectionLayer(
+      {},
+      [],
+      calls,
+      Effect.sync(() => {
+        closed = true;
+      }),
+      clients,
+    );
+    return Effect.gen(function* () {
+      yield* (yield* ChildBackend).stop(original);
+      assert.isTrue(closed);
+      assert.strictEqual(clients.length, 1);
+      assert.strictEqual(clients[0]?.transport, "replace");
+      assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
+      assert.deepStrictEqual(calls, []);
+    }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+  });
+
   it.effect("resumes the recorded thread and CODEX_HOME after a durable restart", () => {
     const saved = HarnessSession.make({
       id: HarnessSessionId.make("saved-codex"),
       cwd: request().cwd,
       home: Option.some("/worker/attempt/codex"),
+      modelProvider: Option.some(EndpointName.make("openai")),
     });
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
     const clients: Array<CodexClient> = [];
     const server = connectionLayer(
       {
         ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-        "thread/resume": { thread: { id: saved.id, turns: [] } },
+        "thread/resume": { modelProvider: "openai", thread: { id: saved.id, turns: [] } },
       },
       [
         {
@@ -176,7 +289,11 @@ describe("Codex child backend", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const running = yield* (yield* ChildBackend).launch(
-          ChildRequest.make({ ...request(), resume: Option.some(saved) }),
+          ChildRequest.make({
+            ...request(),
+            environment: { ...request().environment, CODEX_HOME: "/worker/attempt/codex" },
+            resume: Option.some(saved),
+          }),
         );
         const events = yield* Effect.forkChild(Stream.runCollect(running.events));
         assert.strictEqual((yield* running.result).message, "Continued.");
@@ -207,7 +324,7 @@ describe("Codex child backend", () => {
         const responses = new Map(
           Object.entries({
             ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-            "thread/resume": { thread: { id: saved.id, turns: [] } },
+            "thread/resume": { modelProvider: "openai", thread: { id: saved.id, turns: [] } },
           }),
         );
         const server = Layer.succeed(CodexAppServer)({
@@ -232,6 +349,13 @@ describe("Codex child backend", () => {
             ChildRequest.make({
               ...request(),
               resume: Option.some(saved),
+              environment: {
+                ...request().environment,
+                ...Option.match(saved.home, {
+                  onNone: () => ({}),
+                  onSome: (home) => ({ CODEX_HOME: home }),
+                }),
+              },
               held: supervision !== "paused",
               paused: supervision === "paused",
               idle: supervision === "paused" ? Option.none() : Option.some("Saved final report."),
@@ -480,6 +604,7 @@ describe("Codex child backend", () => {
                     }
                     if (method === "thread/resume")
                       return {
+                        modelProvider: "openai",
                         thread: {
                           id: "thread-1",
                           turns: [{ items: [{ type: "userMessage" }] }],
@@ -877,7 +1002,10 @@ describe("Codex child backend", () => {
         assert(Option.isSome(started.harnessSession));
         assert.strictEqual(started.harnessSession.value.id, "thread-1");
         assert.strictEqual(started.harnessSession.value.cwd, request().cwd);
-        assert(Option.isNone(started.harnessSession.value.home), "Codex uses its default home");
+        assert.deepStrictEqual(
+          started.harnessSession.value.home,
+          Option.some("/home/worker/.codex"),
+        );
         const turn = calls.find(({ method }) => method === "turn/start")?.params;
         assert(Schema.is(Schema.Struct({ effort: Schema.String }))(turn));
         assert.strictEqual(turn.effort, "none");

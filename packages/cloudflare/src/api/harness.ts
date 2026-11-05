@@ -1,3 +1,4 @@
+import type { Harness } from "@usine/core/agent/brain";
 import { catalog } from "@usine/agents/harness";
 import { Option } from "effect";
 import type { CloudflareLlmProvider } from "@usine/core/worker";
@@ -55,6 +56,7 @@ export const PLACEHOLDER_CREDENTIAL = "usine-placeholder";
  */
 export const harnessEnvironment = (
   providers: ReadonlyArray<CloudflareLlmProvider>,
+  harness: Option.Option<Harness>,
 ): Record<string, string> =>
   Object.assign(
     {
@@ -65,12 +67,14 @@ export const harnessEnvironment = (
       GH_TOKEN: PLACEHOLDER_CREDENTIAL,
       GH_PROMPT_DISABLED: "1",
     },
-    ...catalog.descriptors.flatMap(({ worker }) =>
-      Option.toArray(worker.credential)
-        .filter(({ provider }) => providers.includes(provider))
-        .map(({ provider, cloudflare }) => ({
-          ...cloudflare.render(`http://${PROVIDER_HOSTS[provider].sandbox}`, "").environment,
-          [cloudflare.tokenVariable]: PLACEHOLDER_CREDENTIAL,
-        })),
-    ),
+    ...catalog.descriptors
+      .filter(({ id }) => Option.contains(harness, id))
+      .flatMap(({ worker }) =>
+        Option.toArray(worker.credential)
+          .filter(({ provider }) => providers.includes(provider))
+          .map(({ provider, cloudflare }) => ({
+            ...cloudflare.render(`http://${PROVIDER_HOSTS[provider].sandbox}`, "").environment,
+            [cloudflare.tokenVariable]: PLACEHOLDER_CREDENTIAL,
+          })),
+      ),
   );

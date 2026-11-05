@@ -127,6 +127,7 @@ const refusingSteerBackend = Layer.effectContext(
     const services = yield* Effect.context<ChildBackend | StubChildren>();
     const base = Context.get(services, ChildBackend);
     return Context.add(services, ChildBackend, {
+      stop: base.stop,
       launch: (request) =>
         base.launch(request).pipe(
           Effect.map((child) => ({
@@ -165,6 +166,7 @@ describe("durable AttemptRuntime", () => {
                 {
                   id,
                   launch: stub.launch,
+                  stop: stub.stop,
                   preflight: () => Effect.succeed(HarnessReady.make({ harness: id })),
                 },
               ]),
@@ -1766,6 +1768,7 @@ describe("durable AttemptRuntime", () => {
       const database = yield* temporaryDatabase;
       const launched = yield* Deferred.make<ChildSessionLifecycle["Service"]>();
       const backend = Layer.succeed(ChildBackend)({
+        stop: () => Effect.void,
         launch: () =>
           Effect.gen(function* () {
             const lifecycle = yield* ChildSessionLifecycle.current;
@@ -1808,6 +1811,7 @@ describe("durable AttemptRuntime", () => {
       // A launch that hasn't opened its harness, like a Claude child in a retry delay after losing
       // the login refresh lock.
       const backend = Layer.succeed(ChildBackend)({
+        stop: () => Effect.void,
         launch: () =>
           Deferred.succeed(launching, undefined).pipe(
             Effect.andThen(Effect.never),

@@ -13,6 +13,7 @@ import {
   AgentSessionError,
   ChildRequest,
   ChildSessionLifecycle,
+  ContinuationMismatchError,
   ChildSessionBudgetExceededError,
   SessionOperationError,
   reportText,
@@ -347,6 +348,29 @@ export const subagentTool = (services: ExtensionServices) => {
           : task,
       }),
     });
+    if (Option.isSome(saved) && saved.value.session.brain.harness !== spec.agent.brain.harness) {
+      const stopped = yield* services.backend.stop(childRequest).pipe(
+        Effect.provideService(ChildSessionLifecycle, lifecycle),
+        Effect.tapError((error) =>
+          Effect.logError("Could not stop the saved child before refusing continuation", {
+            sessionId,
+            harness: saved.value.session.brain.harness,
+            message: error.message,
+          }),
+        ),
+        Effect.result,
+      );
+      if (Result.isFailure(stopped))
+        return yield* interrupted(
+          `the saved child may still be running because stopping it before the harness change failed: ${stopped.failure.message}`,
+        );
+      const mismatch = ContinuationMismatchError.make({
+        sessionId,
+        field: "harness",
+        message: `harness mismatch (saved ${saved.value.session.brain.harness}, current ${spec.agent.brain.harness})`,
+      });
+      return yield* interrupted(mismatch.message);
+    }
     yield* Effect.annotateCurrentSpan({ agent: session.agent, sessionId: session.id });
     yield* Effect.logInfo(
       "Spawning child session with the rendered task and supplemental parent context",
@@ -441,7 +465,12 @@ export const subagentTool = (services: ExtensionServices) => {
           ) {
             const recovery = yield* Schema.encodeEffect(SavedChild)(
               SavedChild.make({
-                session: event.session,
+                session: {
+                  id: event.session.id,
+                  parentId: event.session.parentId,
+                  agent: event.session.agent,
+                  brain: event.session.brain,
+                },
                 usage: cumulativeUsage,
                 harnessSession: event.harnessSession.value,
                 worker: request.worker,

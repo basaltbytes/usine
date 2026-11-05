@@ -1,7 +1,7 @@
 import { Harness } from "@usine/core/agent/brain";
 import { type TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
 import { GatewayLlmProtocol, GatewayLlmProvider } from "@usine/core/worker";
-import { type Brand, Option, Record, Schema } from "effect";
+import { type Brand, Effect, Option, Record, Schema } from "effect";
 import { CapabilityProfile } from "./capability.ts";
 
 /** The terminal command for a saved harness session. */
@@ -95,6 +95,11 @@ export class WorkerRequirements extends Schema.Class<
   /** Accepted CLI versions; an empty list accepts any installed version. */
   versions: Schema.Array(Schema.NonEmptyString),
   login: Schema.Struct({
+    /** Host configuration variables owned by this harness. */
+    environment: Schema.Array(Schema.NonEmptyString).pipe(
+      Schema.withConstructorDefault(Effect.succeed([])),
+      Schema.withDecodingDefaultKey(Effect.succeed([])),
+    ),
     /** Paths under the worker home mounted read-write for token refresh. */
     mounted: Schema.Array(Schema.NonEmptyString),
     /** Paths under the worker home copied when the container starts. */
@@ -174,6 +179,30 @@ export class HarnessCatalog extends Schema.Class<
       Schema.makeFilter(
         (id) => this.ids.includes(id) || `Unknown harness "${id}". Choose ${this.ids.join(", ")}.`,
       ),
+    );
+  }
+
+  /** Selects the launched harness's variables from an allowlisted host environment. */
+  environmentFor(
+    id: Harness,
+    environment: Readonly<Record<string, string>>,
+  ): Readonly<Record<string, string>> {
+    const variables = (descriptor: HarnessDescriptor) => [
+      ...descriptor.worker.login.environment,
+      ...Option.toArray(descriptor.worker.credential).flatMap(
+        ({ home, gateway, apiKey, cloudflare }) => [
+          ...Option.toArray(home),
+          ...[gateway, apiKey, cloudflare].flatMap((wiring) => [
+            wiring.tokenVariable,
+            ...Object.keys(wiring.environment),
+          ]),
+        ],
+      ),
+    ];
+    const owned = new Set(this.descriptors.flatMap(variables));
+    const selected = new Set(Option.toArray(this.get(id)).flatMap(variables));
+    return Object.fromEntries(
+      Object.entries(environment).filter(([key]) => !owned.has(key) || selected.has(key)),
     );
   }
 

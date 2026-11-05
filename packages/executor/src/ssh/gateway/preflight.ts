@@ -12,7 +12,7 @@ import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts
 import type { HarnessProbe } from "../../harness-preflight.ts";
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
-import { forwardProxyUrl, gatewaySentVariables, gatewayEnvironment } from "./environment.ts";
+import { forwardProxyUrl, gatewayEnvironment } from "./environment.ts";
 
 /** A placeholder caller token that lets preflight check the sent variables without attaching anything. */
 const PROBE_TOKEN = Redacted.make("usine-preflight");
@@ -198,14 +198,23 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
   const { forward, settings } = gateway;
   const gitHost = `git.${settings.domain}`;
   yield* Effect.annotateCurrentSpan({ worker, domain: settings.domain, gateway: forward.gateway });
-  const { sent } = gatewayEnvironment({
+  const environment = {
     catalog,
     domain: settings.domain,
     llmProviders: settings.llmProviders,
     ghConfigDirectory: machine.workerDirectory,
     homes: {},
     callerToken: PROBE_TOKEN,
-  });
+  };
+  const { sent: baseSent } = gatewayEnvironment({ ...environment, harness: Option.none() });
+  const sent = {
+    ...baseSent,
+    ...Object.fromEntries(
+      catalog.ids.flatMap((harness) =>
+        Object.entries(gatewayEnvironment({ ...environment, harness: Option.some(harness) }).sent),
+      ),
+    ),
+  };
   const received = yield* commands.run("preflight", sendingShell(machine.shell, sent), "sh", [
     "-c",
     SENT_VARIABLES_SCRIPT,
@@ -216,7 +225,7 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
   if (dropped.length > 0)
     return yield* gatewayGap(
       worker,
-      `The sshd on SSH worker "${worker}" doesn't accept ${dropped.join(", ")}. Add AcceptEnv ${gatewaySentVariables(catalog).join(" ")} to its sshd configuration.`,
+      `The sshd on SSH worker "${worker}" doesn't accept ${dropped.join(", ")}. Add AcceptEnv ${Object.keys(sent).join(" ")} to its sshd configuration.`,
       new Error(`variables not received: ${dropped.join(" ")}`),
     );
 

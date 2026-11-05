@@ -1,6 +1,6 @@
 # @usine/cloudflare
 
-The sandbox environment reads provider credential variables from the registered harness descriptors. Outbound handlers replace the placeholder credential with the provider API key; sandbox environment variables contain no provider secrets.
+The sandbox environment reads provider credential variables from the selected harness descriptor. `harnessEnvironment(providers, harness)` takes `Option<Harness>`: `Some` adds that harness's provider wiring, and `None` returns the base git, gh, and certificate environment. Other harnesses' wiring does not enter child or tool commands. Outbound handlers replace the placeholder credential with the provider API key; sandbox environment variables contain no provider secrets.
 
 The Cloudflare Worker that runs each usine Attempt in its own sandbox, for `cloudflare` Workers in `usine.yaml` ([#551](https://github.com/basaltbytes/usine/issues/551)). You deploy it to your Cloudflare account; usine's executor calls it over HTTPS with a Cloudflare Access service token.
 

@@ -630,7 +630,7 @@ it.effect("retries opening the selected gateway after a cached setup failure", (
           InstanceId.make("11111111-1111-4111-8111-111111111111"),
         );
         assert(access !== undefined);
-        assert(access.credentials._tag === "Gateway");
+        assert(access.credentials.route === "gateway");
         const first = yield* access.credentials.authentication("openai-codex").pipe(Effect.flip);
         assert.include(first.message, "Set FIRST_GATEWAY_TOKEN");
         env.FIRST_GATEWAY_TOKEN = "configured";

@@ -79,7 +79,7 @@ export const answer = (text: string): AssistantMessage => fauxAssistantMessage([
 
 /** A scripted model runtime and its default parent model. */
 export interface FauxParent {
-  readonly credentials: { readonly _tag: "HostLogin" };
+  readonly credentials: { readonly route: "host-login" };
   readonly models: MutableModels;
   readonly defaultModel: Option.Option<ModelRef>;
 }
@@ -94,7 +94,7 @@ export const fauxParent = (steps: ReadonlyArray<ParentStep>): FauxParent => {
   models.setProvider(faux.provider);
   faux.setResponses([...steps]);
   const defaultModel: ModelRef = { provider: faux.provider.id, modelId: "faux-1" };
-  return { models, defaultModel: Option.some(defaultModel), credentials: { _tag: "HostLogin" } };
+  return { models, defaultModel: Option.some(defaultModel), credentials: { route: "host-login" } };
 };
 
 /** A child launched by the stub backend and finished by the test. */
@@ -135,6 +135,8 @@ export class StubChildren extends Context.Service<
   StubChildren,
   {
     readonly next: Effect.Effect<StubChild>;
+    /** A retained child stopped without starting a turn. */
+    readonly stopped: Effect.Effect<ChildRequest>;
   }
 >()("@usine/durable/testing/StubChildren") {}
 
@@ -259,16 +261,23 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
 export const stubChildBackendLayer: Layer.Layer<ChildBackend | StubChildren> = Layer.effectContext(
   Effect.gen(function* () {
     const launched = yield* Queue.unbounded<StubChild>();
+    const stopped = yield* Queue.unbounded<ChildRequest>();
     return Context.make(
       ChildBackend,
       ChildBackend.of({
+        stop: (request) => Queue.offer(stopped, request).pipe(Effect.asVoid),
         launch: (request) =>
           launchStub(request).pipe(
             Effect.tap(({ child }) => Queue.offer(launched, child)),
             Effect.map(({ running }) => running),
           ),
       }),
-    ).pipe(Context.add(StubChildren, StubChildren.of({ next: Queue.take(launched) })));
+    ).pipe(
+      Context.add(
+        StubChildren,
+        StubChildren.of({ next: Queue.take(launched), stopped: Queue.take(stopped) }),
+      ),
+    );
   }),
 );
 

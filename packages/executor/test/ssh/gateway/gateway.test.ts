@@ -763,6 +763,17 @@ describe("SSH Worker behind a Gateway", () => {
               `preflight ran ${mutating}`,
             );
 
+        machine.state.droppedSentVariables.add("USINE_GATEWAY_TOKEN");
+        yield* executor.preflight(WORKER, [], 1);
+        machine.state.droppedSentVariables.clear();
+
+        machine.state.droppedSentVariables.add("ANTHROPIC_AUTH_TOKEN");
+        const missingProviderToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert(missingProviderToken._tag === "WorkerCapabilityError");
+        assert.include(missingProviderToken.message, "doesn't accept ANTHROPIC_AUTH_TOKEN.");
+        assert.notInclude(missingProviderToken.message, "USINE_GATEWAY_TOKEN");
+        machine.state.droppedSentVariables.clear();
+
         machine.state.droppedSentVariables.add("GH_TOKEN");
         const missingGitHubToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(missingGitHubToken._tag === "WorkerCapabilityError");

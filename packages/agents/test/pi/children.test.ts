@@ -49,6 +49,7 @@ const request = (harness: Harness) =>
   });
 
 const backend = (selected: Harness): ChildBackendService => ({
+  stop: () => Effect.void,
   launch: (found) =>
     Effect.succeed({
       session: found.session,
@@ -75,6 +76,55 @@ const runtimes = extended.ids.map((id): HarnessRuntime => ({
 }));
 
 describe("harness runtime registration", () => {
+  it.effect("removes other harnesses' host configuration before launch", () => {
+    const original = request(claude.id);
+    const runtime: HarnessRuntime = {
+      id: claude.id,
+      stop: () => Effect.void,
+      preflight: checkedPreflight(() => Effect.void),
+      launch: (found) => {
+        assert.deepStrictEqual(found.environment, {
+          HOME: "/home/worker",
+          PATH: "/usr/bin:/bin",
+          CLAUDE_CONFIG_DIR: "/worker/claude",
+        });
+        return backend(claude.id).launch(found);
+      },
+    };
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...original,
+            environment: {
+              ...original.environment,
+              CLAUDE_CONFIG_DIR: "/worker/claude",
+              CODEX_HOME: "/worker/codex",
+              USINE_GATEWAY_TOKEN: "other-harness-token",
+            },
+          }),
+        );
+      }),
+    ).pipe(
+      Effect.provide(
+        childDispatcherLayer.pipe(
+          Layer.provide(
+            Harnesses.layerFrom(catalog, [
+              runtime,
+              ...catalog.ids
+                .filter((id) => id !== claude.id)
+                .map((id): HarnessRuntime => ({
+                  id,
+                  ...backend(id),
+                  preflight: checkedPreflight(() => Effect.void),
+                })),
+            ]),
+          ),
+        ),
+      ),
+    );
+  });
+
   it.effect("refuses saved-session launch when its credential route lacks resume-session", () => {
     const descriptor = HarnessDescriptor.make({
       ...claude,

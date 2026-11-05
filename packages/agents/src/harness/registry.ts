@@ -2,6 +2,7 @@ import { Harness } from "@usine/core/agent/brain";
 import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
 import { HarnessCatalog } from "./harness.ts";
 import { admitPreflight, type HarnessRuntime } from "./runtime.ts";
+import { ChildRequest } from "../runtime.ts";
 import { admitChild } from "./launch.ts";
 
 /** A descriptor and its runtime cannot be registered together. */
@@ -47,8 +48,20 @@ export class Harnesses extends Context.Service<
       }
       registered.set(runtime.id, {
         id: runtime.id,
-        launch: (request) =>
-          admitChild(catalog, request).pipe(Effect.andThen(() => runtime.launch(request))),
+        stop: (request) =>
+          runtime.stop(
+            ChildRequest.make({
+              ...request,
+              environment: catalog.environmentFor(runtime.id, request.environment),
+            }),
+          ),
+        launch: (request) => {
+          const scoped = ChildRequest.make({
+            ...request,
+            environment: catalog.environmentFor(runtime.id, request.environment),
+          });
+          return admitChild(catalog, scoped).pipe(Effect.andThen(() => runtime.launch(scoped)));
+        },
         preflight: (brain, target) =>
           admitPreflight(catalog, brain, target).pipe(
             Effect.andThen(() => runtime.preflight(brain, target)),

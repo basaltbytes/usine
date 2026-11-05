@@ -184,7 +184,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
 
     const grantFor = (repository: RepositoryName) =>
       Effect.succeed({
-        acquire: (attemptId, worker, permissions, machine, operation) =>
+        acquire: (attemptId, worker, permissions, machine, operation, harness) =>
           Effect.gen(function* () {
             yield* reclaimMachine(machine);
             const access = Option.isNone(machine.gateway)
@@ -204,6 +204,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
                   machine,
                   machine.gateway.value,
                   operation,
+                  harness,
                 );
             return yield* withApiKeys(
               catalog,
@@ -213,6 +214,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
               attemptId,
               access,
               operation,
+              harness,
             );
           }),
       } satisfies RemoteGrant<SshMachine>);

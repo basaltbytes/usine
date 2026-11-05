@@ -1,3 +1,4 @@
+import { checkContinuationHome } from "../continuation.ts";
 import { HarnessCatalog } from "../harness.ts";
 import { admitChild } from "../launch.ts";
 import { piPreflight } from "./preflight.ts";
@@ -221,23 +222,28 @@ const makePiChild = Effect.gen(function* () {
       ),
   );
   const directory = (request: ChildRequest) => `${request.cwd}/.usine/pi/sessions`;
-  const launch = Effect.fn("PiRuntime.launch")((request: ChildRequest) =>
-    start(
+  const launch = Effect.fn("PiRuntime.launch")(function* (request: ChildRequest) {
+    yield* checkContinuationHome(
+      request,
+      Option.some(directory(request)),
+      Option.some(directory(request)),
+    );
+    return yield* start(
       request,
       Option.match(request.resume, {
         onNone: () => ({ _tag: "Create" as const, directory: directory(request) }),
         onSome: (saved) => ({
           _tag: "Resume" as const,
-          directory: Option.getOrElse(saved.home, () => directory(request)),
+          directory: directory(request),
           id: saved.id,
         }),
       }),
-    ),
-  );
+    );
+  });
   const resume = Effect.fn("PiRuntime.resume")((request: ChildRequest, id: HarnessSessionId) =>
     start(request, { _tag: "Resume", directory: directory(request), id }),
   );
-  return { launch, resume };
+  return { launch, resume, stop: (_request: ChildRequest) => Effect.void };
 });
 
 /** Provides `ChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
@@ -256,5 +262,11 @@ export interface PiRuntime extends HarnessRuntime {
 export const piRuntime = Effect.gen(function* () {
   const child = yield* makePiChild;
   const preflight = yield* piPreflight;
-  return { id: pi.id, preflight, launch: child.launch, resume: child.resume } satisfies PiRuntime;
+  return {
+    id: pi.id,
+    preflight,
+    launch: child.launch,
+    resume: child.resume,
+    stop: child.stop,
+  } satisfies PiRuntime;
 });
