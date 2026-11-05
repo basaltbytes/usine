@@ -565,7 +565,7 @@ describe("ChatGptLogins", () => {
 
 const chatGptProviders = (login: ChatGptLogin): LlmProviders => ({
   ...NO_PROVIDERS,
-  openai: Option.some(
+  "openai-responses": Option.some(
     OpenAiProvider.make({ upstream: UpstreamBase.make(BACKEND), credential: login }),
   ),
 });
@@ -630,7 +630,7 @@ const send = (url: string, headers: Record<string, string>, body?: string) =>
 
 describe("GatewayProxy with a ChatGPT login", () => {
   it.effect(
-    "sends Codex's /openai/v1 requests to the ChatGPT backend with the login's token and account",
+    "sends Codex's /openai-responses/v1 requests to the ChatGPT backend with the login's token and account",
     () =>
       Effect.gen(function* () {
         const { login } = yield* authFile("60 minutes");
@@ -638,7 +638,7 @@ describe("GatewayProxy with a ChatGPT login", () => {
           yield* setAnswer(refreshing(() => new Response("event: done\n\n", { status: 200 })));
           const caller = yield* attach;
           const answer = yield* send(
-            "http://llm.gw.test/openai/v1/responses?client_version=0.159.2",
+            "http://llm.gw.test/openai-responses/v1/responses?client_version=0.159.2",
             {
               authorization: `Bearer ${caller}`,
               "chatgpt-account-id": "another-account",
@@ -673,11 +673,11 @@ describe("GatewayProxy with a ChatGPT login", () => {
           yield* setAnswer(refreshing());
           const caller = yield* attach;
           for (const path of [
-            "/openai/responses",
-            "/openai/v1",
-            "/openai/v1/x%2F..%2Fconversations",
-            "/openai/v1/conversations",
-            "/openai/v1/responses/../../conversations",
+            "/openai-responses/responses",
+            "/openai-responses/v1",
+            "/openai-responses/v1/x%2F..%2Fconversations",
+            "/openai-responses/v1/conversations",
+            "/openai-responses/v1/responses/../../conversations",
           ]) {
             const answer = yield* send(`http://llm.gw.test${path}`, {
               authorization: `Bearer ${caller}`,
@@ -705,7 +705,7 @@ describe("GatewayProxy with a ChatGPT login", () => {
             yield* setAnswer(() => Effect.succeed(token.clone()));
             const caller = yield* attach;
             const answer = yield* send(
-              "http://llm.gw.test/openai/v1/responses",
+              "http://llm.gw.test/openai-responses/v1/responses",
               { authorization: `Bearer ${caller}` },
               "{}",
             );
@@ -734,7 +734,7 @@ describe("GatewayProxy with a ChatGPT login", () => {
         );
         const caller = yield* attach;
         const ask = send(
-          "http://llm.gw.test/openai/v1/responses",
+          "http://llm.gw.test/openai-responses/v1/responses",
           { authorization: `Bearer ${caller}` },
           "{}",
         );
@@ -788,7 +788,7 @@ describe("the Node gateway with a ChatGPT login", () => {
       });
       const providers: LlmProviders = {
         ...NO_PROVIDERS,
-        openai: Option.some(
+        "openai-responses": Option.some(
           OpenAiProvider.make({
             upstream: UpstreamBase.make(`${backend.origin}/backend-api/codex`),
             credential: login,
@@ -804,7 +804,7 @@ describe("the Node gateway with a ChatGPT login", () => {
               host: proxy.host,
               port: proxy.port,
               method: "POST",
-              path: "/openai/v1/responses",
+              path: "/openai-responses/v1/responses",
               headers: { host: "llm.gw.test", authorization: `Bearer ${caller}` },
             },
             (response) => {

@@ -1,5 +1,7 @@
 # @usine/config
 
+SSH `gateway.llm_providers` lists wire-protocol slots: `anthropic-messages` and `openai-responses`. Saved configurations and imports with the previous gateway IDs decode to protocol IDs; exports write protocol IDs. Provisioner `api_keys` and Cloudflare provider records use provider names, `anthropic` and `openai`.
+
 Stores versioned configuration and imports and exports the files of a [usine](https://github.com/basaltbytes/usine) instance folder. The [`usine.yaml`](https://docs.usine.dev/reference/configuration/usine-yaml/), [loop file](https://docs.usine.dev/reference/configuration/loop-files/), and [agent file](https://docs.usine.dev/reference/configuration/agent-files/) references describe every key.
 
 - `usine.yaml`: schema version, factory-wide GitHub labels, the managed-repo registry, projects, settings, workers, webhook mode, and operator login.

@@ -323,35 +323,46 @@ describe("GatewayProxy", () => {
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
-  it.effect("Anthropic requests carry the gateway's API key in place of the placeholder", () =>
-    Effect.gen(function* () {
-      const caller = yield* attach(installation);
-      yield* send(
-        "http://llm.gw.test/anthropic/v1/messages?beta=true",
-        { "x-api-key": caller, "anthropic-version": "2023-06-01" },
-        { method: "POST", body: "{}" },
-      );
-      const [request] = yield* sent;
-      assert(request !== undefined);
-      assert.strictEqual(request.url, "https://api.anthropic.com/v1/messages?beta=true");
-      assert.deepStrictEqual(Headers.get(request.headers, "x-api-key"), Option.some(ANTHROPIC_KEY));
-      assert.deepStrictEqual(
-        Headers.get(request.headers, "anthropic-version"),
-        Option.some("2023-06-01"),
-      );
-    }).pipe(
-      Effect.provide(
-        gateway({
-          ...NO_PROVIDERS,
-          anthropic: Option.some(
-            AnthropicProvider.make({
-              upstream: UpstreamBase.make("https://api.anthropic.com"),
-              credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
-            }),
-          ),
-        }),
+  it.effect.each(["anthropic-messages", "anthropic"])(
+    "%s requests replace the placeholder with the gateway API key",
+    (prefix) =>
+      Effect.gen(function* () {
+        lines.length = 0;
+        const caller = yield* attach(installation);
+        yield* send(
+          `http://llm.gw.test/${prefix}/v1/messages?beta=true`,
+          { "x-api-key": caller, "anthropic-version": "2023-06-01" },
+          { method: "POST", body: "{}" },
+        );
+        const [request] = yield* sent;
+        assert(request !== undefined);
+        assert.strictEqual(request.url, "https://api.anthropic.com/v1/messages?beta=true");
+        assert.strictEqual(
+          lines.some((line) => line.includes("Deprecated LLM path prefix")),
+          prefix === "anthropic",
+        );
+        for (const value of [caller, ANTHROPIC_KEY]) assert.notInclude(lines.join("\n"), value);
+        assert.deepStrictEqual(
+          Headers.get(request.headers, "x-api-key"),
+          Option.some(ANTHROPIC_KEY),
+        );
+        assert.deepStrictEqual(
+          Headers.get(request.headers, "anthropic-version"),
+          Option.some("2023-06-01"),
+        );
+      }).pipe(
+        Effect.provide(
+          gateway({
+            ...NO_PROVIDERS,
+            "anthropic-messages": Option.some(
+              AnthropicProvider.make({
+                upstream: UpstreamBase.make("https://api.anthropic.com"),
+                credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
+              }),
+            ),
+          }),
+        ),
       ),
-    ),
   );
 
   it.effect(
@@ -359,7 +370,7 @@ describe("GatewayProxy", () => {
     () =>
       Effect.gen(function* () {
         const caller = yield* attach(installation);
-        yield* send("http://llm.gw.test/anthropic/v1/messages", {
+        yield* send("http://llm.gw.test/anthropic-messages/v1/messages", {
           authorization: `Bearer ${caller}`,
           "anthropic-beta": "fine-grained-tool-streaming-2025-05-14",
         });
@@ -377,7 +388,7 @@ describe("GatewayProxy", () => {
         Effect.provide(
           gateway({
             ...NO_PROVIDERS,
-            anthropic: Option.some(
+            "anthropic-messages": Option.some(
               AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
                 credential: AnthropicSubscriptionToken.make({ token: secret(SUBSCRIPTION_TOKEN) }),
@@ -388,22 +399,28 @@ describe("GatewayProxy", () => {
       ),
   );
 
-  it.effect(
-    "Codex's OpenAI requests carry the key as a bearer token; an unset provider is refused",
-    () =>
+  it.effect.each(["openai-responses", "openai"])(
+    "%s requests replace the placeholder with a bearer key and refuse an unset provider",
+    (prefix) =>
       Effect.gen(function* () {
+        lines.length = 0;
         const caller = yield* attach(installation);
-        yield* send("http://llm.gw.test/openai/v1/responses", {
+        yield* send(`http://llm.gw.test/${prefix}/v1/responses`, {
           authorization: `Bearer ${caller}`,
         });
         const [request] = yield* sent;
         assert(request !== undefined);
         assert.strictEqual(request.url, "https://api.openai.com/v1/responses");
+        assert.strictEqual(
+          lines.some((line) => line.includes("Deprecated LLM path prefix")),
+          prefix === "openai",
+        );
+        for (const value of [caller, OPENAI_KEY]) assert.notInclude(lines.join("\n"), value);
         assert.deepStrictEqual(
           Headers.get(request.headers, "authorization"),
           Option.some(`Bearer ${OPENAI_KEY}`),
         );
-        const refused = yield* send("http://llm.gw.test/anthropic/v1/messages", {
+        const refused = yield* send("http://llm.gw.test/anthropic-messages/v1/messages", {
           "x-api-key": caller,
         });
         assert.deepStrictEqual(
@@ -414,7 +431,7 @@ describe("GatewayProxy", () => {
         Effect.provide(
           gateway({
             ...NO_PROVIDERS,
-            openai: Option.some(
+            "openai-responses": Option.some(
               OpenAiProvider.make({
                 upstream: UpstreamBase.make("https://api.openai.com"),
                 credential: OpenAiApiKey.make({ key: secret(OPENAI_KEY) }),
@@ -437,13 +454,13 @@ describe("GatewayProxy", () => {
             { method: "POST", body: "{}" },
           );
         for (const path of [
-          "/anthropic/v1/messages?beta=true",
-          "/anthropic/v1/messages/count_tokens?beta=true",
-          "/anthropic/v1/models",
-          "/anthropic/v1/models/claude-haiku-5-5",
-          "/openai/v1/responses",
-          "/openai/v1/responses/compact",
-          "/openai/v1/models",
+          "/anthropic-messages/v1/messages?beta=true",
+          "/anthropic-messages/v1/messages/count_tokens?beta=true",
+          "/anthropic-messages/v1/models",
+          "/anthropic-messages/v1/models/claude-haiku-5-5",
+          "/openai-responses/v1/responses",
+          "/openai-responses/v1/responses/compact",
+          "/openai-responses/v1/models",
         ])
           assert.strictEqual((yield* ask(path)).status, 200, path);
         assert.deepStrictEqual(
@@ -461,28 +478,30 @@ describe("GatewayProxy", () => {
 
         for (const path of [
           // Other parts of the providers' APIs.
+          "/anthropic-messages/v1/files",
+          "/anthropic-messages/v1/messages/batches",
+          "/anthropic-messages/v1/organizations/api_keys",
+          "/openai-responses/v1/files",
           "/anthropic/v1/files",
-          "/anthropic/v1/messages/batches",
-          "/anthropic/v1/organizations/api_keys",
-          "/openai/v1/files",
           "/openai/v1/chat/completions",
+          "/openai-responses/v1/chat/completions",
           // Paths outside /v1.
-          "/anthropic/messages",
-          "/openai/responses",
-          "/openai",
+          "/anthropic-messages/messages",
+          "/openai-responses/responses",
+          "/openai-responses",
           // Percent-encoded separators.
-          "/anthropic/v1/messages%2F..%2F..%2Ffiles",
-          "/openai/v1/responses%2f..%2ffiles",
-          "/openai/v1/responses%5C..%5Cfiles",
-          "/openai/v1/responses%252F..%252Ffiles",
+          "/anthropic-messages/v1/messages%2F..%2F..%2Ffiles",
+          "/openai-responses/v1/responses%2f..%2ffiles",
+          "/openai-responses/v1/responses%5C..%5Cfiles",
+          "/openai-responses/v1/responses%252F..%252Ffiles",
           // Dot segments, which URL parsing resolves before the route check.
-          "/anthropic/v1/messages/../files",
-          "/openai/v1/responses/%2e%2e/files",
-          "/openai/v1/responses/.%2E/files",
-          "/anthropic/v1/models/..",
+          "/anthropic-messages/v1/messages/../files",
+          "/openai-responses/v1/responses/%2e%2e/files",
+          "/openai-responses/v1/responses/.%2E/files",
+          "/anthropic-messages/v1/models/..",
           // Trailing and doubled separators.
-          "/openai/v1/responses/",
-          "/anthropic/v1//messages",
+          "/openai-responses/v1/responses/",
+          "/anthropic-messages/v1//messages",
         ]) {
           const refused = yield* ask(path);
           assert.deepStrictEqual(
@@ -496,13 +515,13 @@ describe("GatewayProxy", () => {
       }).pipe(
         Effect.provide(
           gateway({
-            anthropic: Option.some(
+            "anthropic-messages": Option.some(
               AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
                 credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
               }),
             ),
-            openai: Option.some(
+            "openai-responses": Option.some(
               OpenAiProvider.make({
                 upstream: UpstreamBase.make("https://api.openai.com"),
                 credential: OpenAiApiKey.make({ key: secret(OPENAI_KEY) }),
@@ -802,7 +821,7 @@ describe("GatewayProxy", () => {
         yield* send("http://git.gw.test/acme/other.git/info/refs", {
           "x-usine-gateway-token": caller,
         });
-        yield* send("http://llm.gw.test/anthropic/v1/messages", { "x-api-key": caller });
+        yield* send("http://llm.gw.test/anthropic-messages/v1/messages", { "x-api-key": caller });
         const logged = [...lines];
         const refusal = logged.find((line) => line.includes("repository-mismatch"));
         assert(refusal !== undefined, logged.join("\n"));
@@ -821,7 +840,7 @@ describe("GatewayProxy", () => {
         Effect.provide(
           gateway({
             ...NO_PROVIDERS,
-            anthropic: Option.some(
+            "anthropic-messages": Option.some(
               AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
                 credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),

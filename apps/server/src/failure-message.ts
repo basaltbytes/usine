@@ -2,6 +2,8 @@ import type { configCommand } from "./configuration/cli.ts";
 import { Duration, type Effect, Match, Option, Schema } from "effect";
 import type { backup } from "./backup.ts";
 import type { CliUsageError, CliVersionError } from "./cli.ts";
+import { LaunchdService } from "./instance/launchd.ts";
+import { type ServiceUnit, serviceOutput, serviceStartCommand } from "./instance/service.ts";
 import type { upDetached } from "./detach.ts";
 import type { exportRun } from "./export-run.ts";
 import type { instanceEnvironment } from "./instance/environment.ts";
@@ -88,11 +90,11 @@ const runList = (runs: ReadonlyArray<string>): string =>
 const waitingFor = (runs: ReadonlyArray<string>): string =>
   runs.length === 0 ? "" : `, waiting for the running attempts of ${runList(runs)}`;
 
-/** Returns the command that starts the instance again: its systemd service's, or a background start. */
-const startCommand = (unit: Option.Option<string>): string =>
+/** Returns the supervised or detached start command. */
+const startCommand = (unit: Option.Option<ServiceUnit>): string =>
   Option.match(unit, {
     onNone: () => "usine up --detach",
-    onSome: (service) => `systemctl start ${service}`,
+    onSome: serviceStartCommand,
   });
 
 const stopTimeout = (
@@ -100,7 +102,7 @@ const stopTimeout = (
   pid: number,
   timeout: Duration.Duration,
   runs: ReadonlyArray<string>,
-  unit: Option.Option<string>,
+  unit: Option.Option<ServiceUnit>,
 ): string => {
   const still = `usine (pid ${pid}) is still stopping after ${Duration.format(timeout)}${waitingFor(runs)}. Its drain continues.`;
   return Match.value(command).pipe(
@@ -149,7 +151,7 @@ const logLines = (tail: string): string =>
 const startOutput = (failure: UpgradeFailedError): string =>
   Option.match(failure.unit, {
     onNone: () => logLines(failure.tail),
-    onSome: (unit) => `Read its output with journalctl -u ${unit}.`,
+    onSome: (unit) => `Read its output at ${serviceOutput(unit)}.`,
   });
 
 /** Returns where to check a start that runs but doesn't answer. */
@@ -157,7 +159,7 @@ const stillRuns = (failure: UpgradeFailedError): string =>
   Option.match(failure.unit, {
     onNone: () =>
       `It still runs: check .usine/usine.log, or stop it with usine stop. ${logLines(failure.tail)}`,
-    onSome: (unit) => `It still runs: check journalctl -u ${unit}, or stop it with usine stop.`,
+    onSome: (unit) => `It still runs: check ${serviceOutput(unit)}, or stop it with usine stop.`,
   });
 
 /**
@@ -256,12 +258,14 @@ export const failureMessage = (failure: CliFailure): string =>
         : `usine up${holderOf(pid)} didn't answer on port ${port}, and wrote nothing to ${log} for ${Duration.format(timeout)}. It still runs. Check ${log}, or stop it with usine stop.`,
     DetachedSpawnError: ({ command, reason }) =>
       `Could not start ${command} in the background (${clause(reason)}).`,
+    LaunchctlError: ({ command, service, reason }) =>
+      `${command} failed (${clause(reason)}). Run the command in the login session that owns ${service} and check its plist and log files.`,
     SystemctlError: ({ command, unit, reason }) =>
       `${command} failed (${clause(reason)}). ${unit} runs usine, so usine manages it with systemctl. Run the command as a user that may start and stop ${unit}, such as root, or let this user manage it with the polkit rule in the guide to running the orchestrator on a server.`,
-    SystemdStartError: ({ unit, outcome, state, timeout }) =>
+    ServiceStartError: ({ unit, outcome, state, timeout }) =>
       outcome === "failed"
-        ? `systemctl start ${unit} ran, but the service was ${state} before usine listened, and is now stopped. Read its output with journalctl -u ${unit}, then run systemctl start ${unit}.`
-        : `systemctl start ${unit} ran, but usine didn't answer within ${Duration.format(timeout)}, and the service is ${state}. Startup recovery can take minutes: follow it with journalctl -u ${unit} -f, and check it with usine status.`,
+        ? `${Schema.is(LaunchdService)(unit) ? `launchctl kickstart ${unit}` : serviceStartCommand(unit)} ran, but the service was ${state} before usine listened, and is now stopped. Read its output at ${serviceOutput(unit)}, then run ${startCommand(Option.some(unit))}.`
+        : `${unit} started, but usine didn't answer within ${Duration.format(timeout)}, and the service is ${state}. Startup recovery can take minutes: read ${serviceOutput(unit)} and check it with usine status.`,
     EngineOutsideInstanceError: ({ script, version, packaged }) =>
       packaged
         ? `usine upgrade changed nothing: the running engine, @usine/server ${version}, runs from ${script}, outside this instance's node_modules. Update that install with its package manager, then run usine restart.`

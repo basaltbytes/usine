@@ -3,13 +3,14 @@ title: Run usine
 description: Start and maintain a local instance or a hosted orchestrator.
 ---
 
-Start an instance on your machine or a Linux server, then maintain its access, version, and stored state. For a first agent pull request, follow the [quickstart](/get-started/quickstart/).
+Start an instance on your machine, a Linux server, or an always-on Mac, then maintain its access, version, and stored state. For a first agent pull request, follow the [quickstart](/get-started/quickstart/).
 
 ## Start an instance
 
 1. [Run usine locally](/guides/run-usine-locally/)
 2. [Host usine on a Linux server](/guides/host-usine-on-linux/)
-3. [Keep the orchestrator running](/guides/keep-the-orchestrator-running/)
+3. [Host usine on a Mac](/guides/host-usine-on-macos/)
+4. [Keep the orchestrator running](/guides/keep-the-orchestrator-running/)
 
 ## Connect to the instance
 

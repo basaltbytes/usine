@@ -21,7 +21,7 @@ it.effect(
               domain: "gw.test",
               destination: "gateway",
               admin_token_env: "GATEWAY_TOKEN",
-              llm_providers: ["anthropic", "openai"],
+              llm_providers: ["anthropic-messages", "openai-responses"],
             },
             provisioner: {
               provider: "boat",

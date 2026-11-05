@@ -174,7 +174,7 @@ const CODEX_CONFIG = `model_provider = "usine-gateway"
 
 [model_providers.usine-gateway]
 name = "usine gateway"
-base_url = "http://llm.gw.test/openai/v1"
+base_url = "http://llm.gw.test/openai-responses/v1"
 env_key = "USINE_GATEWAY_TOKEN"
 wire_api = "responses"
 requires_openai_auth = false
@@ -241,7 +241,7 @@ describe("ChatGPT login at the gateway", () => {
         );
         const providers = {
           ...NO_PROVIDERS,
-          openai: Option.some(
+          "openai-responses": Option.some(
             OpenAiProvider.make({
               upstream: UpstreamBase.make(`${standIn.origin}/backend-api/codex`),
               credential: ChatGptLogin.make({

@@ -1,4 +1,6 @@
 import { Effect, Layer } from "effect";
+import type { HarnessCatalog } from "./harness.ts";
+import type { HarnessRuntime } from "./runtime.ts";
 import { catalog } from "./catalog.ts";
 import { claudeSdkLive } from "./claude/sdk.ts";
 import { claudeRuntime } from "./claude/claude.ts";
@@ -13,14 +15,26 @@ export { admitChild, childAdmissionContext, hostPlacement } from "./launch.ts";
 export { Harnesses, HarnessRegistrationError, UnknownHarnessError } from "./registry.ts";
 export { type HarnessRuntime, ProbeTarget } from "./runtime.ts";
 
+const harnessesFor = (
+  source: HarnessCatalog,
+  configure: (runtimes: ReadonlyArray<HarnessRuntime>) => ReadonlyArray<HarnessRuntime>,
+) =>
+  Layer.unwrap(
+    Effect.map(Effect.all([claudeRuntime, codexRuntime, piRuntime]), (runtimes) =>
+      Harnesses.layerFrom(source, configure(runtimes)),
+    ),
+  );
+
+const sdkLive = Layer.mergeAll(claudeSdkLive, codexAppServerLive, piSdkLive);
+
 /** Registers every catalog descriptor with its runtime using supplied SDK services. */
-export const harnessesLayer = Layer.unwrap(
-  Effect.map(Effect.all([claudeRuntime, codexRuntime, piRuntime]), (runtimes) =>
-    Harnesses.layerFrom(catalog, runtimes),
-  ),
-);
+export const harnessesLayer = harnessesFor(catalog, (runtimes) => runtimes);
 
 /** Provides the registered runtimes with the production SDKs. */
-export const harnessesLive = harnessesLayer.pipe(
-  Layer.provide(Layer.mergeAll(claudeSdkLive, codexAppServerLive, piSdkLive)),
-);
+export const harnessesLive = harnessesLayer.pipe(Layer.provide(sdkLive));
+
+/** Composes raw built-in adapters before applying admission with the supplied catalog. */
+export const harnessesLiveFrom = (
+  source: HarnessCatalog,
+  configure: (runtimes: ReadonlyArray<HarnessRuntime>) => ReadonlyArray<HarnessRuntime>,
+) => harnessesFor(source, configure).pipe(Layer.provide(sdkLive));

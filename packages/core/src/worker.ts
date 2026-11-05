@@ -110,13 +110,13 @@ export const GatewayAdminPort = Schema.Int.check(
 ).pipe(Schema.brand("GatewayAdminPort"));
 export type GatewayAdminPort = typeof GatewayAdminPort.Type;
 
-/**
- * An LLM provider whose credential the Gateway stores. The harness for that provider, Claude
- * Code for `anthropic` and Codex for `openai`, uses the Attempt's caller token instead of a login
- * on the machine.
- */
+/** A provider of attempt API keys. */
 export const GatewayLlmProvider = Schema.Literals(["anthropic", "openai"]);
 export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
+
+/** The wire protocol of a gateway credential slot. */
+export const GatewayLlmProtocol = Schema.Literals(["anthropic-messages", "openai-responses"]);
+export type GatewayLlmProtocol = typeof GatewayLlmProtocol.Type;
 
 /**
  * The kind of LLM provider credential that the Gateway stores, as reported by its admin API, or

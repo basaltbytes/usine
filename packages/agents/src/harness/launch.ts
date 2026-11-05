@@ -25,7 +25,7 @@ export const childAdmissionContext = (
         ? "gateway-subscription"
         : "gateway-api-key"
       : Option.isSome(provider) &&
-          request.environment[`${provider.value.provider.toUpperCase()}_API_KEY`] !== undefined
+          request.environment[provider.value.apiKey.tokenVariable] !== undefined
         ? "api-key"
         : "host-login",
   });

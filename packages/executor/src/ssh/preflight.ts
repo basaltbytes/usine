@@ -1,3 +1,4 @@
+import type { HarnessCatalog } from "@usine/agents/harness";
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
@@ -41,6 +42,7 @@ const capabilityError = (
  * gives as degraded. Each runtime synchronizes its login checks.
  */
 export const sshMachinePreflightFor = (
+  catalog: HarnessCatalog,
   commands: RemoteCommands,
   harnessProbe: (machine: SshMachine, shell: RemoteShell) => HarnessProbe,
   containers: SshContainers,
@@ -111,13 +113,14 @@ export const sshMachinePreflightFor = (
       const address = machine.address.machine;
       if (address._tag === "Fixed" && Option.isSome(address.tailnet))
         yield* configureTailnetGateway(
+          catalog,
           commands,
           "preflight",
           machine,
           address.tailnet.value,
           machine.gateway.value.settings.domain,
         );
-      yield* verifyGateway(commands, worker, machine, machine.gateway.value);
+      yield* verifyGateway(catalog, commands, worker, machine, machine.gateway.value);
     }
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
     if (containerCheck._tag === "Container") {
@@ -160,7 +163,10 @@ export const sshMachinePreflightFor = (
               Option.match(machine.gateway, {
                 onNone: () => ({}),
                 onSome: ({ settings }) =>
-                  gatewayExportedEnvironment(settings, `${machine.workerDirectory}/gh`),
+                  gatewayExportedEnvironment(
+                    { ...settings, catalog },
+                    `${machine.workerDirectory}/gh`,
+                  ),
               }),
             )
             .pipe(Effect.flatMap(probe)),

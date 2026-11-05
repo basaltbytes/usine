@@ -1,3 +1,5 @@
+import type { HarnessCatalog } from "@usine/agents/harness";
+import { safeSegment } from "@usine/core/repository";
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
 import { Effect, Option } from "effect";
@@ -8,7 +10,12 @@ import type { SshMachine } from "../model.ts";
 import { detectRuntime } from "../runtime.ts";
 
 /** Records cleanup errors before finalizers suppress them, and resets an unused machine. */
-export const machineResetFor = (raw: RemoteCommands, instance: string, instanceId: InstanceId) => {
+export const machineResetFor = (
+  catalog: HarnessCatalog,
+  raw: RemoteCommands,
+  instance: string,
+  instanceId: InstanceId,
+) => {
   const failures = new WeakSet<RemoteShell>();
   const failed = (shell: RemoteShell) => Effect.sync(() => void failures.add(shell));
   const commands: RemoteCommands = {
@@ -60,9 +67,17 @@ export const machineResetFor = (raw: RemoteCommands, instance: string, instanceI
       });
     yield* commands.run("cleanup", machine.shell, "rm", [
       "-rf",
-      ...["attempts", "credentials", "codex", "gh", "container-checkouts"].map(
-        (directory) => `${machine.workerDirectory}/${directory}`,
-      ),
+      ...[
+        "attempts",
+        "credentials",
+        "gh",
+        "container-checkouts",
+        ...catalog.descriptors
+          .filter(({ worker }) =>
+            Option.exists(worker.credential, ({ home }) => Option.isSome(home)),
+          )
+          .map(({ id }) => safeSegment(id)),
+      ].map((directory) => `${machine.workerDirectory}/${directory}`),
     ]);
     yield* Effect.logInfo("Reset the machine for reuse; shared caches and images remain", {
       worker,

@@ -131,7 +131,7 @@ export const llmProviders = Effect.gen(function* () {
     "https://chatgpt.com/backend-api/codex",
   );
   const anthropicCredential = yield* onlyOne(
-    "anthropic",
+    "anthropic-messages",
     ["ANTHROPIC_API_KEY", Option.map(anthropicKey, (key) => AnthropicApiKey.make({ key }))],
     [
       "USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN",
@@ -139,7 +139,7 @@ export const llmProviders = Effect.gen(function* () {
     ],
   );
   const openAiCredential = yield* onlyOne(
-    "openai",
+    "openai-responses",
     ["OPENAI_API_KEY", Option.map(openAiKey, (key) => OpenAiApiKey.make({ key }))],
     [
       "USINE_GATEWAY_CHATGPT_AUTH_FILE",
@@ -153,10 +153,10 @@ export const llmProviders = Effect.gen(function* () {
     yield* checkAuthFileWritable(openAiCredential.value.authFile);
   }
   return {
-    anthropic: Option.map(anthropicCredential, (credential) =>
+    "anthropic-messages": Option.map(anthropicCredential, (credential) =>
       AnthropicProvider.make({ upstream: anthropicUpstream, credential }),
     ),
-    openai: Option.map(openAiCredential, (credential) =>
+    "openai-responses": Option.map(openAiCredential, (credential) =>
       OpenAiProvider.make({
         upstream: credential._tag === "ChatGptLogin" ? chatGptUpstream : openAiUpstream,
         credential,
@@ -166,12 +166,18 @@ export const llmProviders = Effect.gen(function* () {
 });
 
 /** Returns each provider's credential kind for a log line, or `none`. */
-const providerCredentials = ({ anthropic, openai }: LlmProviders) => ({
-  anthropic: Option.match(anthropic, {
+const providerCredentials = ({
+  "anthropic-messages": anthropic,
+  "openai-responses": openai,
+}: LlmProviders) => ({
+  "anthropic-messages": Option.match(anthropic, {
     onNone: () => "none",
     onSome: (held) => held.credential._tag,
   }),
-  openai: Option.match(openai, { onNone: () => "none", onSome: (held) => held.credential._tag }),
+  "openai-responses": Option.match(openai, {
+    onNone: () => "none",
+    onSome: (held) => held.credential._tag,
+  }),
 });
 
 export const egressAllowlistPath = Config.String("USINE_GATEWAY_EGRESS_ALLOWLIST").pipe(

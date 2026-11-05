@@ -195,7 +195,7 @@ describe("ConfigParser", () => {
         "      destination: usine-gateway",
         "      admin_port: 7071",
         "      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN",
-        "      llm_providers: [anthropic]",
+        "      llm_providers: [anthropic-messages]",
         "    container:",
         "      image: registry.example:5000/usine/worker:custom",
         "      cpus: 1.5",
@@ -221,7 +221,7 @@ describe("ConfigParser", () => {
       expect(gateway?.destination).toBe("usine-gateway");
       expect(gateway?.adminPort).toBe(7071);
       expect(gateway?.adminTokenEnv).toBe("USINE_GATEWAY_ADMIN_TOKEN");
-      expect(gateway?.llmProviders).toEqual(["anthropic"]);
+      expect(gateway?.llmProviders).toEqual(["anthropic-messages"]);
       const containerOf = ({
         image,
         cpus,
@@ -294,15 +294,28 @@ describe("ConfigParser", () => {
         only?.kind === "ssh" &&
           Option.map(only.gateway, ({ adminPort, llmProviders }) => ({ adminPort, llmProviders })),
       ).toEqual(Option.some({ adminPort: 7070, llmProviders: [] }));
-      const [both] = (yield* parse(gatewayOf([...valid, "llm_providers: [anthropic, openai]"])))
-        .workers;
+      const [both] = (yield* parse(
+        gatewayOf([...valid, "llm_providers: [anthropic-messages, openai-responses]"]),
+      )).workers;
       expect(
         both?.kind === "ssh" && Option.map(both.gateway, ({ llmProviders }) => llmProviders),
-      ).toEqual(Option.some(["anthropic", "openai"]));
+      ).toEqual(Option.some(["anthropic-messages", "openai-responses"]));
+
+      const legacy = yield* parse(gatewayOf([...valid, "llm_providers: [anthropic, openai]"]));
+      const [migrated] = legacy.workers;
+      expect(
+        migrated?.kind === "ssh" &&
+          Option.map(migrated.gateway, ({ llmProviders }) => llmProviders),
+      ).toEqual(Option.some(["anthropic-messages", "openai-responses"]));
+      const encodedLegacy = yield* Schema.encodeEffect(UsineConfig)(legacy);
+      expect(jsonKey(encodedLegacy)).toContain(
+        '"llm_providers":["anthropic-messages","openai-responses"]',
+      );
 
       for (const workers of [
         gatewayOf([...valid, "llm_providers: [gemini]"]),
-        gatewayOf([...valid, "llm_providers: [openai, openai]"]),
+        gatewayOf([...valid, "llm_providers: [openai, openai-responses]"]),
+        gatewayOf([...valid, "llm_providers: [openai-responses, openai-responses]"]),
         gatewayOf(["domain: GW.internal", ...valid.slice(1)]),
         gatewayOf([valid[0] ?? "", "destination: -oProxyCommand=sh", valid[2] ?? ""]),
         gatewayOf([valid[0] ?? "", valid[2] ?? ""]),
@@ -439,7 +452,7 @@ describe("ConfigParser", () => {
         "      domain: gw.internal",
         "      destination: usine-gateway",
         "      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN",
-        "      llm_providers: [anthropic]",
+        "      llm_providers: [anthropic-messages]",
       ];
       const hetzner = [
         "  - name: hetzner-pool",

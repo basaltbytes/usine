@@ -20,3 +20,5 @@ A question or blocker in **Needs attention**, access to its GitHub item, and pro
 The unresolved attention entry clears. Marking the question answered or blocker resolved checks the newest item state; a matching active loop can open work again.
 
 An agent ends with `[usine:question]` or `[usine:blocked]` and records the decision needed on the item. That outcome suppresses automatic work for the same state. A later changed item state can release suppression. A GitHub reply must change the item after polling observed the question; if both happen within one poll interval, use the explicit action above.
+
+Claude Code, Codex, and Pi child sessions log these reports at Info with `kind` set to `question` or `blocked`, along with the report's `message` and `sessionId`. These reports still end the attempt with a question or blocker. Harness and infrastructure failures log at Error.

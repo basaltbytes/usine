@@ -1,5 +1,7 @@
 # @usine/agents
 
+Harness descriptors define secret-free credential recipes for gateway access, attempt API keys, and Cloudflare outbound handlers. Each recipe specifies environment variables, the variable that supplies the credential, and configuration files. Gateway recipes select a wire-protocol slot (`anthropic-messages` or `openai-responses`); provider names select provisioner API keys. A descriptor also declares whether its wiring requires a writable attempt home. Worker cloud-init and SSH preflight derive their accepted caller-token variables from the catalog.
+
 The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Code, Codex, and Pi child backends that an attempt's Pi parent delegates to, their prompts, and harness preflight. The parent runs in the orchestrator as a durable task (`@usine/durable`); its `subagent` tool starts the child that the agent's brain spec selects. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) describes each harness.
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version. Harness SDKs and protocols are exact-pinned.
@@ -25,6 +27,8 @@ const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive)
 ```
 
 `harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. Registered launch and preflight methods apply admission with that catalog, including credential-provider lookup for child launches. A `HarnessRuntime` has an ID, `preflight(brain, target)`, and `launch(request)`. `ProbeTarget` names the host, environment, worker, optional provisioned machine, and credential route (`host-login`, `gateway`, `api-key`, or `sandbox-api-key`). Preflight reports capability gaps as `HarnessUnavailableError` values; transport failures and timeouts fail with `SessionOperationError`.
+
+Use `harnessesLiveFrom(catalog, configure)` to extend or reuse the raw built-in adapters before registry admission wraps them. The callback receives adapters with the production SDKs; return the runtimes for the supplied catalog.
 
 The Node composition requires `ChildProcessSpawner` and `HostLoginLock` (`/runtime`). The lock is keyed by harness, worker, and provisioned machine. Build `harnessesLive` with `hostLoginLockLayer` from `@usine/executor` once at the application root. Provide that registry to both the executor and the attempt runtime. Claude's runtime takes the lock during host-login preflight and while a child starts. `/claude`, `/codex`, and `/pi` also export single-harness `ChildBackend` layers and their SDK contracts.
 
@@ -103,6 +107,8 @@ Should egress use HTTP CONNECT or a SOCKS proxy? Both fit the gateway.
 ```
 
 `reportedOutcome` reads markers as `AgentBlockedError` and `AgentQuestionError`, and `reportText` writes them. A parent's blocker becomes a non-retryable `BlockedFailure` and its question a non-retryable `QuestionFailure`: the run fails, its loop suppresses the item, and the run waits for the operator. A child's harness failure (`AgentResultError`) goes to the parent as a `[usine:failed]` report that `reportedOutcome` reads back, so the attempt ends with `AgentFailure` and suppresses nothing: the harness posted nothing.
+
+Claude Code, Codex, and Pi children log blocker and question reports at Info with `kind` (`blocked` or `question`), `message`, and `sessionId`. Harness and infrastructure failures log at Error. The log level does not change the typed outcome returned to the parent.
 
 A child's report returns to the parent's `subagent` call as text opening with its marker, to return verbatim. The parent keeps the first: a later ordinary answer fails with it, and the paraphrase stays in the transcript. Successful siblings don't clear it. Held children can take guidance and replace their answer before release. A marker without details still fails.
 

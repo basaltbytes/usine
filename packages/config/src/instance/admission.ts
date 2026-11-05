@@ -20,7 +20,7 @@ export const brainAdmissionProblems = (
         worker.kind === "ssh" &&
         Option.isSome(worker.gateway) &&
         Option.isSome(provider) &&
-        worker.gateway.value.llmProviders.includes(provider.value.provider);
+        worker.gateway.value.llmProviders.includes(provider.value.protocol);
       const context = AdmissionContext.make({
         placement:
           worker.kind === "local"
