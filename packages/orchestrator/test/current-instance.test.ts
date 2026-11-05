@@ -5,13 +5,17 @@ import { assert, describe, it } from "@effect/vitest";
 import { InstancePath } from "@usine/config/file";
 import { GitHubLabelName } from "@usine/config/label";
 import { DurableHarness } from "@usine/durable/harness";
+import { gatewayModelAccess } from "@usine/durable/gateway";
 import { fauxParent } from "@usine/durable/testing";
 import { parentAdmissionLayer } from "../src/current-instance/parents.ts";
 import { AgentName } from "@usine/core/agent";
-import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceId, InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { Executor, WorkerCapabilityError, fullPreflight } from "@usine/executor";
-import { Effect, FileSystem, Layer, Logger, Path } from "effect";
+import { ConfigProvider, Effect, Option, FileSystem, Layer, Logger, Path } from "effect";
+import { TestClock } from "effect/testing";
+import { parentModels } from "../src/parent-models.ts";
+import { fakeMachine } from "../../executor/test/ssh/support.ts";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { stepExecutorLayer } from "../src/scheduler/scheduler.ts";
 import { testAppLayer } from "./support/github-app.ts";
@@ -181,6 +185,80 @@ describe("CurrentInstance", () => {
           ["loops/healthy.md", loopFile("healthy")],
         ],
       ),
+  );
+
+  it.live("validates gateway credentials at startup and reload without a local login", () =>
+    withFolder(
+      () =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          let connected = false;
+          const access = yield* gatewayModelAccess({
+            credential: (protocol) =>
+              Effect.succeed(
+                Option.fromUndefinedOr(
+                  protocol === "anthropic-messages"
+                    ? "api-key"
+                    : connected
+                      ? "subscription"
+                      : undefined,
+                ),
+              ),
+            request: () => Effect.die("admission does not send model requests"),
+          });
+          yield* Layer.build(parentAdmissionLayer).pipe(
+            Effect.provideService(DurableHarness, {
+              ...fauxParent([]),
+              models: access.models,
+              credentials: access.credentials,
+              install: unused,
+              resume: unused,
+              use: unused,
+              subscribe: unused,
+            }),
+          );
+          const quarantined = yield* instances.get;
+          assert.deepStrictEqual(
+            quarantined.agents.map(({ name }) => name),
+            ["healthy"],
+          );
+          assert.include(
+            quarantined.invalidAgents[0]?.error.message ?? "",
+            'Gateway credential unavailable for provider "openai-codex"',
+          );
+          connected = true;
+          yield* instances.reload;
+          const running = yield* instances.get;
+          assert.lengthOf(running.agents, 2);
+          assert.lengthOf(running.invalidAgents, 0);
+          connected = false;
+          const failure = yield* Effect.flip(instances.reload);
+          assert.include(
+            failure.message,
+            'Gateway credential unavailable for provider "openai-codex"',
+          );
+          const rejected = yield* instances.get;
+          assert.strictEqual(rejected, running);
+        }).pipe(Effect.scoped),
+      [
+        ...initialFiles.filter(([file]) => file !== "agents/developer.md"),
+        [
+          "agents/developer.md",
+          agentFile("gpt-5.6-sol").replace(
+            "effort: high",
+            "effort: high\nparent_model: openai-codex/gpt-5.6-sol",
+          ),
+        ],
+        [
+          "agents/healthy.md",
+          agentFile("gpt-5.6-sol").replace(
+            "effort: high",
+            "effort: high\nparent_model: anthropic/claude-fable-5-1",
+          ),
+        ],
+        ["loops/healthy.md", loopFile("healthy")],
+      ],
+    ),
   );
 
   it.live.each([
@@ -429,5 +507,144 @@ describe("CurrentInstance", () => {
         assert.strictEqual(currentInstance, running);
       }).pipe(Effect.scoped),
     ),
+  );
+});
+
+const gatewayWorkers = `version: 1
+repos: [{ name: basaltbytes/usine }]
+workers:
+  - name: first
+    kind: ssh
+    destination: worker-one
+    root: /srv/usine
+    gateway:
+      domain: gw.test
+      destination: usine-gateway
+      admin_token_env: FIRST_GATEWAY_TOKEN
+  - name: second
+    kind: ssh
+    destination: worker-two
+    root: /srv/usine
+    gateway:
+      domain: other.test
+      destination: other-gateway
+      admin_token_env: SECOND_GATEWAY_TOKEN
+`;
+
+it.live("keeps host authentication when the instance has no gateway", () =>
+  withFolder(() =>
+    Effect.gen(function* () {
+      const startup = yield* (yield* CurrentInstance).get;
+      const access = yield* parentModels(
+        startup,
+        InstanceId.make("11111111-1111-4111-8111-111111111111"),
+      );
+      assert.isUndefined(access);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.live.each(["missing admin token", "unreachable proxy"])(
+  "starts with quarantined gateway coordinators after %s",
+  (reason) => {
+    const machine = fakeMachine();
+    return withFolder(
+      () =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const startup = yield* instances.get;
+          const access = yield* parentModels(
+            startup,
+            InstanceId.make("11111111-1111-4111-8111-111111111111"),
+          );
+          assert(access !== undefined);
+          const parents = { ...access, defaultModel: Option.none() };
+          yield* Layer.build(parentAdmissionLayer).pipe(
+            Effect.provideService(DurableHarness, {
+              ...parents,
+              install: unused,
+              resume: unused,
+              use: unused,
+              subscribe: unused,
+            }),
+          );
+          const current = yield* instances.get;
+          assert.lengthOf(current.agents, 0);
+          assert.lengthOf(current.invalidAgents, 1);
+          assert.lengthOf(current.quarantinedLoops, 1);
+          assert.include(
+            current.invalidAgents[0]?.error.message ?? "",
+            'Gateway unreachable for provider "openai-codex"',
+          );
+          if (reason === "missing admin token") {
+            assert.include(
+              current.invalidAgents[0]?.error.message ?? "",
+              "Set FIRST_GATEWAY_TOKEN",
+            );
+            assert.notInclude(
+              current.invalidAgents[0]?.error.message ?? "",
+              "SECOND_GATEWAY_TOKEN",
+            );
+          } else {
+            assert.include(current.invalidAgents[0]?.error.message ?? "", "model route");
+            assert(machine.state.forwards.every(({ live }) => !live));
+          }
+        }).pipe(
+          Effect.scoped,
+          Effect.provide([
+            machine.layer,
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env:
+                  reason === "missing admin token"
+                    ? { SECOND_GATEWAY_TOKEN: "configured-on-the-other-gateway" }
+                    : { FIRST_GATEWAY_TOKEN: "configured" },
+              }),
+            ),
+          ]),
+        ),
+      [
+        ["usine.yaml", gatewayWorkers],
+        [
+          "agents/developer.md",
+          agentFile("gpt-5.6-sol").replace(
+            "effort: high",
+            "effort: high\nparent_model: openai-codex/gpt-5.6-sol",
+          ),
+        ],
+        ["loops/start-dev.md", loopFile("developer")],
+      ],
+    );
+  },
+);
+
+it.effect("retries opening the selected gateway after a cached setup failure", () => {
+  const machine = fakeMachine();
+  const env: Record<string, string> = {};
+  return withFolder(
+    () =>
+      Effect.gen(function* () {
+        const startup = yield* (yield* CurrentInstance).get;
+        const access = yield* parentModels(
+          startup,
+          InstanceId.make("11111111-1111-4111-8111-111111111111"),
+        );
+        assert(access !== undefined);
+        assert(access.credentials._tag === "Gateway");
+        const first = yield* access.credentials.authentication("openai-codex").pipe(Effect.flip);
+        assert.include(first.message, "Set FIRST_GATEWAY_TOKEN");
+        env.FIRST_GATEWAY_TOKEN = "configured";
+        const cached = yield* access.credentials.authentication("openai-codex").pipe(Effect.flip);
+        assert.strictEqual(cached.message, first.message);
+        yield* TestClock.adjust("6 seconds");
+        const retried = yield* access.credentials.authentication("openai-codex").pipe(Effect.flip);
+        assert.notInclude(retried.message, "Set FIRST_GATEWAY_TOKEN");
+        assert.include(retried.message, "model route");
+        assert(machine.state.forwards.every(({ live }) => !live));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide([machine.layer, ConfigProvider.layer(ConfigProvider.fromEnv({ env }))]),
+      ),
+    [["usine.yaml", gatewayWorkers], ...initialFiles.filter(([file]) => file !== "usine.yaml")],
   );
 });

@@ -15,7 +15,7 @@ export const pi = HarnessDescriptor.make({
   capabilities: [
     CapabilityProfile.make({
       placements: ["orchestrator"],
-      credentials: ["host-login"],
+      credentials: ["host-login", "gateway", "gateway-subscription", "gateway-api-key"],
       supported: [
         "durable-coordination",
         "resume-session",
@@ -60,7 +60,7 @@ export const pi = HarnessDescriptor.make({
   ],
   placementReason: "Pi runs its tools in the orchestrator process and supports only local children",
   credentialReason:
-    "Pi uses the orchestrator's provider credentials, not gateway or attempt credentials",
+    "Pi uses local host credentials for children and host or gateway credentials on the orchestrator",
   prices: Option.none(),
   handoff: null,
 });

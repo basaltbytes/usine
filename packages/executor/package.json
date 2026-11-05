@@ -34,6 +34,10 @@
     "./ssh": {
       "types": "./dist/ssh/ssh.d.ts",
       "default": "./dist/ssh/ssh.js"
+    },
+    "./gateway": {
+      "types": "./dist/ssh/gateway/model-route.d.ts",
+      "default": "./dist/ssh/gateway/model-route.js"
     }
   },
   "publishConfig": {

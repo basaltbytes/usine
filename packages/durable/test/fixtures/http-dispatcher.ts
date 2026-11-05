@@ -19,6 +19,7 @@ import { Effect, Option, Schema } from "effect";
 import { ModelId } from "@usine/core/agent/brain";
 import { resolveParent } from "../../src/parent.ts";
 import { EnvHttpProxyAgent, fetch as undiciFetch, getGlobalDispatcher } from "undici";
+import { gatewayModelAccess } from "../../src/gateway.ts";
 import { DurableHarness } from "../../src/harness.ts";
 import { loadParentModels, harnessLayer } from "../../src/live.ts";
 
@@ -96,14 +97,36 @@ writeFileSync(
   jsonKey({ httpProxy: "invalid-project-proxy" }),
 );
 
+const access =
+  scenario === "gateway"
+    ? await Effect.runPromise(
+        gatewayModelAccess({
+          credential: () => Effect.succeedSome("subscription"),
+          request: () => Effect.die("model requests are not used by this fixture"),
+        }),
+      )
+    : undefined;
+
 const openHarness = () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const harness = yield* DurableHarness;
+      if (access !== undefined) {
+        assert.strictEqual(harness.models, access.models);
+        const resolved = yield* resolveParent(
+          harness,
+          {
+            parentModel: Option.some(ModelId.make("openai-codex/gpt-5.6-sol")),
+            parentEffort: "high",
+          },
+          Option.none(),
+        );
+        assert.strictEqual(resolved.pool, "chatgptPlan");
+      }
       yield* harness.use("check the HTTP dispatcher", async () => {
         assert(getGlobalDispatcher() instanceof EnvHttpProxyAgent);
       });
-    }).pipe(Effect.provide(harnessLayer(directory)), Effect.scoped),
+    }).pipe(Effect.provide(harnessLayer(directory, access)), Effect.scoped),
   );
 
 try {
@@ -113,7 +136,7 @@ try {
       Effect.runPromise(
         Effect.gen(function* () {
           const parents = yield* loadParentModels(directory);
-          yield* resolveParent(parents.models, parents.defaultModel, {
+          yield* resolveParent(parents, {
             parentModel: Option.some(ModelId.make("missing/parent-model")),
             parentEffort: "high",
           });

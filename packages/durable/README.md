@@ -12,6 +12,7 @@ Coordinator startup and `subagent` use the shared harness admission check. `/liv
 - `/parent`: `resolveParent(models, defaultModel, options)`, which validates coordinator admission, model availability, reasoning effort, and credentials.
 - `/harness`: the `DurableHarness` service, which manages the open pi-durable harness, and its platform-free `layer(options)`.
 - `/backup`: `backup(instanceDirectory, destination)`, an online copy of `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file. `usine backup` writes it next to the runtime database copy.
+- `/gateway`: `gatewayModelAccess(transport)` returns an Effect that builds Pi model access from a gateway transport. Parent admission checks the configured coordinator providers. It uses no local provider login.
 - `/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the child backends from `@usine/agents`.
 - `/testing`: a scripted parent model and stub children for whole-attempt tests, and a stub `AttemptRuntime` for executor tests.
 
@@ -22,6 +23,8 @@ import { layer as durableLayer } from "@usine/durable/live";
 // shared with the executor.
 const attempts = durableLayer(instanceDirectory);
 ```
+
+`/live` accepts optional `ParentModelAccess` as its second argument. The orchestrator supplies gateway model access when an SSH worker configures a gateway; otherwise Pi keeps its local login. `DurableHarnessOptions.credentials` selects `HostLogin` or `Gateway`; gateway admission checks the upstream credential through an Effect independently of the transport's caller token. Gateway ChatGPT models use the Responses API over HTTP streaming, without a local OAuth token, and retain the `chatgptPlan` pool. API-key routes use `apiKeys`.
 
 The parent record stores the pool and endpoint resolved from its credential at launch. Transcript relay uses those stored values after a restart. Records created before these fields were stored retain the historical accounting rule.
 

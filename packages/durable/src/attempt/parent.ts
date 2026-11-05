@@ -1,5 +1,5 @@
 import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
-import { getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import {
   piAuthentication,
@@ -19,6 +19,7 @@ import { AgentSessionId, EndpointName, ParentSession } from "@usine/core/agent/s
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
+import type { DurableHarness } from "../harness.ts";
 import type { AttemptRecord } from "./documents.ts";
 
 /** The parent model, validated against the effort and credential. */
@@ -57,12 +58,43 @@ const launchError = (sessionId: Option.Option<AgentSessionId>, message: string, 
     cause,
   });
 
+type ParentModels = Pick<DurableHarness["Service"], "models" | "defaultModel" | "credentials">;
+
+const checkAuthentication = Effect.fn("ParentModel.authentication")(function* (
+  { models, credentials }: ParentModels,
+  provider: string,
+  sessionId: Option.Option<AgentSessionId>,
+) {
+  yield* Effect.annotateCurrentSpan({ provider });
+  return yield* credentials._tag === "Gateway"
+    ? credentials
+        .authentication(provider)
+        .pipe(
+          Effect.mapError((cause) =>
+            launchError(
+              sessionId,
+              `Gateway unreachable for provider "${provider}": ${cause.message}`,
+              cause,
+            ),
+          ),
+        )
+    : Effect.tryPromise({
+        try: (signal) => models.checkAuth(provider, { signal }),
+        catch: (cause) =>
+          launchError(sessionId, "Can't check the parent model's credential", cause),
+      }).pipe(
+        Effect.map((auth) =>
+          piAuthentication(auth, models.getProvider(provider)?.auth.oauth?.isSubscription === true),
+        ),
+      );
+});
+
 const selectModel = Effect.fn("ParentModel.select")(function* (
-  models: Models,
-  defaultModel: Option.Option<ModelRef>,
+  parents: ParentModels,
   spec: ParentBrainOptions,
   sessionId: Option.Option<AgentSessionId> = Option.none(),
 ) {
+  const { models, defaultModel, credentials } = parents;
   if (Option.isSome(spec.parentModel)) {
     const named = spec.parentModel.value;
     const found = Option.flatMap(Option.fromNullishOr(splitPiModel(named)), (ref) =>
@@ -90,7 +122,16 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
     catch: (cause) =>
       launchError(sessionId, "Can't list the models that have a configured credential", cause),
   });
-  const first = available[0];
+  let first = available[0];
+  if (credentials._tag === "Gateway") {
+    first = undefined;
+    for (const provider of new Set(available.map((model) => model.provider))) {
+      const authentication = yield* checkAuthentication(parents, provider, sessionId);
+      if (resolvePiPool(provider, authentication) === undefined) continue;
+      first = available.find((model) => model.provider === provider);
+      break;
+    }
+  }
   if (first === undefined) {
     const model = ModelId.make("unknown");
     yield* Effect.logError("Pi parent has no model with a configured credential");
@@ -110,8 +151,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
  * pool.
  */
 export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
-  models: Models,
-  defaultModel: Option.Option<ModelRef>,
+  parents: ParentModels,
   spec: ParentBrainOptions,
   sessionId: Option.Option<AgentSessionId> = Option.none(),
 ) {
@@ -120,7 +160,8 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
     parentEffort: spec.parentEffort,
     parentModel: Option.getOrUndefined(spec.parentModel),
   });
-  const selected = yield* selectModel(models, defaultModel, spec, sessionId);
+  const { credentials } = parents;
+  const selected = yield* selectModel(parents, spec, sessionId);
   const model = ModelId.make(`${selected.provider}/${selected.id}`);
   yield* Effect.fromResult(
     admitBrain(
@@ -131,7 +172,10 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
         model,
         effort: spec.parentEffort,
       }),
-      AdmissionContext.make({ placement: "orchestrator", credential: "host-login" }),
+      AdmissionContext.make({
+        placement: "orchestrator",
+        credential: credentials._tag === "HostLogin" ? "host-login" : "gateway",
+      }),
     ),
   ).pipe(
     Effect.tapError((error) =>
@@ -157,14 +201,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
     });
   }
-  const check = yield* Effect.tryPromise({
-    try: (signal) => models.checkAuth(selected.provider, { signal }),
-    catch: (cause) => launchError(sessionId, "Can't check the parent model's credential", cause),
-  });
-  const authentication = piAuthentication(
-    check,
-    models.getProvider(selected.provider)?.auth.oauth?.isSubscription === true,
-  );
+  const authentication = yield* checkAuthentication(parents, selected.provider, sessionId);
   const required = requiredPiPool(selected.provider);
   const pool = resolvePiPool(selected.provider, authentication);
   if (pool === undefined) {
@@ -178,7 +215,10 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       harness: Harness.make("pi"),
       model,
       pool: required,
-      message: `Pi parent model "${model}" requires a credential from the ${required} pool`,
+      message:
+        credentials._tag === "HostLogin"
+          ? `Pi parent model "${model}" requires a credential from the ${required} pool`
+          : `Gateway credential unavailable for provider "${selected.provider}" (coordinator model "${model}", pool ${required})`,
     });
   }
   yield* Effect.logInfo("Pi parent authenticated", { model, pool });

@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { it } from "@effect/vitest";
 
-it.live.each(["node", "custom", "environment", "unknown-parent"])(
+it.live.each(["node", "custom", "environment", "unknown-parent", "gateway"])(
   "opens the live harness with one proxy-aware dispatcher (%s fetch/environment)",
   (scenario) =>
     Effect.gen(function* () {

@@ -10,6 +10,10 @@ Harness credential providers, login mounts, and login egress hosts come from the
 
 Worker preflight checks each coding-agent brain with the shared `admitBrain` policy before probing binaries or credentials. Pi's descriptor permits local children; remote and sandbox refusals include the role, missing placement, and adapter reason.
 
+## Orchestrator model access
+
+`@usine/executor/gateway` exports `gatewayModelRouteFor(worker, repository, gateway)` for model runtimes on the orchestrator, including the coordinator and supervisor. It opens SSH forwards to the admin API and model proxy, checks the proxy's caller-token requirement, and registers an anonymous attachment. `credential(protocol)` reports the gateway's credential kind; `request(protocol, body, headers, signal)` streams a model response with the caller token. Provider credentials remain on the gateway. The attachment renews every two minutes, restores missing gateway state under the same ID, and detaches on scope closure.
+
 ## Attempt lifetime
 
 Call `Executor.prepare(request)` inside `Effect.scoped`, then `prepared.launch(io)` once. The `PreparedAttempt` owns the checkout and repo access. Its `workspace`, an `AttemptWorkspace` with the worker, run spec, and worktree path, serializes without credentials or live handles.

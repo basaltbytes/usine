@@ -77,16 +77,20 @@ describe("brain admission", () => {
         ),
       );
     }
-    assert(
-      Result.isFailure(
-        admitBrain(
-          catalog,
-          "supervisor",
-          brain("pi"),
-          AdmissionContext.make({ placement: "orchestrator", credential: "gateway-subscription" }),
-        ),
-      ),
-    );
+    for (const credential of ["gateway", "gateway-subscription", "gateway-api-key"] as const) {
+      for (const role of ["coordinator", "supervisor"] as const) {
+        assert(
+          Result.isSuccess(
+            admitBrain(
+              catalog,
+              role,
+              brain("pi"),
+              AdmissionContext.make({ placement: "orchestrator", credential }),
+            ),
+          ),
+        );
+      }
+    }
   });
 
   it("refuses unregistered harnesses and unsupported credentials", () => {
