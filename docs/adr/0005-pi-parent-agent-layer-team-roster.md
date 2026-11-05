@@ -40,7 +40,7 @@ The durable runtime records the exact child prompt on `SessionStarted.prompt`, a
 
 Harness descriptors declare capabilities for each credential route and placement. One `admitBrain` policy checks configuration, worker preflight, coordinator start, and child launch. The coordinator requires `durable-coordination`; Pi on the orchestrator provides it through pi-durable. Claude Code and Codex resume conversations without a journal of usine tool intents and results, so their descriptors refuse that role with a reason. The supervisor role runs on the orchestrator through gateway credentials, which keeps subscription credentials on the gateway.
 
-This replaces harness-specific placement refusals with role requirements. `parent_model` and `parent_effort` remain the parent settings because only Pi provides durable coordination. Startup validates every rostered agent's resolved parent model, effort, and credential before opening durable storage. Each attempt repeats that check to detect changed credentials.
+This replaces harness-specific placement refusals with role requirements. `parent_model` and `parent_effort` remain the parent settings because only Pi provides durable coordination. Startup validates every rostered agent's resolved parent model, effort, and credential before opening durable storage. Configuration reloads and saved edits repeat the check before applying a revision, including changes to instance defaults or agent overrides. Each attempt repeats that check to detect changed credentials.
 
 ## Amendment (2026-11-05, #959): saved Pi child conversations
 

@@ -3,6 +3,9 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
+import { DurableHarness } from "@usine/durable/harness";
+import { fauxParent } from "@usine/durable/testing";
+import { parentAdmissionLayer } from "../src/current-instance/parents.ts";
 import { AgentName } from "@usine/core/agent";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
@@ -115,6 +118,93 @@ const startWorkers = (preflighted: Array<string>) =>
   });
 
 describe("CurrentInstance", () => {
+  it.live.each([
+    ["agent", "parent_model", "unknown-provider/nonexistent-model", "no model"],
+    ["settings", "parent_model", "unknown-provider/nonexistent-model", "no model"],
+    ["agent", "parent_effort", "max", "doesn't support effort"],
+    ["settings", "parent_effort", "max", "doesn't support effort"],
+  ] as const)(
+    "refuses an invalid %s %s before installing a reload",
+    ([source, field, value, diagnostic]) =>
+      withFolder((root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const running = yield* instances.get;
+          yield* Layer.build(parentAdmissionLayer).pipe(
+            Effect.provideService(DurableHarness, {
+              ...fauxParent([]),
+              install: unused,
+              resume: unused,
+              use: unused,
+              subscribe: unused,
+            }),
+          );
+          yield* writeInstanceFiles(
+            root,
+            source === "agent"
+              ? [
+                  [
+                    "agents/developer.md",
+                    agentFile("gpt-5.6-sol").replace(
+                      "effort: high",
+                      `effort: high\n${field}: ${value}`,
+                    ),
+                  ],
+                ]
+              : [["usine.yaml", `${usineYaml()}settings:\n  ${field}: ${value}\n`]],
+          );
+          const failure = yield* Effect.flip(instances.reload);
+          assert(failure._tag === "FactoryConfigError", failure._tag);
+          assert.include(failure.message, diagnostic);
+          assert.include(failure.message, 'Agent "developer" cannot run as coordinator');
+          const rejected = yield* instances.get;
+          assert.strictEqual(rejected, running);
+
+          yield* writeInstanceFiles(root, [
+            [
+              "agents/developer.md",
+              agentFile("gpt-5.6-sol").replace(
+                "effort: high",
+                "effort: high\nparent_model: faux/faux-1\nparent_effort: high",
+              ),
+            ],
+            ["usine.yaml", usineYaml()],
+          ]);
+          yield* instances.reload;
+          const accepted = yield* instances.get;
+          assert.notStrictEqual(accepted, running);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.live("keeps the running configuration when a parent credential becomes unavailable", () =>
+    withFolder(() =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const parent = fauxParent([]);
+        yield* Layer.build(parentAdmissionLayer).pipe(
+          Effect.provideService(DurableHarness, {
+            ...parent,
+            install: unused,
+            resume: unused,
+            use: unused,
+            subscribe: unused,
+          }),
+        );
+        yield* instances.reload;
+        const running = yield* instances.get;
+        const provider = parent.models.getProvider("faux");
+        assert(provider !== undefined);
+        parent.models.setProvider({ ...provider, auth: {} });
+        const failure = yield* Effect.flip(instances.reload);
+        assert(failure._tag === "FactoryConfigError", failure._tag);
+        assert.include(failure.message, "requires a credential");
+        const rejected = yield* instances.get;
+        assert.strictEqual(rejected, running);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
   it.live("reports the Loops, Agents, and labels a reload added or changed", () =>
     withFolder((root) =>
       Effect.gen(function* () {

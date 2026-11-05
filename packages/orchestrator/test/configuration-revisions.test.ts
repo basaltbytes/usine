@@ -1,3 +1,6 @@
+import { DurableHarness } from "@usine/durable/harness";
+import { fauxParent } from "@usine/durable/testing";
+import { parentAdmissionLayer } from "../src/current-instance/parents.ts";
 import { Harness } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -56,6 +59,17 @@ it.live("applies committed agent brains and webhook settings live", () =>
       ),
     );
     const current = Context.get(context, CurrentInstance);
+    const unused = () => Effect.die("unused harness operation");
+    yield* Layer.build(parentAdmissionLayer).pipe(
+      Effect.provideService(CurrentInstance, current),
+      Effect.provideService(DurableHarness, {
+        ...fauxParent([]),
+        install: unused,
+        resume: unused,
+        use: unused,
+        subscribe: unused,
+      }),
+    );
     const preflighted: Array<string> = [];
     yield* current.registerWorkers((_, loaded) =>
       Effect.sync(() => {
@@ -74,6 +88,28 @@ it.live("applies committed agent brains and webhook settings live", () =>
     const agentAfter = yield* Effect.transposeOption(
       Option.map(agent.after, Schema.decodeUnknownEffect(Schema.JsonObject)),
     );
+    const invalid = yield* Effect.flip(
+      current.commit({
+        expected: revision.number,
+        actor: initial.config.operator,
+        message: Option.none(),
+        changes: [
+          ConfigurationChange.make({
+            ...agent,
+            before: agent.after,
+            after: Option.map(agentAfter, (value) => ({
+              ...value,
+              parentModel: { _tag: "Some", value: "unknown-provider/nonexistent-model" },
+            })),
+          }),
+        ],
+      }),
+    );
+    expect(invalid._tag).toBe("FactoryConfigError");
+    expect((yield* store.read).number).toBe(revision.number);
+    const unchanged = yield* current.get;
+    expect(unchanged).toBe(initial);
+
     const changed = yield* store.commit({
       expected: revision.number,
       actor: initial.config.operator,

@@ -37,7 +37,7 @@ Every attempt has a Pi parent in the orchestrator. Its `subagent` tool starts ch
 
 Parent model selection uses the agent override, instance default, Pi's configured default, then the first Pi model with a credential. Parent effort uses the agent override, instance default, then child effort. Pi reads configuration from `~/.pi/agent` or `PI_CODING_AGENT_DIR` for the Unix user running the orchestrator. An `openai-codex` model requires a ChatGPT login there; other providers require API keys.
 
-Startup validates the resolved parent model, effort, and credential for every rostered agent before resuming attempts. An unavailable model, unsupported effort, or missing credential stops startup with a diagnostic. Each attempt checks its parent again before creating the conversation, so a later credential change can fail the attempt with `AgentFailure`.
+Startup validates the resolved parent model, effort, and credential for every rostered agent before resuming attempts. An unavailable model, unsupported effort, or missing credential stops startup with a diagnostic. Configuration reloads and saved edits validate every agent’s resolved parent, including agent overrides and instance defaults, before applying the revision. A refusal keeps the running configuration unchanged; saved edits also leave the stored revision unchanged. Each attempt checks its parent again before creating the conversation, so a later credential change can fail the attempt with `AgentFailure`.
 
 The parent uses the coordinator role, which requires durable coordination: committed tool intents and results that continue after an orchestrator restart. Pi provides that capability. The `parent_model` and `parent_effort` settings continue to select its brain.
 

@@ -193,6 +193,10 @@ export class CurrentInstance extends Context.Service<
      * setup mode, a reload rejects any `workers` change.
      */
     readonly registerWorkers: (workers: WorkerReload) => Effect.Effect<void, never, Scope.Scope>;
+    /** Checks coordinator brains before a revision is stored or applied, until the scope closes. */
+    readonly registerParentAdmission: (
+      admit: (loaded: LoadedInstance) => Effect.Effect<void, FactoryConfigError>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
   }
 >()("@usine/orchestrator/current-instance/current-instance/CurrentInstance") {
   /**
@@ -214,6 +218,9 @@ export class CurrentInstance extends Context.Service<
         );
         const current = yield* SubscriptionRef.make(initial);
         const registered = yield* Ref.make(Option.none<WorkerReload>());
+        const parentAdmission = yield* Ref.make<
+          (loaded: LoadedInstance) => Effect.Effect<void, FactoryConfigError>
+        >(() => Effect.void);
         const reloading = yield* Semaphore.make(1);
 
         const beforeWorkersStart = Effect.fn("CurrentInstance.beforeWorkersStart")(function* (
@@ -249,6 +256,7 @@ export class CurrentInstance extends Context.Service<
               if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
                 return yield* restartRequired(restart);
               }
+              yield* restore((yield* Ref.get(parentAdmission))(loaded));
               const applyWorkers = yield* restore(
                 Option.isSome(workers)
                   ? workers.value(running, loaded)
@@ -379,6 +387,7 @@ export class CurrentInstance extends Context.Service<
               );
               yield* install(next.configuration).pipe(
                 Effect.catchTags({
+                  FactoryConfigError: () => Effect.void,
                   RestartRequiredError: () => Effect.void,
                   ReloadPreflightError: () => Effect.void,
                 }),
@@ -405,6 +414,14 @@ export class CurrentInstance extends Context.Service<
           reload,
           commit: commitRevision,
           registerWorkers,
+          registerParentAdmission: Effect.fn("CurrentInstance.registerParentAdmission")(function* (
+            admit: (loaded: LoadedInstance) => Effect.Effect<void, FactoryConfigError>,
+          ) {
+            yield* Effect.annotateCurrentSpan({ directory });
+            yield* Effect.acquireRelease(Ref.set(parentAdmission, admit), () =>
+              Ref.set(parentAdmission, () => Effect.void),
+            );
+          }),
         };
       }),
     );

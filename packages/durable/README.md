@@ -9,6 +9,7 @@ Coordinator startup and `subagent` use the shared harness admission check. The l
 ## Entry points
 
 - `/attempt-runtime`: the `AttemptRuntime` contract that the executor calls, with `AttemptRequest`, `StoredRequest`, and `AttemptReport`.
+- `/parent`: `resolveParent(models, defaultModel, options)`, which validates coordinator admission, model availability, reasoning effort, and credentials.
 - `/harness`: the `DurableHarness` service, which manages the open pi-durable harness, and its platform-free `layer(options)`.
 - `/backup`: `backup(instanceDirectory, destination)`, an online copy of `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file. `usine backup` writes it next to the runtime database copy.
 - `/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the child backends from `@usine/agents`.

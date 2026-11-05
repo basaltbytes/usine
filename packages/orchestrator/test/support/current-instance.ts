@@ -9,6 +9,7 @@ export const fixedInstance = (instance: LoadedInstance): CurrentInstance["Servic
   changes: Stream.concat(Stream.make(instance), Stream.never),
   commit: () => Effect.die("this test never writes configuration"),
   reload: Effect.die("this test's instance is never reloaded"),
+  registerParentAdmission: () => Effect.void,
   registerWorkers: () => Effect.void,
 });
 

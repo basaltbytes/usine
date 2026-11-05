@@ -1,5 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai/models";
+import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 import {
   type FauxResponseStep,
   fauxAssistantMessage,
@@ -63,11 +63,7 @@ import {
 import { keepNotice } from "./attempt/hubs.ts";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "./attempt/subagent.ts";
-import {
-  type DurableHarnessOptions,
-  durableError,
-  layer as durableHarnessLayer,
-} from "./harness.ts";
+import { durableError, layer as durableHarnessLayer } from "./harness.ts";
 
 export type ParentStep = FauxResponseStep;
 
@@ -81,13 +77,17 @@ export const delegate = (task: string): AssistantMessage =>
 /** Returns a parent turn whose final answer is `text`. */
 export const answer = (text: string): AssistantMessage => fauxAssistantMessage([fauxText(text)]);
 
+/** A scripted model runtime and its default parent model. */
+export interface FauxParent {
+  readonly models: MutableModels;
+  readonly defaultModel: Option.Option<ModelRef>;
+}
+
 /**
  * Returns pi-ai model access that answers requests with `steps` in order, at any reasoning effort
  * up to `high`.
  */
-export const fauxParent = (
-  steps: ReadonlyArray<ParentStep>,
-): Pick<DurableHarnessOptions, "models" | "defaultModel"> => {
+export const fauxParent = (steps: ReadonlyArray<ParentStep>): FauxParent => {
   const faux = fauxProvider({ models: [{ id: "faux-1", reasoning: true }] });
   const models = createModels();
   models.setProvider(faux.provider);

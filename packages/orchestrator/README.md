@@ -10,7 +10,7 @@ Operator usage reads use each session's recorded billing pool. Older sessions wi
 
 Operator usage reads use each harness descriptor’s token price table when the session reports a token breakdown without its own USD cost. The configuration capabilities API includes harness display labels and saved-session resume commands from the same catalog.
 
-Startup resolves each rostered agent's parent model and effort from agent overrides and instance settings, then validates the coordinator's model, effort, and credentials before durable attempts resume. A refused parent stops startup with its diagnostic.
+Startup resolves each rostered agent's parent model and effort from agent overrides and instance settings, then validates the coordinator's model, effort, and credentials before durable attempts resume. A refused parent stops startup with its diagnostic. Configuration reloads and saved edits repeat this validation before storing or applying a revision; a refusal preserves the running configuration.
 
 ## Conditional approval
 
