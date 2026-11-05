@@ -25,7 +25,7 @@ const attempts = durableLayer(instanceDirectory);
 
 The parent record stores the pool and endpoint resolved from its credential at launch. Transcript relay uses those stored values after a restart. Records created before these fields were stored retain the historical accounting rule.
 
-Building the layer installs the usine extension and resumes tasks. Closing it writes no task outcome, so the next start resumes the same work.
+Building the layer installs the usine extension and resumes tasks. Closing it writes no task outcome, so the next start resumes the same work. Each child receives a `ChildSessionLifecycle` tied to the channel attachment that supplied its host and environment. When that attachment detaches, the child stops recovering connections and reporting shutdown errors before the executor releases its transports and credentials.
 
 Before opening the first harness, `/live` installs Pi's HTTP dispatcher once for the process. It uses HTTP/1.1, CONNECT proxy tunnels, five-minute body and header timeouts, and a two-second address-family connection attempt timeout. Pi's global `httpProxy` setting fills unset `HTTP_PROXY` and `HTTPS_PROXY` variables; existing environment values and `NO_PROXY` retain their precedence. Project settings do not configure the proxy.
 

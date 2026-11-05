@@ -30,6 +30,7 @@ import {
   AgentCapacityError,
   ChildRequest,
   ChildBackend,
+  ChildSessionLifecycle,
   PoolUnavailableError,
   SessionOperationError,
   toAttemptFailure,
@@ -165,6 +166,55 @@ describe("Pi child backend", () => {
     }),
     cwd: WorkingDirectory.make("/workspace/usine"),
     prompt: "Implement the focused task.",
+  });
+
+  it.live("suppresses a Pi prompt failure when its attempt is stopping", () => {
+    let stopping = false;
+    let rejectPrompt: ((cause: unknown) => void) | undefined;
+    const logs: Array<{ level: string; message: string }> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      logs.push({ level: logLevel.toUpperCase(), message: jsonKey(message) });
+    });
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => {},
+      messages: [],
+      prompt: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectPrompt = reject;
+        }),
+      steer: () => Promise.resolve(),
+      subscribe: () => () => {},
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          harnessSession: Option.none(),
+          model: childRequest.session.brain.model,
+          pool: "apiKeys",
+          session,
+          tools: childTools,
+        }),
+    });
+    return Effect.gen(function* () {
+      yield* (yield* ChildBackend).launch(childRequest);
+      while (rejectPrompt === undefined) yield* Effect.sleep("10 millis");
+      stopping = true;
+      rejectPrompt(new Error("Session disposed during shutdown"));
+      while (!logs.some(({ message }) => message.includes("stopped with its attempt")))
+        yield* Effect.sleep("10 millis");
+      assert.deepStrictEqual(
+        logs.filter(({ level }) => level === "WARN" || level === "ERROR"),
+        [],
+      );
+    }).pipe(
+      Effect.provide(piChildLayer.pipe(Layer.provide(sdk))),
+      Effect.provideService(ChildSessionLifecycle, { isStopping: Effect.sync(() => stopping) }),
+      Effect.provide(Logger.layer([logger])),
+      Effect.timeout("5 seconds"),
+      Effect.scoped,
+    );
   });
 
   it.effect("keeps a held Pi child open across idle turns and returns only after release", () =>

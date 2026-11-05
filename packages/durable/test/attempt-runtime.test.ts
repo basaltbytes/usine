@@ -31,7 +31,7 @@ import { CommitSha } from "@usine/core/repository";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import { Commit, StepCompletion, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { ChildBackend, SessionOperationError } from "@usine/agents/runtime";
+import { ChildBackend, ChildSessionLifecycle, SessionOperationError } from "@usine/agents/runtime";
 import {
   Context,
   DateTime,
@@ -1758,6 +1758,45 @@ describe("durable AttemptRuntime", () => {
         const currentFinished = yield* runtime.finished(request.spec.attemptId);
         assert.deepStrictEqual(currentFinished, Option.none());
       }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("marks a child's attempt stopping when its execute call detaches", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const launched = yield* Deferred.make<ChildSessionLifecycle["Service"]>();
+      const backend = Layer.succeed(ChildBackend)({
+        launch: () =>
+          Effect.gen(function* () {
+            const lifecycle = yield* ChildSessionLifecycle.current;
+            yield* Deferred.succeed(launched, lifecycle);
+            return yield* Effect.never;
+          }),
+      });
+      const services = attemptRuntimeLayer.pipe(
+        Layer.provideMerge(
+          durableHarnessLayer({
+            ...fauxParent([delegate("Fix the flaky test")]),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open the durable storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const execution = yield* Effect.forkChild(
+          runtime.execute(attemptRequest("run/step/977"), recordingSink().sink),
+        );
+        const lifecycle = yield* Deferred.await(launched).pipe(Effect.timeout("5 seconds"));
+        const stoppingBefore = yield* lifecycle.isStopping;
+        assert.isFalse(stoppingBefore);
+        yield* Fiber.interrupt(execution);
+        const stoppingAfter = yield* lifecycle.isStopping;
+        assert.isTrue(stoppingAfter);
+      }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
   );
 

@@ -10,7 +10,10 @@ const lint = (filename, source) => {
   const probe = join(root, filename.replace("example.ts", `web-import-probe-${process.pid}.ts`));
   writeFileSync(probe, source, { flag: "wx" });
   try {
-    return spawnSync("pnpm", ["exec", "oxlint", probe], { cwd: root, encoding: "utf8" });
+    return spawnSync("corepack", ["pnpm", "exec", "oxlint", probe], {
+      cwd: root,
+      encoding: "utf8",
+    });
   } finally {
     rmSync(probe);
   }

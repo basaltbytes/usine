@@ -52,6 +52,7 @@ import {
 import {
   type AgentSessionError,
   ChildBackend,
+  ChildSessionLifecycle,
   type RunningSession,
   UnknownModelError,
   UnsupportedEffortError,
@@ -97,6 +98,7 @@ const makeCodexChild = Effect.gen(function* () {
         sessionId: request.session.id,
       });
       yield* Effect.logInfo("Launching Codex child session");
+      const lifecycle = yield* ChildSessionLifecycle.current;
       const client: CodexClient = {
         cwd: request.cwd,
         sessionId: Option.some(request.session.id),
@@ -311,7 +313,7 @@ const makeCodexChild = Effect.gen(function* () {
       });
       const interruptTurn = Effect.fn("CodexRuntime.interruptTurn")(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-        if (!turnActive || interrupting) return;
+        if ((yield* lifecycle.isStopping) || !turnActive || interrupting) return;
         interrupting = true;
         const encodedTurnInterruptParams = yield* Schema.encodeEffect(
           Schema.toCodecJson(TurnInterruptParams),
@@ -363,6 +365,7 @@ const makeCodexChild = Effect.gen(function* () {
       });
 
       const fail = Effect.fn("CodexRuntime.fail")(function* (error: AgentSessionError) {
+        if (yield* lifecycle.isStopping) return;
         yield* connection.close.pipe(
           Effect.tapError((cause) =>
             Effect.logWarning("Codex child cleanup failed while reporting its original failure", {
@@ -377,6 +380,12 @@ const makeCodexChild = Effect.gen(function* () {
       let resumed = false;
       const resume = Effect.fn("CodexRuntime.resume")(function* (error: AgentSessionError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.thread.id });
+        if (yield* lifecycle.isStopping) {
+          yield* Effect.logInfo("Leaving the Codex child for reattachment", {
+            sessionId: session.id,
+          });
+          return yield* Effect.never;
+        }
         if (
           resumed ||
           request.host._tag !== "RemoteShell" ||
