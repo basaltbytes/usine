@@ -113,14 +113,21 @@ const isProviderName = Schema.is(LlmProviderName);
 export interface LlmTarget {
   readonly provider: LlmProviderName;
   readonly rest: string;
+  readonly legacy: boolean;
 }
 
 /** Returns the provider from the first path segment; for example, `/anthropic-messages/v1/messages` is Anthropic's `/v1/messages`. */
 export const llmTarget = (pathname: string): Option.Option<LlmTarget> => {
   const match = /^\/([a-z-]+)(\/.*)?$/u.exec(pathname);
-  const provider = match?.[1];
+  const prefix = match?.[1];
+  const provider =
+    prefix === "anthropic"
+      ? "anthropic-messages"
+      : prefix === "openai"
+        ? "openai-responses"
+        : prefix;
   if (match === null || provider === undefined || !isProviderName(provider)) return Option.none();
-  return Option.some({ provider, rest: match[2] ?? "" });
+  return Option.some({ provider, rest: match[2] ?? "", legacy: prefix !== provider });
 };
 
 /** Returns the credential kind sent to `provider`: a subscription for a Claude token or a ChatGPT login. */

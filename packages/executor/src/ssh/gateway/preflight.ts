@@ -1,4 +1,8 @@
-import { catalog, type HarnessCredential, type HarnessDescriptor } from "@usine/agents/harness";
+import {
+  type HarnessCatalog,
+  type HarnessCredential,
+  type HarnessDescriptor,
+} from "@usine/agents/harness";
 import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usine/core/worker";
@@ -8,7 +12,7 @@ import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts
 import type { HarnessProbe } from "../../harness-preflight.ts";
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
-import { forwardProxyUrl, GATEWAY_SENT_VARIABLES, gatewayEnvironment } from "./environment.ts";
+import { forwardProxyUrl, gatewaySentVariables, gatewayEnvironment } from "./environment.ts";
 
 /** A placeholder caller token that lets preflight check the sent variables without attaching anything. */
 const PROBE_TOKEN = Redacted.make("usine-preflight");
@@ -35,25 +39,6 @@ const unreachable = (host: string, command: string, result: CommandResult) =>
     cause: new Error(result.stderr.trim() || `ssh exited with code ${SSH_FAILURE}`),
   });
 
-/**
- * Logs a warning, once per Worker, that the Gateway is too old to report its Anthropic
- * credential kind (#248). Later preflights log at debug level.
- */
-const warnOfUnreportedCredential = (worker: WorkerName, gateway: MachineGateway) =>
-  Ref.getAndSet(gateway.warnedOfUnreportedCredential, true).pipe(
-    Effect.flatMap((warned) =>
-      warned
-        ? Effect.logDebug(
-            "SSH Worker's Gateway still does not report the kind of its Anthropic credential; already warned for this Worker",
-            { worker, gateway: gateway.forward.gateway },
-          )
-        : Effect.logWarning(
-            "SSH Worker's Gateway does not report the kind of its Anthropic credential; its Claude Code children count in the Claude plan pool until the Gateway is upgraded",
-            { worker, gateway: gateway.forward.gateway },
-          ),
-    ),
-  );
-
 /** Each provider's display name and the Gateway variables that set its credential. */
 const PROVIDER_CREDENTIALS = {
   "anthropic-messages": {
@@ -77,8 +62,7 @@ const NO_CREDENTIALS: GatewayCredentials = {
 /**
  * Reads the Gateway's credential kind for each provider in the Worker's `llmProviders` and
  * records them for the Worker (ADR 0013). Fails if the Gateway has no credential for a listed
- * provider. If the Gateway is too old to report credentials, keeps the Claude plan pool for
- * Anthropic with a warning, and fails for OpenAI, which such a Gateway can't serve for Codex.
+ * provider or predates credential reporting.
  */
 const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentials")(function* (
   worker: WorkerName,
@@ -98,15 +82,16 @@ const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentia
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
   if (Option.isNone(reported)) {
-    if (listed.includes("openai-responses"))
-      return yield* gatewayGap(
-        worker,
-        `The gateway of SSH worker "${worker}" doesn't report its LLM credentials, so Codex can't use its OpenAI credential. Upgrade @usine/gateway on the gateway, or remove openai-responses from llm_providers.`,
-        new Error("the gateway answered 404 for GET /v1/providers"),
-      );
-    yield* warnOfUnreportedCredential(worker, gateway);
-    yield* Ref.set(gateway.credentials, NO_CREDENTIALS);
-    return NO_CREDENTIALS;
+    yield* Effect.logWarning("Gateway upgrade required before using LLM protocols", {
+      worker,
+      gateway: gateway.forward.gateway,
+      llmProviders: listed,
+    });
+    return yield* gatewayGap(
+      worker,
+      `The gateway of SSH worker "${worker}" doesn't report its LLM credentials. Upgrade @usine/gateway on the gateway before using ${listed.join(", ")} in llm_providers.`,
+      new Error("the gateway answered 404 for GET /v1/providers"),
+    );
   }
   const { providers } = reported.value;
   const kindOf = (provider: GatewayLlmProtocol) =>
@@ -144,6 +129,7 @@ const credentialMode = (kind: Option.Option<GatewayCredentialKind>, listed: bool
  * preflight: Anthropic's for Claude Code, OpenAI's for Codex. Pi uses its own login.
  */
 export const gatewayCredentialFor = (
+  catalog: HarnessCatalog,
   gateway: MachineGateway,
   harness: Harness,
 ): Effect.Effect<Option.Option<GatewayCredentialKind>> =>
@@ -203,6 +189,7 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
  * rejects a request without a caller token.
  */
 const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine")(function* (
+  catalog: HarnessCatalog,
   commands: RemoteCommands,
   worker: WorkerName,
   machine: SshMachine,
@@ -212,6 +199,7 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
   const gitHost = `git.${settings.domain}`;
   yield* Effect.annotateCurrentSpan({ worker, domain: settings.domain, gateway: forward.gateway });
   const { sent } = gatewayEnvironment({
+    catalog,
     domain: settings.domain,
     llmProviders: settings.llmProviders,
     ghConfigDirectory: machine.workerDirectory,
@@ -228,7 +216,7 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
   if (dropped.length > 0)
     return yield* gatewayGap(
       worker,
-      `The sshd on SSH worker "${worker}" doesn't accept ${dropped.join(", ")}. Add AcceptEnv ${GATEWAY_SENT_VARIABLES.join(" ")} to its sshd configuration.`,
+      `The sshd on SSH worker "${worker}" doesn't accept ${dropped.join(", ")}. Add AcceptEnv ${gatewaySentVariables(catalog).join(" ")} to its sshd configuration.`,
       new Error(`variables not received: ${dropped.join(" ")}`),
     );
 
@@ -269,13 +257,14 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
  * checks of `verifyGatewayAdmin`, then the machine checks of `verifyGatewayFromMachine`.
  */
 export const verifyGateway = (
+  catalog: HarnessCatalog,
   commands: RemoteCommands,
   worker: WorkerName,
   machine: SshMachine,
   gateway: MachineGateway,
 ) =>
   verifyGatewayAdmin(worker, gateway).pipe(
-    Effect.andThen(verifyGatewayFromMachine(commands, worker, machine, gateway)),
+    Effect.andThen(verifyGatewayFromMachine(catalog, commands, worker, machine, gateway)),
   );
 
 /**
@@ -307,6 +296,7 @@ const PROXY_REFUSED = "403";
  * machine or in a container on it.
  */
 export const gatewayHarnessProbe = (
+  catalog: HarnessCatalog,
   commands: RemoteCommands,
   machine: SshMachine,
   gateway: MachineGateway,

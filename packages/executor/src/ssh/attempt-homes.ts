@@ -1,4 +1,5 @@
-import { catalog, type HarnessDescriptor } from "@usine/agents/harness";
+import { Harnesses } from "@usine/agents/harness/node";
+import { type HarnessDescriptor } from "@usine/agents/harness";
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { safeSegment } from "@usine/core/repository";
@@ -36,6 +37,7 @@ export const attemptHomeIn = (
 export const attemptHomesFor = Effect.fn("SshExecutor.attemptHomesFor")(function* (
   commands: RemoteCommands,
 ) {
+  const { catalog } = yield* Harnesses;
   // The number of holds on each harness home, by path.
   const held = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
   const count = (home: string, change: 1 | -1) =>

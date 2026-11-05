@@ -947,6 +947,7 @@ export const executorLayer = (
   storage: StubStorage = new StubStorage(),
   /** Replaces the executor's own login and binary checks. */
   probes: Pick<SshExecutorOptions, "harnessReadiness" | "attemptConnections"> = {},
+  harnesses: typeof harnessesLive = harnessesLive,
 ) =>
   sshLayer({
     workers: [address],
@@ -955,7 +956,7 @@ export const executorLayer = (
     interruptGrace: "2 seconds",
     ...probes,
   }).pipe(
-    Layer.provide(harnessesLive),
+    Layer.provide(harnesses),
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),

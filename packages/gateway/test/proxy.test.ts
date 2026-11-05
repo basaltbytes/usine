@@ -323,35 +323,46 @@ describe("GatewayProxy", () => {
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
-  it.effect("Anthropic requests carry the gateway's API key in place of the placeholder", () =>
-    Effect.gen(function* () {
-      const caller = yield* attach(installation);
-      yield* send(
-        "http://llm.gw.test/anthropic-messages/v1/messages?beta=true",
-        { "x-api-key": caller, "anthropic-version": "2023-06-01" },
-        { method: "POST", body: "{}" },
-      );
-      const [request] = yield* sent;
-      assert(request !== undefined);
-      assert.strictEqual(request.url, "https://api.anthropic.com/v1/messages?beta=true");
-      assert.deepStrictEqual(Headers.get(request.headers, "x-api-key"), Option.some(ANTHROPIC_KEY));
-      assert.deepStrictEqual(
-        Headers.get(request.headers, "anthropic-version"),
-        Option.some("2023-06-01"),
-      );
-    }).pipe(
-      Effect.provide(
-        gateway({
-          ...NO_PROVIDERS,
-          "anthropic-messages": Option.some(
-            AnthropicProvider.make({
-              upstream: UpstreamBase.make("https://api.anthropic.com"),
-              credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
-            }),
-          ),
-        }),
+  it.effect.each(["anthropic-messages", "anthropic"])(
+    "%s requests replace the placeholder with the gateway API key",
+    (prefix) =>
+      Effect.gen(function* () {
+        lines.length = 0;
+        const caller = yield* attach(installation);
+        yield* send(
+          `http://llm.gw.test/${prefix}/v1/messages?beta=true`,
+          { "x-api-key": caller, "anthropic-version": "2023-06-01" },
+          { method: "POST", body: "{}" },
+        );
+        const [request] = yield* sent;
+        assert(request !== undefined);
+        assert.strictEqual(request.url, "https://api.anthropic.com/v1/messages?beta=true");
+        assert.strictEqual(
+          lines.some((line) => line.includes("Deprecated LLM path prefix")),
+          prefix === "anthropic",
+        );
+        for (const value of [caller, ANTHROPIC_KEY]) assert.notInclude(lines.join("\n"), value);
+        assert.deepStrictEqual(
+          Headers.get(request.headers, "x-api-key"),
+          Option.some(ANTHROPIC_KEY),
+        );
+        assert.deepStrictEqual(
+          Headers.get(request.headers, "anthropic-version"),
+          Option.some("2023-06-01"),
+        );
+      }).pipe(
+        Effect.provide(
+          gateway({
+            ...NO_PROVIDERS,
+            "anthropic-messages": Option.some(
+              AnthropicProvider.make({
+                upstream: UpstreamBase.make("https://api.anthropic.com"),
+                credential: AnthropicApiKey.make({ key: secret(ANTHROPIC_KEY) }),
+              }),
+            ),
+          }),
+        ),
       ),
-    ),
   );
 
   it.effect(
@@ -388,17 +399,23 @@ describe("GatewayProxy", () => {
       ),
   );
 
-  it.effect(
-    "Codex's OpenAI requests carry the key as a bearer token; an unset provider is refused",
-    () =>
+  it.effect.each(["openai-responses", "openai"])(
+    "%s requests replace the placeholder with a bearer key and refuse an unset provider",
+    (prefix) =>
       Effect.gen(function* () {
+        lines.length = 0;
         const caller = yield* attach(installation);
-        yield* send("http://llm.gw.test/openai-responses/v1/responses", {
+        yield* send(`http://llm.gw.test/${prefix}/v1/responses`, {
           authorization: `Bearer ${caller}`,
         });
         const [request] = yield* sent;
         assert(request !== undefined);
         assert.strictEqual(request.url, "https://api.openai.com/v1/responses");
+        assert.strictEqual(
+          lines.some((line) => line.includes("Deprecated LLM path prefix")),
+          prefix === "openai",
+        );
+        for (const value of [caller, OPENAI_KEY]) assert.notInclude(lines.join("\n"), value);
         assert.deepStrictEqual(
           Headers.get(request.headers, "authorization"),
           Option.some(`Bearer ${OPENAI_KEY}`),
@@ -465,6 +482,8 @@ describe("GatewayProxy", () => {
           "/anthropic-messages/v1/messages/batches",
           "/anthropic-messages/v1/organizations/api_keys",
           "/openai-responses/v1/files",
+          "/anthropic/v1/files",
+          "/openai/v1/chat/completions",
           "/openai-responses/v1/chat/completions",
           // Paths outside /v1.
           "/anthropic-messages/messages",

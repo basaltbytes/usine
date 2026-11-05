@@ -186,7 +186,6 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       "anthropic-messages": Option.none(),
       "openai-responses": Option.none(),
     });
-    const warnedOfUnreportedCredential = yield* Ref.make(false);
     return {
       gateway: {
         settings: {
@@ -196,7 +195,6 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
         forward,
         admin,
         credentials,
-        warnedOfUnreportedCredential,
       } satisfies MachineGateway,
       forwards: new Map(current.forwards).set(key, { forward, scope: forwardScope, workers }),
       opened: Option.isNone(shared),

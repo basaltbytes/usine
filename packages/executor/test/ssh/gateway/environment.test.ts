@@ -1,9 +1,10 @@
+import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { GatewayDomain, type GatewayLlmProtocol } from "@usine/core/worker";
 import { Redacted } from "effect";
 import {
-  GATEWAY_SENT_VARIABLES,
+  gatewaySentVariables,
   gatewayConfigFiles,
   gatewayEnvironment,
 } from "../../../src/ssh/gateway/environment.ts";
@@ -16,6 +17,7 @@ const DIRECTORIES = {
 
 const environmentFor = (llmProviders: ReadonlyArray<GatewayLlmProtocol>) => {
   const { exported, sent } = gatewayEnvironment({
+    catalog,
     domain: GatewayDomain.make("gw.internal"),
     llmProviders,
     ...DIRECTORIES,
@@ -89,7 +91,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, USINE_GATEWAY_TOKEN: CALLER_TOKEN });
     assert.deepStrictEqual(
       Object.keys(environmentFor(["anthropic-messages", "openai-responses"]).sent),
-      [...GATEWAY_SENT_VARIABLES],
+      [...gatewaySentVariables(catalog)],
     );
   });
 
@@ -97,6 +99,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     const files = (llmProviders: ReadonlyArray<GatewayLlmProtocol>) =>
       Object.fromEntries(
         gatewayConfigFiles({
+          catalog,
           domain: GatewayDomain.make("gw.internal"),
           llmProviders,
           ...DIRECTORIES,

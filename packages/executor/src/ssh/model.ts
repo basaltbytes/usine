@@ -200,11 +200,9 @@ export interface MachineGateway {
   /**
    * The credential kind the Gateway uses for each provider, from the last preflight: Anthropic
    * for Claude Code, OpenAI for Codex. `None` before the first preflight, for a provider that
-   * `llmProviders` doesn't list, or for Anthropic if the Gateway is too old to report it.
+   * `llmProviders` doesn't list.
    */
   readonly credentials: Ref.Ref<GatewayCredentials>;
-  /** Whether a preflight already warned that the Gateway is too old to report its Anthropic credential kind. */
-  readonly warnedOfUnreportedCredential: Ref.Ref<boolean>;
 }
 
 /** The credential kind the Gateway holds for each provider; see `MachineGateway.credentials`. */

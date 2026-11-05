@@ -1,4 +1,4 @@
-import { catalog, type HarnessCredential } from "@usine/agents/harness";
+import { type HarnessCatalog, type HarnessCredential } from "@usine/agents/harness";
 import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import type { RemoteCommands } from "../../remote/commands.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
@@ -20,6 +20,7 @@ import type { SshWorkerEntry } from "../workers.ts";
  * the Gateway nor in the provisioner's `api_keys`.
  */
 export const harnessCredentialGap = (
+  catalog: HarnessCatalog,
   entry: SshWorkerEntry,
   brains: ReadonlyArray<BrainSpec>,
 ): Option.Option<WorkerCapabilityError> => {
@@ -32,7 +33,10 @@ export const harnessCredentialGap = (
       : `${head} Set provisioner.api_keys.${provider}. ${noGateway}`;
   };
   for (const harness of Arr.dedupe(brains.map((brain) => brain.harness))) {
-    if (gatewayHolds(entry.gateway, harness) || Option.isSome(provisionedApiKey(entry, harness)))
+    if (
+      gatewayHolds(catalog, entry.gateway, harness) ||
+      Option.isSome(provisionedApiKey(catalog, entry, harness))
+    )
       continue;
     const message = Option.match(catalog.get(harness), {
       onNone: () => `No provisioned worker credential for harness "${harness}".`,

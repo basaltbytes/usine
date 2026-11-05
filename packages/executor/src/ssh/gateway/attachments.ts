@@ -1,4 +1,5 @@
-import { catalog } from "@usine/agents/harness";
+import type { HarnessCatalog } from "@usine/agents/harness";
+import { Harnesses } from "@usine/agents/harness/node";
 import { reclaimOnceFor } from "../../remote/reclaim.ts";
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
@@ -58,7 +59,7 @@ export const writeMachineFiles = (
  * Returns the directory of gh's configuration on a Worker behind a Gateway, and the Attempt's
  * harness homes. These directories contain no token.
  */
-const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
+const configDirectories = (catalog: HarnessCatalog, machine: SshMachine, attemptId: AttemptId) => ({
   ghConfigDirectory: `${machine.workerDirectory}/gh`,
   homes: Object.fromEntries(
     catalog.descriptors.map(({ id }) => [
@@ -79,6 +80,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
   holdAttemptHome: AttemptHomes["hold"],
   onDetachFailure: (machine: SshMachine) => Effect.Effect<void>,
 ) {
+  const { catalog } = yield* Harnesses;
   const provider = yield* CredentialProvider;
   const active = new Set<AttachmentId>();
   const membership = yield* Semaphore.make(1);
@@ -155,7 +157,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const { admin, settings } = gateway;
     const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
     yield* Effect.annotateCurrentSpan(fields);
-    const directories = configDirectories(machine, attemptId);
+    const directories = configDirectories(catalog, machine, attemptId);
     const homes = yield* Effect.forEach(
       catalog.descriptors.filter(({ worker }) =>
         Option.exists(
@@ -170,6 +172,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       operation,
       machine.shell,
       gatewayConfigFiles({
+        catalog,
         domain: settings.domain,
         llmProviders: settings.llmProviders,
         ...directories,
@@ -301,6 +304,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       ),
     ).pipe(Effect.forkScoped);
     const { exported, sent } = gatewayEnvironment({
+      catalog,
       domain: settings.domain,
       egress: settings.egress,
       llmProviders: settings.llmProviders,

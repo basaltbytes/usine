@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem } from "@effect/platform-node";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
@@ -83,6 +84,7 @@ it.live(
             ),
           );
         const { exported, sent } = gatewayEnvironment({
+          catalog,
           domain,
           llmProviders: [],
           ghConfigDirectory: directory,

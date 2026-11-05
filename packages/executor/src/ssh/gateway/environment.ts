@@ -1,4 +1,4 @@
-import { catalog, gatewayTokenVariables } from "@usine/agents/harness";
+import { type HarnessCatalog, gatewayTokenVariables } from "@usine/agents/harness";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayDomain, GatewayLlmProtocol } from "@usine/core/worker";
 import { type CallerToken, GATEWAY_TOKEN_HEADER } from "@usine/gateway/admin";
@@ -17,7 +17,7 @@ const GH_GATEWAY_SOCKET = `${GH_GATEWAY_SOCKET_DIRECTORY}/http.sock`;
 const FORWARD_PROXY_PORT = 3128;
 
 /** Caller-token variables that the worker's sshd must accept. */
-export const GATEWAY_SENT_VARIABLES = [
+export const gatewaySentVariables = (catalog: HarnessCatalog) => [
   "GIT_CONFIG_VALUE_0",
   "GH_ENTERPRISE_TOKEN",
   "GH_TOKEN",
@@ -43,6 +43,7 @@ export const ghGatewayConfig = (domain: GatewayDomain) =>
   }) as const;
 
 export interface GatewayEnvironmentOptions {
+  readonly catalog: HarnessCatalog;
   readonly egress?: "proxy" | "direct";
   readonly domain: GatewayDomain;
   readonly llmProviders: ReadonlyArray<GatewayLlmProtocol>;
@@ -84,7 +85,7 @@ export interface GatewayEnvironment {
  * such as a preflight's harness probes.
  */
 export const gatewayExportedEnvironment = (
-  settings: Pick<GatewayEnvironmentOptions, "domain" | "llmProviders" | "egress">,
+  settings: Pick<GatewayEnvironmentOptions, "catalog" | "domain" | "llmProviders" | "egress">,
   ghConfigDirectory: string,
 ): Readonly<Record<string, string>> => {
   const { exported } = gatewayEnvironment({
@@ -93,7 +94,7 @@ export const gatewayExportedEnvironment = (
     homes: {},
     callerToken: Redacted.make(""),
   });
-  const homeVariables = catalog.descriptors.flatMap(({ worker }) =>
+  const homeVariables = settings.catalog.descriptors.flatMap(({ worker }) =>
     Option.toArray(worker.credential).flatMap(({ home }) => Option.toArray(home)),
   );
   return Object.fromEntries(
@@ -163,9 +164,9 @@ export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayE
 
 /** The registered wiring recipes whose protocols the gateway serves. */
 const gatewayWirings = (
-  options: Pick<GatewayEnvironmentOptions, "domain" | "llmProviders" | "homes">,
+  options: Pick<GatewayEnvironmentOptions, "catalog" | "domain" | "llmProviders" | "homes">,
 ) =>
-  catalog.descriptors.flatMap(({ id, worker }) =>
+  options.catalog.descriptors.flatMap(({ id, worker }) =>
     Option.toArray(worker.credential)
       .filter(({ protocol }) => options.llmProviders.includes(protocol))
       .map(({ gateway, gatewayPath }) =>

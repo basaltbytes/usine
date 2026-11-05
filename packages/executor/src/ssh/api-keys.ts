@@ -1,4 +1,4 @@
-import { catalog } from "@usine/agents/harness";
+import { type HarnessCatalog } from "@usine/agents/harness";
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { Effect, Option, Redacted } from "effect";
@@ -10,7 +10,11 @@ import { writeMachineFiles } from "./gateway/attachments.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress } from "./model.ts";
 
 /** Returns whether the Gateway holds a credential for `harness`'s provider. */
-export const gatewayHolds = (gateway: Option.Option<MachineGateway>, harness: Harness): boolean =>
+export const gatewayHolds = (
+  catalog: HarnessCatalog,
+  gateway: Option.Option<MachineGateway>,
+  harness: Harness,
+): boolean =>
   Option.exists(gateway, ({ settings }) =>
     Option.exists(
       Option.flatMap(catalog.get(harness), (descriptor) =>
@@ -26,11 +30,13 @@ export const gatewayHolds = (gateway: Option.Option<MachineGateway>, harness: Ha
  * credential.
  */
 export const provisionedApiKey = (
+  catalog: HarnessCatalog,
   worker: { readonly address: SshWorkerAddress; readonly gateway: Option.Option<MachineGateway> },
   harness: Harness,
 ): Option.Option<Redacted.Redacted<string>> => {
   const { machine } = worker.address;
-  if (machine._tag !== "Provisioned" || gatewayHolds(worker.gateway, harness)) return Option.none();
+  if (machine._tag !== "Provisioned" || gatewayHolds(catalog, worker.gateway, harness))
+    return Option.none();
   return Option.flatMap(
     Option.flatMap(catalog.get(harness), (descriptor) =>
       Option.map(descriptor.worker.credential, ({ provider }) => provider),
@@ -41,6 +47,7 @@ export const provisionedApiKey = (
 
 /** Adds provisioner API keys and writes each registered harness's attempt configuration. */
 export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
+  catalog: HarnessCatalog,
   commands: RemoteCommands,
   holdAttemptHome: AttemptHomes["hold"],
   machine: SshMachine,
@@ -50,7 +57,7 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name });
   const keyed = catalog.descriptors.flatMap((descriptor) =>
-    Option.toArray(provisionedApiKey(machine, descriptor.id)).flatMap((key) =>
+    Option.toArray(provisionedApiKey(catalog, machine, descriptor.id)).flatMap((key) =>
       Option.toArray(descriptor.worker.credential).map((credential) => ({
         descriptor,
         credential,

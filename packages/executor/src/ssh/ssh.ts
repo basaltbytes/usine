@@ -42,8 +42,9 @@ import { sshMachinesFor, SshWorkers } from "./workers.ts";
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
     const harnesses = yield* Harnesses;
+    const { catalog } = harnesses;
     const remoteCommands = yield* remoteCommandsFor;
-    const reset = machineResetFor(remoteCommands, options.instance, options.instanceId);
+    const reset = machineResetFor(catalog, remoteCommands, options.instance, options.instanceId);
     const { commands } = reset;
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
@@ -80,6 +81,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         );
     const fs = yield* FileSystem.FileSystem;
     const records = yield* sshWorkerRecordsFor(
+      catalog,
       options.workerRecordsDirectory ??
         (yield* fs.makeTempDirectoryScoped({ prefix: "usine-ssh-workers-" }).pipe(Effect.orDie)),
       base,
@@ -95,7 +97,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     // or a provisioned machine's Attempts get an API key.
     const harnessProbe = (machine: SshMachine, shell: RemoteShell): HarnessProbe => {
       const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(harnesses, shell, {});
-      const keyed = (harness: Harness) => Option.isSome(provisionedApiKey(machine, harness));
+      const keyed = (harness: Harness) =>
+        Option.isSome(provisionedApiKey(catalog, machine, harness));
       const external = agentsHarnessProbe(harnesses, shell, {}, "api-key");
       const probe: HarnessProbe = (brain, login) =>
         keyed(brain.harness) ? external(brain, login) : own(brain, login);
@@ -103,6 +106,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         onNone: () => probe,
         onSome: (gateway) =>
           gatewayHarnessProbe(
+            catalog,
             commands,
             machine,
             gateway,
@@ -119,7 +123,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       reset.failed(machine.shell),
     );
     const containers = yield* sshContainersFor(commands, options.instance, options.instanceId);
-    const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, containers);
+    const verifyMachine = sshMachinePreflightFor(catalog, commands, harnessProbe, containers);
     const forgetConnection = Effect.fn("SshExecutor.forgetReleasedConnection")(function* (
       attemptId: AttemptId,
     ) {
@@ -202,6 +206,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
                   operation,
                 );
             return yield* withApiKeys(
+              catalog,
               commands,
               attemptHomes.hold,
               machine,
@@ -315,7 +320,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       gatewayCredential: (machine, harness) =>
         Option.match(machine.gateway, {
           onNone: () => Effect.succeed(Option.none<GatewayCredentialKind>()),
-          onSome: (gateway) => gatewayCredentialFor(gateway, harness),
+          onSome: (gateway) => gatewayCredentialFor(catalog, gateway, harness),
         }),
       grantFor,
       readOnlyAccessGap: Option.none(),

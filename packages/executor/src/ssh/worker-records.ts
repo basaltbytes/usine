@@ -1,4 +1,4 @@
-import { catalog } from "@usine/agents/harness";
+import type { HarnessCatalog } from "@usine/agents/harness";
 import type { SshCommand } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import { safeSegment } from "@usine/core/repository";
@@ -36,6 +36,7 @@ const SshWorkerRecordJson = Schema.fromJsonString(SshWorkerRecord);
  * each Worker's port and key, `DEFAULT_SSH` if omitted.
  */
 export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(function* (
+  catalog: HarnessCatalog,
   directory: string,
   ssh: SshCommand = DEFAULT_SSH,
 ) {

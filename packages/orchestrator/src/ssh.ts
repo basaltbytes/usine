@@ -1,3 +1,4 @@
+import { Harnesses } from "@usine/agents/harness/node";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { workerConnectionsFor } from "./connections.ts";
 import type { RunDatabase } from "@usine/engine/database";
@@ -36,9 +37,14 @@ export const withSshWorkerDiscard = <A, E, R>(
   make: (discard: NonNullable<StepExecutorOptions["discard"]>) => Layer.Layer<A, E, R>,
 ) =>
   Layer.unwrap(
-    Effect.map(sshWorkerRecordsFor(sshWorkerRecordsDirectory(instanceDirectory)), ({ discard }) =>
-      make(discard),
-    ),
+    Effect.gen(function* () {
+      const { catalog } = yield* Harnesses;
+      const { discard } = yield* sshWorkerRecordsFor(
+        catalog,
+        sshWorkerRecordsDirectory(instanceDirectory),
+      );
+      return make(discard);
+    }),
   ).pipe(Layer.provide(NodeServices.layer));
 
 /** Returns the SSH Workers that `usine.yaml` declares, in declared order. */

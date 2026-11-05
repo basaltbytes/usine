@@ -13,6 +13,7 @@ import { Executor, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
+import { sharedHarnesses } from "../harnesses.ts";
 import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
 import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
@@ -83,6 +84,17 @@ for (const address of [hetznerAddress, boatAddress]) {
           assert.strictEqual(machine.state.containers.size, 0);
           assert.strictEqual(machine.state.credentials.size, 0);
           assert.strictEqual(records.size, 0, "reset removes the completed attempt connection");
+          const reset = machine.state.calls.find(
+            ({ line }) =>
+              line.startsWith("exec 'rm' '-rf'") && line.includes("/container-checkouts'"),
+          );
+          assert(reset !== undefined);
+          assert.include(
+            reset.line,
+            "/shared-client'",
+            "reset removes every registered harness home before reusing the machine",
+          );
+          assert.include(reset.line, "/codex'");
           const reused = yield* machines.create(WORKER, MACHINE_RUN, second, [TEST_AGENT.brain]);
           assert.isTrue(records.has(second));
           assert.strictEqual(reused.id, first.id);
@@ -112,6 +124,7 @@ for (const address of [hetznerAddress, boatAddress]) {
           Effect.scoped,
           Effect.provide(
             runtimeOf(machine, providers, reuseAddress(address), {
+              harnesses: sharedHarnesses,
               attemptConnections: {
                 read: (id) => Effect.sync(() => Option.fromNullishOr(records.get(id))),
                 write: (id, connection) => Effect.sync(() => void records.set(id, connection)),

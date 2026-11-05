@@ -1,3 +1,4 @@
+import type { harnessesLive } from "@usine/agents/harness/node";
 import { NodeCrypto } from "@effect/platform-node";
 import {
   GatewayAdminPort,
@@ -133,7 +134,12 @@ export const fakeGateway = (
   providers: LlmProviders = GATEWAY_PROVIDERS,
 ) => {
   const calls: Array<AdminCall> = [];
-  const switches = { refusedDetaches: new Set<string>(), answering: true, reportsProviders: true };
+  const switches = {
+    refusedDetaches: new Set<string>(),
+    answering: true,
+    reportsProviders: true,
+    legacyProviders: false,
+  };
   let inFlight = 0;
   const idle = Latch.makeUnsafe(true);
   const tracked = <A, E, R>(request: Effect.Effect<A, E, R>) =>
@@ -219,6 +225,18 @@ export const fakeGateway = (
             return HttpServerResponse.toClientResponse(HttpServerResponse.empty({ status: 404 }), {
               request,
             });
+          if (path === "/v1/providers" && switches.legacyProviders)
+            return HttpServerResponse.toClientResponse(
+              HttpServerResponse.jsonUnsafe({
+                providers: Object.entries(providers).flatMap(([protocol, provider]) =>
+                  Option.toArray(provider).map(() => ({
+                    provider: protocol === "anthropic-messages" ? "anthropic" : "openai",
+                    credential: "api-key",
+                  })),
+                ),
+              }),
+              { request },
+            );
           const response = yield* handler.pipe(
             Effect.provideService(
               HttpServerRequest.HttpServerRequest,
@@ -246,6 +264,7 @@ export const gatewayRuntime = (
     readonly address?: SshWorkerAddress;
     readonly parent?: StubParent;
     readonly storage?: StubStorage;
+    readonly harnesses?: typeof harnessesLive;
     /** Replaces the executor's own login and binary checks; the Gateway's checks still run. */
     readonly probes?: Pick<SshExecutorOptions, "harnessReadiness">;
   } = {},
@@ -257,6 +276,7 @@ export const gatewayRuntime = (
     options.parent,
     options.storage,
     options.probes,
+    options.harnesses,
   ).pipe(Layer.provideMerge(gateway.layer));
 
 /**
