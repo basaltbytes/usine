@@ -22,6 +22,10 @@ export class PullRequest extends Schema.TaggedClass<
   number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The GitHub pull request URL, encoded as a string for storage. */
   url: Schema.URLFromString,
+  /** The checkout base used to harvest this attempt, or `None` for older facts. */
+  base: Schema.OptionFromOptionalKey(CommitSha).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The pushed head, or `None` for facts recorded before CI handoffs. */
   head: Schema.OptionFromOptionalKey(CommitSha).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),

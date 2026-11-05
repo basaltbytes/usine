@@ -1,3 +1,8 @@
+import { NodeServices } from "@effect/platform-node";
+import { harvestFacts } from "@usine/core/step/harvest";
+import { jsonKey } from "@usine/core/json-key";
+import { AttemptWindows } from "@usine/core/attempt";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { boardHistory } from "./support/run-reader.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
@@ -30,7 +35,8 @@ import { UnconfirmedStops } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { RunEvent, RunReader, RunSnapshot, summarizeRun } from "@usine/engine/run-reader";
-import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schema } from "effect";
+import { harvestedAttemptChanges } from "../src/operator/task-changes.ts";
 import { OperatorObservation } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
@@ -140,6 +146,7 @@ const pullRequest = (
       mergedAt: state.merged ? "2026-10-03T10:00:00Z" : null,
       author: { login: "usine-bot" },
       baseRefName: "main",
+      baseRefOid: "c".repeat(40),
       headRefName: `fix/${number}`,
       headRefOid: "a".repeat(40),
       additions: 1,
@@ -267,6 +274,7 @@ const runs = [
           Commit.make({ sha: CommitSha.make("a".repeat(40)), summary: "Second plan commit" }),
           PullRequest.make({
             number: 41,
+            base: Option.some(CommitSha.make("c".repeat(40))),
             url: new URL(pullUrl(41)),
             head: Option.some(CommitSha.make("a".repeat(40))),
           }),
@@ -495,12 +503,16 @@ describe("Task view", () => {
         task.items.find(({ number }) => number === 41)?.pullRequest?.head,
         "a".repeat(40),
       );
+      assert.strictEqual(
+        task.items.find(({ number }) => number === 41)?.pullRequest?.base,
+        "c".repeat(40),
+      );
       assert.deepStrictEqual(
-        task.attemptChanges.map(({ runId, attemptId, pullRequest, first, head }) => ({
+        task.attemptChanges.map(({ runId, attemptId, pullRequest, base, head }) => ({
           runId,
           attemptId,
           pullRequest,
-          first,
+          base,
           head,
         })),
         [
@@ -508,7 +520,7 @@ describe("Task view", () => {
             runId: "run-plan",
             attemptId: "run-plan/2",
             pullRequest: 41,
-            first: "b".repeat(40),
+            base: "c".repeat(40),
             head: "a".repeat(40),
           },
         ],
@@ -559,6 +571,111 @@ describe("Task view", () => {
       );
       // Run histories come from every Item the Board considers, not the overview's recent window.
       assert.strictEqual(requested.length, items.length);
+    }),
+  );
+
+  it.effect(
+    "compares a merge of main from the checkout base rather than the first harvested parent",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-attempt-range-" });
+        const git = (...args: Array<string>) =>
+          spawner
+            .string(ChildProcess.make("git", args, { cwd: directory }))
+            .pipe(Effect.map((text) => text.trim()));
+        yield* git("init", "-b", "main");
+        yield* git("config", "user.name", "Test");
+        yield* git("config", "user.email", "test@example.com");
+        yield* git("commit", "--allow-empty", "-m", "Common ancestor");
+        yield* git("checkout", "-b", "feature");
+        yield* fs.writeFileString(path.join(directory, "previous-round.txt"), "Previous PR work\n");
+        yield* git("add", ".");
+        yield* git("commit", "-m", "Previous round");
+        const baseOutput = yield* git("rev-parse", "HEAD");
+        const base = CommitSha.make(baseOutput);
+        yield* git("checkout", "main");
+        yield* fs.writeFileString(path.join(directory, "main-update.txt"), "Main update\n");
+        yield* git("add", ".");
+        yield* git("commit", "-m", "Main update");
+        const mainOutput = yield* git("rev-parse", "HEAD");
+        const main = CommitSha.make(mainOutput);
+        yield* git("checkout", "feature");
+        yield* git("merge", "--no-ff", "main", "-m", "Merge main");
+        const headOutput = yield* git("rev-parse", "HEAD");
+        const head = CommitSha.make(headOutput);
+        const facts = yield* harvestFacts(
+          {
+            attemptId: AttemptId.make("run-plan/2"),
+            repository,
+            baseCommit: base,
+            revision: RepositoryRevision.make("feature"),
+            payload: {},
+            preparedAt: Option.none(),
+            botLogin: Option.none(),
+            agent: developer,
+          },
+          (command, args) =>
+            command === "git"
+              ? args[0] === "ls-remote"
+                ? Effect.succeed([`${head}\trefs/heads/feature`])
+                : git(...args).pipe(Effect.map((text) => text.split("\n")))
+              : Effect.succeed([
+                  jsonKey([[{ number: 41, html_url: pullUrl(41), head: { sha: head } }]]),
+                ]),
+          Effect.succeed(AttemptWindows.make({ own: Option.none(), overlapping: [] })),
+        );
+        assert.deepStrictEqual(
+          facts.flatMap((fact) => (fact._tag === "Commit" ? [fact.sha] : [])).slice(0, 1),
+          [main],
+        );
+        const snapshot = summary(
+          "run-plan",
+          40,
+          "plan",
+          RunState.Succeeded.make(),
+          "2026-10-02T09:00:00Z",
+          (runId) => [
+            attempt(
+              runId,
+              2,
+              "2026-10-02T09:00:00Z",
+              succeeded,
+              Option.some("2026-10-02T09:20:00Z"),
+            ),
+          ],
+          Option.some(StepResult.make({ message: "Merged main", facts })),
+        );
+        const changes = harvestedAttemptChanges(snapshot);
+        assert.strictEqual(changes[0]?.base, base);
+        assert.strictEqual(changes[0]?.head, head);
+        const files = yield* git("diff", "--name-only", `${base}...${head}`);
+        assert.strictEqual(files, "main-update.txt");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("omits legacy attempt comparisons whose checkout base was not recorded", () =>
+    Effect.gen(function* () {
+      const legacy = yield* Schema.decodeEffect(PullRequest)({
+        _tag: "PullRequest",
+        number: 41,
+        url: pullUrl(41),
+        head: "a".repeat(40),
+      });
+      assert.isTrue(Option.isNone(legacy.base));
+      const original = runs[0];
+      assert.isDefined(original);
+      if (original === undefined) return;
+      const snapshot = RunSnapshot.make({
+        ...original,
+        step: Step.make({
+          ...original.step,
+          result: Option.some(StepResult.make({ message: "Legacy result", facts: [legacy] })),
+        }),
+      });
+      assert.deepStrictEqual(harvestedAttemptChanges(snapshot), []);
     }),
   );
 

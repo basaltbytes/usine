@@ -11,6 +11,7 @@ export class TaskPullRequestState extends Schema.Class<
   TaskPullRequestState,
   Brand.Brand<"@usine/orchestrator/operator/TaskPullRequestState">
 >("TaskPullRequestState")({
+  base: CommitSha,
   head: CommitSha,
   checks: Schema.NullOr(Schema.String),
   review: Schema.NullOr(Schema.String),
@@ -26,7 +27,7 @@ export class TaskAttemptChangesView extends Schema.Class<
   number: AttemptNumber,
   loop: LoopName,
   pullRequest: ItemNumber,
-  first: CommitSha,
+  base: CommitSha,
   head: CommitSha,
 }) {}
 
@@ -42,28 +43,25 @@ export const harvestedAttemptChanges = (
   );
   if (Option.isNone(attempt)) return [];
   const facts = snapshot.step.result.value.facts;
-  const commits = facts.filter((fact) => fact._tag === "Commit");
-  const first = commits[0];
-  const last = commits.at(-1);
-  if (first === undefined || last === undefined) return [];
-  return facts.flatMap((fact) =>
-    fact._tag === "PullRequest"
-      ? [
-          TaskAttemptChangesView.make({
-            runId: snapshot.run.id,
-            attemptId: attempt.value.id,
-            number: attempt.value.number,
-            loop: snapshot.run.loop,
-            pullRequest: ItemNumber.make(fact.number),
-            first: first.sha,
-            head: Option.getOrElse(fact.head, () => last.sha),
-          }),
-        ]
-      : [],
-  );
+  return facts.flatMap((fact) => {
+    if (fact._tag !== "PullRequest" || Option.isNone(fact.base) || Option.isNone(fact.head))
+      return [];
+    return [
+      TaskAttemptChangesView.make({
+        runId: snapshot.run.id,
+        attemptId: attempt.value.id,
+        number: attempt.value.number,
+        loop: snapshot.run.loop,
+        pullRequest: ItemNumber.make(fact.number),
+        base: fact.base.value,
+        head: fact.head.value,
+      }),
+    ];
+  });
 };
 
 const ProjectedPullRequest = Schema.Struct({
+  baseRefOid: CommitSha,
   headRefOid: CommitSha,
   reviewDecision: Schema.NullOr(Schema.String),
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
@@ -73,6 +71,7 @@ const decodeProjectedPullRequest = Schema.decodeUnknownOption(ProjectedPullReque
 export const taskPullRequestState = (payload: Schema.Json): Option.Option<TaskPullRequestState> =>
   Option.map(decodeProjectedPullRequest(payload), (payload) =>
     TaskPullRequestState.make({
+      base: payload.baseRefOid,
       head: payload.headRefOid,
       checks: payload.statusCheckRollup?.state ?? null,
       review: payload.reviewDecision,

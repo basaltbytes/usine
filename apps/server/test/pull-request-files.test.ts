@@ -12,7 +12,6 @@ import { ProjectId } from "@usine/core/project";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { GitHubApp } from "@usine/github/github-app";
 import {
-  AttemptFilesQuery,
   CommitRangeFilesQuery,
   FileChanges,
   FileChangesQuery,
@@ -149,7 +148,7 @@ it.live(
           ),
         );
       });
-      const response = yield* app.read(PullRequestFilesQuery.make({ head }));
+      const response = yield* app.read(PullRequestFilesQuery.make({ base, head }));
       assert.strictEqual(response.status, 200);
       const changes = yield* decode(response);
       assert.strictEqual(changes.files.length, 101);
@@ -159,7 +158,7 @@ it.live(
       assert.strictEqual(changes.files[100]?.oldPath, "src/old.ts");
       assert.strictEqual(changes.files[100]?.status, "renamed");
       assert.strictEqual(app.requests.length, 4);
-      const again = yield* app.read(PullRequestFilesQuery.make({ head }));
+      const again = yield* app.read(PullRequestFilesQuery.make({ base, head }));
       assert.strictEqual(again.status, 200);
       assert.strictEqual(app.requests.length, 4);
     }).pipe(Effect.scoped),
@@ -191,21 +190,57 @@ it.live("returns an explicit range with truncated patches and test and generated
   }).pipe(Effect.scoped),
 );
 
-it.live("compares an attempt from the first recorded commit's parent and caches the result", () =>
+it.live("caches an attempt comparison by its recorded checkout base and pushed head", () =>
   Effect.gen(function* () {
-    const app = yield* fixture((url) =>
-      url.pathname.endsWith(`/commits/${first}`)
-        ? json({ parents: [{ sha: base }] })
-        : json({ files: [file] }),
-    );
-    const query = AttemptFilesQuery.make({ first, head });
+    const app = yield* fixture((url) => {
+      assert.strictEqual(url.pathname, `/repos/${repository}/compare/${base}...${head}`);
+      return json({ files: [file] });
+    });
+    const query = CommitRangeFilesQuery.make({ base, head });
     const changes = yield* app.read(query).pipe(Effect.flatMap(decode));
     assert.strictEqual(changes.base, base);
-    assert.strictEqual(app.requests.length, 2);
-    assert.ok(app.requests[1]?.includes(`/compare/${base}...${head}`));
-    yield* app.read(AttemptFilesQuery.make({ first, head }));
-    assert.strictEqual(app.requests.length, 2);
+    assert.strictEqual(app.requests.length, 1);
+    yield* app.read(CommitRangeFilesQuery.make({ base, head }));
+    assert.strictEqual(app.requests.length, 1);
   }).pipe(Effect.scoped),
+);
+
+it.live(
+  "loads a retargeted PR with the same head under its new base and rejects stale selections",
+  () =>
+    Effect.gen(function* () {
+      let target = base;
+      const app = yield* fixture((url) =>
+        url.pathname.endsWith("/files")
+          ? json([{ ...file, filename: target === base ? "old-target.ts" : "new-target.ts" }])
+          : json({ ...pr, base: { sha: target } }),
+      );
+      const old = yield* app
+        .read(PullRequestFilesQuery.make({ base, head }))
+        .pipe(Effect.flatMap(decode));
+      assert.strictEqual(old.files[0]?.path, "old-target.ts");
+      target = first;
+      const current = yield* app
+        .read(PullRequestFilesQuery.make({ base: target, head }))
+        .pipe(Effect.flatMap(decode));
+      assert.strictEqual(current.files[0]?.path, "new-target.ts");
+      assert.strictEqual(current.base, target);
+      assert.strictEqual(app.requests.length, 6);
+      yield* app.read(PullRequestFilesQuery.make({ base: target, head }));
+      assert.strictEqual(app.requests.length, 6);
+
+      const stale = yield* fixture((url) =>
+        url.pathname.endsWith("/files") ? json([file]) : json({ ...pr, base: { sha: target } }),
+      );
+      assert.strictEqual(
+        (yield* stale.read(PullRequestFilesQuery.make({ base, head }))).status,
+        502,
+      );
+      assert.strictEqual(
+        (yield* stale.read(PullRequestFilesQuery.make({ base: target, head }))).status,
+        200,
+      );
+    }).pipe(Effect.scoped),
 );
 
 it.live("does not cache files under a head that changed during pagination", () =>
@@ -216,7 +251,7 @@ it.live("does not cache files under a head that changed during pagination", () =
       snapshots += 1;
       return json(snapshots === 2 ? { ...pr, head: { sha: first } } : pr);
     });
-    const query = PullRequestFilesQuery.make({ head });
+    const query = PullRequestFilesQuery.make({ base, head });
     const failed = yield* app.read(query);
     assert.strictEqual(failed.status, 502);
     const body = yield* Effect.promise(() => failed.json());
@@ -246,7 +281,7 @@ it.live("marks GitHub's comparison file limit and PR file limit", () =>
     );
     for (const query of [
       CommitRangeFilesQuery.make({ base, head }),
-      PullRequestFilesQuery.make({ head }),
+      PullRequestFilesQuery.make({ base, head }),
     ]) {
       const changes = yield* app.read(query).pipe(Effect.flatMap(decode));
       assert.strictEqual(changes.filesTruncated, true);
@@ -263,7 +298,7 @@ it.live("checks the target project and repository before reading GitHub or a cac
       (url) => (url.pathname.endsWith("/files") ? json([file]) : json(pr)),
       permissions,
     );
-    const query = PullRequestFilesQuery.make({ head });
+    const query = PullRequestFilesQuery.make({ base, head });
     const allowed = yield* app.read(query);
     assert.strictEqual(allowed.status, 200);
     const requests = app.requests.length;
@@ -295,8 +330,7 @@ it("documents every union query parameter and the full commit constraint", () =>
     [
       { name: "_tag", required: true },
       { name: "head", required: true },
-      { name: "base", required: false },
-      { name: "first", required: false },
+      { name: "base", required: true },
     ],
   );
   assert.deepStrictEqual(

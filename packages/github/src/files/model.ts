@@ -5,24 +5,14 @@ import { type Brand, Schema } from "effect";
 export class PullRequestFilesQuery extends Schema.TaggedClass<
   PullRequestFilesQuery,
   Brand.Brand<"@usine/github/files/PullRequestFilesQuery">
->("PullRequestFilesQuery")("PullRequestFiles", { head: CommitSha }) {}
+>("PullRequestFilesQuery")("PullRequestFiles", { base: CommitSha, head: CommitSha }) {}
 
 export class CommitRangeFilesQuery extends Schema.TaggedClass<
   CommitRangeFilesQuery,
   Brand.Brand<"@usine/github/files/CommitRangeFilesQuery">
 >("CommitRangeFilesQuery")("CommitRangeFiles", { base: CommitSha, head: CommitSha }) {}
 
-/** Compares the first recorded commit's first parent with the pushed head. */
-export class AttemptFilesQuery extends Schema.TaggedClass<
-  AttemptFilesQuery,
-  Brand.Brand<"@usine/github/files/AttemptFilesQuery">
->("AttemptFilesQuery")("AttemptFiles", { first: CommitSha, head: CommitSha }) {}
-
-export const FileChangesQuery = Schema.Union([
-  PullRequestFilesQuery,
-  CommitRangeFilesQuery,
-  AttemptFilesQuery,
-]);
+export const FileChangesQuery = Schema.Union([PullRequestFilesQuery, CommitRangeFilesQuery]);
 export type FileChangesQuery = typeof FileChangesQuery.Type;
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));

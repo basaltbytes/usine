@@ -294,7 +294,7 @@ const makeTaskReader = Effect.gen(function* () {
           : Option.none();
       if (kind === "pr" && Option.isNone(pullRequest))
         yield* Effect.logWarning(
-          "Pull request changes unavailable without a valid projected head",
+          "Pull request changes unavailable without a valid projected base and head",
           { repository: managed.name, itemKey },
         );
       details.set(

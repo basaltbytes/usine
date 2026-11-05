@@ -21,7 +21,8 @@ export const noChangedFiles = "No files changed in this comparison";
 export const truncatedFiles =
   "GitHub limited this file list. Open the pull request on GitHub for the full list.";
 export const noRecordedAttempts = "No attempt commits recorded for this pull request";
-export const noRecordedHead = "Changes are available after the pull request head is recorded";
+export const noRecordedHead =
+  "Changes are available after the pull request base and head are recorded";
 export const checksState = (state: string | null) =>
   `Checks: ${state === "SUCCESS" ? "passed" : state === "FAILURE" || state === "ERROR" ? "failed" : state === "PENDING" || state === "EXPECTED" ? "pending" : "unavailable"}`;
 export const reviewState = (state: string | null) =>

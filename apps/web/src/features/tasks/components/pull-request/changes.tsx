@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ItemNumber } from "@usine/core/item";
 import type { ProjectId } from "@usine/core/project";
 import type { RepositoryName } from "@usine/core/repository";
-import { AttemptFilesQuery, PullRequestFilesQuery } from "@usine/github/files";
+import { CommitRangeFilesQuery, PullRequestFilesQuery } from "@usine/github/files";
 import type { TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { lazy, Suspense, useId, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
@@ -58,8 +58,8 @@ const PullRequestFiles = ({
   const attempt = attempts.find(({ attemptId }) => attemptId === selected);
   const selection =
     attempt === undefined
-      ? PullRequestFilesQuery.make({ head: state.head })
-      : AttemptFilesQuery.make({ first: attempt.first, head: attempt.head });
+      ? PullRequestFilesQuery.make({ base: state.base, head: state.head })
+      : CommitRangeFilesQuery.make({ base: attempt.base, head: attempt.head });
   const files = useQuery(pullRequestFilesQuery(project, repository, number, selection));
   return (
     <div className="min-w-0 space-y-3 pb-3">

@@ -108,7 +108,12 @@ const taskWithChanges = () => {
         ...item,
         pullRequest:
           item.kind === "pr"
-            ? TaskPullRequestState.make({ head: prHead, checks: "SUCCESS", review: "APPROVED" })
+            ? TaskPullRequestState.make({
+                base: CommitSha.make("b".repeat(40)),
+                head: prHead,
+                checks: "SUCCESS",
+                review: "APPROVED",
+              })
             : null,
       }),
     ),
@@ -119,7 +124,7 @@ const taskWithChanges = () => {
         number: AttemptNumber.make(1),
         loop: LoopName.make("start-dev"),
         pullRequest: ItemNumber.make(42),
-        first: CommitSha.make("d".repeat(40)),
+        base: CommitSha.make("d".repeat(40)),
         head: attemptHead,
       }),
     ],
@@ -539,6 +544,26 @@ it("shows whole-PR and attempt changes in place and reuses the immutable query",
   await pullRequests.getByText("Changes", { exact: true }).nth(1).click();
   await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
   expect(fileRequests).toHaveLength(2);
+  const retargeted = TaskView.make({
+    ...taskWithChanges(),
+    items: EffectArray.map(taskWithChanges().items, (item) =>
+      TaskItemView.make({
+        ...item,
+        pullRequest:
+          item.pullRequest === null
+            ? null
+            : TaskPullRequestState.make({
+                ...item.pullRequest,
+                base: CommitSha.make("f".repeat(40)),
+              }),
+      }),
+    ),
+  });
+  tasks.set("40", retargeted);
+  queryClient.setQueryData(taskQuery(taskRepository, ItemNumber.make(40)).queryKey, retargeted);
+  await expect.poll(() => fileRequests.length).toBe(3);
+  expect(fileRequests[2]).toContain("base=" + "f".repeat(40));
+  expect(fileRequests[2]).toContain("head=" + prHead);
   const changed = TaskView.make({
     ...taskWithChanges(),
     items: EffectArray.map(taskWithChanges().items, (item) =>
@@ -556,8 +581,8 @@ it("shows whole-PR and attempt changes in place and reuses the immutable query",
   });
   tasks.set("40", changed);
   queryClient.setQueryData(taskQuery(taskRepository, ItemNumber.make(40)).queryKey, changed);
-  await expect.poll(() => fileRequests.length).toBe(3);
-  expect(fileRequests[2]).toContain("head=" + "e".repeat(40));
+  await expect.poll(() => fileRequests.length).toBe(4);
+  expect(fileRequests[3]).toContain("head=" + "e".repeat(40));
 });
 
 it("shows file marks and patch availability on a phone without widening the task page", async () => {

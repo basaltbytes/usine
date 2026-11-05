@@ -2,7 +2,6 @@ import { ItemNumber } from "@usine/core/item";
 import { ProjectId } from "@usine/core/project";
 import { RepositoryName } from "@usine/core/repository";
 import {
-  AttemptFilesQuery,
   CommitRangeFilesQuery,
   FileChanges,
   FileChangesQuery,
@@ -23,7 +22,7 @@ export const pullRequestFilesRead = HttpApiEndpoint.get(
   .annotate(OpenApi.Summary, "Read pull request or attempt changes")
   .annotate(
     OpenApi.Description,
-    "Returns commit-pinned files for a whole pull request, a base/head comparison, or the first recorded attempt commit through its pushed head. Reports missing patches and truncated file lists. Requires read access to the repository's project.",
+    "Returns commit-pinned files for a whole pull request or a comparison from an attempt checkout base to its pushed head. Reports missing patches and truncated file lists. Requires read access to the repository's project.",
   )
   .annotate(OpenApi.Transform, (operation) => ({
     ...operation,
@@ -34,7 +33,7 @@ export const pullRequestFilesRead = HttpApiEndpoint.get(
           name: "_tag",
           schema: Schema.Union(FileChangesQuery.members.map((member) => member.fields._tag)),
           required: true,
-          description: "Select the whole PR, a commit range, or recorded attempt commits.",
+          description: "Select the whole PR or a commit range.",
         },
         {
           name: "head",
@@ -45,15 +44,8 @@ export const pullRequestFilesRead = HttpApiEndpoint.get(
         {
           name: "base",
           schema: CommitRangeFilesQuery.fields.base,
-          required: false,
-          description: "Required for CommitRangeFiles; excluded from other selections.",
-        },
-        {
-          name: "first",
-          schema: AttemptFilesQuery.fields.first,
-          required: false,
-          description:
-            "Required for AttemptFiles; the first recorded commit, whose first parent starts the comparison. Excluded from other selections.",
+          required: true,
+          description: "The full PR base commit SHA or attempt checkout base commit SHA.",
         },
       ].map(({ name, schema, required, description }) => ({
         name,

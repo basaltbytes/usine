@@ -13833,13 +13833,12 @@
             "name": "_tag",
             "in": "query",
             "required": true,
-            "description": "Select the whole PR, a commit range, or recorded attempt commits.",
+            "description": "Select the whole PR or a commit range.",
             "schema": {
               "type": "string",
               "enum": [
                 "PullRequestFiles",
-                "CommitRangeFiles",
-                "AttemptFiles"
+                "CommitRangeFiles"
               ]
             }
           },
@@ -13856,18 +13855,8 @@
           {
             "name": "base",
             "in": "query",
-            "required": false,
-            "description": "Required for CommitRangeFiles; excluded from other selections.",
-            "schema": {
-              "type": "string",
-              "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
-            }
-          },
-          {
-            "name": "first",
-            "in": "query",
-            "required": false,
-            "description": "Required for AttemptFiles; the first recorded commit, whose first parent starts the comparison. Excluded from other selections.",
+            "required": true,
+            "description": "The full PR base commit SHA or attempt checkout base commit SHA.",
             "schema": {
               "type": "string",
               "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
@@ -14431,7 +14420,7 @@
             }
           }
         },
-        "description": "Returns commit-pinned files for a whole pull request, a base/head comparison, or the first recorded attempt commit through its pushed head. Reports missing patches and truncated file lists. Requires read access to the repository's project.",
+        "description": "Returns commit-pinned files for a whole pull request or a comparison from an attempt checkout base to its pushed head. Reports missing patches and truncated file lists. Requires read access to the repository's project.",
         "summary": "Read pull request or attempt changes"
       }
     },
@@ -45663,7 +45652,7 @@
                   "minimum": 1,
                   "maximum": 9007199254740991
                 },
-                "first": {
+                "base": {
                   "type": "string",
                   "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
                 },
@@ -45678,7 +45667,7 @@
                 "number",
                 "loop",
                 "pullRequest",
-                "first",
+                "base",
                 "head"
               ],
               "additionalProperties": false
@@ -46330,6 +46319,10 @@
               {
                 "type": "object",
                 "properties": {
+                  "base": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
                   "head": {
                     "type": "string",
                     "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
@@ -46356,6 +46349,7 @@
                   }
                 },
                 "required": [
+                  "base",
                   "head",
                   "checks",
                   "review"
@@ -48325,6 +48319,10 @@
           },
           "url": {
             "type": "string"
+          },
+          "base": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
           },
           "head": {
             "type": "string",

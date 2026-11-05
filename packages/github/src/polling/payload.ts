@@ -1,4 +1,5 @@
 import { type Brand, Effect, Schema, SchemaGetter } from "effect";
+import { CommitSha } from "@usine/core/repository";
 import { BaseRefName } from "./detection.ts";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -119,6 +120,7 @@ export const PullRequestPayload = Schema.Struct({
   mergedAt: Schema.NullOr(Timestamp),
   author: NullableActor,
   baseRefName: BaseRefName,
+  baseRefOid: Schema.optionalKey(CommitSha),
   headRefName: Schema.String,
   headRefOid: Schema.NonEmptyString,
   additions: NonNegativeInt,

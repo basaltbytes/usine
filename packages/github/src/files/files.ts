@@ -21,7 +21,6 @@ export {
   FileChangesQuery,
   PullRequestFilesQuery,
   CommitRangeFilesQuery,
-  AttemptFilesQuery,
 } from "./model.ts";
 
 const PullRequest = Schema.Struct({
@@ -32,7 +31,6 @@ const PullRequest = Schema.Struct({
 const Comparison = Schema.Struct({
   files: Schema.Array(GitHubFile),
 });
-const Commit = Schema.Struct({ parents: Schema.NonEmptyArray(Schema.Struct({ sha: CommitSha })) });
 
 /** Reads commit-pinned patches with installation authentication and a shared immutable cache. */
 export class GitHubFiles extends Context.Service<
@@ -75,15 +73,13 @@ export class GitHubFiles extends Context.Service<
         yield* Effect.annotateCurrentSpan({
           repository,
           item,
+          base: selection.base,
           head: selection.head,
           scope: selection._tag,
         });
         const prefix = `repos/${repository}`;
         if (selection._tag !== "PullRequestFiles") {
-          const base =
-            selection._tag === "CommitRangeFiles"
-              ? selection.base
-              : (yield* get(`${prefix}/commits/${selection.first}`, Commit)).parents[0].sha;
+          const base = selection.base;
           const comparison = yield* get(
             `${prefix}/compare/${base}...${selection.head}?per_page=1`,
             Comparison,
@@ -105,10 +101,10 @@ export class GitHubFiles extends Context.Service<
         }
         const path = `${prefix}/pulls/${item}`;
         const before = yield* get(path, PullRequest);
-        if (before.head.sha !== selection.head)
+        if (before.head.sha !== selection.head || before.base.sha !== selection.base)
           return yield* invalidResponse(
             "read-pull-request-files",
-            "The pull request head changed. Refresh the task to load the latest changes.",
+            "The pull request base or head changed. Refresh the task to load the latest changes.",
           );
         const files: Array<ChangedFile> = [];
         let page = 1;
@@ -156,7 +152,12 @@ export class GitHubFiles extends Context.Service<
           item: ItemNumber,
           selection: FileChangesQuery,
         ) {
-          yield* Effect.annotateCurrentSpan({ repository, item, head: selection.head });
+          yield* Effect.annotateCurrentSpan({
+            repository,
+            item,
+            base: selection.base,
+            head: selection.head,
+          });
           return yield* Cache.get(
             cache,
             FileRead.make({

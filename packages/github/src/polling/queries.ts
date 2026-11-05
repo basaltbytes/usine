@@ -85,6 +85,7 @@ export const PULL_REQUEST_PAYLOAD_QUERY = `
         mergedAt
         author { login }
         baseRefName
+        baseRefOid
         headRefName
         headRefOid
         additions
