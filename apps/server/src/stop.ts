@@ -6,7 +6,13 @@ import type { LifecycleOptions, Port } from "./cli.ts";
 import { type InstanceRecord, ProcessId } from "./instance/record.ts";
 import { gatewayTokenVariables, hasLiveAttempt, listRuns } from "./instance/operator-api.ts";
 import { probeInstance, processAlive, signalProcess } from "./instance/state.ts";
-import { SystemdUnit, supervisingUnit, systemctl } from "./instance/systemd.ts";
+import { configuredLaunchdService, launchdState } from "./instance/launchd.ts";
+import {
+  ServiceUnit,
+  supervisingService,
+  stopService,
+  serviceStopCommand,
+} from "./instance/service.ts";
 
 const EXIT_POLL_INTERVAL = "200 millis";
 /** Separates the two signals of `--force`, so that the OS doesn't merge them into one. */
@@ -28,8 +34,8 @@ export class StopTimeoutError extends Schema.TaggedError<
   timeout: Schema.Duration,
   /** The Runs whose Attempts were live when the stop started. */
   runs: Schema.Array(RunId),
-  /** The systemd service that runs the instance, which `systemctl start` starts again. */
-  unit: Schema.Option(SystemdUnit),
+  /** The service that supervises the instance. */
+  unit: Schema.Option(ServiceUnit),
 }) {}
 
 /** The instance process still ran `timeout` after `--force` sent it `SIGKILL`. */
@@ -178,7 +184,7 @@ const killProcess = Effect.fn("Cli.killProcess")(function* (
 
 /**
  * Starts the drain of the instance process and waits for the process to exit: through
- * `systemctl stop --no-block` if `unit` runs it, so that systemd doesn't restart it, else with
+ * its service manager if `unit` runs it, so that the supervisor doesn't restart it, else with
  * `SIGTERM`. With `force`, sends a second `SIGTERM`, which ends the drain without waiting for
  * running Attempts, and sends `SIGKILL` if the process still runs after the timeout. Doesn't repeat
  * the first signal to a process that records that it is stopping.
@@ -187,7 +193,7 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
   command: LifecycleCommandName,
   pid: ProcessId,
   record: Option.Option<InstanceRecord>,
-  unit: Option.Option<SystemdUnit>,
+  unit: Option.Option<ServiceUnit>,
   options: LifecycleOptions,
   directory: InstanceDirectory = InstanceDirectory.make(process.cwd()),
 ) {
@@ -203,9 +209,9 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
   if (stopping) {
     yield* Console.log(`usine (pid ${pid}) is already stopping. Waiting for it to exit.`);
   } else if (Option.isSome(unit)) {
-    yield* Console.log(`Stopping usine (pid ${pid}) with systemctl stop ${unit.value}.`);
-    yield* systemctl(unit.value, ["stop", "--no-block"]);
-    yield* Effect.logInfo("Asked systemd to stop the instance's service", {
+    yield* Console.log(`Stopping usine (pid ${pid}) with ${serviceStopCommand(unit.value)}.`);
+    yield* stopService(unit.value);
+    yield* Effect.logInfo("Asked the service manager to stop the instance's service", {
       command,
       pid,
       unit: unit.value,
@@ -248,14 +254,30 @@ export const stop = Effect.fn("Cli.stop")(function* (
   directory: InstanceDirectory,
   options: LifecycleOptions,
 ) {
+  yield* Effect.annotateCurrentSpan({ instanceDirectory: directory });
   const state = yield* probeInstance(directory);
   if (state._tag === "Stopped") {
+    const service = yield* configuredLaunchdService;
+    if (Option.isSome(service)) {
+      yield* Effect.annotateCurrentSpan({ service: service.value });
+      const job = yield* launchdState(service.value);
+      if (Option.isSome(job)) {
+        yield* Console.log(`Stopping usine with ${serviceStopCommand(service.value)}.`);
+        yield* stopService(service.value);
+        yield* Effect.logInfo("Unloaded the launchd job while no process held the instance lock", {
+          instanceDirectory: directory,
+          service: service.value,
+        });
+        yield* Console.log("usine stopped.");
+        return;
+      }
+    }
     yield* Console.log(`usine is not running in ${directory}.`);
     return;
   }
   if (state._tag === "Running") {
     const { record } = state;
-    const unit = yield* supervisingUnit(record.pid, record.systemdUnit);
+    const unit = yield* supervisingService(record);
     return yield* stopProcess("stop", record.pid, Option.some(record), unit, options, directory);
   }
   if (Option.isNone(state.pid)) {

@@ -1,5 +1,5 @@
 import type { InstanceDirectory } from "@usine/core/instance";
-import { DateTime, Duration, Effect, Option } from "effect";
+import { DateTime, Duration, Effect, Option, Schema } from "effect";
 import { SERVER_HOST, packageVersion } from "./cli.ts";
 import {
   SERVER_PACKAGE,
@@ -12,7 +12,8 @@ import {
 import type { InstanceRecord } from "./instance/record.ts";
 import { type ListedRun, listRuns } from "./instance/operator-api.ts";
 import { type InstanceState, probeInstance } from "./instance/state.ts";
-import { supervisingUnit } from "./instance/systemd.ts";
+import { supervisingService } from "./instance/service.ts";
+import { LaunchdService } from "./instance/launchd.ts";
 import { resolveVersion } from "./registry.ts";
 
 /** What `usine status` prints, and whether a process holds the instance. */
@@ -42,15 +43,24 @@ const openRuns = (runs: ReadonlyArray<ListedRun>): string => {
 };
 
 /**
- * Returns the service line for an instance whose systemd service has it as its main process, or
- * `None` for an instance outside one.
+ * Reports a verified supervising service, or `None` for an unsupervised process.
  */
 const serviceLine = (record: InstanceRecord) =>
-  supervisingUnit(record.pid, record.systemdUnit).pipe(
-    Effect.map(Option.map((unit) => field("service", `${unit}, managed with systemctl`))),
-    Effect.catchTag("SystemctlError", (error) =>
-      Effect.succeedSome(field("service", `${error.unit}, unknown: ${error.reason}`)),
+  supervisingService(record).pipe(
+    Effect.map(
+      Option.map((unit) =>
+        field(
+          "service",
+          `${unit}, managed with ${Schema.is(LaunchdService)(unit) ? "launchctl" : "systemctl"}`,
+        ),
+      ),
     ),
+    Effect.catchTags({
+      LaunchctlError: (error) =>
+        Effect.succeedSome(field("service", `${error.service}, unknown: ${error.reason}`)),
+      SystemctlError: (error) =>
+        Effect.succeedSome(field("service", `${error.unit}, unknown: ${error.reason}`)),
+    }),
   );
 
 /** Returns the update line for an engine installed from a pin, or `None` for other engines. */

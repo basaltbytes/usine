@@ -17,7 +17,7 @@ Fields in this table belong to `settings`.
 | `max_attempt_tokens` | integer ≥ 1 | unlimited | Tokens per attempt across the parent and all children. |
 | `parent_model` | string | Pi selection | Parent model in `provider/model` form for agents without an override. |
 | `parent_effort` | effort | agent effort | Parent reasoning effort for agents without an override. |
-| `upgrade_channel` | `latest` or `next` | `latest` | npm channel checked for global installations managed by systemd. |
+| `upgrade_channel` | `latest` or `next` | `latest` | npm channel checked for global installations managed by systemd or launchd. |
 | `upgrade_mode` | `off`, `propose`, or `automatic` | `propose` | Disable upgrade checks, offer upgrades, or upgrade after admitted attempts finish. |
 
 For example, edit the existing settings entity and keep its other fields:

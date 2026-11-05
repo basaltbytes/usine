@@ -22,6 +22,28 @@ record() {
   printf 'upgrade previous=%s target=%s status=%s reason=%s\n' "$previous" "$target" "$1" "$message"
 }
 
+if [ "${service_manager-systemd}" = systemd ]; then
+service_command=systemctl
+service_state() {
+  systemctl show --property=ActiveState --value "$unit"
+}
+
+service_stopped_reason() {
+  local exit_code exit_status
+  exit_code=$(systemctl show --property=ExecMainCode --value "$unit") || exit_code=unavailable
+  exit_status=$(systemctl show --property=ExecMainStatus --value "$unit") || exit_status=unavailable
+  case "$exit_code" in
+    1) health_reason="The server service stopped during its health check (state=$state, exit status=$exit_status).";;
+    2|3) health_reason="The server service stopped during its health check (state=$state, signal=$exit_status).";;
+    *) health_reason="The server service stopped during its health check (state=$state, exit code=$exit_code, exit status=$exit_status).";;
+  esac
+  printf 'upgrade health-check version=%s reason=service-stopped state=%s exit_code=%s exit_status=%s\n' "$wanted" "$state" "$exit_code" "$exit_status"
+}
+
+start_server() {
+  timeout 30s systemctl start "$unit"
+}
+
 stop_server() {
   systemctl stop --no-block "$unit" || return 1
   sleep 1
@@ -31,7 +53,7 @@ stop_server() {
     printf 'upgrade shutdown unit=%s pid=%s signal=TERM failed; checking unit state\n' "$unit" "$main_pid"
   fi
   for ((i=0; i<60; i++)); do
-    state=$(systemctl show --property=ActiveState --value "$unit") || return 1
+    state=$(service_state) || return 1
     if [ "$state" = inactive ] || [ "$state" = failed ]; then return 0; fi
     sleep 1
   done
@@ -40,15 +62,17 @@ stop_server() {
     printf 'upgrade shutdown unit=%s pid=%s signal=KILL failed; checking unit state\n' "$unit" "$main_pid"
   fi
   for ((i=0; i<5; i++)); do
-    state=$(systemctl show --property=ActiveState --value "$unit") || return 1
+    state=$(service_state) || return 1
     if [ "$state" = inactive ] || [ "$state" = failed ]; then return 0; fi
     sleep 1
   done
   return 1
 }
 
+fi
+
 healthy() {
-  local wanted=$1 check=$2 token started=$SECONDS deadline=$((SECONDS+180)) remaining request_timeout readiness exit_code exit_status
+  local wanted=$1 check=$2 token started=$SECONDS deadline=$((SECONDS+180)) remaining request_timeout readiness
   if [ "$check" = ready ]; then
     health_reason='The new server did not become ready within three minutes.'
   else
@@ -77,19 +101,12 @@ healthy() {
         "$wanted" "$readiness" "$((SECONDS-started))"
       if [ "$readiness" = 200 ] && [ "$SECONDS" -le "$deadline" ]; then return 0; fi
     fi
-    if ! state=$(systemctl show --property=ActiveState --value "$unit"); then
-      health_reason='Could not inspect the server service during its health check. Check the upgrade service journal.'
+    if ! state=$(service_state); then
+      health_reason='Could not inspect the server service during its health check. Check the upgrade service output.'
       return 1
     fi
     if [ "$state" = failed ] || [ "$state" = inactive ]; then
-      exit_code=$(systemctl show --property=ExecMainCode --value "$unit") || exit_code=unavailable
-      exit_status=$(systemctl show --property=ExecMainStatus --value "$unit") || exit_status=unavailable
-      case "$exit_code" in
-        1) health_reason="The server service stopped during its health check (state=$state, exit status=$exit_status).";;
-        2|3) health_reason="The server service stopped during its health check (state=$state, signal=$exit_status).";;
-        *) health_reason="The server service stopped during its health check (state=$state, exit code=$exit_code, exit status=$exit_status).";;
-      esac
-      printf 'upgrade health-check version=%s reason=service-stopped state=%s exit_code=%s exit_status=%s\n' "$wanted" "$state" "$exit_code" "$exit_status"
+      service_stopped_reason
       return 1
     fi
     remaining=$((deadline-SECONDS))
@@ -169,7 +186,7 @@ backup_data() {
 
 restore_data() {
   local database restore
-  recovery_reason="Rollback failed: could not restore the databases. The service is stopped. Check the upgrade service journal and restore the backup in $snapshot."
+  recovery_reason="Rollback failed: could not restore the databases. The service is stopped. Check the upgrade service output and restore the backup in $snapshot."
   printf 'upgrade restore previous=%s snapshot=%s\n' "$previous" "$snapshot"
   restore=$(mktemp -d "$folder/restore.XXXXXXXX") || return 1
   cp "$snapshot/runtime.sqlite" "$restore/runtime.sqlite" || return 1
@@ -235,13 +252,13 @@ restore_previous() {
 exec 9> "$folder/helper.lock"
 flock -n 9 || exit 0
 record installing ''
-backup_reason='Could not prepare database backups; the server and packages were not changed. Check the upgrade service journal.'
+backup_reason='Could not prepare database backups; the server and packages were not changed. Check the upgrade service output.'
 if ! prepare_backup; then
   record failed "$backup_reason"
   exit 1
 fi
 if ! backup_data; then
-  record failed 'Could not back up the databases; the server and packages were not changed. Check the upgrade service journal.'
+  record failed 'Could not back up the databases; the server and packages were not changed. Check the upgrade service output.'
   exit 1
 fi
 if ! stop_server; then
@@ -252,10 +269,10 @@ reason='The package could not be installed.'
 failure_stage=install
 if install_version "$target"; then
   failure_stage=health-check
-  if timeout 30s systemctl start "$unit"; then
+  if start_server; then
     if healthy "$target" ready; then
       if ! prune_backups; then
-        printf 'upgrade backup-prune folder=%s status=failed; check the upgrade service journal and remove old backups manually\n' "$backup_root" >&2
+        printf 'upgrade backup-prune folder=%s status=failed; check the upgrade service output and remove old backups manually\n' "$backup_root" >&2
       fi
       record good ''
       exit 0
@@ -263,18 +280,18 @@ if install_version "$target"; then
     reason=$health_reason
   else
     start_status=$?
-    reason="The new server service could not be started (systemctl exit status=$start_status). Check the upgrade service journal."
+    reason="The new server service could not be started ($service_command exit status=$start_status). Check the upgrade service output."
   fi
 fi
 printf 'upgrade rollback previous=%s target=%s failure_stage=%s reason=%s\n' "$previous" "$target" "$failure_stage" "$reason"
 recovery_status=rolled-back
 recovery_reason=
-if stop_server && restore_previous && restore_data && timeout 30s systemctl start "$unit" && healthy "$previous" version; then
+if stop_server && restore_previous && restore_data && start_server && healthy "$previous" version; then
   record "$recovery_status" "$reason"
   if [ "$recovery_status" = failed ]; then exit 1; fi
 else
   if ! stop_server; then
-    record failed 'Rollback failed and the service could not be stopped. Stop it manually and check the upgrade service journal.'
+    record failed 'Rollback failed and the service could not be stopped. Stop it manually and check the upgrade service output.'
     exit 1
   fi
   if [ -n "$recovery_reason" ]; then
@@ -283,8 +300,8 @@ else
   fi
   installed=$(installed_version) || installed=
   case "$installed" in
-    "$previous"|"$target") record failed 'Rollback failed. Check the upgrade service journal.';;
-    *) record failed 'Rollback failed. Check the upgrade service journal and reinstall the previous version.';;
+    "$previous"|"$target") record failed 'Rollback failed. Check the upgrade service output.';;
+    *) record failed 'Rollback failed. Check the upgrade service output and reinstall the previous version.';;
   esac
   exit 1
 fi

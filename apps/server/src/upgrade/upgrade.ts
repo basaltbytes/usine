@@ -29,7 +29,7 @@ import {
 } from "../instance/manifest.ts";
 import { type InstanceRecord, instanceFiles } from "../instance/record.ts";
 import { probeInstance } from "../instance/state.ts";
-import { SystemdUnit, supervisingUnit } from "../instance/systemd.ts";
+import { ServiceUnit, supervisingService } from "../instance/service.ts";
 import { dependenciesOf, resolveVersion } from "../registry.ts";
 import {
   UnrecordedInstanceError,
@@ -90,8 +90,8 @@ export class UpgradeFailedError extends Schema.TaggedError<
   commit: Schema.Option(Schema.String),
   /** The last lines of `.usine/usine.log`, for a failed start. */
   tail: Schema.String,
-  /** The systemd service that runs the instance, whose journal has its output. */
-  unit: Schema.Option(SystemdUnit),
+  /** The service that supervises the instance and captures its output. */
+  unit: Schema.Option(ServiceUnit),
 }) {}
 
 const backupStamp = (now: DateTime.Utc): string =>
@@ -178,7 +178,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     const instancePath = yield* realPathOrSelf(directory);
     const scriptPath = yield* realPathOrSelf(script);
     if (!installedInInstance(instancePath, scriptPath)) {
-      const unit = yield* supervisingUnit(running.value.pid, running.value.systemdUnit);
+      const unit = yield* supervisingService(running.value);
       if (
         Option.isSome(unit) &&
         (yield* realPathOrSelf(script)).endsWith("/lib/node_modules/@usine/server/dist/main.js")
@@ -281,8 +281,8 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     );
   }
   const unit = Option.isSome(running)
-    ? yield* supervisingUnit(running.value.pid, running.value.systemdUnit)
-    : Option.none<SystemdUnit>();
+    ? yield* supervisingService(running.value)
+    : Option.none<ServiceUnit>();
   yield* Effect.logInfo("Upgrading the engine pin of the instance", {
     from: previous,
     to: target,
@@ -394,7 +394,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
                 error.tail,
               ),
         ),
-      SystemdStartError: (error) =>
+      ServiceStartError: (error) =>
         Effect.fail(
           error.outcome === "failed"
             ? failure("start", `${error.unit} was ${error.state} before it listened`, commit, "")
