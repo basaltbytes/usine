@@ -153,6 +153,8 @@ A global npm installation managed by systemd or launchd checks for upgrades ever
 
 Upgrade status retains the last fully verified version for the selected channel while a check is running or a newer release is incomplete. Registry probe details stay in the server log; the status message explains pending upgrade waits and upgrade failures.
 
+Managed upgrades are available after GitHub App setup finishes. During setup, upgrade requests explain that setup must finish first. If the service stops during the helper's health check, the recorded failure includes its state and exit status or signal. A failed start reports the start command's exit status; a readiness timeout means the service kept running until the deadline passed.
+
 In **Configuration → Settings**, select **Upgrade when idle** to stop admitting attempts and wait for active attempts to finish, or **Upgrade now** to restart and reattach running attempts. `usine upgrade [<version> | --channel <latest|next>]` requests the same operation; `--force` selects immediate restart, and `--check` only reports versions. The CLI prints when the request is accepted; Settings and the helper's journal or log report its outcome.
 
 While an idle upgrade waits, deferred runs keep worker slots free. Settings shows the requested version and offers **Cancel pending upgrade**; authenticated clients can send `DELETE /api/upgrade`. Cancellation resumes deferred runs without a restart and prevents automatic mode from requesting that version again in this process. A manual request can retry it. Cancellation is rejected once installation starts. An upgrade wait with deferred runs appears in Needs attention after ten minutes.

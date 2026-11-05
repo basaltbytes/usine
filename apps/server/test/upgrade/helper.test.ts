@@ -75,6 +75,8 @@ const run = (
     | "migrated-external"
     | "migrated-good"
     | "migrated-startup-exit"
+    | "migrated-startup-signal"
+    | "migrated-startup-failure"
     | "migrated-startup-wait"
     | "migrated-startup-deadline"
     | "migrated-no-durable"
@@ -229,6 +231,7 @@ if [ "$2" = --property=MainPID ]; then
   touch "$folder/pid-read"
 fi
 if [ "$1" = start ]; then
+  if [ "$(cat "$folder/installed")" = @usine/server@2.0.0 ] && [ "$scenario" = migrated-startup-failure ]; then exit 1; fi
   echo active > "$folder/state"
   cp "$folder/installed" "$folder/running"
   printf '%043d' "$(cat "$folder/installed" | tr -cd '0-9')" > "$folder/../admin-token"
@@ -240,7 +243,13 @@ if [ "$1" = start ]; then
     if [ "$scenario" = missing-durable-backup ]; then rm -f "$folder"/backup.*/runtime.durable.sqlite; fi
   fi
 fi
-if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
+if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi
+if [ "$2" = --property=ExecMainCode ]; then
+  if [ "$scenario" = migrated-startup-signal ]; then echo 2; else echo 1; fi
+fi
+if [ "$2" = --property=ExecMainStatus ]; then
+  if [ "$scenario" = migrated-startup-signal ]; then echo 15; else echo 1; fi
+fi`,
     );
     if (manager === "launchd") {
       writeFileSync(join(folder, "state"), "active");
@@ -250,7 +259,16 @@ if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
 case "$1" in
   print)
     if [ -f "$folder/unloaded" ]; then exit 113; fi
-    if [ "$(cat "$folder/state")" = active ]; then echo 'state = running'; else echo 'state = waiting'; fi;;
+    if [ "$(cat "$folder/state")" = active ]; then
+      echo 'state = running'
+    else
+      echo 'state = waiting'
+      if [ "$scenario" = migrated-startup-signal ]; then
+        echo 'last terminating signal = Terminated: 15'
+      else
+        echo 'last exit code = 1'
+      fi
+    fi;;
   bootout)
     if [ "$scenario" = bad-stop ]; then exit 1; fi
     systemctl stop
@@ -272,7 +290,7 @@ installed=$(cat "$folder/installed")
 if [[ "$url" = */api/ready ]]; then
   if [ "$installed" = @usine/server@2.0.0 ]; then
     case "$scenario" in
-      migrated-startup-exit)
+      migrated-startup-exit|migrated-startup-signal)
         echo failed > "$folder/state"
         : > "$folder/running"
         printf '503'; exit 0;;
@@ -515,7 +533,7 @@ it.each(["migrated-api", "migrated-external", "migrated-no-durable"] as const)(
   },
 );
 
-it.each(["migrated-startup-exit", "migrated-startup-deadline"] as const)(
+it.each(["migrated-startup-exit", "migrated-startup-signal", "migrated-startup-deadline"] as const)(
   "restores the package and both databases when the version answers but readiness fails: %s",
   slowCli,
   (scenario) => {
@@ -528,17 +546,37 @@ it.each(["migrated-startup-exit", "migrated-startup-deadline"] as const)(
     expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
     expect(result.durable).toEqual([{ value: "before" }]);
     expect(result.output).toContain(
-      scenario === "migrated-startup-exit" ? "reason=service-stopped" : "reason=deadline-exceeded",
+      scenario === "migrated-startup-deadline"
+        ? "reason=deadline-exceeded"
+        : "reason=service-stopped",
     );
     if (scenario === "migrated-startup-deadline") {
+      expect(result.record.reason).toBe(
+        "The new server did not become ready within three minutes.",
+      );
       const elapsed = Number(
         result.output.match(/reason=deadline-exceeded elapsed_seconds=(\d+)/u)?.[1],
       );
       expect(elapsed).toBeGreaterThanOrEqual(180);
       expect(elapsed).toBeLessThan(183);
+    } else {
+      expect(result.record.reason).toBe(
+        scenario === "migrated-startup-signal"
+          ? "The server service stopped during its health check (state=failed, signal=15)."
+          : "The server service stopped during its health check (state=failed, exit status=1).",
+      );
     }
   },
 );
+
+it("records a start failure separately from a readiness deadline", slowCli, () => {
+  const result = run("migrated-startup-failure");
+  expect(result.failed, result.output).toBe(false);
+  assert(result.record.status === "rolled-back");
+  expect(result.record.failureStage).toBe("health-check");
+  expect(result.record.reason).toContain("could not be started (systemctl exit status=1)");
+  expect(result.running).toBe("@usine/server@1.0.0");
+});
 
 it("waits for recovery after the target version answers before recording good", slowCli, () => {
   const result = run("migrated-startup-wait");
@@ -833,7 +871,15 @@ healthy 1.0.0 version
   }),
 );
 
-it.each(["good", "bad-install", "migrated-api", "migrated-startup-exit", "bad-stop"] as const)(
+it.each([
+  "good",
+  "bad-install",
+  "migrated-api",
+  "migrated-startup-exit",
+  "migrated-startup-signal",
+  "migrated-startup-failure",
+  "bad-stop",
+] as const)(
   "runs launchd upgrade and recovery through the independent helper: %s",
   slowCli,
   (scenario) => {
@@ -848,6 +894,19 @@ it.each(["good", "bad-install", "migrated-api", "migrated-startup-exit", "bad-st
     expect(result.failed, result.output).toBe(false);
     expect(result.commands).toContain("launchctl bootstrap");
     expect(result.commands).toContain("launchctl kickstart");
+    expect(result.commands).not.toContain("show --property=ExecMain");
+    if (scenario === "migrated-startup-exit" || scenario === "migrated-startup-signal") {
+      assert(result.record.status === "rolled-back");
+      expect(result.record.reason).toBe(
+        scenario === "migrated-startup-signal"
+          ? "The server service stopped during its health check (state=inactive, signal=Terminated: 15)."
+          : "The server service stopped during its health check (state=inactive, exit status=1).",
+      );
+    }
+    if (scenario === "migrated-startup-failure") {
+      assert(result.record.status === "rolled-back");
+      expect(result.record.reason).toContain("could not be started (launchctl exit status=1)");
+    }
     expect(result.record.status).toBe(scenario === "good" ? "good" : "rolled-back");
     expect(result.running).toBe(
       scenario === "good" ? "@usine/server@2.0.0" : "@usine/server@1.0.0",

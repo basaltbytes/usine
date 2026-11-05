@@ -23,8 +23,21 @@ record() {
 }
 
 if [ "${service_manager-systemd}" = systemd ]; then
+service_command=systemctl
 service_state() {
   systemctl show --property=ActiveState --value "$unit"
+}
+
+service_stopped_reason() {
+  local exit_code exit_status
+  exit_code=$(systemctl show --property=ExecMainCode --value "$unit") || exit_code=unavailable
+  exit_status=$(systemctl show --property=ExecMainStatus --value "$unit") || exit_status=unavailable
+  case "$exit_code" in
+    1) health_reason="The server service stopped during its health check (state=$state, exit status=$exit_status).";;
+    2|3) health_reason="The server service stopped during its health check (state=$state, signal=$exit_status).";;
+    *) health_reason="The server service stopped during its health check (state=$state, exit code=$exit_code, exit status=$exit_status).";;
+  esac
+  printf 'upgrade health-check version=%s reason=service-stopped state=%s exit_code=%s exit_status=%s\n' "$wanted" "$state" "$exit_code" "$exit_status"
 }
 
 start_server() {
@@ -60,6 +73,11 @@ fi
 
 healthy() {
   local wanted=$1 check=$2 token started=$SECONDS deadline=$((SECONDS+180)) remaining request_timeout readiness
+  if [ "$check" = ready ]; then
+    health_reason='The new server did not become ready within three minutes.'
+  else
+    health_reason='The server did not report the expected version within three minutes.'
+  fi
   while [ "$SECONDS" -lt "$deadline" ]; do
     remaining=$((deadline-SECONDS))
     if [ "$remaining" -le 0 ]; then break; fi
@@ -83,9 +101,12 @@ healthy() {
         "$wanted" "$readiness" "$((SECONDS-started))"
       if [ "$readiness" = 200 ] && [ "$SECONDS" -le "$deadline" ]; then return 0; fi
     fi
-    state=$(service_state) || return 1
+    if ! state=$(service_state); then
+      health_reason='Could not inspect the server service during its health check. Check the upgrade service output.'
+      return 1
+    fi
     if [ "$state" = failed ] || [ "$state" = inactive ]; then
-      printf 'upgrade health-check version=%s reason=service-stopped state=%s\n' "$wanted" "$state"
+      service_stopped_reason
       return 1
     fi
     remaining=$((deadline-SECONDS))
@@ -247,14 +268,19 @@ fi
 reason='The package could not be installed.'
 failure_stage=install
 if install_version "$target"; then
-  reason='The new server did not become ready within three minutes.'
   failure_stage=health-check
-  if start_server && healthy "$target" ready; then
-    if ! prune_backups; then
-      printf 'upgrade backup-prune folder=%s status=failed; check the upgrade service output and remove old backups manually\n' "$backup_root" >&2
+  if start_server; then
+    if healthy "$target" ready; then
+      if ! prune_backups; then
+        printf 'upgrade backup-prune folder=%s status=failed; check the upgrade service output and remove old backups manually\n' "$backup_root" >&2
+      fi
+      record good ''
+      exit 0
     fi
-    record good ''
-    exit 0
+    reason=$health_reason
+  else
+    start_status=$?
+    reason="The new server service could not be started ($service_command exit status=$start_status). Check the upgrade service output."
   fi
 fi
 printf 'upgrade rollback previous=%s target=%s failure_stage=%s reason=%s\n' "$previous" "$target" "$failure_stage" "$reason"

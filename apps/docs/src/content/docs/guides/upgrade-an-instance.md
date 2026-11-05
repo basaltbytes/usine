@@ -9,6 +9,8 @@ Install a selected usine release and verify the restarted instance.
 
 Access to the instance machine, a recoverable backup, and either a global installation managed by systemd or launchd with the upgrade helper or an instance-local registry pin. A checkout installation must be pulled and built separately.
 
+Complete GitHub App setup before requesting a managed upgrade. During setup, the server refuses upgrade requests with a message that setup must finish first.
+
 ## Procedure
 
 1. From the instance folder, inspect the running and available versions:
@@ -30,6 +32,8 @@ Access to the instance machine, a recoverable backup, and either a global instal
 ## Check the result
 
 `usine status` reports the selected version, and the authenticated UI loads. The managed helper verifies `/api/version` and waits up to 180 seconds for `/api/ready` after recovery. Failed managed installation or readiness restores the prior package and database backup; inspect its recorded failure before retrying.
+
+If the service stops during its health check, the recorded failure includes the service state and exit status or signal. A failed service start reports the start command's exit status. The helper reports a readiness timeout only when the service keeps running until the readiness deadline passes.
 
 Managed upgrades check that required packages resolve before draining. The helper backs up both stores before changing packages and requires free space on both the backup and instance filesystems equal to at least twice the combined database and WAL file sizes, so rollback can stage database copies locally even with external backups. If space is insufficient, it records a failed upgrade with the folder to clean and leaves the server and packages unchanged. Instance-local upgrades back up stores, change package pins, install dependencies, commit the pin change, and restart. A failed local installation restores manifests and lockfiles; follow the CLI’s recovery instructions if startup fails.
 

@@ -59,6 +59,8 @@ pnpm format    # oxfmt
 
 Tests import other workspace packages from their `dist`, and the `@usine/server` tests also run its own `dist/main.js`. turbo builds both before it tests. To test one package, run `pnpm turbo run test --filter <package>`; `pnpm --filter <package> test` skips the builds, so it fails or tests stale code until you run `pnpm build`.
 
+The script tests invoke `corepack pnpm` to use the version pinned in `package.json`. Enable Corepack on the test machine; the global pnpm version does not affect these subprocesses.
+
 API contract changes require regenerating and staging `apps/docs/public/openapi.json` before `pnpm check`. See the [docs README](apps/docs/README.md#operator-http-api-reference) for generation commands.
 
 SQLite storage fixtures use `tooling/test/sqlite.mts` to select writable `/dev/shm` on Linux when it is mounted as tmpfs. On other hosts, they use the OS temporary directory. Fixtures that execute binaries or Git hooks keep using the OS temporary directory because shared memory can be mounted with `noexec`.
