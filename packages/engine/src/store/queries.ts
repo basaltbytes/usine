@@ -867,7 +867,7 @@ export const queriesFor = (
     yield* database
       .update(attempts)
       .set({ resultJson })
-      .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.resultJson)))
+      .where(eq(attempts.attemptId, attemptId))
       .execute();
     yield* changedAttempt(attemptId);
   });

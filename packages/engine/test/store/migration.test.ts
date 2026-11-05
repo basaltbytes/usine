@@ -25,11 +25,12 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { BrainSpec } from "@usine/core/agent/brain";
 
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import { PullRequest, StepResult } from "@usine/core/step/result";
 import { CommitSha } from "@usine/core/repository";
 import { RunApproval, ApprovalSource } from "@usine/core/run/approval";
 
-import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 
 import { RunDatabase } from "../../src/database/database.ts";
@@ -40,7 +41,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 
 import { RunStore } from "../../src/store/store.ts";
 
-import { testAgent, lifecycleSubmission } from "./support.ts";
+import { testAgent, lifecycleSubmission, withRunStore } from "./support.ts";
 
 /** Seeds a pending Run in an old schema directly, because the current store writes columns from later migrations. */
 const seedPendingRun = (runId: RunId) =>
@@ -60,9 +61,18 @@ const seedPendingRun = (runId: RunId) =>
   });
 
 describe("Attempt migrations", () => {
-  it.live.each([true, false])(
-    "upgrades populated Attempts and retains a step result with explicit attribution: %s",
-    (attributed) =>
+  it.live.each([
+    { attributed: false, outcome: "Succeeded", retry: "none", retained: true },
+    { attributed: false, outcome: "AwaitingCi", retry: "none", retained: true },
+    { attributed: false, outcome: null, retry: "none", retained: false },
+    { attributed: false, outcome: "Failed", retry: "running", retained: false },
+    { attributed: false, outcome: "Failed", retry: "failed", retained: false },
+    { attributed: true, outcome: "Failed", retry: "running", retained: true },
+    { attributed: true, outcome: "Failed", retry: "failed", retained: true },
+    { attributed: true, outcome: null, retry: "none", retained: false },
+  ])(
+    "upgrades populated Attempts with result attribution: %j",
+    ({ attributed, outcome, retry, retained }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const currentDirectory = yield* fs.makeTempDirectoryScoped({
@@ -141,10 +151,17 @@ describe("Attempt migrations", () => {
             const encodedResult = yield* Schema.encodeEffect(StepResult)(result);
             const resultJson = jsonKey(encodedResult);
             yield* sql`UPDATE usine_steps SET result = ${resultJson} WHERE run_id = ${runId}`;
-            if (attributed) {
-              yield* sql`UPDATE usine_attempts SET outcome_json = '{"_tag":"Succeeded"}' WHERE attempt_id = ${id}`;
-              yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at)
-              VALUES ('upgrade-retry', ${runId}, ${lifecycleSubmission.step}, 'local', 2, ${json3}, '2026-09-12T00:01:00.000Z')`;
+            const failed = jsonKey({
+              _tag: "Failed",
+              failure: { _tag: "AgentFailure", message: "CI failed" },
+            });
+            const outcomeJson =
+              outcome === null ? null : outcome === "Failed" ? failed : jsonKey({ _tag: outcome });
+            yield* sql`UPDATE usine_attempts SET outcome_json = ${outcomeJson} WHERE attempt_id = ${id}`;
+            if (retry !== "none") {
+              const retryOutcome = retry === "failed" ? failed : null;
+              yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at, outcome_json)
+              VALUES ('upgrade-retry', ${runId}, ${lifecycleSubmission.step}, 'local', 2, ${json3}, '2026-09-12T00:01:00.000Z', ${retryOutcome})`;
             }
             // v7 changed only the unstored `Start` frame; bumping the envelope literal alone once made
             // every v6 transcript unreadable.
@@ -172,14 +189,17 @@ describe("Attempt migrations", () => {
           assert.deepStrictEqual(attempt.failureResolution, Option.none());
           assert.deepStrictEqual(
             attempt.result,
-            Option.some(
-              StepResult.make({
-                ...result,
-                attemptId: Option.some(attempt.id),
-              }),
-            ),
+            retained
+              ? Option.some(
+                  StepResult.make({
+                    ...result,
+                    attemptId: Option.some(attempt.id),
+                  }),
+                )
+              : Option.none(),
           );
-          if (attributed) assert.deepStrictEqual(snapshot.attempts[1]?.result, Option.none());
+          assert.deepStrictEqual(snapshot.step.result, Option.some(result));
+          if (retry !== "none") assert.deepStrictEqual(snapshot.attempts[1]?.result, Option.none());
           const transcript = yield* store.transcript(
             TranscriptAllQuery.make({ attemptId: attempt.id }),
           );
@@ -204,6 +224,43 @@ describe("Attempt migrations", () => {
           Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("an attempt's completion replaces an incorrect backfilled result", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const sql = yield* SqlClient.SqlClient;
+        const runId = RunId.make("backfilled-result");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const attempt = started.execution.attempt;
+        const previous = StepResult.make({ message: "Previous attempt", facts: [] });
+        const encoded = yield* Schema.encodeEffect(StepResult)(previous);
+        yield* sql`UPDATE usine_attempts SET result_json = ${jsonKey(encoded)} WHERE attempt_id = ${attempt.id}`;
+        const result = StepResult.make({
+          message: "This attempt's comparison",
+          facts: [
+            PullRequest.make({
+              number: 1003,
+              url: new URL("https://github.com/basaltbytes/usine/pull/1003"),
+              base: Option.some(CommitSha.make("b".repeat(40))),
+              head: Option.some(CommitSha.make("c".repeat(40))),
+            }),
+          ],
+        });
+        yield* store.finishAttempt(attempt, Result.succeed(result));
+        const completed = yield* store.snapshot(runId);
+        const expected = Option.some(
+          StepResult.make({ ...result, attemptId: Option.some(attempt.id) }),
+        );
+        assert.deepStrictEqual(completed.attempts[0]?.result, expected);
+        assert.deepStrictEqual(completed.step.result, expected);
+        yield* store.finishAttempt(attempt, Result.succeed(previous));
+        assert.deepStrictEqual((yield* store.snapshot(runId)).attempts[0]?.result, expected);
+      }),
+    ),
   );
 });
 
