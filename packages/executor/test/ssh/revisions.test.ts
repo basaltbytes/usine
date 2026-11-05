@@ -40,7 +40,11 @@ for (const transition of ["unchanged", "live", "restart"] as const) {
           const revised: SshWorkerAddress = {
             ...ADDRESS,
             root: WorkerRoot.make("/srv/new"),
-            machine: { _tag: "Fixed", destination: SshDestination.make("new-host") },
+            machine: {
+              _tag: "Fixed",
+              tailnet: Option.none(),
+              destination: SshDestination.make("new-host"),
+            },
           };
           const destination = transition === "unchanged" ? DESTINATION : "new-host";
           const remoteHosts = Layer.effect(

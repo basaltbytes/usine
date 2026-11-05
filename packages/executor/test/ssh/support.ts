@@ -179,6 +179,8 @@ interface FakeMachineState {
   /** Whether `git.<domain>` resolves and responds from the machine. */
   gatewayReachable: boolean;
   tailscaleJoin: "ready" | "refused";
+  tailnetConfigure: "ready" | "refused";
+  gatewayRefusal: string;
   /** Whether the Gateway's forward proxy responds to the machine. */
   forwardProxyReachable: boolean;
   /** Hosts that the forward proxy refuses to tunnel to. */
@@ -346,6 +348,8 @@ export const fakeMachine = () => {
     droppedSentVariables: new Set(),
     gatewayReachable: true,
     tailscaleJoin: "ready",
+    tailnetConfigure: "ready",
+    gatewayRefusal: "missing-caller-token",
     forwardProxyReachable: true,
     refusedHosts: new Set(),
     files: new Map(),
@@ -566,6 +570,10 @@ export const fakeMachine = () => {
       );
     const docker = respondToDocker(line, input);
     if (docker !== undefined) return docker;
+    if (line.includes("# usine-tailnet"))
+      return state.tailnetConfigure === "ready"
+        ? oneShotHandle("", 0)
+        : oneShotHandle("", 1, "sudo: a password is required");
     if (line.includes("'tailscale' 'up'") && state.tailscaleJoin === "refused")
       return oneShotHandle("", 1, `auth key refused: ${input}`);
     if (line === "exec 'true'") return oneShotHandle("", 0);
@@ -589,7 +597,7 @@ export const fakeMachine = () => {
     if (line.startsWith("exec 'curl'"))
       return state.gatewayReachable
         ? oneShotHandle(
-            "HTTP/1.1 401 Unauthorized\r\nx-usine-gateway-refusal: missing-caller-token\r\n\r\n",
+            `HTTP/1.1 401 Unauthorized\r\nx-usine-gateway-refusal: ${state.gatewayRefusal}\r\n\r\n`,
             0,
           )
         : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
@@ -899,7 +907,7 @@ export const capturedLogs = () => {
 /** The test Worker's address, without a Gateway. */
 export const ADDRESS: SshWorkerAddress = {
   name: WORKER,
-  machine: { _tag: "Fixed", destination: DESTINATION },
+  machine: { _tag: "Fixed", tailnet: Option.none(), destination: DESTINATION },
   identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
   port: Option.some(SshPort.make(2222)),
   root: WorkerRoot.make("/srv/usine"),

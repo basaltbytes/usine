@@ -383,6 +383,7 @@ export type {
   SshExecutorOptions,
   SshMachine,
   SshProvisioner,
+  SshTailnet,
   SshWorkerAddress,
   SshWorkerContainer,
   SshWorkerGateway,

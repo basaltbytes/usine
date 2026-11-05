@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { SshDestination, WorkerName } from "@usine/core/worker";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
@@ -142,7 +142,11 @@ describe("SSH Workers added and removed while the executor runs", () => {
             const prepared = yield* executor.prepare(request);
             yield* workers.addWorker({
               ...gatewayAddress({ gateway: OTHER_GATEWAY }),
-              machine: { _tag: "Fixed", destination: SshDestination.make("usine@203.0.113.8") },
+              machine: {
+                _tag: "Fixed",
+                tailnet: Option.none(),
+                destination: SshDestination.make("usine@203.0.113.8"),
+              },
             });
             yield* executor.preflight(WORKER, [], 1);
             assert(
