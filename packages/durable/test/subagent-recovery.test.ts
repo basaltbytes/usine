@@ -318,6 +318,13 @@ for (const [recovery, blocker] of [
             yield* replacement.reply("The replacement child's report.");
           }
           const report = yield* Fiber.join(execution).pipe(Effect.result);
+          if (recovery === "harness-changed") {
+            const stopped = yield* Context.get(services, StubChildren).stopped;
+            assert.strictEqual(stopped.session.id, first.session.id);
+            assert.strictEqual(stopped.session.brain.harness, "codex");
+            assert.deepStrictEqual(stopped.resume, Option.some(saved));
+            assert.strictEqual(stopped.cwd, request.cwd);
+          }
           if (recovery === "resume-with-other-infra" || recovery === "resume-fails-after-infra") {
             assert(Result.isFailure(report));
             assert.deepStrictEqual(

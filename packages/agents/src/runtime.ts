@@ -400,6 +400,8 @@ export type OnDelivery = (
 
 /** A backend that launches child sessions for tasks delegated by an attempt's parent. */
 export interface ChildBackendService {
+  /** Stops a retained child without resuming its conversation or starting a turn. */
+  readonly stop: (request: ChildRequest) => Effect.Effect<void, AgentSessionError>;
   /** Starts the child described by `request` in the calling scope and returns its controls; await `result` separately before closing the scope. */
   readonly launch: (
     request: ChildRequest,

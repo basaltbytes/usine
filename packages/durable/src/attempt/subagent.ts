@@ -296,14 +296,6 @@ export const subagentTool = (services: ExtensionServices) => {
         Option.getOrNull(saved.value.machine) !== Option.getOrNull(request.machine))
     )
       return yield* interrupted("the original worker, machine, or checkout is unavailable");
-    if (Option.isSome(saved) && saved.value.session.brain.harness !== spec.agent.brain.harness) {
-      const mismatch = ContinuationMismatchError.make({
-        sessionId,
-        field: "harness",
-        message: `harness mismatch (saved ${saved.value.session.brain.harness}, current ${spec.agent.brain.harness})`,
-      });
-      return yield* interrupted(mismatch.message);
-    }
     // Read when each child starts, so a preflight that ran after the Attempt launched applies.
     const session = ChildSession.make({
       ...(Option.isSome(saved)
@@ -356,6 +348,24 @@ export const subagentTool = (services: ExtensionServices) => {
           : task,
       }),
     });
+    if (Option.isSome(saved) && saved.value.session.brain.harness !== spec.agent.brain.harness) {
+      yield* services.backend.stop(childRequest).pipe(
+        Effect.provideService(ChildSessionLifecycle, lifecycle),
+        Effect.tapError((error) =>
+          Effect.logError("Could not stop the saved child before refusing continuation", {
+            sessionId,
+            harness: saved.value.session.brain.harness,
+            message: error.message,
+          }),
+        ),
+      );
+      const mismatch = ContinuationMismatchError.make({
+        sessionId,
+        field: "harness",
+        message: `harness mismatch (saved ${saved.value.session.brain.harness}, current ${spec.agent.brain.harness})`,
+      });
+      return yield* interrupted(mismatch.message);
+    }
     yield* Effect.annotateCurrentSpan({ agent: session.agent, sessionId: session.id });
     yield* Effect.logInfo(
       "Spawning child session with the rendered task and supplemental parent context",

@@ -86,6 +86,7 @@ describe("injected harness registry", () => {
         catalog,
         catalog.ids.map((id): HarnessRuntime => ({
           id,
+          stop: () => Effect.die("preflight must not stop a child"),
           launch: () => Effect.die("preflight must not launch a child"),
           preflight: (brain, target) =>
             Effect.sync(() => {

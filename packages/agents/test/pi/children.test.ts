@@ -49,6 +49,7 @@ const request = (harness: Harness) =>
   });
 
 const backend = (selected: Harness): ChildBackendService => ({
+  stop: () => Effect.void,
   launch: (found) =>
     Effect.succeed({
       session: found.session,
@@ -79,6 +80,7 @@ describe("harness runtime registration", () => {
     const original = request(claude.id);
     const runtime: HarnessRuntime = {
       id: claude.id,
+      stop: () => Effect.void,
       preflight: checkedPreflight(() => Effect.void),
       launch: (found) => {
         assert.deepStrictEqual(found.environment, {

@@ -145,7 +145,15 @@ const successfulResponses = (
 describe("Codex child backend", () => {
   for (const field of ["home", "default-home", "model_provider"] as const) {
     it.effect(`refuses a saved Codex continuation after its ${field} changes`, () => {
-      const original = request();
+      const original = request(
+        "gpt-5.6-terra",
+        "off",
+        RemoteShell.make({
+          ssh: { command: "ssh", args: [] },
+          sshEnvironment: {},
+          destination: "worker",
+        }),
+      );
       const saved = HarnessSession.make({
         id: HarnessSessionId.make("saved-codex"),
         cwd: original.cwd,
@@ -155,6 +163,7 @@ describe("Codex child backend", () => {
         modelProvider: Option.some(EndpointName.make("usine-gateway")),
       });
       const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+      const clients: Array<CodexClient> = [];
       const server = connectionLayer(
         {
           ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
@@ -165,6 +174,8 @@ describe("Codex child backend", () => {
         },
         [],
         calls,
+        Effect.void,
+        clients,
       );
       return Effect.scoped(
         Effect.gen(function* () {
@@ -203,10 +214,45 @@ describe("Codex child backend", () => {
                 : "changed-provider",
           );
           assert(!calls.some(({ method }) => method === "turn/start"));
+          assert.strictEqual(clients.length, 1, "the old transport is replaced before refusal");
+          assert.strictEqual(clients[0]?.transport, "replace");
+          assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
         }),
       ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
     });
   }
+
+  it.effect("stops a retained remote child without resuming its conversation", () => {
+    const original = request(
+      "gpt-5.6-terra",
+      "off",
+      RemoteShell.make({
+        ssh: { command: "ssh", args: [] },
+        sshEnvironment: {},
+        destination: "worker",
+      }),
+    );
+    const clients: Array<CodexClient> = [];
+    const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+    let closed = false;
+    const server = connectionLayer(
+      {},
+      [],
+      calls,
+      Effect.sync(() => {
+        closed = true;
+      }),
+      clients,
+    );
+    return Effect.gen(function* () {
+      yield* (yield* ChildBackend).stop(original);
+      assert.isTrue(closed);
+      assert.strictEqual(clients.length, 1);
+      assert.strictEqual(clients[0]?.transport, "replace");
+      assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
+      assert.deepStrictEqual(calls, []);
+    }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+  });
 
   it.effect("resumes the recorded thread and CODEX_HOME after a durable restart", () => {
     const saved = HarnessSession.make({

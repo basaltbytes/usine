@@ -534,10 +534,10 @@ const makeClaudeChild = Effect.gen(function* () {
         "CLAUDE_CONFIG_DIR",
         ".claude",
       );
-      yield* checkContinuationHome(request, home, defaultHome);
       const lifecycle = yield* ChildSessionLifecycle.current;
       if (Option.isSome(request.resume) && request.host._tag === "RemoteShell")
         yield* stopRemote(request, request.host);
+      yield* checkContinuationHome(request, home, defaultHome);
       // The launch that runs the session; a resume replaces it.
       let current = yield* launchWithRetries(
         request,
@@ -946,7 +946,10 @@ const makeClaudeChild = Effect.gen(function* () {
       } satisfies RunningSession;
     },
   );
-  return ChildBackend.of({ launch });
+  const stop = Effect.fn("ClaudeRuntime.stop")(function* (request: ChildRequest) {
+    if (request.host._tag === "RemoteShell") yield* stopRemote(request, request.host);
+  });
+  return ChildBackend.of({ launch, stop });
 });
 
 /** Provides `ChildBackend` with Claude Code for every delegated task. */
@@ -956,5 +959,10 @@ export const claudeChildLayer = Layer.effect(ChildBackend, makeClaudeChild);
 export const claudeRuntime = Effect.gen(function* () {
   const child = yield* makeClaudeChild;
   const preflight = yield* claudePreflight;
-  return { id: claude.id, preflight, launch: child.launch } satisfies HarnessRuntime;
+  return {
+    id: claude.id,
+    preflight,
+    launch: child.launch,
+    stop: child.stop,
+  } satisfies HarnessRuntime;
 });

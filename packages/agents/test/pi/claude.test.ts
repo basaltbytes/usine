@@ -336,6 +336,48 @@ const droppedLaunch = (onDrop: () => void = () => {}) => {
 };
 
 describe("Claude child backend", () => {
+  for (const home of ["configured", "default"] as const) {
+    it.effect(`stops a saved remote child before refusing a changed ${home} home`, () => {
+      const original = request();
+      const worker = workerCommands(0);
+      let opened = false;
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: () => {
+          opened = true;
+          return scripted([]);
+        },
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const error = yield* (yield* ChildBackend)
+            .launch(
+              ChildRequest.make({
+                ...original,
+                host: exitingHost(0),
+                environment:
+                  home === "configured"
+                    ? { ...original.environment, CLAUDE_CONFIG_DIR: "/new-claude" }
+                    : { ...original.environment, HOME: "/new-home" },
+                resume: Option.some(
+                  HarnessSession.make({
+                    id: HarnessSessionId.make("saved-claude"),
+                    cwd: original.cwd,
+                    home: Option.some(home === "configured" ? "/old-claude" : "/old-home/.claude"),
+                  }),
+                ),
+              }),
+            )
+            .pipe(Effect.flip);
+          assert.strictEqual(error._tag, "ContinuationMismatchError");
+          assert.include(error.message, "home mismatch");
+          assert.lengthOf(worker.commands, 1);
+          assert.include(worker.commands[0]?.at(-1) ?? "", CHILD_STOP_SCRIPT);
+          assert.isFalse(opened, "refusal cannot start another Claude process");
+        }),
+      ).pipe(Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provide(sdk))));
+    });
+  }
+
   it.effect("continues the saved conversation supplied by a restarted durable call", () => {
     const saved = HarnessSession.make({
       id: HarnessSessionId.make("saved-claude"),

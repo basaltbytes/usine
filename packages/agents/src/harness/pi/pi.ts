@@ -243,7 +243,7 @@ const makePiChild = Effect.gen(function* () {
   const resume = Effect.fn("PiRuntime.resume")((request: ChildRequest, id: HarnessSessionId) =>
     start(request, { _tag: "Resume", directory: directory(request), id }),
   );
-  return { launch, resume };
+  return { launch, resume, stop: (_request: ChildRequest) => Effect.void };
 });
 
 /** Provides `ChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
@@ -262,5 +262,11 @@ export interface PiRuntime extends HarnessRuntime {
 export const piRuntime = Effect.gen(function* () {
   const child = yield* makePiChild;
   const preflight = yield* piPreflight;
-  return { id: pi.id, preflight, launch: child.launch, resume: child.resume } satisfies PiRuntime;
+  return {
+    id: pi.id,
+    preflight,
+    launch: child.launch,
+    resume: child.resume,
+    stop: child.stop,
+  } satisfies PiRuntime;
 });

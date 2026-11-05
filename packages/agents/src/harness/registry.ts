@@ -48,6 +48,13 @@ export class Harnesses extends Context.Service<
       }
       registered.set(runtime.id, {
         id: runtime.id,
+        stop: (request) =>
+          runtime.stop(
+            ChildRequest.make({
+              ...request,
+              environment: catalog.environmentFor(runtime.id, request.environment),
+            }),
+          ),
         launch: (request) => {
           const scoped = ChildRequest.make({
             ...request,
