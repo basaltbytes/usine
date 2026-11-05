@@ -10,6 +10,7 @@ import {
   Effect,
   Fiber,
   Layer,
+  Logger,
   Option,
   Predicate,
   Queue,
@@ -21,7 +22,12 @@ import {
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
-import { ChildRequest, SessionOperationError, WorkingDirectory } from "../../../src/runtime.ts";
+import {
+  ChildRequest,
+  ChildSessionLifecycle,
+  SessionOperationError,
+  WorkingDirectory,
+} from "../../../src/runtime.ts";
 import {
   CodexAppServer,
   codexAppServerCommand,
@@ -131,6 +137,89 @@ const awaitStdinLines = (process: FakeProcess, count: number) =>
   });
 
 describe("Codex app-server transport", () => {
+  it.effect("leaves the app-server for recovery when its attempt is stopping", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const stopping = yield* Deferred.make<void>();
+      const released = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+          });
+          yield* Deferred.succeed(stopping, undefined);
+          yield* connection.close;
+        }),
+      ).pipe(
+        Effect.provide(
+          codexAppServerLive.pipe(Layer.provide(spawnerFor(process, { exitOnEof: false }))),
+        ),
+        Effect.provideService(ChildSessionLifecycle, { isStopping: Deferred.isDone(stopping) }),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("1 minute");
+      yield* Fiber.join(released);
+      const stdinClosed = yield* Deferred.isDone(process.stdinClosed);
+      const killed = yield* Deferred.isDone(process.killed);
+      assert.isFalse(stdinClosed);
+      assert.isFalse(killed);
+    }),
+  );
+
+  for (const exitCode of [143, 255]) {
+    it.effect(
+      `leaves the remote supervisor alone after shutdown closes its relay with ${exitCode}`,
+      () =>
+        Effect.gen(function* () {
+          const process = yield* fakeProcess;
+          const stopping = yield* Deferred.make<void>();
+          const errors: unknown[] = [];
+          let spawns = 0;
+          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+            if (["WARN", "ERROR"].includes(logLevel.toUpperCase())) errors.push(message);
+          });
+          const spawner = Layer.effect(
+            ChildProcessSpawner.ChildProcessSpawner,
+            Effect.gen(function* () {
+              const base = yield* ChildProcessSpawner.ChildProcessSpawner;
+              return ChildProcessSpawner.make((command) => {
+                spawns += 1;
+                return base.spawn(command);
+              });
+            }),
+          ).pipe(Layer.provide(spawnerFor(process, { exitOnEof: false })));
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* (yield* CodexAppServer).open({
+                cwd: request.cwd,
+                sessionId: Option.some(request.session.id),
+                environment: request.environment,
+                host: RemoteShell.make({
+                  ssh: { command: "ssh", args: [] },
+                  sshEnvironment: {},
+                  destination: "worker",
+                }),
+              });
+              yield* TestClock.adjust(0);
+              yield* Deferred.succeed(stopping, undefined);
+              yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(exitCode));
+              yield* TestClock.adjust("1 minute");
+            }),
+          ).pipe(
+            Effect.provide(codexAppServerLive.pipe(Layer.provide(spawner))),
+            Effect.provideService(ChildSessionLifecycle, { isStopping: Deferred.isDone(stopping) }),
+            Effect.provide(Logger.layer([logger])),
+          );
+          assert.strictEqual(spawns, 1);
+          const killed = yield* Deferred.isDone(process.killed);
+          assert.isFalse(killed);
+          assert.deepStrictEqual(errors, []);
+        }),
+    );
+  }
+
   it.effect("sends EOF and keeps every close caller waiting until the process exits", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
