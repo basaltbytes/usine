@@ -58,3 +58,34 @@ it.effect(
       assert.notInclude(decodedValue1, "client-secret");
     }),
 );
+
+it.effect("resolves a fixed tailnet worker with only the gateway admin secret", () =>
+  Effect.gen(function* () {
+    const config = yield* Schema.decodeEffect(UsineConfig)({
+      version: 1,
+      repos: [],
+      workers: [
+        {
+          name: "home",
+          kind: "ssh",
+          destination: "usine@100.64.0.3",
+          root: "/home/usine/.usine",
+          gateway: {
+            domain: "gw.test",
+            destination: "gateway",
+            admin_token_env: "GATEWAY_TOKEN",
+          },
+          tailnet: { gateway_address: "100.64.0.2" },
+        },
+      ],
+    });
+    const [worker] = yield* sshWorkerAddressesOf(config);
+    assert(worker?.machine._tag === "Fixed");
+    assert(Option.isSome(worker.machine.tailnet));
+    assert.strictEqual(worker.machine.tailnet.value.gatewayAddress, "100.64.0.2");
+  }).pipe(
+    Effect.provide(
+      ConfigProvider.layer(ConfigProvider.fromEnv({ env: { GATEWAY_TOKEN: "admin" } })),
+    ),
+  ),
+);

@@ -15,6 +15,7 @@ import type { RemoteCommands } from "../remote/commands.ts";
 import type { SshContainers } from "./container.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
+import { configureTailnetGateway } from "./gateway/tailnet.ts";
 import { HOST_MEMORY_RESERVE_MIB, limitFields } from "./limits.ts";
 import type { SshMachine } from "./model.ts";
 import type { SshWorkerEntry } from "./workers.ts";
@@ -33,8 +34,9 @@ const capabilityError = (
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,
  * memory is enough for the concurrent Attempts, the Gateway (if any) responds and is reachable,
  * the container runtime and attempt image work when installed, and each brain is ready. Pulls
- * the Attempt image and changes nothing else. With a container runtime, it derives the container limits that
- * `usine.yaml` leaves unset for `maxConcurrentAttempts` containers, which the report gives, and
+ * the Attempt image. For a fixed tailnet worker, configures gateway routing with passwordless
+ * sudo. With a container runtime, it derives the container limits that `usine.yaml` leaves unset
+ * for `maxConcurrentAttempts` containers, which the report gives, and
  * brains are probed in a container from the image; without, as the SSH user, which the report
  * gives as degraded. Each runtime synchronizes its login checks.
  */
@@ -105,8 +107,18 @@ export const sshMachinePreflightFor = (
       commands.run("preflight", machine.shell, "cat", ["/proc/meminfo"]),
     );
 
-    if (Option.isSome(machine.gateway))
+    if (Option.isSome(machine.gateway)) {
+      const address = machine.address.machine;
+      if (address._tag === "Fixed" && Option.isSome(address.tailnet))
+        yield* configureTailnetGateway(
+          commands,
+          "preflight",
+          machine,
+          address.tailnet.value,
+          machine.gateway.value.settings.domain,
+        );
       yield* verifyGateway(commands, worker, machine, machine.gateway.value);
+    }
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
     if (containerCheck._tag === "Container") {
       const memoryMib = containerCheck.limits.limits.memoryMib;

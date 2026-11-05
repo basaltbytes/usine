@@ -31,3 +31,5 @@ An initialized instance on persistent storage, its credentials in the instance e
 `usine status` reports the PID, version, uptime, listener, and open runs. The log updates as work proceeds. Use [a Linux server deployment](/guides/host-usine-on-linux/) for unattended operation.
 
 Use `usine stop` to drain running attempts, and `usine restart` to restart an idle instance. `--force` interrupts the wait; the next start reattaches retained attempts. [CLI lifecycle commands](/reference/cli/) describe timeouts.
+
+When a reattached attempt delegates to a replacement child, that child's report determines the outcome. An infrastructure failure from the previous child remains in the transcript. If the parent finishes without another delegation, the infrastructure failure still fails the attempt.

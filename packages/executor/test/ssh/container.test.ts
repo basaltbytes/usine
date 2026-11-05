@@ -755,7 +755,11 @@ describe("SSH Worker with Docker", () => {
 
         yield* workers.addWorker({
           ...ADDRESS,
-          machine: { _tag: "Fixed", destination: SshDestination.make("other@203.0.113.7") },
+          machine: {
+            _tag: "Fixed",
+            tailnet: Option.none(),
+            destination: SshDestination.make("other@203.0.113.7"),
+          },
         });
         yield* Effect.scoped(
           executor.prepare(CheckoutRequest.make({ ...secondRequest, worker: WORKER })),

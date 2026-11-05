@@ -2,7 +2,7 @@ import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { GitHubChecks } from "@usine/github/checks";
 import { CiMonitor } from "./ci.ts";
 import { WebhookHealth } from "./webhooks.ts";
-import type { RunDatabase } from "@usine/engine/database";
+import type { RunDatabase, TranscriptCodec } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { BrainSpec } from "@usine/core/agent/brain";
@@ -43,9 +43,10 @@ import { WorkerStatus } from "./worker-status.ts";
  */
 export const operatorObservationLayer = (
   instanceDirectory: InstanceDirectory,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
-    instanceDirectory,
-  ),
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    EnginePersistenceError
+  > = localSqliteLayer(instanceDirectory),
 ) =>
   Layer.mergeAll(
     OperatorObservation.layer,
@@ -69,9 +70,10 @@ export const operatorObservationLayer = (
 export const runtimeLayer = (
   instanceDirectory: InstanceDirectory,
   instanceId: InstanceId,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
-    instanceDirectory,
-  ),
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    EnginePersistenceError
+  > = localSqliteLayer(instanceDirectory),
 ) => {
   const app = GitHubApp.layer.pipe(
     Layer.provide(externalHttpClientLayer),

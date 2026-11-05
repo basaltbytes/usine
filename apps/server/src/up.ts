@@ -22,7 +22,7 @@ import { GitHubPolling } from "@usine/github/polling";
 import { ServerUpgrades } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
 import { localSqliteLayer, SqliteReader } from "@usine/engine/local-sqlite";
-import type { RunDatabase } from "@usine/engine/database";
+import type { RunDatabase, TranscriptCodec } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { configurationLayer, initializeConfiguration } from "./configuration/runtime.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
@@ -173,7 +173,7 @@ const start = Effect.fnUntraced(function* (
   instances: CurrentInstance["Service"],
   port: Port,
   record: InstanceRecord,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError>,
+  database: Layer.Layer<RunDatabase | StepOutputStore | TranscriptCodec, EnginePersistenceError>,
   configurationEditor: ConfigurationEditor["Service"],
   auth: AuthServices,
 ) {

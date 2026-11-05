@@ -35,6 +35,7 @@ Preflight requires at least 1.5 GiB per concurrent attempt and warns below 3 GiB
 | `root` | absolute path | required | Writable remote base for `workers/<name>/`. |
 | `container` | container settings | derived limits | Attempt image and resource limits. |
 | `gateway` | gateway settings | omitted | GitHub and model credential proxy. |
+| `tailnet.gateway_address` | IPv4 address in `100.64.0.0/10` | omitted | Gateway address for a long-lived machine already on Tailscale; requires `gateway` and `destination`. |
 | `provisioner` | provisioner settings | omitted | Provider that creates machines for attempts. |
 
 ```yaml
@@ -99,6 +100,8 @@ gateway:
 ```
 
 The gateway stores the real installation token; the attempt receives a caller token. Listed model providers need no worker login. A provider using an API key counts under API keys on the run page; subscription credentials count under the matching plan. A harness without gateway injection uses its worker login through the forward proxy. See [Configure a gateway](/guides/configure-a-gateway/).
+
+A long-lived SSH worker can set `tailnet: { gateway_address: 100.64.0.2 }` alongside `gateway`. The machine joins Tailscale before preflight and uses its existing identity; OAuth variables are not accepted here. Preflight uses passwordless `sudo -n` to configure gateway host entries, sshd `AcceptEnv`, and gh's systemd HTTP socket, then checks the gateway's missing-caller-token refusal. Install OpenSSH server, systemd, `systemd-socket-proxyd`, and curl first. Containers receive the same gateway host entries, while downloads use direct internet access. Cleanup keeps the machine's tailnet identity. Worker-level `tailnet` is refused with a provisioner; Boat uses `provisioner.tailnet`. See [Home worker on a Mac](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
 ## Provisioner
 
@@ -198,6 +201,6 @@ llm_providers:
 
 The sandbox receives placeholder credentials; outbound handlers inject real GitHub tokens and provider keys. Preflight checks Access credentials, image availability, provider keys, and harness versions in a temporary sandbox. Pi children and interactive terminals are unsupported. Placement cannot guarantee EU-only execution. See [Run attempts in Cloudflare sandboxes](/guides/cloudflare-sandboxes/).
 
-SSH and Cloudflare connection revisions apply to new attempts. SSH revisions include `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, and `provisioner`. Cloudflare revisions include `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, and `llm_providers`.
+SSH and Cloudflare connection revisions apply to new attempts. SSH revisions include `destination`, `identity_file`, `port`, `root`, `gateway`, `tailnet`, `container`, and `provisioner`. Cloudflare revisions include `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, and `llm_providers`.
 
 Retained attempts keep their original host or endpoint, credential references, and container settings through reattachment, salvage, and cleanup, including after restart. Preflight checks the revised connection without changing a retained attempt's isolation. Changing a provisioned SSH worker to a fixed destination stops creation retries and clears provisioning pauses; an allocated machine stays assigned to its attempt and its original provider deletes it after cleanup. Keep the original credential variables and SSH keys available until recovery finishes. [Revision application](/reference/configuration/config/#revision-application) lists restart requirements.
