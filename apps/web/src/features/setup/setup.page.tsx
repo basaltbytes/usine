@@ -1,3 +1,4 @@
+import { ProviderConnections } from "~/components/providers/connections";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
@@ -187,6 +188,9 @@ export const SetupPage = ({ error }: SetupPageProps) => {
               {activate.isPending ? openingInstance : pickRepositories}
             </Button>
           ))}
+        {(state._tag === "Ready" || (state._tag === "Repositories" && !state.signIn)) && (
+          <ProviderConnections />
+        )}
         {state._tag === "Ready" && (
           <Button disabled={activate.isPending} onClick={() => activate.mutate("/")}>
             {activate.isPending ? openingInstance : continueToInstance}

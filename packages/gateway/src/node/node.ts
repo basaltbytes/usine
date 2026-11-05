@@ -1,3 +1,4 @@
+import { ProviderCredentials } from "../credentials/store.ts";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
@@ -141,6 +142,7 @@ export const gatewayLayer = (
     AttachmentPersistenceError,
     GatewaySettings
   > = Attachments.layer,
+  credentialDirectory?: string,
 ) =>
   Layer.effect(
     GatewayAddresses,
@@ -152,6 +154,11 @@ export const gatewayLayer = (
     }),
   ).pipe(
     Layer.provide(GatewayProxy.layer),
+    Layer.provideMerge(
+      credentialDirectory === undefined
+        ? Layer.empty
+        : ProviderCredentials.layer(credentialDirectory),
+    ),
     Layer.provideMerge(gatewayServicesWithAttachments(attachments)),
     Layer.provide(
       Layer.mergeAll(NodeHttpClient.layerUndici, NodeFileSystem.layer, NodeCrypto.layer),
@@ -179,7 +186,7 @@ export const gatewayFromEnvironment = Layer.unwrap(
     const attachments = fileAttachmentsLayer(directory);
     return reloadOnHangup.pipe(
       Layer.provideMerge(gatewayReloadLayer(started, base).pipe(Layer.provide(NodeCrypto.layer))),
-      Layer.provideMerge(gatewayLayer(started.listeners, attachments)),
+      Layer.provideMerge(gatewayLayer(started.listeners, attachments, directory)),
       Layer.provide(Layer.succeed(GatewaySettings)(started.settings)),
     );
   }),

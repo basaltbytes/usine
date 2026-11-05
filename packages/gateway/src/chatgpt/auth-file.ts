@@ -101,7 +101,7 @@ const nonEmpty = (value: string | null | undefined) =>
   Option.fromNullishOr(value).pipe(Option.filter((text) => text !== ""));
 
 /** Returns the tokens in the text of a Codex `auth.json`. */
-const tokensFromAuthFile = (
+export const tokensFromAuthFile = (
   path: string,
   text: string,
 ): Result.Result<ChatGptTokens, ChatGptAuthFileError> => {

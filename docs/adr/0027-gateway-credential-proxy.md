@@ -158,6 +158,12 @@ Podman workers supersede the root-equivalent SSH user assumption of the #548 ame
 
 The gateway credential contract and Boat tailnet routing stay unchanged. Disposable-worker validation must test gateway access from both container startup and a later `exec` over fresh SSH, including cold GHCR blob downloads, metadata denial, and the Boat path. Host networking still exposes host loopback services; rootless mode does not change that accepted boundary.
 
+## Amendment: managed provider sign-in (2026-11-04)
+
+Operators authorize provider logins from usine. The orchestrator runs the installed provider CLI in an isolated, scoped login process, forwards only its allowlisted authorization prompt, and transfers the completed credential through the existing admin API over SSH. The same control uses local harness storage when the instance has no gateway. Provider API keys use a separate masked input.
+
+The gateway stores managed provider settings with atomic file replacement and mode 0600 in its state directory. Managed settings override environment credentials, including a persistent disconnected state, so reloads cannot restore a credential the operator removed. Dedicated ChatGPT auth files use the existing refresh service. The credential service extends gateway settings management; the login runner and credential destinations are separate ports so cancellation, storage, and provider processes can be tested without a real account. Gateway-backed workers receive configuration revisions for provider routing when a connection changes.
+
 ## Amendment (2026-11-05, #661): long-lived workers over the tailnet
 
 A fixed SSH worker outside the gateway's private network can use the same credential routing as Boat. Its operator joins the Linux machine to Tailscale once and sets worker-level `tailnet.gateway_address`. Preflight uses passwordless sudo to apply the shared gateway configuration and verifies the missing-caller-token refusal. The existing machine identity needs no OAuth client and remains joined after attempt cleanup.

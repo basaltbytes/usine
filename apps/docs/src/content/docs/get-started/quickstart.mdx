@@ -25,18 +25,16 @@ usine --version
 
 Expected: npm finishes installing, and `usine --version` prints the installed release number.
 
-## 2. Sign in to Codex and Pi
+## 2. Install Codex and sign in to Pi
 
-Install the Codex CLI version that usine's preflight accepts and sign in with your ChatGPT account:
+Install the Codex CLI version that usine accepts:
 
 ```sh
 npm install --global @openai/codex@0.164.0
 codex --version
-codex login
-codex login status
 ```
 
-Complete the browser login with your ChatGPT account. Expected: `codex --version` prints `codex-cli 0.164.0`, and `codex login status` confirms a ChatGPT login. Codex saves its credential in `~/.codex` (or `CODEX_HOME` if set) for the child on your local worker.
+Expected: `codex --version` prints `codex-cli 0.164.0`. You connect Codex from usine after starting the orchestrator in step 5.
 
 Install Pi to sign in separately for the parent, then open its terminal interface:
 
@@ -118,9 +116,18 @@ In the setup screen:
 1. Enter a unique App name, then select **Create App on GitHub** and confirm on GitHub. The instance supplies the required permissions and callback URLs.
 2. After GitHub returns you to setup, select **Install App on GitHub**. Install it on your account and select only `usine-scratch`.
 3. Return to setup and select **Check installation**. Then select **Sign in with GitHub**; this sign-in makes you the first instance admin.
-4. Select **Open usine** to activate the runtime. The bootstrap already registered `usine-scratch` and created the **Scratch** project.
+4. In **Provider connections**, select **Connect ChatGPT**. Open the displayed sign-in page and enter its device code. Enable device authorization in ChatGPT security settings if required. Wait for **Connected · Subscription**. usine saves the local worker’s Codex login in `~/.codex/auth.json` (`CODEX_HOME` when set).
+5. Select **Open usine** to activate the runtime. The bootstrap already registered `usine-scratch` and created the **Scratch** project.
 
 Expected: the terminal reports `usine is running at http://127.0.0.1:7331`, and the web UI lists **Scratch**. The App credentials are saved in `.usine/github-app.json`. Open **Configuration > Loops** and confirm that `scratch/first-pr` is running; select **Resume** if it is paused.
+
+Local workers accept Claude subscription logins, Claude setup tokens, and API keys for both Claude and Codex. API-key children report usage in the API keys pool; subscription children use the matching plan pool.
+
+Local preflight checks and harness children use the same `CODEX_HOME` and `CLAUDE_CONFIG_DIR` as the orchestrator. Set these variables before starting `usine up` when you use custom credential directories.
+
+Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Disconnect removes the managed `auth.json`; usine's local Codex launches ignore keyring credentials.
+
+For a headless host, run `usine login chatgpt` from the instance folder in a second terminal. Configuration > Settings provides the same connect, replace, and disconnect actions. `usine logout chatgpt` disconnects the local harness. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.
 
 Setup can resume at `/setup` if interrupted. See [Sign in to an instance](/guides/sign-in/) for existing App credentials and member access.
 

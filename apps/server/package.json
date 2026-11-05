@@ -34,6 +34,7 @@
     "@usine/durable": "workspace:*",
     "@usine/engine": "workspace:*",
     "@usine/expression": "workspace:*",
+    "@usine/gateway": "workspace:*",
     "@usine/github": "workspace:*",
     "@usine/orchestrator": "workspace:*",
     "effect": "catalog:"

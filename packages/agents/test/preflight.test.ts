@@ -269,18 +269,11 @@ describe("worker harness readiness", () => {
         () => {
           const server = account(Effect.succeed({ account: auth, requiresOpenaiAuth: true }));
           return Effect.gen(function* () {
-            if (auth.type === "chatgpt") {
-              const available = yield* verifyHarness(coder, local, workerEnvironment);
-              assert.deepStrictEqual(
-                available,
-                HarnessReady.make({ harness: Harness.make("codex") }),
-              );
-            } else {
-              const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
-              const matchesError = Schema.is(HarnessUnavailableError)(error);
-              assert(matchesError);
-              assert.strictEqual(error.capability, "login");
-            }
+            const available = yield* verifyHarness(coder, local, workerEnvironment);
+            assert.deepStrictEqual(
+              available,
+              HarnessReady.make({ harness: Harness.make("codex") }),
+            );
             assert.strictEqual(server.opened(), 1);
             assert.strictEqual(server.closed(), 1);
           }).pipe(
@@ -319,7 +312,7 @@ describe("worker harness readiness", () => {
   );
 
   const subscriptionLogin =
-    "Claude Code needs a subscription login. Run claude auth login on the worker.";
+    "Claude Code needs a subscription login or API key. Run claude auth login on the worker.";
   // Claude Code 2.1.308 prints its status and exits 1 when not logged in.
   for (const status of [
     {
@@ -334,6 +327,8 @@ describe("worker harness readiness", () => {
       exitCode: 1,
     },
     { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 0 },
+    { auth: { loggedIn: true, authMethod: "oauth_token", apiProvider: "firstParty" }, exitCode: 0 },
+    { auth: { loggedIn: true, authMethod: "unknown", apiProvider: "firstParty" }, exitCode: 0 },
     { auth: { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" }, exitCode: 0 },
     { auth: { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }, exitCode: 0 },
   ]) {
@@ -342,7 +337,7 @@ describe("worker harness readiness", () => {
       () => {
         const server = account(Effect.succeed(null));
         return Effect.gen(function* () {
-          if (status.auth.authMethod === "claude.ai") {
+          if (["claude.ai", "oauth_token", "api_key"].includes(status.auth.authMethod)) {
             const available = yield* verifyHarness(
               brain(Harness.make("claude")),
               local,
