@@ -69,7 +69,7 @@ interface PendingRequest {
 // @effect-diagnostics-next-line schemaSync:off
 const quoteDirectory = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 const repositoryTrustOverride = (cwd: string): string =>
-  `projects.${quoteDirectory(cwd)}.trust_level="untrusted"`;
+  `projects={${quoteDirectory(cwd)}={trust_level="untrusted"}}`;
 /** Command-line overrides for every Codex invocation: disable nested agents, plugins, apps, startup update checks, and analytics. */
 export const codexConfigArgs: ReadonlyArray<string> = [
   "features.multi_agent=false",
@@ -89,7 +89,7 @@ const appServerArgs = (cwd: string) => [
 ];
 
 /**
- * Returns the app-server command for `client` on its host. The process starts in the home directory,
+ * Returns the app-server command for `client` on its host. The process starts in `/`,
  * not the worktree, so startup cannot read repository config before thread trust is set.
  */
 export const codexAppServerCommand = (
@@ -105,6 +105,7 @@ export const codexAppServerCommand = (
   return hostCommand(
     client.host,
     {
+      cwd: "/",
       environment: client.environment,
       pidFile: Option.getOrUndefined(
         Option.map(client.sessionId, (sessionId) => childPidFile(client.cwd, sessionId)),

@@ -72,6 +72,8 @@ Pi children save their conversations in `.usine/pi/sessions` under the attempt c
 
 Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, and Pi ignores project-local configuration. Repository agent instructions still apply.
 
+Codex disables the checkout's project-local configuration, hooks, and exec policies even if its saved configuration marks the checkout as trusted. Its app server starts in `/`, outside the checkout and home directory, to avoid loading repository configuration at startup or reporting disabled project configuration in the worker's `.codex` directory. Other Codex diagnostics log at Warning.
+
 ## Preflight
 
 Preflight checks tools and credentials; it does not install harnesses. Startup checks each rostered child brain on every worker. A changed roster is checked before the running configuration accepts it. Each attempt also checks its selected agent. Failures identify the worker, capability, and remediation.
