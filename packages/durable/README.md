@@ -9,6 +9,7 @@ Brain specifications use the branded `Harness` ID from `@usine/core/agent/brain`
 - `/attempt-runtime`: the `AttemptRuntime` contract that the executor calls, with `AttemptRequest`, `StoredRequest`, and `AttemptReport`.
 - `/harness`: the `DurableHarness` service, which manages the open pi-durable harness, and its platform-free `layer(options)`.
 - `/backup`: `backup(instanceDirectory, destination)`, an online copy of `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file. `usine backup` writes it next to the runtime database copy.
+- `/gateway`: `gatewayModelAccess(transport)` builds Pi model access from a gateway transport, and `preflightGatewayModels` checks configured coordinator providers. It uses no local provider login.
 - `/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the child backends from `@usine/agents`.
 - `/testing`: a scripted parent model and stub children for whole-attempt tests, and a stub `AttemptRuntime` for executor tests.
 
@@ -19,6 +20,8 @@ import { layer as durableLayer } from "@usine/durable/live";
 // shared with the executor.
 const attempts = durableLayer(instanceDirectory);
 ```
+
+`/live` accepts optional `ParentModelAccess` as its second argument. The orchestrator supplies gateway model access when an SSH worker configures a gateway; otherwise Pi keeps its local login. `DurableHarnessOptions.parentAuthentication` checks the upstream credential separately from the transport's caller token. Gateway ChatGPT models use the Responses API over HTTP streaming, without a local OAuth token, and retain the `chatgptPlan` pool. API-key routes use `apiKeys`.
 
 The parent record stores the pool and endpoint resolved from its credential at launch. Transcript relay uses those stored values after a restart. Records created before these fields were stored retain the historical accounting rule.
 

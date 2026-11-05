@@ -14,10 +14,12 @@ import {
   layer as durableHarnessLayer,
 } from "./harness.ts";
 import { durableStoragePath } from "./storage-path.ts";
+import type { ParentModelAccess } from "./gateway.ts";
 import { configureHarnessHttp } from "./http-dispatcher.ts";
 
 const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
   instanceDirectory: InstanceDirectory,
+  access?: ParentModelAccess,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -27,10 +29,12 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
     projectTrusted: false,
   });
   yield* configureHarnessHttp(settings.getGlobalSettings().httpProxy);
-  const models = yield* Effect.tryPromise({
-    try: (signal) => ModelRuntime.create({ signal }),
-    catch: (cause) => durableError("load the Pi model runtime", cause),
-  });
+  const models =
+    access?.models ??
+    (yield* Effect.tryPromise({
+      try: (signal) => ModelRuntime.create({ signal }),
+      catch: (cause) => durableError("load the Pi model runtime", cause),
+    }));
   const defaultModel = Option.flatMap(
     Option.fromNullishOr(settings.getDefaultProvider()),
     (provider) =>
@@ -51,6 +55,7 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
       ),
     ),
     models,
+    parentAuthentication: access?.authentication,
     defaultModel,
   } satisfies DurableHarnessOptions;
 });
@@ -59,8 +64,8 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
  * Provides the durable harness on `.usine/durable.sqlite` with Pi's configured models and
  * credentials.
  */
-export const harnessLayer = (instanceDirectory: InstanceDirectory) =>
-  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory), durableHarnessLayer)).pipe(
+export const harnessLayer = (instanceDirectory: InstanceDirectory, access?: ParentModelAccess) =>
+  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory, access), durableHarnessLayer)).pipe(
     Layer.provide(NodeServices.layer),
   );
 
@@ -71,8 +76,8 @@ export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = ch
  * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every
  * unfinished Attempt.
  */
-export const layer = (instanceDirectory: InstanceDirectory) =>
+export const layer = (instanceDirectory: InstanceDirectory, access?: ParentModelAccess) =>
   attemptRuntimeLayer.pipe(
-    Layer.provideMerge(harnessLayer(instanceDirectory)),
+    Layer.provideMerge(harnessLayer(instanceDirectory, access)),
     Layer.provide(childBackendLayer),
   );

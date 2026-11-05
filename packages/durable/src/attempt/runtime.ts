@@ -54,6 +54,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     hubs,
     backend,
     defaultModel: durable.defaultModel,
+    parentAuthentication: durable.parentAuthentication,
     run: (program, signal) => Effect.runPromiseWith(services)(program, { signal }),
   });
   yield* durable.install(extension);

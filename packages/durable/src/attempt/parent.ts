@@ -1,3 +1,5 @@
+// Pi authentication uses Promise callbacks.
+// @effect-diagnostics asyncFunction:off
 import { getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import {
@@ -18,6 +20,7 @@ import { AgentSessionId, EndpointName, ParentSession } from "@usine/core/agent/s
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
+import type { ParentModelAccess } from "../gateway.ts";
 import type { AttemptRecord } from "./documents.ts";
 
 /** The parent model, validated against the effort and credential. */
@@ -109,6 +112,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
   models: Models,
   defaultModel: Option.Option<ModelRef>,
   spec: RunSpec,
+  gatewayAuthentication?: ParentModelAccess["authentication"],
 ) {
   yield* Effect.annotateCurrentSpan({
     attemptId: spec.attemptId,
@@ -131,14 +135,16 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
     });
   }
-  const check = yield* Effect.tryPromise({
-    try: (signal) => models.checkAuth(selected.provider, { signal }),
+  const authentication = yield* Effect.tryPromise({
+    try: async (signal) =>
+      gatewayAuthentication === undefined
+        ? piAuthentication(
+            await models.checkAuth(selected.provider, { signal }),
+            models.getProvider(selected.provider)?.auth.oauth?.isSubscription === true,
+          )
+        : gatewayAuthentication(selected.provider, signal),
     catch: (cause) => launchError(spec, "Can't check the parent model's credential", cause),
   });
-  const authentication = piAuthentication(
-    check,
-    models.getProvider(selected.provider)?.auth.oauth?.isSubscription === true,
-  );
   const required = requiredPiPool(selected.provider);
   const pool = resolvePiPool(selected.provider, authentication);
   if (pool === undefined) {
@@ -152,7 +158,10 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       harness: Harness.make("pi"),
       model,
       pool: required,
-      message: `Pi parent model "${model}" requires a credential from the ${required} pool`,
+      message:
+        gatewayAuthentication === undefined
+          ? `Pi parent model "${model}" requires a credential from the ${required} pool`
+          : `Gateway credential unavailable for provider "${selected.provider}" (coordinator model "${model}", pool ${required})`,
     });
   }
   yield* Effect.logInfo("Pi parent authenticated", { model, pool });
