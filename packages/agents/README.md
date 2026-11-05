@@ -1,5 +1,7 @@
 # @usine/agents
 
+Harness descriptors define secret-free credential recipes for gateway access, attempt API keys, and Cloudflare outbound handlers. Each recipe specifies environment variables, the variable that supplies the credential, and configuration files. Gateway recipes select a wire-protocol slot (`anthropic-messages` or `openai-responses`); provider names select provisioner API keys. A descriptor also declares whether its wiring requires a writable attempt home. Worker cloud-init and SSH preflight derive their accepted caller-token variables from the catalog.
+
 The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Code, Codex, and Pi child backends that an attempt's Pi parent delegates to, their prompts, and harness preflight. The parent runs in the orchestrator as a durable task (`@usine/durable`); its `subagent` tool starts the child that the agent's brain spec selects. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) describes each harness.
 
 0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version. Harness SDKs and protocols are exact-pinned.
@@ -80,6 +82,8 @@ The prompts tell parents and children, before returning, to run gates, tests, an
 
 ## Lost connections
 
+The durable attempt runtime supplies `ChildSessionLifecycle` when it launches a child. Detaching the attempt channel marks that lifecycle as stopping before the executor closes transports and credentials. Child backends leave recovery to the next process: Codex skips reconnect, saved-thread resume, EOF, remote stop commands, and journal removal; Claude Code skips session recovery. Shutdown errors stay out of child failure reports for Codex, Claude Code, and Pi. Direct backend callers can provide the lifecycle service; without it, normal recovery and cleanup apply.
+
 If the SSH connection to a remote Claude child breaks, for example while the orchestrator's machine sleeps, the SSH client exits with `SSH_FAILURE` (255) and the output stream fails. The backend then resumes the child instead of failing it: it stops the Claude process left on the worker with `CHILD_STOP_SCRIPT` and the child's pid file, and starts Claude with the saved session in the same child session, so the parent spends no child budget. A working child gets a message that asks it to check the worktree and continue, followed by the operator messages that it hadn't read. A paused or idle child waits for the operator. Open tool calls end as errors, and token usage and cost carry over.
 
 The backend tries after 5 s, 15 s, 30 s, 1 min, 2 min, and 5 min; a message from Claude resets the count. After the last try, on a local host, or if Claude itself exited, the child fails with `SessionOperationError` as before.
@@ -101,6 +105,8 @@ Should egress use HTTP CONNECT or a SOCKS proxy? Both fit the gateway.
 ```
 
 `reportedOutcome` reads markers as `AgentBlockedError` and `AgentQuestionError`, and `reportText` writes them. A parent's blocker becomes a non-retryable `BlockedFailure` and its question a non-retryable `QuestionFailure`: the run fails, its loop suppresses the item, and the run waits for the operator. A child's harness failure (`AgentResultError`) goes to the parent as a `[usine:failed]` report that `reportedOutcome` reads back, so the attempt ends with `AgentFailure` and suppresses nothing: the harness posted nothing.
+
+Claude Code, Codex, and Pi children log blocker and question reports at Info with `kind` (`blocked` or `question`), `message`, and `sessionId`. Harness and infrastructure failures log at Error. The log level does not change the typed outcome returned to the parent.
 
 A child's report returns to the parent's `subagent` call as text opening with its marker, to return verbatim. The parent keeps the first: a later ordinary answer fails with it, and the paraphrase stays in the transcript. Successful siblings don't clear it. Held children can take guidance and replace their answer before release. A marker without details still fails.
 

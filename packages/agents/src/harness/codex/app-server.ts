@@ -17,7 +17,7 @@ import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { childPidFile } from "../../child-host/child-host.ts";
 import { RemoteCodexProcessLost, remoteCodexProcess } from "./remote.ts";
 import { hostCommand } from "../../child-host/command.ts";
-import { SessionOperationError } from "../../runtime.ts";
+import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
 
 import {
   CodexAppServer,
@@ -135,6 +135,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         harness: Harness.make("codex"),
         sessionId: Option.getOrUndefined(request.sessionId),
       });
+      const lifecycle = yield* ChildSessionLifecycle.current;
       const input = yield* Queue.make<Uint8Array, Cause.Done>();
       const notifications = yield* Queue.make<
         CodexNotification,
@@ -381,6 +382,12 @@ const makeCodexAppServer = Effect.gen(function* () {
             sessionId: Option.getOrUndefined(request.sessionId),
           });
           yield* Ref.set(closing, true);
+          if (yield* lifecycle.isStopping) {
+            yield* Effect.logInfo("Leaving the Codex app-server for reattachment", {
+              sessionId: Option.getOrUndefined(request.sessionId),
+            });
+            return;
+          }
           yield* Queue.end(input);
           const [exitCode] = yield* Effect.all(
             [handle.exitCode, Fiber.join(stdoutReader), Fiber.join(stderrReader)],
@@ -418,17 +425,24 @@ const makeCodexAppServer = Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
         close.pipe(
           Effect.catch((cause) =>
-            Effect.logWarning("Forcing Codex app-server to stop after graceful shutdown failed", {
-              cause,
-              sessionId: Option.getOrUndefined(request.sessionId),
-            }).pipe(
-              Effect.andThen(handle.kill({ forceKillAfter: "5 seconds" })),
-              Effect.catch((cause) =>
-                Effect.logWarning("Could not force Codex app-server to stop", {
-                  cause,
-                  sessionId: Option.getOrUndefined(request.sessionId),
-                }),
-              ),
+            Effect.flatMap(lifecycle.isStopping, (stopping) =>
+              stopping
+                ? Effect.void
+                : Effect.logWarning(
+                    "Forcing Codex app-server to stop after graceful shutdown failed",
+                    {
+                      cause,
+                      sessionId: Option.getOrUndefined(request.sessionId),
+                    },
+                  ).pipe(
+                    Effect.andThen(handle.kill({ forceKillAfter: "5 seconds" })),
+                    Effect.catch((cause) =>
+                      Effect.logWarning("Could not force Codex app-server to stop", {
+                        cause,
+                        sessionId: Option.getOrUndefined(request.sessionId),
+                      }),
+                    ),
+                  ),
             ),
           ),
         ),

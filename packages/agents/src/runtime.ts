@@ -26,6 +26,17 @@ import { ChildHost } from "./child-host/child-host.ts";
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));
 export type WorkingDirectory = typeof WorkingDirectory.Type;
 
+/** Marks an attempt's release before its child transport and credentials close. */
+export class ChildSessionLifecycle extends Context.Service<
+  ChildSessionLifecycle,
+  { readonly isStopping: Effect.Effect<boolean> }
+>()("@usine/agents/runtime/ChildSessionLifecycle") {
+  static readonly current = Effect.map(
+    Effect.serviceOption(ChildSessionLifecycle),
+    Option.getOrElse(() => ChildSessionLifecycle.of({ isStopping: Effect.succeed(false) })),
+  );
+}
+
 /** A task delegated to one child, with its session and the checkout it shares with the parent. */
 export class ChildRequest extends Schema.Class<
   ChildRequest,

@@ -1,6 +1,6 @@
 import { Harness } from "@usine/core/agent/brain";
 import { type TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
-import { GatewayLlmProvider } from "@usine/core/worker";
+import { GatewayLlmProtocol, GatewayLlmProvider } from "@usine/core/worker";
 import { type Brand, Option, Record, Schema } from "effect";
 
 /** The terminal command for a saved harness session. */
@@ -24,16 +24,64 @@ export class HarnessPresentation extends Schema.Class<
   handoff: Schema.NullOr(ResumeCommand),
 }) {}
 
+/** A secret-free environment and config-file recipe. Values can contain {{baseUrl}} and {{home}}. */
+export class CredentialWiring extends Schema.Class<
+  CredentialWiring,
+  Brand.Brand<"@usine/agents/harness/CredentialWiring">
+>("@usine/agents/CredentialWiring")({
+  tokenVariable: Schema.NonEmptyString,
+  environment: Schema.Record(Schema.String, Schema.String),
+  files: Schema.Record(Schema.String, Schema.String),
+}) {
+  get requiresHome(): boolean {
+    return (
+      Object.keys(this.files).length > 0 ||
+      Object.values(this.environment).some((value) => value.includes("{{home}}"))
+    );
+  }
+
+  render(baseUrl: string, home: string) {
+    const expand = (value: string) =>
+      value.replaceAll("{{baseUrl}}", baseUrl).replaceAll("{{home}}", home);
+    return {
+      tokenVariable: this.tokenVariable,
+      environment: Object.fromEntries(
+        Object.entries(this.environment).map(([key, value]) => [key, expand(value)]),
+      ),
+      files: Object.entries(this.files).map(
+        ([path, contents]) => [`${home}/${path}`, expand(contents)] as const,
+      ),
+    };
+  }
+}
+
 /** A provider credential and the hosts used without a gateway credential. */
 export class HarnessCredential extends Schema.Class<
   HarnessCredential,
   Brand.Brand<"@usine/agents/harness/HarnessCredential">
->("@usine/agents/HarnessCredential")({
-  provider: GatewayLlmProvider,
-  label: Schema.NonEmptyString,
-  hosts: Schema.Array(Schema.NonEmptyString),
-  apiHost: Schema.NonEmptyString,
-}) {}
+>("@usine/agents/HarnessCredential")(
+  Schema.Struct({
+    provider: GatewayLlmProvider,
+    protocol: GatewayLlmProtocol,
+    gatewayPath: Schema.NonEmptyString,
+    /** None when credential wiring needs no attempt home. */
+    home: Schema.Option(Schema.NonEmptyString),
+    gateway: CredentialWiring,
+    apiKey: CredentialWiring,
+    cloudflare: CredentialWiring,
+    label: Schema.NonEmptyString,
+    hosts: Schema.Array(Schema.NonEmptyString),
+    apiHost: Schema.NonEmptyString,
+    apiKeyBaseUrl: Schema.NonEmptyString,
+  }).check(
+    Schema.makeFilter(
+      ({ home, gateway, apiKey, cloudflare }) =>
+        ((Option.isSome(home) || (!gateway.requiresHome && !apiKey.requiresHome)) &&
+          !cloudflare.requiresHome) ||
+        "Credential wiring requires an attempt home; Cloudflare wiring supports environment variables only",
+    ),
+  ),
+) {}
 
 /** Worker installation and login requirements, without secret values. */
 export class WorkerRequirements extends Schema.Class<

@@ -12,6 +12,7 @@ import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
   type AgentSessionError,
   ChildRequest,
+  ChildSessionLifecycle,
   ChildSessionBudgetExceededError,
   SessionOperationError,
   reportText,
@@ -177,8 +178,12 @@ export const subagentTool = (services: ExtensionServices) => {
       );
     }
     // An abort, such as the harness closing at shutdown, ends a wait for a released Attempt.
+    const attachment = hub.attached;
+    const lifecycle = ChildSessionLifecycle.of({
+      isStopping: Effect.sync(() => hub.attached !== attachment),
+    });
     const request = yield* untilAborted(
-      Deferred.await(hub.attached),
+      Deferred.await(attachment),
       context,
       sessionId,
       Effect.logInfo(
@@ -253,6 +258,7 @@ export const subagentTool = (services: ExtensionServices) => {
       services.backend
         .launch(childRequest)
         .pipe(
+          Effect.provideService(ChildSessionLifecycle, lifecycle),
           Effect.tapError(recordInfrastructureFailure),
           Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }),
         ),

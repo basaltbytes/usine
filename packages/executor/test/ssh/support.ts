@@ -191,7 +191,7 @@ interface FakeMachineState {
    * The Codex homes on the machine, by path, with whether the Attempt of each has a checkout. A
    * Codex home that the executor writes has none, so only its hold keeps a sweep from removing it.
    */
-  readonly codexHomes: Map<string, boolean>;
+  readonly attemptHomes: Map<string, boolean>;
   /** Whether the Gateway accepts the SSH connection of a forward to its admin API. */
   gatewayAcceptsSsh: boolean;
   /** Every forward the executor started, in order. */
@@ -353,7 +353,7 @@ export const fakeMachine = () => {
     forwardProxyReachable: true,
     refusedHosts: new Set(),
     files: new Map(),
-    codexHomes: new Map(),
+    attemptHomes: new Map(),
     gatewayAcceptsSsh: true,
     forwards: [],
     podmanInfo: undefined,
@@ -603,7 +603,7 @@ export const fakeMachine = () => {
         : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
     // Lists the Codex homes whose Attempt has no checkout.
     if (line.includes("basename")) {
-      const listed = [...state.codexHomes].filter(([, checkout]) => !checkout);
+      const listed = [...state.attemptHomes].filter(([, checkout]) => !checkout);
       return oneShotHandle(listed.map(([home]) => `${home}${NUL}`).join(""), 0);
     }
     // Writes configuration files: path and contents pairs after the script and `$0`.
@@ -615,7 +615,7 @@ export const fakeMachine = () => {
         state.files.set(path, pairs[index + 1] ?? "");
         const codexHome = /^(.+\/codex\/[^/]+)\/config\.toml$/u.exec(path)?.[1];
         if (codexHome !== undefined)
-          state.codexHomes.set(codexHome, state.codexHomes.get(codexHome) ?? false);
+          state.attemptHomes.set(codexHome, state.attemptHomes.get(codexHome) ?? false);
       }
       return oneShotHandle("", 0);
     }
@@ -644,7 +644,7 @@ export const fakeMachine = () => {
     }
     if (line.startsWith("exec 'rm' '-rf' ")) {
       for (const target of remoteWords(line).slice(2)) {
-        state.codexHomes.delete(target);
+        state.attemptHomes.delete(target);
         for (const directory of state.credentials.keys())
           if (directory === target || directory.startsWith(`${target}/`))
             state.credentials.delete(directory);
@@ -947,6 +947,7 @@ export const executorLayer = (
   storage: StubStorage = new StubStorage(),
   /** Replaces the executor's own login and binary checks. */
   probes: Pick<SshExecutorOptions, "harnessReadiness" | "attemptConnections"> = {},
+  harnesses: typeof harnessesLive = harnessesLive,
 ) =>
   sshLayer({
     workers: [address],
@@ -955,7 +956,7 @@ export const executorLayer = (
     interruptGrace: "2 seconds",
     ...probes,
   }).pipe(
-    Layer.provide(harnessesLive),
+    Layer.provide(harnesses),
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),

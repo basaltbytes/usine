@@ -21,7 +21,7 @@ import { agentsHarnessProbe, type HarnessProbe } from "../harness-preflight.ts";
 import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
 import type { RemoteGrant } from "../remote/machine.ts";
 import { remoteExecutorFor } from "../remote/remote.ts";
-import { codexHomesFor } from "./codex-homes.ts";
+import { attemptHomesFor } from "./attempt-homes.ts";
 import { sshContainersFor } from "./container.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
@@ -42,8 +42,9 @@ import { sshMachinesFor, SshWorkers } from "./workers.ts";
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
     const harnesses = yield* Harnesses;
+    const { catalog } = harnesses;
     const remoteCommands = yield* remoteCommandsFor;
-    const reset = machineResetFor(remoteCommands, options.instance, options.instanceId);
+    const reset = machineResetFor(catalog, remoteCommands, options.instance, options.instanceId);
     const { commands } = reset;
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
@@ -80,6 +81,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         );
     const fs = yield* FileSystem.FileSystem;
     const records = yield* sshWorkerRecordsFor(
+      catalog,
       options.workerRecordsDirectory ??
         (yield* fs.makeTempDirectoryScoped({ prefix: "usine-ssh-workers-" }).pipe(Effect.orDie)),
       base,
@@ -95,7 +97,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     // or a provisioned machine's Attempts get an API key.
     const harnessProbe = (machine: SshMachine, shell: RemoteShell): HarnessProbe => {
       const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(harnesses, shell, {});
-      const keyed = (harness: Harness) => Option.isSome(provisionedApiKey(machine, harness));
+      const keyed = (harness: Harness) =>
+        Option.isSome(provisionedApiKey(catalog, machine, harness));
       const external = agentsHarnessProbe(harnesses, shell, {}, "api-key");
       const probe: HarnessProbe = (brain, login) =>
         keyed(brain.harness) ? external(brain, login) : own(brain, login);
@@ -103,6 +106,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         onNone: () => probe,
         onSome: (gateway) =>
           gatewayHarnessProbe(
+            catalog,
             commands,
             machine,
             gateway,
@@ -114,12 +118,12 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       });
     };
     const credentials = yield* sshCredentialsFor(commands);
-    const codexHomes = yield* codexHomesFor(commands);
-    const attachments = yield* gatewayAttachmentsFor(commands, codexHomes.hold, (machine) =>
+    const attemptHomes = yield* attemptHomesFor(commands);
+    const attachments = yield* gatewayAttachmentsFor(commands, attemptHomes.hold, (machine) =>
       reset.failed(machine.shell),
     );
     const containers = yield* sshContainersFor(commands, options.instance, options.instanceId);
-    const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, containers);
+    const verifyMachine = sshMachinePreflightFor(catalog, commands, harnessProbe, containers);
     const forgetConnection = Effect.fn("SshExecutor.forgetReleasedConnection")(function* (
       attemptId: AttemptId,
     ) {
@@ -202,8 +206,9 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
                   operation,
                 );
             return yield* withApiKeys(
+              catalog,
               commands,
-              codexHomes.hold,
+              attemptHomes.hold,
               machine,
               attemptId,
               access,
@@ -212,27 +217,13 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           }),
       } satisfies RemoteGrant<SshMachine>);
 
-    // Provisioned machines remove their Codex homes during reset or machine deletion.
+    // Provisioned machines remove their harness homes during reset or machine deletion.
     const sweep = Effect.fn("SshExecutor.sweep")(function* () {
       const machines = (yield* entries).flatMap(({ machine }) => Option.toArray(machine));
-      yield* Effect.forEach(
-        machines,
-        (machine) =>
-          codexHomes.sweep(machine).pipe(
-            Effect.tapError((error) =>
-              Effect.logWarning(
-                "Could not sweep the Codex homes on the SSH Worker; the next sweep tries again",
-                {
-                  worker: machine.address.name,
-                  host: machine.shell.destination,
-                  message: error.message,
-                },
-              ),
-            ),
-            Effect.ignore,
-          ),
-        { concurrency: "unbounded", discard: true },
-      );
+      yield* Effect.forEach(machines, (machine) => attemptHomes.sweep(machine), {
+        concurrency: "unbounded",
+        discard: true,
+      });
     });
 
     const fixedLeftovers = yield* Cache.make({
@@ -329,7 +320,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       gatewayCredential: (machine, harness) =>
         Option.match(machine.gateway, {
           onNone: () => Effect.succeed(Option.none<GatewayCredentialKind>()),
-          onSome: (gateway) => gatewayCredentialFor(gateway, harness),
+          onSome: (gateway) => gatewayCredentialFor(catalog, gateway, harness),
         }),
       grantFor,
       readOnlyAccessGap: Option.none(),

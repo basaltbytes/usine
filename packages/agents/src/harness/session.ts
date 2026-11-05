@@ -14,7 +14,12 @@ import {
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Option, Queue, Ref, Result, Schema } from "effect";
 import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
-import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
+import {
+  type AgentSessionError,
+  ChildSessionLifecycle,
+  reportedOutcome,
+  SessionResult,
+} from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./pi/sdk.ts";
 
 // Pi tool-event callbacks synchronously normalize arbitrary SDK tool values before emitting session events.
@@ -45,6 +50,7 @@ export interface SessionChannel {
 export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   options: SessionChannelOptions,
 ) {
+  const lifecycle = yield* ChildSessionLifecycle.current;
   const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const terminal = yield* Ref.make(false);
@@ -67,12 +73,27 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
 
   const fail = Effect.fn("SessionChannel.fail")(function* (error: AgentSessionError) {
     yield* Effect.annotateCurrentSpan({ sessionId: options.sessionId });
+    if (yield* lifecycle.isStopping) {
+      yield* Effect.logInfo(`${options.label} stopped with its attempt`, {
+        sessionId: options.sessionId,
+        errorTag: error._tag,
+      });
+      return;
+    }
     if (yield* Ref.getAndSet(terminal, true)) return;
-    yield* Effect.logError(`${options.label} failed`, {
-      errorTag: error._tag,
-      message: error.message,
-      sessionId: options.sessionId,
-    });
+    if (error._tag === "AgentBlockedError" || error._tag === "AgentQuestionError") {
+      yield* Effect.logInfo(`${options.label} returned a reserved report`, {
+        kind: error._tag === "AgentBlockedError" ? "blocked" : "question",
+        message: error.message,
+        sessionId: options.sessionId,
+      });
+    } else {
+      yield* Effect.logError(`${options.label} failed`, {
+        errorTag: error._tag,
+        message: error.message,
+        sessionId: options.sessionId,
+      });
+    }
     yield* Deferred.fail(result, error);
     yield* Queue.fail(events, error);
     yield* runCleanups;

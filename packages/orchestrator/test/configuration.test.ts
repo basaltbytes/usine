@@ -76,7 +76,7 @@ workers:
       domain: gw.internal
       destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-      llm_providers: [anthropic]
+      llm_providers: [anthropic-messages]
 `,
   ],
   [
@@ -421,7 +421,7 @@ describe("Configuration view", () => {
         destination: "usine-gateway",
         adminPort: 7070,
         adminTokenEnv: "USINE_GATEWAY_ADMIN_TOKEN",
-        llmProviders: ["anthropic"],
+        llmProviders: ["anthropic-messages"],
       });
       assert.deepStrictEqual(view.removedWorkers, [{ name: "retired", running: 1 }]);
 

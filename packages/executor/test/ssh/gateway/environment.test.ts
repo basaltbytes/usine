@@ -1,9 +1,10 @@
+import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { GatewayDomain, type GatewayLlmProvider } from "@usine/core/worker";
+import { GatewayDomain, type GatewayLlmProtocol } from "@usine/core/worker";
 import { Redacted } from "effect";
 import {
-  GATEWAY_SENT_VARIABLES,
+  gatewaySentVariables,
   gatewayConfigFiles,
   gatewayEnvironment,
 } from "../../../src/ssh/gateway/environment.ts";
@@ -11,11 +12,12 @@ import {
 const CALLER_TOKEN = "ugw1.sample-claims.sample-signature";
 const DIRECTORIES = {
   ghConfigDirectory: "/home/usine/.usine/workers/eu-one/gh",
-  codexHome: "/home/usine/.usine/workers/eu-one/codex",
+  homes: { codex: "/home/usine/.usine/workers/eu-one/codex" },
 };
 
-const environmentFor = (llmProviders: ReadonlyArray<GatewayLlmProvider>) => {
+const environmentFor = (llmProviders: ReadonlyArray<GatewayLlmProtocol>) => {
   const { exported, sent } = gatewayEnvironment({
+    catalog,
     domain: GatewayDomain.make("gw.internal"),
     llmProviders,
     ...DIRECTORIES,
@@ -57,7 +59,7 @@ const CODEX_CONFIG = `model_provider = "usine-gateway"
 
 [model_providers.usine-gateway]
 name = "usine gateway"
-base_url = "http://llm.gw.internal/openai/v1"
+base_url = "http://llm.gw.internal/openai-responses/v1"
 env_key = "USINE_GATEWAY_TOKEN"
 wire_api = "responses"
 requires_openai_auth = false
@@ -72,40 +74,42 @@ describe("An Attempt's environment behind a Gateway", () => {
   });
 
   it("points Claude Code at the Gateway only when the Gateway holds the Anthropic credential", () => {
-    const { exported, sent } = environmentFor(["anthropic"]);
+    const { exported, sent } = environmentFor(["anthropic-messages"]);
     assert.deepStrictEqual(exported, {
       ...WITHOUT_LLM,
-      ANTHROPIC_BASE_URL: "http://llm.gw.internal/anthropic",
+      ANTHROPIC_BASE_URL: "http://llm.gw.internal/anthropic-messages",
     });
     assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, ANTHROPIC_AUTH_TOKEN: CALLER_TOKEN });
   });
 
   it("points Codex at the Gateway through its CODEX_HOME only when the Gateway holds the OpenAI credential", () => {
-    const { exported, sent } = environmentFor(["openai"]);
+    const { exported, sent } = environmentFor(["openai-responses"]);
     assert.deepStrictEqual(exported, {
       ...WITHOUT_LLM,
       CODEX_HOME: "/home/usine/.usine/workers/eu-one/codex",
     });
     assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, USINE_GATEWAY_TOKEN: CALLER_TOKEN });
-    assert.deepStrictEqual(Object.keys(environmentFor(["anthropic", "openai"]).sent), [
-      ...GATEWAY_SENT_VARIABLES,
-    ]);
+    assert.deepStrictEqual(
+      Object.keys(environmentFor(["anthropic-messages", "openai-responses"]).sent),
+      [...gatewaySentVariables(catalog)],
+    );
   });
 
   it("writes Codex's model provider, without a token, only when the Gateway holds the OpenAI credential", () => {
-    const files = (llmProviders: ReadonlyArray<GatewayLlmProvider>) =>
+    const files = (llmProviders: ReadonlyArray<GatewayLlmProtocol>) =>
       Object.fromEntries(
         gatewayConfigFiles({
+          catalog,
           domain: GatewayDomain.make("gw.internal"),
           llmProviders,
           ...DIRECTORIES,
         }),
       );
-    assert.deepStrictEqual(Object.keys(files(["anthropic"])), [
+    assert.deepStrictEqual(Object.keys(files(["anthropic-messages"])), [
       "/home/usine/.usine/workers/eu-one/gh/config.yml",
       "/home/usine/.usine/workers/eu-one/gh/hosts.yml",
     ]);
-    const withCodex = files(["openai"]);
+    const withCodex = files(["openai-responses"]);
     assert.strictEqual(
       withCodex["/home/usine/.usine/workers/eu-one/codex/config.toml"],
       CODEX_CONFIG,

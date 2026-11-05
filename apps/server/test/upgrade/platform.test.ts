@@ -9,16 +9,17 @@ import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ReleaseVersion } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
-import { DateTime, Effect, Option, Ref } from "effect";
+import { DateTime, Effect, Option, Ref, Result } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { assert, expect, it } from "@effect/vitest";
 import { Port } from "../../src/cli.ts";
 import { InstanceLaunch, InstanceRecord, ProcessId } from "../../src/instance/record.ts";
+import { LaunchdService } from "../../src/instance/launchd.ts";
 import { SystemdUnit } from "../../src/instance/systemd.ts";
 import { makeUpgrades, UpgradeError } from "../../src/upgrade/control.ts";
 import { systemUpgradePlatform } from "../../src/upgrade/platform.ts";
 
-const platformAt = (folder: string) =>
+const platformAt = (folder: string, manager: "systemd" | "launchd" = "systemd") =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     return yield* systemUpgradePlatform(
@@ -27,7 +28,12 @@ const platformAt = (folder: string) =>
         pid: ProcessId.make(4242),
         version: "1.0.0",
         startedAt: DateTime.nowUnsafe(),
-        systemdUnit: Option.some(SystemdUnit.make("usine.service")),
+        systemdUnit:
+          manager === "systemd" ? Option.some(SystemdUnit.make("usine.service")) : Option.none(),
+        launchdService:
+          manager === "launchd"
+            ? Option.some(LaunchdService.make("gui/501/dev.usine"))
+            : Option.none(),
         launch: InstanceLaunch.make({
           node: process.execPath,
           nodeOptions: [],
@@ -47,7 +53,9 @@ const platformAt = (folder: string) =>
     );
   });
 
-it.live.each(["npm", "curl", "timeout", "flock"])(
+const commands = ["node", "npm", "curl", "timeout", "flock", "stat", "df", "find", "sort"];
+
+it.live.each(commands)(
   "rejects missing %s before draining and accepts the complete dependency set",
   (missing) =>
     Effect.gen(function* () {
@@ -60,7 +68,7 @@ it.live.each(["npm", "curl", "timeout", "flock"])(
           "systemctl",
           'case "$2" in --property=MainPID) echo 4242;; --property=LoadState) echo loaded;; *) exit 1;; esac',
         );
-        for (const command of ["npm", "curl", "timeout", "flock"]) {
+        for (const command of commands) {
           if (command !== missing) executable(command, "exit 0");
         }
         yield* Effect.gen(function* () {
@@ -70,7 +78,7 @@ it.live.each(["npm", "curl", "timeout", "flock"])(
           const upgrades = yield* makeUpgrades({
             running: "1.0.0",
             settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
-            platform,
+            platform: Result.succeed(platform.value),
             drain: () => Ref.set(drained, true),
             resume: Effect.void,
           });
@@ -109,7 +117,8 @@ it.live(
           "systemctl",
           'case "$2" in --property=MainPID) echo 4242;; --property=LoadState) echo loaded;; *) exit 1;; esac',
         );
-        for (const command of ["curl", "timeout", "flock"]) executable(command, "exit 0");
+        for (const command of commands.filter((name) => name !== "npm"))
+          executable(command, "exit 0");
         executable(
           "npm",
           `echo "$2 $3" >> "$PWD/lookups"
@@ -133,7 +142,7 @@ esac`,
           const upgrades = yield* makeUpgrades({
             running: "1.0.0",
             settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "propose" }),
-            platform: Option.some({
+            platform: Result.succeed({
               ...platform.value,
               launch: () => Ref.set(launched, true),
             }),
@@ -173,4 +182,57 @@ esac`,
         rmSync(folder, { recursive: true, force: true });
       }
     }),
+);
+
+it.live("preflights and launches an independent launchd helper, and detects a stopped helper", () =>
+  Effect.gen(function* () {
+    const folder = mkdtempSync(join(tmpdir(), "usine-launchd-upgrade-"));
+    const executable = (name: string, body: string) =>
+      writeFileSync(join(folder, name), `#!/bin/bash\n${body}\n`, { mode: 0o700 });
+    try {
+      symlinkSync("/bin/bash", join(folder, "bash"));
+      for (const command of commands) executable(command, "exit 0");
+      executable(
+        "launchctl",
+        `case "$1" in
+  print)
+    if [ "$2" = gui/501/dev.usine ]; then printf 'state = running\\npid = 4242\\n';
+    elif [ -e '${folder}/helper-unloaded' ]; then echo 'Bad request.' >&2; exit 113;
+    else echo 'state = not running'; fi;;
+  kickstart) echo "$2" > '${folder}/started';;
+  *) exit 1;;
+esac`,
+      );
+      yield* Effect.gen(function* () {
+        const platform = yield* platformAt(folder, "launchd");
+        assert(Option.isSome(platform));
+        executable("stat", "exit 1");
+        const dependencies = yield* platform.value.preflight.pipe(Effect.flip);
+        expect(dependencies.message).toContain("GNU coreutils and findutils");
+        executable("stat", "exit 0");
+        writeFileSync(join(folder, "helper-unloaded"), "");
+        const unloaded = yield* platform.value.preflight.pipe(Effect.flip);
+        expect(unloaded.message).toContain("Load gui/501/dev.usine-upgrade from");
+        expect(unloaded.message).toContain("dev.usine-upgrade.plist before upgrading");
+        rmSync(join(folder, "helper-unloaded"));
+        yield* platform.value.preflight;
+        yield* platform.value.launch(ReleaseVersion.make("1.1.0"));
+        expect(readFileSync(join(folder, "started"), "utf8").trim()).toBe(
+          "gui/501/dev.usine-upgrade",
+        );
+        const helper = readFileSync(join(folder, ".usine/upgrade/run.sh"), "utf8");
+        expect(helper).toContain("service_manager='launchd'");
+        expect(helper).toContain("launchctl bootout");
+        expect(helper).toContain("@usine/server@$version");
+        const outcome = yield* platform.value.outcome;
+        assert(Option.isSome(outcome));
+        expect(outcome.value.status).toBe("failed");
+        executable("launchctl", 'echo "Operation not permitted" >&2; exit 1');
+        const error = yield* platform.value.preflight.pipe(Effect.flip);
+        expect(error.message).toContain("Operation not permitted");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  }),
 );

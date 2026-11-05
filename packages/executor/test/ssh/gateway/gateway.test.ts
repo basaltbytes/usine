@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
@@ -90,8 +91,8 @@ const codexRequest = CheckoutRequest.make({
 
 /** A Gateway whose OpenAI credential is a ChatGPT login. */
 const CHATGPT_PROVIDERS = {
-  anthropic: Option.none(),
-  openai: Option.some(
+  "anthropic-messages": Option.none(),
+  "openai-responses": Option.some(
     OpenAiProvider.make({
       upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
       credential: ChatGptLogin.make({
@@ -164,7 +165,10 @@ describe("SSH Worker behind a Gateway", () => {
         assert.strictEqual(given.host.sshEnvironment.ANTHROPIC_AUTH_TOKEN, callerToken);
         assert.strictEqual(given.environment.GH_HOST, "git.gw.test");
         assert.strictEqual(given.environment.GH_CONFIG_DIR, `${WORKER_ROOT}/gh`);
-        assert.strictEqual(given.environment.ANTHROPIC_BASE_URL, "http://llm.gw.test/anthropic");
+        assert.strictEqual(
+          given.environment.ANTHROPIC_BASE_URL,
+          "http://llm.gw.test/anthropic-messages",
+        );
         const json1 = jsonKey(given.environment);
         assert.notInclude(json1, callerToken);
         const json2 = jsonKey(given.environment);
@@ -879,7 +883,7 @@ describe("SSH Worker behind a Gateway", () => {
         yield* inForce.replace({
           ...(yield* inForce.current),
           providers: {
-            anthropic: Option.some(
+            "anthropic-messages": Option.some(
               AnthropicProvider.make({
                 upstream: UpstreamBase.make("https://api.anthropic.com"),
                 credential: AnthropicSubscriptionToken.make({
@@ -887,7 +891,7 @@ describe("SSH Worker behind a Gateway", () => {
                 }),
               }),
             ),
-            openai: Option.none(),
+            "openai-responses": Option.none(),
           },
         });
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
@@ -903,64 +907,66 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect(
-    "keeps a Gateway too old to report its credentials in the Claude plan pool, with a warning once per Worker",
-    () => {
+  it.effect.each(["anthropic-messages", "openai-responses"] as const)(
+    "normalizes legacy provider reports for the %s slot during preflight",
+    (protocol) => {
       const machine = fakeMachine();
-      const gateway = fakeGateway(machine);
-      gateway.switches.reportsProviders = false;
-      const logs = capturedLogs();
-      const warnings = () =>
-        logs.lines.filter((line) =>
-          line.includes(
-            "does not report the kind of its Anthropic credential; its Claude Code children count in the Claude plan pool",
-          ),
-        );
-      let given: AttemptRequest | undefined;
-      const parent: StubParent = (context) => {
-        given = context.request;
-        return completes(context);
-      };
+      const gateway =
+        protocol === "anthropic-messages"
+          ? fakeGateway(machine)
+          : fakeGateway(machine, CHATGPT_PROVIDERS);
+      gateway.switches.legacyProviders = true;
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        const [warning] = warnings();
-        assert(warning !== undefined, "the preflight warns that the plan pool is kept");
-        assert.include(warning, '"worker":"eu-one"');
-        const prepared = yield* executor.prepare(request);
-        yield* prepared.launch(sink);
-        assert(given !== undefined, "the Attempt's parent ran");
-        const currentGatewayCredential = yield* given.gatewayCredential;
-        assert.deepStrictEqual(currentGatewayCredential, Option.none());
-
-        // A reload that gives the Worker another slot preflights it again.
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 2);
-        assert.strictEqual(warnings().length, 1, "the Worker is warned once");
-        const nextGatewayCredential = yield* given.gatewayCredential;
-        assert.deepStrictEqual(nextGatewayCredential, Option.none());
-
-        // Once the Gateway is upgraded, the next preflight still reads and records the kind.
-        gateway.switches.reportsProviders = true;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 2);
-        const updatedGatewayCredential = yield* given.gatewayCredential;
-        assert.deepStrictEqual(updatedGatewayCredential, Option.some("api-key"));
-        assert.strictEqual(warnings().length, 1);
+        yield* executor.preflight(
+          WORKER,
+          [protocol === "anthropic-messages" ? TEST_AGENT.brain : CODEX_BRAIN],
+          1,
+        );
       }).pipe(
-        Effect.scoped,
         Effect.provide(
-          gatewayRuntime(machine, mintingProvider(), gateway, { parent }).pipe(
-            Layer.provideMerge(logs.layer),
-          ),
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: [protocol] }),
+          }),
         ),
       );
     },
   );
 
+  for (const protocol of ["anthropic-messages", "openai-responses"] as const) {
+    it.effect(
+      `requires a gateway upgrade before using ${protocol} without provider reporting`,
+      () => {
+        const machine = fakeMachine();
+        const gateway = fakeGateway(machine);
+        gateway.switches.reportsProviders = false;
+        return Effect.gen(function* () {
+          const executor = yield* Executor;
+          const refused = yield* executor
+            .preflight(WORKER, [TEST_AGENT.brain], 1)
+            .pipe(Effect.flip);
+          assert.strictEqual(refused._tag, "WorkerCapabilityError");
+          assert.include(refused.message, "Upgrade @usine/gateway");
+          assert.include(refused.message, protocol);
+        }).pipe(
+          Effect.provide(
+            gatewayRuntime(machine, mintingProvider(), gateway, {
+              address: gatewayAddress({ llmProviders: [protocol] }),
+            }),
+          ),
+        );
+      },
+    );
+  }
+
   it.effect(
     "preflight reports a Gateway that holds no Anthropic credential while the Worker's llm_providers lists it",
     () => {
       const machine = fakeMachine();
-      const gateway = fakeGateway(machine, { anthropic: Option.none(), openai: Option.none() });
+      const gateway = fakeGateway(machine, {
+        "anthropic-messages": Option.none(),
+        "openai-responses": Option.none(),
+      });
       return Effect.gen(function* () {
         const executor = yield* Executor;
         const refused = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
@@ -968,7 +974,7 @@ describe("SSH Worker behind a Gateway", () => {
         assert.strictEqual(refused.capability, "gateway");
         assert.strictEqual(
           refused.message,
-          'The gateway of SSH worker "eu-one" has no Anthropic credential, but the worker\'s llm_providers includes anthropic. Set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the gateway, or remove anthropic from llm_providers.',
+          'The gateway of SSH worker "eu-one" has no Anthropic credential, but the worker\'s llm_providers includes anthropic-messages. Set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the gateway, or remove anthropic-messages from llm_providers.',
         );
       }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },
@@ -1135,7 +1141,7 @@ describe("SSH Worker behind a Gateway", () => {
         assert.notInclude(json4, callerToken);
         const config = machine.state.files.get(`${codexHome}/config.toml`) ?? "";
         assert.include(config, 'model_provider = "usine-gateway"');
-        assert.include(config, 'base_url = "http://llm.gw.test/openai/v1"');
+        assert.include(config, 'base_url = "http://llm.gw.test/openai-responses/v1"');
         assert.include(config, 'env_key = "USINE_GATEWAY_TOKEN"');
         assert.notInclude(config, callerToken);
         const currentGatewayCredential = yield* given.gatewayCredential;
@@ -1147,7 +1153,7 @@ describe("SSH Worker behind a Gateway", () => {
       }).pipe(
         Effect.provide(
           gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: ["openai"] }),
+            address: gatewayAddress({ llmProviders: ["openai-responses"] }),
             parent,
             probes: { harnessReadiness },
           }),
@@ -1166,22 +1172,22 @@ describe("SSH Worker behind a Gateway", () => {
       const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
       const kept = `${WORKER_ROOT}/codex/kept-run_execute_1`;
       // An earlier process crashed: recovery removed one Attempt's checkout and kept another's.
-      machine.state.codexHomes.set(crashed, false);
-      machine.state.codexHomes.set(kept, true);
+      machine.state.attemptHomes.set(crashed, false);
+      machine.state.attemptHomes.set(kept, true);
       return Effect.gen(function* () {
         const executor = yield* Executor;
         const prepared = yield* executor.prepare(codexRequest);
         yield* executor.sweep;
-        assert.sameMembers([...machine.state.codexHomes.keys()], [running, kept]);
+        assert.sameMembers([...machine.state.attemptHomes.keys()], [running, kept]);
         machine.state.reachable = false;
         yield* executor.sweep;
         machine.state.reachable = true;
         yield* prepared.launch(sink);
-        assert.sameMembers([...machine.state.codexHomes.keys()], [kept]);
+        assert.sameMembers([...machine.state.attemptHomes.keys()], [kept]);
       }).pipe(
         Effect.provide(
           gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: ["openai"] }),
+            address: gatewayAddress({ llmProviders: ["openai-responses"] }),
           }),
         ),
       );
@@ -1197,9 +1203,9 @@ describe("SSH Worker behind a Gateway", () => {
       const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
       const kept = `${WORKER_ROOT}/codex/kept-run_execute_1`;
       const other = `${WORKER_ROOT}/codex/other-run_execute_1`;
-      machine.state.codexHomes.set(crashed, false);
-      machine.state.codexHomes.set(kept, true);
-      machine.state.codexHomes.set(other, false);
+      machine.state.attemptHomes.set(crashed, false);
+      machine.state.attemptHomes.set(kept, true);
+      machine.state.attemptHomes.set(other, false);
       const record = `${LOCAL_TEMPORARY_DIRECTORY}/${WORKER}.json`;
       return Effect.gen(function* () {
         // The executor recorded the Worker when it added it; a reload then removed it.
@@ -1207,7 +1213,7 @@ describe("SSH Worker behind a Gateway", () => {
         const recorded = machine.state.localFiles.get(record) ?? "";
         assert.include(recorded, DESTINATION);
         assert.notInclude(recorded, "admin-token");
-        const records = yield* sshWorkerRecordsFor(LOCAL_TEMPORARY_DIRECTORY).pipe(
+        const records = yield* sshWorkerRecordsFor(catalog, LOCAL_TEMPORARY_DIRECTORY).pipe(
           Effect.provide(machine.layer),
         );
         const commands = machine.state.calls.length;
@@ -1220,7 +1226,7 @@ describe("SSH Worker behind a Gateway", () => {
           AttemptId.make("crashed-run/execute/1"),
           AttemptId.make("kept-run/execute/1"),
         ]);
-        assert.sameMembers([...machine.state.codexHomes.keys()], [other]);
+        assert.sameMembers([...machine.state.attemptHomes.keys()], [other]);
         const removal = machine.state.calls.at(-1);
         assert.includeMembers(
           [...(removal?.command.args ?? [])],
@@ -1229,11 +1235,11 @@ describe("SSH Worker behind a Gateway", () => {
         // An unreachable machine doesn't fail the discard.
         machine.state.reachable = false;
         yield* records.discard(WORKER, [AttemptId.make("other-run/execute/1")]);
-        assert.sameMembers([...machine.state.codexHomes.keys()], [other]);
+        assert.sameMembers([...machine.state.attemptHomes.keys()], [other]);
       }).pipe(
         Effect.provide(
           gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: ["openai"] }),
+            address: gatewayAddress({ llmProviders: ["openai-responses"] }),
           }),
         ),
       );
@@ -1257,14 +1263,14 @@ describe("SSH Worker behind a Gateway", () => {
         const inForce = yield* SettingsInForce;
         yield* inForce.replace({
           ...(yield* inForce.current),
-          providers: { anthropic: Option.none(), openai: Option.none() },
+          providers: { "anthropic-messages": Option.none(), "openai-responses": Option.none() },
         });
         const missing = yield* executor.preflight(WORKER, [CODEX_BRAIN], 1).pipe(Effect.flip);
         assert(missing._tag === "WorkerCapabilityError");
         assert.strictEqual(missing.capability, "gateway");
         assert.strictEqual(
           missing.message,
-          'The gateway of SSH worker "eu-one" has no OpenAI credential, but the worker\'s llm_providers includes openai. Set OPENAI_API_KEY or USINE_GATEWAY_CHATGPT_AUTH_FILE on the gateway, or remove openai from llm_providers.',
+          'The gateway of SSH worker "eu-one" has no OpenAI credential, but the worker\'s llm_providers includes openai-responses. Set OPENAI_API_KEY or USINE_GATEWAY_CHATGPT_AUTH_FILE on the gateway, or remove openai-responses from llm_providers.',
         );
 
         gateway.switches.reportsProviders = false;
@@ -1275,7 +1281,7 @@ describe("SSH Worker behind a Gateway", () => {
       }).pipe(
         Effect.provide(
           gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: ["openai"] }),
+            address: gatewayAddress({ llmProviders: ["openai-responses"] }),
           }),
         ),
       );
