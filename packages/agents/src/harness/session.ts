@@ -235,12 +235,16 @@ export const subscribePiSession = (
   piSession: PiSession,
   session: AgentSession,
   channel: SessionChannel,
+  seed: Option.Option<SessionUsage> = Option.none(),
 ) =>
   Effect.gen(function* () {
     const context = yield* Effect.context<never>();
     const log = Effect.runForkWith(context);
     let lastText: string | undefined;
-    let total: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Option.none() };
+    let total: SessionUsage = Option.getOrElse(seed, () => ({
+      totalTokens: TokenCount.make(0),
+      costUsd: Option.none(),
+    }));
     // Provider retries reported in the current turn, and whether the last retry is unresolved.
     let retries = 0;
     let retrying = false;

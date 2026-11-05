@@ -657,7 +657,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       tokens: [...seed.tokens.values()].reduce((sum, value) => sum + value, 0),
       unsupervisedRecorded: Option.isSome(recorded),
       unsupervisedMinutes: Math.round(Duration.toMillis(seed.unsupervised) / 6_000) / 10,
-      parentHeld: seed.parentHeld,
+      heldSessions: seed.holds.size,
+      parentHeld: seed.holds.has("parent"),
       warned: [...seed.warned],
     });
     return seed;

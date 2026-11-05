@@ -5,6 +5,9 @@ import {
   HarnessSession,
   HarnessSessionId,
   SessionStarted,
+  SessionTokensUpdated,
+  TokenCount,
+  UsdAmount,
   TextOutput,
 } from "@usine/core/agent/session";
 import { jsonKey } from "@usine/core/json-key";
@@ -90,6 +93,13 @@ for (const [recovery, blocker] of [
             if (parent.length === 0) {
               assert(Option.isSome(child.request.resume));
               assert.deepStrictEqual(child.request.resume.value, saved);
+              assert.deepStrictEqual(
+                child.request.usage,
+                Option.some({
+                  totalTokens: TokenCount.make(1000),
+                  costUsd: Option.some(UsdAmount.make(0.25)),
+                }),
+              );
             }
             if (recovery !== "missing-session")
               yield* child.emit(
@@ -98,6 +108,13 @@ for (const [recovery, blocker] of [
                   harnessSession: Option.some(saved),
                 }),
               );
+            yield* child.emit(
+              SessionTokensUpdated.make({
+                session: child.request.session,
+                totalTokens: TokenCount.make(parent.length === 0 ? 1500 : 1000),
+                costUsd: Option.some(UsdAmount.make(parent.length === 0 ? 0.375 : 0.25)),
+              }),
+            );
             yield* child.emit(TextOutput.make({ session: child.request.session, text }));
             yield* output.committed;
             if (recovery === "invalid-session" || recovery === "extra-saved-fields")
@@ -186,6 +203,13 @@ for (const [recovery, blocker] of [
             const child = yield* Context.get(services, StubChildren).next;
             assert.strictEqual(child.request.session.id, first.session.id);
             assert.deepStrictEqual(child.request.resume, Option.some(saved));
+            assert.deepStrictEqual(
+              child.request.usage,
+              Option.some({
+                totalTokens: TokenCount.make(recovery === "resume-twice" ? 1500 : 1000),
+                costUsd: Option.some(UsdAmount.make(recovery === "resume-twice" ? 0.375 : 0.25)),
+              }),
+            );
             assert.strictEqual(child.request.cwd, first.cwd);
             assert.strictEqual(child.request.worker, first.worker);
             assert.include(child.request.prompt, request.spec.task);

@@ -586,7 +586,7 @@ const makeClaudeChild = Effect.gen(function* () {
       });
       boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
-      const usage = claudeSessionMeter();
+      const usage = claudeSessionMeter(Option.getOrUndefined(request.usage));
       const readRateLimits = claudeRateLimits(session);
       // The latest session ID from Claude, which a resume loads.
       let harnessSessionId = Option.map(request.resume, (saved) => saved.id);

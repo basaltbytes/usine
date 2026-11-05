@@ -8,6 +8,8 @@ import {
   ChildSessionBudget,
   ChildSessionCount,
   HarnessSession,
+  TokenCount,
+  UsdAmount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { MachineId, WorkerName } from "@usine/core/worker";
@@ -53,6 +55,10 @@ export class ChildRequest extends Schema.Class<
   resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
   ),
+  /** Cumulative usage committed before the orchestrator resumed this child. */
+  usage: Schema.OptionFromOptionalKey(
+    Schema.Struct({ totalTokens: TokenCount, costUsd: Schema.OptionFromNullOr(UsdAmount) }),
+  ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
   /** Keeps the child addressable after a turn until the operator releases its persisted Hold. */
   held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** Waits for operator guidance before starting a turn in a restored paused child. */

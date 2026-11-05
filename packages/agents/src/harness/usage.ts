@@ -107,8 +107,8 @@ const NO_USAGE: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Optio
  * session's usage: the current process's, as `claudeTokenMeter` reads it, plus the earlier
  * processes'. `restart` starts on a new process, which Claude counts from zero.
  */
-export const claudeSessionMeter = () => {
-  let earlier = NO_USAGE;
+export const claudeSessionMeter = (seed: SessionUsage = NO_USAGE) => {
+  let earlier = seed;
   let current = NO_USAGE;
   let meter = claudeTokenMeter();
   return {

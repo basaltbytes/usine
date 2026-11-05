@@ -415,6 +415,41 @@ describe("Attempt guard", () => {
       }),
   );
 
+  for (const ended of [false, true]) {
+    it.effect(`restores child Holds across restart (finished child: ${ended})`, () =>
+      Effect.gen(function* () {
+        const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() };
+        const before = yield* setup(ceilings);
+        yield* before.started;
+        yield* TestClock.adjust("20 seconds");
+        yield* before.hold(first, true);
+        yield* before.hold(second, true);
+        if (ended)
+          yield* before.emit(
+            AttemptChannel.SessionEvent.make({ event: SessionFinished.make({ session: first }) }),
+          );
+        yield* before.stop;
+        yield* TestClock.adjust("10 minutes");
+        const after = yield* setup(ceilings, { attempt: before.attempt });
+        yield* TestClock.adjust("2 hours");
+        assert.strictEqual(after.result.pollUnsafe(), undefined);
+        assert.deepStrictEqual(after.warnings, []);
+        yield* after.hold(second, false);
+        if (!ended) {
+          yield* TestClock.adjust("2 hours");
+          assert.strictEqual(after.result.pollUnsafe(), undefined);
+          yield* after.hold(first, false);
+        }
+        yield* TestClock.adjust("39 seconds");
+        assert.strictEqual(after.result.pollUnsafe(), undefined);
+        yield* TestClock.adjust("1 second");
+        const outcome = yield* Fiber.join(after.result);
+        assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+        assert.strictEqual(outcome.failure.ceiling, "wall-clock");
+      }),
+    );
+  }
+
   it.effect("counts the tokens of a session that finished before the restart", () =>
     Effect.gen(function* () {
       const ceilings = { maxAttemptMinutes: Option.none(), maxAttemptTokens: Option.some(100) };

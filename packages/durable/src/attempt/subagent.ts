@@ -276,6 +276,13 @@ export const subagentTool = (services: ExtensionServices) => {
         held,
         paused,
       });
+    if (Option.isSome(saved) && Option.isSome(saved.value.usage))
+      yield* Effect.logInfo("Restoring the child's committed usage before launch", {
+        attemptId: spec.attemptId,
+        sessionId,
+        totalTokens: saved.value.usage.value.totalTokens,
+        costUsd: saved.value.usage.value.costUsd,
+      });
     const childRequest = ChildRequest.make({
       session,
       cwd: WorkingDirectory.make(request.cwd),
@@ -284,6 +291,7 @@ export const subagentTool = (services: ExtensionServices) => {
       worker: request.worker,
       machine: request.machine,
       resume: Option.map(saved, (child) => child.harnessSession),
+      usage: Option.flatMap(saved, (child) => child.usage),
       held,
       paused,
       prompt: assembleChildPrompt({
@@ -366,6 +374,7 @@ export const subagentTool = (services: ExtensionServices) => {
       yield* call("publish the child's id", () =>
         api.details({ childSessionId: session.id }, context),
       );
+      let cumulativeUsage = childRequest.usage;
       const forward = (event: AgentSessionEvent) =>
         Effect.gen(function* () {
           if (
@@ -376,6 +385,7 @@ export const subagentTool = (services: ExtensionServices) => {
             const recovery = yield* Schema.encodeEffect(SavedChild)(
               SavedChild.make({
                 session: event.session,
+                usage: cumulativeUsage,
                 harnessSession: event.harnessSession.value,
                 worker: request.worker,
                 machine: request.machine,
@@ -389,6 +399,18 @@ export const subagentTool = (services: ExtensionServices) => {
             );
             yield* call("publish the saved child conversation", () =>
               api.details({ childSessionId: session.id, saved: recovery }, context),
+            );
+          }
+          if (event._tag === "SessionTokensUpdated") {
+            cumulativeUsage = Option.some(event);
+            const usage = yield* Schema.encodeEffect(ChildRequest.fields.usage)(
+              cumulativeUsage,
+            ).pipe(Effect.orDie);
+            yield* call("save the child's cumulative usage", () =>
+              api.commit(async (tx) => {
+                const record = await tx.doc(SubagentDoc, api.taskId);
+                if (record.saved !== null) record.saved.usage = usage;
+              }, context),
             );
           }
           if (event._tag === "TextOutput") {

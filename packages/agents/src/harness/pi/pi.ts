@@ -175,7 +175,12 @@ const makePiChild = Effect.gen(function* () {
             yield* channel.emit(
               SessionStarted.make({ session, harnessSession: started.harnessSession }),
             );
-            const subscription = yield* subscribePiSession(started.session, session, channel);
+            const subscription = yield* subscribePiSession(
+              started.session,
+              session,
+              channel,
+              request.usage,
+            );
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
                 Effect.andThen(Effect.sync(acquired.dispose)),

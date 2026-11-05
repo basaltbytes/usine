@@ -1,3 +1,4 @@
+import { ChildRequest } from "@usine/agents/runtime";
 import { defineDoc } from "@earendil-works/pi-durable";
 import { ChildSession, HarnessSession } from "@usine/core/agent/session";
 import { MachineId, WorkerName } from "@usine/core/worker";
@@ -9,6 +10,7 @@ export class SavedChild extends Schema.Class<
   Brand.Brand<"@usine/durable/attempt/SavedChild">
 >("@usine/durable/SavedChild")({
   session: ChildSession,
+  usage: ChildRequest.fields.usage,
   harnessSession: HarnessSession,
   worker: WorkerName,
   machine: Schema.OptionFromNullOr(MachineId),

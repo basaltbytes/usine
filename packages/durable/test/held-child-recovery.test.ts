@@ -2,7 +2,7 @@
 // @effect-diagnostics asyncFunction:off
 import { assert, it } from "@effect/vitest";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { PiSdk, piChildLayer } from "@usine/agents/pi";
+import { PiSdk, piChildLayer, type PiSessionEvent } from "@usine/agents/pi";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
@@ -52,6 +52,8 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
             const turn = yield* Deferred.make<void>();
             const prompted = yield* Deferred.make<void>();
             const prompts: string[] = [];
+            const metered = yield* Deferred.make<void>();
+            const listeners = new Set<(event: PiSessionEvent) => void>();
             const started = yield* Deferred.make<AgentSessionId>();
             const idle = yield* Deferred.make<void>();
             const sdk = Layer.succeed(PiSdk)({
@@ -67,9 +69,36 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
                   harnessSession: Option.some(saved),
                   session: {
                     messages: [answer("The child's final report.")],
-                    subscribe: () => () => {},
+                    subscribe: (callback) => {
+                      listeners.add(callback);
+                      return () => {
+                        listeners.delete(callback);
+                      };
+                    },
                     prompt: (message) => {
                       prompts.push(message);
+                      for (const listener of listeners)
+                        listener({
+                          type: "message_end",
+                          message: {
+                            ...answer("Usage checkpoint"),
+                            content: [],
+                            usage: {
+                              input: resumed ? 400 : 800,
+                              output: resumed ? 100 : 200,
+                              cacheRead: 0,
+                              cacheWrite: 0,
+                              totalTokens: resumed ? 500 : 1000,
+                              cost: {
+                                input: 0,
+                                output: 0,
+                                cacheRead: 0,
+                                cacheWrite: 0,
+                                total: resumed ? 0.125 : 0.25,
+                              },
+                            },
+                          },
+                        });
                       return run(
                         Deferred.succeed(prompted, undefined).pipe(
                           Effect.andThen(Deferred.await(turn)),
@@ -116,6 +145,8 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
                       if (event.session._tag !== "ChildSession") return Effect.void;
                       if (event._tag === "SessionStarted")
                         return Deferred.succeed(started, event.session.id).pipe(Effect.asVoid);
+                      if (event._tag === "SessionTokensUpdated")
+                        return Deferred.succeed(metered, undefined).pipe(Effect.asVoid);
                       if (event._tag === "SessionIdle")
                         return Deferred.succeed(idle, undefined).pipe(Effect.asVoid);
                       return Effect.void;
@@ -136,6 +167,7 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
             if (!resumed) {
               firstSession = Option.some(sessionId);
               yield* Deferred.await(prompted);
+              yield* Deferred.await(metered);
               if (held)
                 yield* operator(
                   AttemptChannel.OperatorMessage.make({ message: "Wait for my release." }),
@@ -210,6 +242,18 @@ for (const supervision of ["held", "paused", "held-paused"] as const) {
         );
       }
       const outbound = recording.outbound();
+      const usage = outbound.flatMap(({ payload }) =>
+        payload._tag === "SessionEvent" &&
+        payload.event._tag === "SessionTokensUpdated" &&
+        payload.event.session._tag === "ChildSession"
+          ? [payload.event]
+          : [],
+      );
+      assert.deepStrictEqual(
+        usage.map(({ totalTokens }) => totalTokens),
+        [1000, 1500],
+      );
+      assert.deepStrictEqual(usage.at(-1)?.costUsd, Option.some(0.375));
       assert(!outbound.some(({ payload }) => payload._tag === "InterventionRejected"));
       const finished = outbound.flatMap(({ payload }) =>
         payload._tag === "SessionEvent" && payload.event._tag === "ToolFinished"

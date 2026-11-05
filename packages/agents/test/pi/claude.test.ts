@@ -12,6 +12,8 @@ import {
   HarnessSessionId,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
+  TokenCount,
+  UsdAmount,
   sessionPool,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
@@ -345,7 +347,21 @@ describe("Claude child backend", () => {
         assert.strictEqual(options.resume, saved.id);
         assert.strictEqual(options.env?.CLAUDE_CONFIG_DIR, "/worker/attempt/claude");
         return scripted(
-          [{ type: "result", subtype: "success", result: "Continued." }],
+          [
+            {
+              type: "result",
+              subtype: "success",
+              result: "Continued.",
+              modelUsage: {
+                model: {
+                  inputTokens: 400,
+                  outputTokens: 100,
+                  cacheCreationInputTokens: 0,
+                  costUSD: 0.125,
+                },
+              },
+            },
+          ],
           undefined,
           saved.id,
         );
@@ -354,7 +370,14 @@ describe("Claude child backend", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const running = yield* (yield* ChildBackend).launch(
-          ChildRequest.make({ ...request(), resume: Option.some(saved) }),
+          ChildRequest.make({
+            ...request(),
+            resume: Option.some(saved),
+            usage: Option.some({
+              totalTokens: TokenCount.make(1000),
+              costUsd: Option.some(UsdAmount.make(0.25)),
+            }),
+          }),
         );
         const events = yield* Effect.forkChild(Stream.runCollect(running.events));
         assert.strictEqual((yield* running.result).message, "Continued.");
@@ -362,6 +385,10 @@ describe("Claude child backend", () => {
         const started = transcript.find((event) => event._tag === "SessionStarted");
         assert(started !== undefined);
         assert.deepStrictEqual(started.harnessSession, Option.some(saved));
+        const usage = transcript.filter((event) => event._tag === "SessionTokensUpdated").at(-1);
+        assert(usage !== undefined);
+        assert.strictEqual(usage.totalTokens, 1500);
+        assert.deepStrictEqual(usage.costUsd, Option.some(0.375));
       }),
     ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
   });

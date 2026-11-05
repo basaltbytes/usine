@@ -7,3 +7,5 @@ Resume saved child conversations after an orchestrator restart in the original c
 A resumed child's final report replaces its pre-restart infrastructure failure while preserving blockers from other children.
 
 Failed recovery allows a replacement child to supersede the previous infrastructure failure. Resumed children use the worker's current credential kind; incompatible saved conversations return an interrupted result with the committed output.
+
+Commit child usage with the saved conversation and restore it before launch.
