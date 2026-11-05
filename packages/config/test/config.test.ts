@@ -1062,6 +1062,49 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("reads the PR base commit in conditions and prompts, including older payloads", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const engine = yield* ExpressionEngine;
+      const condition = 'item.baseRefOid != null && item.baseRefOid != ""';
+      const source = [
+        "---",
+        "trigger:",
+        "  on: pr",
+        `  if: '${condition}'`,
+        "agent: reviewer",
+        "---",
+        "Base: {{ item.baseRefOid }}",
+      ].join("\n");
+      const file = InstancePath.make("loops/review-base.md");
+      const loop = yield* parser.parseLoopFile(file, source);
+      const cases: ReadonlyArray<readonly [Schema.JsonObject, boolean, string]> = [
+        [{ baseRefOid: "a".repeat(40) }, true, "a".repeat(40)],
+        [{ baseRefOid: null }, false, "null"],
+        [{}, false, "null"],
+      ];
+      for (const [item, expectedMatch, expectedBase] of cases) {
+        const context = {
+          repo: { name: "basaltbytes/usine", owner: "basaltbytes", url: "https://example.test" },
+          item,
+        };
+        const matches = yield* engine.evaluateBoolean(
+          Source.make(condition),
+          pullRequestEnvironment,
+          context,
+        );
+        expect(matches).toBe(expectedMatch);
+        const prompt = yield* parser.renderPrompt(loop, context);
+        expect(prompt).toBe(`Base: ${expectedBase}`);
+      }
+      const issueFailure = yield* parser
+        .parseLoopFile(file, source.replace("on: pr", "on: issue"))
+        .pipe(Effect.flip);
+      expect(issueFailure.stage).toBe("expression");
+      expect(issueFailure.message).toContain("No such key: baseRefOid");
+    }).pipe(Effect.provide(Layer.merge(parserLayer, MarcbachmannCelLayer))),
+  );
+
   it.effect("reads an unquoted boolean if: as the CEL literal and explains other values", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
