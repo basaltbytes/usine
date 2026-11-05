@@ -16,12 +16,11 @@ import {
 import { durableStoragePath } from "./storage-path.ts";
 import { configureHarnessHttp } from "./http-dispatcher.ts";
 
-const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
+/** Loads the orchestrator's Pi models and credentials without opening durable storage. */
+export const loadParentModels = Effect.fn("ParentModels.load")(function* (
   instanceDirectory: InstanceDirectory,
 ) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const file = durableStoragePath(path, instanceDirectory);
+  yield* Effect.annotateCurrentSpan({ directory: instanceDirectory });
   // Only the Pi user's global settings: the instance folder's own `.pi/` is not trusted.
   const settings = SettingsManager.create(instanceDirectory, getAgentDir(), {
     projectTrusted: false,
@@ -39,6 +38,17 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
         modelId,
       })),
   );
+  return { models, defaultModel };
+});
+
+const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
+  instanceDirectory: InstanceDirectory,
+) {
+  yield* Effect.annotateCurrentSpan({ directory: instanceDirectory });
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const file = durableStoragePath(path, instanceDirectory);
+  const { models, defaultModel } = yield* loadParentModels(instanceDirectory);
   yield* Effect.logInfo("Durable harness storage", { file });
   return {
     openStorage: fileSystem.makeDirectory(path.dirname(file), { recursive: true }).pipe(

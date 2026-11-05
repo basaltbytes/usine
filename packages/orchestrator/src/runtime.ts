@@ -24,6 +24,7 @@ import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer } from "effect";
 import { gitHubCredentialLayer } from "./credentials.ts";
+import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { externalHttpClientLayer } from "./http-client.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
@@ -92,6 +93,7 @@ export const runtimeLayer = (
   // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
   // executor's preflight and the Attempts' Claude children.
   const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
+    (runtime) => parentAdmissionLayer.pipe(Layer.provideMerge(runtime)),
     Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),
     Layer.provide(NodeServices.layer),

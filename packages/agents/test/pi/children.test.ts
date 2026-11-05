@@ -1,6 +1,8 @@
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
 import { Harnesses, type HarnessRuntime, ProbeTarget } from "../../src/harness/node.ts";
+import { checkedPreflight } from "../../src/harness/runtime.ts";
+import { CapabilityProfile } from "../../src/harness/capability.ts";
 import { HarnessReady } from "@usine/core/agent/capability";
 import { catalog } from "../../src/harness/catalog.ts";
 import { assert, describe, it } from "@effect/vitest";
@@ -64,7 +66,7 @@ const extended = HarnessCatalog.make({
 const runtimes = extended.ids.map((id): HarnessRuntime => ({
   id,
   ...backend(id),
-  preflight: () => Effect.succeed(HarnessReady.make({ harness: id })),
+  preflight: checkedPreflight(() => Effect.void),
 }));
 
 describe("harness runtime registration", () => {
@@ -88,6 +90,7 @@ describe("harness runtime registration", () => {
                 credential: "host-login",
               }),
             );
+            assert.strictEqual(readiness._tag, "HarnessReady");
             assert.strictEqual(readiness.harness, harness);
           }
           const error = yield* dispatcher
@@ -101,6 +104,62 @@ describe("harness runtime registration", () => {
           ),
         ),
       ),
+  );
+
+  it.effect(
+    "uses the registered credential provider for launch and refuses unsupported preflight routes",
+    () => {
+      const apiProfile = claude.capabilities.find((profile) =>
+        profile.credentials.includes("api-key"),
+      );
+      assert(apiProfile !== undefined);
+      const apiOnly = HarnessDescriptor.make({
+        ...claude,
+        id: extra,
+        capabilities: [CapabilityProfile.make({ ...apiProfile, credentials: ["api-key"] })],
+      });
+      const activeCatalog = HarnessCatalog.make({ descriptors: [apiOnly] });
+      return Effect.gen(function* () {
+        const dispatcher = yield* ChildBackend;
+        const base = request(extra);
+        const child = ChildRequest.make({
+          ...base,
+          environment: { ANTHROPIC_API_KEY: "test-key" },
+        });
+        const running = yield* dispatcher.launch(child);
+        assert.strictEqual((yield* running.result).message, extra);
+        const refused = yield* dispatcher.launch(base).pipe(Effect.flip);
+        assert.strictEqual(refused._tag, "AgentResultError");
+        assert.include(refused.message, "credential-route");
+        for (const credential of ["api-key", "host-login"] as const) {
+          const readiness = yield* preflight(
+            child.session.brain,
+            ProbeTarget.make({
+              host: child.host,
+              environment: child.environment,
+              worker: child.worker,
+              machine: child.machine,
+              credential,
+            }),
+          );
+          assert.strictEqual(
+            readiness._tag,
+            credential === "api-key" ? "HarnessReady" : "HarnessUnavailableError",
+          );
+        }
+      }).pipe(
+        Effect.provide(
+          childDispatcherLayer.pipe(
+            Layer.provideMerge(
+              Harnesses.layerFrom(activeCatalog, [
+                { id: extra, ...backend(extra), preflight: checkedPreflight(() => Effect.void) },
+              ]),
+            ),
+          ),
+        ),
+        Effect.scoped,
+      );
+    },
   );
 
   for (const [description, entries] of [

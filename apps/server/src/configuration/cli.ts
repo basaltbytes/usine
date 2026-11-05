@@ -1,5 +1,10 @@
+import { loadParentModels } from "@usine/durable/live";
+import { parentAdmissionProblems } from "@usine/orchestrator/parent-admission";
 import { localActor } from "@usine/core/operator";
 import {
+  Configuration,
+  ConfigurationInvalid,
+  commit,
   StaleRevision,
   ConfigurationStore,
   ConfigurationStoreError,
@@ -18,7 +23,17 @@ import {
 import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
-import { Config, Console, DateTime, Effect, FileSystem, Layer, Option, Path } from "effect";
+import {
+  Array as EffectArray,
+  Config,
+  Console,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { ConfigCommand, ConfigCommandError } from "./command.ts";
 import { configurationLayer, initializeConfiguration } from "./runtime.ts";
@@ -28,6 +43,25 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     const path = yield* Path.Path;
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
+    if (command._tag === "ConfigImportCommand") {
+      const current = yield* store.read;
+      if (Option.isNone(current.instance)) {
+        const imported = yield* folder.load(InstanceDirectory.make(path.resolve(command.folder)));
+        const parents = yield* loadParentModels(directory);
+        const problems = yield* parentAdmissionProblems(imported, parents);
+        if (EffectArray.isArrayNonEmpty(problems))
+          return yield* ConfigurationInvalid.make({ problems });
+        const revision = yield* store.commit({
+          expected: current.number,
+          changes: configurationDiff([], configurationEntities(imported)),
+          message: command.message,
+          actor: Option.some(localActor),
+        });
+        return yield* Console.log(
+          `Revision ${revision.number}: ${revision.changes.length} change(s).`,
+        );
+      }
+    }
     const { instance, number } = yield* initializeConfiguration(directory);
     const entities = configurationEntities(instance);
     const resolveKey = (
@@ -48,6 +82,23 @@ export const runConfigCommand = Effect.fn("Cli.config")(
         if (changes.length === 0) {
           yield* Console.log("No configuration changes.");
           return;
+        }
+        const parser = yield* ConfigParser;
+        const candidate = yield* commit(
+          parser,
+          Configuration.make({ number, instance: Option.some(instance) }),
+          expected,
+          changes,
+          { actor, message, time: yield* DateTime.now },
+        );
+        if (Option.isSome(candidate.configuration.instance)) {
+          const parents = yield* loadParentModels(directory);
+          const problems = yield* parentAdmissionProblems(
+            candidate.configuration.instance.value,
+            parents,
+          );
+          if (EffectArray.isArrayNonEmpty(problems))
+            return yield* ConfigurationInvalid.make({ problems });
         }
         const revision = yield* store.commit({
           expected,

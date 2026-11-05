@@ -562,7 +562,7 @@ describe("Pi child backend", () => {
         );
         const matchesError = Schema.is(AgentResultError)(error);
         assert(matchesError);
-        assert.match(error.message, /^Pi children run only on local workers/u);
+        assert.include(error.message, "pi cannot run as coding-agent at ssh: lacks ssh");
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
       }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),

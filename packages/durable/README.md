@@ -4,9 +4,12 @@ Runs an attempt's Pi parent in the orchestrator on [`@earendil-works/pi-durable`
 
 Brain specifications use the branded `Harness` ID from `@usine/core/agent/brain`. Configuration checks registered harnesses through the platform-free `@usine/agents/harness` catalog before an attempt starts.
 
+Coordinator startup and `subagent` use the shared harness admission check. `/live` exports `loadParentModels(directory)` for configuration validation without opening durable storage. The orchestrator quarantines refused coordinator brains while keeping its operator UI available. Parent selection repeats admission when each attempt starts.
+
 ## Entry points
 
 - `/attempt-runtime`: the `AttemptRuntime` contract that the executor calls, with `AttemptRequest`, `StoredRequest`, and `AttemptReport`.
+- `/parent`: `resolveParent(models, defaultModel, options)`, which validates coordinator admission, model availability, reasoning effort, and credentials.
 - `/harness`: the `DurableHarness` service, which manages the open pi-durable harness, and its platform-free `layer(options)`.
 - `/backup`: `backup(instanceDirectory, destination)`, an online copy of `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file. `usine backup` writes it next to the runtime database copy.
 - `/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the child backends from `@usine/agents`.

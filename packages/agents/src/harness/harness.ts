@@ -2,6 +2,7 @@ import { Harness } from "@usine/core/agent/brain";
 import { type TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
 import { GatewayLlmProtocol, GatewayLlmProvider } from "@usine/core/worker";
 import { type Brand, Option, Record, Schema } from "effect";
+import { CapabilityProfile } from "./capability.ts";
 
 /** The terminal command for a saved harness session. */
 export class ResumeCommand extends Schema.Class<
@@ -110,18 +111,28 @@ const TokenRates = Schema.Struct({
   output: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
-/** A session behavior supported by a harness. */
-export const HarnessCapability = Schema.Literals(["resume-session"]);
-export type HarnessCapability = typeof HarnessCapability.Type;
-
 /** Platform-free harness data shared by configuration, workers, and operator reads. */
 export class HarnessDescriptor extends Schema.Class<
   HarnessDescriptor,
   Brand.Brand<"@usine/agents/harness/HarnessDescriptor">
 >("@usine/agents/HarnessDescriptor")({
   ...HarnessPresentation.fields,
-  capabilities: Schema.Array(HarnessCapability).check(Schema.isUnique()),
   worker: WorkerRequirements,
+  capabilities: Schema.NonEmptyArray(CapabilityProfile).check(
+    Schema.makeFilter(
+      (profiles) => {
+        const routes = profiles.flatMap(({ placements, credentials }) =>
+          placements.flatMap((placement) =>
+            credentials.map((credential) => `${placement}:${credential}`),
+          ),
+        );
+        return new Set(routes).size === routes.length;
+      },
+      { message: "Expected one capability profile per placement and credential route" },
+    ),
+  ),
+  placementReason: Schema.NonEmptyString,
+  credentialReason: Schema.NonEmptyString,
   /** None when the harness supplies its own prices. */
   prices: Schema.Option(Schema.Record(Schema.String, TokenRates)),
 }) {
