@@ -23,7 +23,7 @@ const coordinator = AdmissionContext.make({ placement: "orchestrator", credentia
 describe("brain admission", () => {
   it("requires durable coordination, rather than a particular harness ID", () => {
     assert(Result.isSuccess(admitBrain(catalog, "coordinator", brain("pi"), coordinator)));
-    for (const id of ["claude", "codex"]) {
+    for (const id of ["claude", "codex", "opencode"]) {
       const result = admitBrain(catalog, "coordinator", brain(id), coordinator);
       assert(Result.isFailure(result));
       assert.strictEqual(result.failure.role, "coordinator");
@@ -89,6 +89,44 @@ describe("brain admission", () => {
     );
   });
 
+  it("admits OpenCode on SSH workers and refuses unsupported placement and roles", () => {
+    for (const placement of ["local", "ssh", "container"] as const) {
+      for (const credential of [
+        "host-login",
+        "api-key",
+        "gateway-api-key",
+        "gateway-subscription",
+      ] as const) {
+        assert(
+          Result.isSuccess(
+            admitBrain(
+              catalog,
+              "coding-agent",
+              brain("opencode"),
+              AdmissionContext.make({ placement, credential }),
+            ),
+          ),
+        );
+      }
+    }
+    const sandbox = admitBrain(
+      catalog,
+      "coding-agent",
+      brain("opencode"),
+      AdmissionContext.make({ placement: "sandbox", credential: "api-key" }),
+    );
+    assert(Result.isFailure(sandbox));
+    assert.include(sandbox.failure.message, "TCP forwarding");
+    const supervisor = admitBrain(
+      catalog,
+      "supervisor",
+      brain("opencode"),
+      AdmissionContext.make({ placement: "orchestrator", credential: "gateway-subscription" }),
+    );
+    assert(Result.isFailure(supervisor));
+    assert.strictEqual(supervisor.failure.missing[0].capability, "usine-tools");
+  });
+
   it("refuses unregistered harnesses and unsupported credentials", () => {
     const unknown = admitBrain(catalog, "coding-agent", brain("unknown"), local);
     assert(Result.isFailure(unknown));
@@ -136,7 +174,8 @@ describe("brain admission", () => {
       for (const profile of descriptor.capabilities) {
         assert.strictEqual(
           profile.supported.includes("plan-windows"),
-          descriptor.id !== "pi" && profile.credentials.includes("gateway-subscription"),
+          ["claude", "codex"].includes(descriptor.id) &&
+            profile.credentials.includes("gateway-subscription"),
         );
       }
     }

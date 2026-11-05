@@ -426,13 +426,13 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 1.4.0
         version: 1.4.0
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.0.6(effect@4.0.6)(redis@6.2.1)
       '@usine/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
-      '@effect/platform-node':
-        specifier: 'catalog:'
-        version: 4.0.6(effect@4.0.6)(redis@6.2.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.6(effect@4.0.6)(vitest@5.0.5)

@@ -30,7 +30,7 @@ const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive)
 
 Use `harnessesLiveFrom(catalog, configure)` to extend or reuse the raw built-in adapters before registry admission wraps them. The callback receives adapters with the production SDKs; return the runtimes for the supplied catalog.
 
-The Node composition requires `ChildProcessSpawner` and `HostLoginLock` (`/runtime`). The lock is keyed by harness, worker, and provisioned machine. Build `harnessesLive` with `hostLoginLockLayer` from `@usine/executor` once at the application root. Provide that registry to both the executor and the attempt runtime. Claude's runtime takes the lock during host-login preflight and while a child starts. `/claude`, `/codex`, and `/pi` also export single-harness `ChildBackend` layers and their SDK contracts.
+The Node composition requires `ChildProcessSpawner` and `HostLoginLock` (`/runtime`). The lock is keyed by harness, worker, and provisioned machine. Build `harnessesLive` with `hostLoginLockLayer` from `@usine/executor` once at the application root. Provide that registry to both the executor and the attempt runtime. Claude's runtime takes the lock during host-login preflight and while a child starts. `/claude`, `/codex`, `/pi`, and `/opencode` also export single-harness `ChildBackend` layers and their SDK contracts.
 
 Child prompts include the rendered loop task unchanged, including edit-and-retry amendments. Parent-written text appears separately as supplemental context and cannot replace the task instructions.
 
@@ -39,6 +39,7 @@ Child prompts include the rendered loop task unchanged, including edit-and-retry
 - **Parent:** a Pi model with an API key, or an `openai-codex` ChatGPT model through Plus or Pro OAuth. The start log records `apiKeys` or `chatgptPlan`. A child past the run spec's child-session budget stops the parent with `ChildSessionBudgetExceededError`.
 - **Claude Code:** the worker's `claude` through the Agent SDK, with `bypassPermissions`, worker-user settings only, and the CLI login. Subscription sessions map `rate_limit_event` reports to `PoolRateLimitsUpdated` for `claudePlan`. The five-hour allowance is the primary window; the latest seven-day allowance, including model-specific allowances, is the secondary window. Each report contains only the observed window. The pool projection preserves the other window across children, attempts, and resumes. Utilization fractions become percentages, reset timestamps use epoch seconds, and omitted reset times remain unknown. Reports without utilization and unsupported allowance types are skipped. API-key sessions emit no Claude plan windows.
 - **Codex:** app-server JSON-RPC over stdio, with `approvalPolicy: never` and the CLI login. It checks the login with `account/read` before creating a thread, and records plan rate windows as `PoolRateLimitsUpdated`. An API-key login, no login, or an unsupported account fails with `PoolUnavailableError`, which needs the operator. A change to unsupported authentication ends the session before more rate windows are recorded. If `ChildSession.gatewayCredential` is set, the gateway holds the OpenAI credential and Codex has no login: the child skips the login check and ignores login changes, and its pool follows the credential kind, `chatgptPlan` for a ChatGPT login and `apiKeys` for an API key.
+- **OpenCode:** `@opencode/cli@2.2.5`, using a password-protected `serve --stdio` loopback server and SSE. Models use `provider/model`; effort selects a model variant, with `off` selecting its default. Host OpenAI OAuth uses `chatgptPlan`; API keys and compatible endpoints use `apiKeys`. Gateway routes use the OpenAI Responses slot and its reported credential kind. Gateway and provisioned-key recipes isolate saved credentials in an attempt data directory. The adapter reports tokens and USD, accepts steering during tools, and supports interrupt, holds, and delivery acknowledgements. `/opencode` exports `OpenCodeServer`, its connection contracts, `openCodeServerLive`, `openCodeChildLayer`, and `openCodeRuntime`.
 - **Pi children:** an API key for the selected provider, or a ChatGPT subscription login for an `openai-codex/...` model, using the same authentication and billing pools as the parent. Other OAuth providers remain unavailable. Pi reports tokens and cost, but no plan rate windows, so usine cannot warn before Pi sessions reach the ChatGPT plan limit.
 
 Codex rate-window events include the login email returned by `account/read`. A supported account change refreshes that identity before more snapshots are recorded. Gateway-backed children have no local login and leave it absent. Account identity is stored for display and excluded from diagnostic logs.
@@ -61,6 +62,8 @@ Logs record the verified authentication method and pool. On completion or interr
 - `RemoteShell`: one `ssh <args> <destination> -- <remote command>`, which enters the worktree, exports the request's environment over the machine's own, writes its pid to `<worktree>.child-<n>.pid`, and runs the harness. The SSH client gets only `RemoteShell.sshEnvironment`. With `container`, the remote command is `<runtime> exec -i <name> sh -c <command line>`, so the directory, variables, and pid file are inside that container.
 
 Executors run `CHILD_KILL_SCRIPT` remotely to stop every child in those pid files before keeping or removing a worktree. Claude Code runs remotely through `spawnClaudeCodeProcess`, Codex over the same SSH command. Pi children run tools in this process and fail on `RemoteShell` with `AgentResultError`. They get only Pi's default tools, `read`, `bash`, `edit`, and `write`, whatever the global Pi `defaultTools` setting adds, and `bash` runs with exactly `ChildRequest.environment`.
+
+OpenCode runs locally or through an SSH TCP forward. SSH containers require host networking, as the worker executor configures it. Cloudflare sandbox placement is refused because its shell transport cannot forward TCP. OpenCode starts outside the checkout, disables project configuration and `.claude` skills, and retains repository AGENTS instructions. An unexpected headless permission request fails the child. Closing server stdin stops the server; an event stream that disconnects before a result fails with `SessionOperationError`.
 
 The worktree is repo-controlled input: Pi ignores the project's `.pi/` settings, extensions, prompt templates, skills, and themes; Claude omits project setting sources; Codex marks the worktree untrusted. AGENTS instructions still apply. The executor isolates the worker.
 
@@ -146,6 +149,15 @@ USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/agents test:int
 USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agents test:integration:pi
 ```
 
+OpenCode's contracts run with a configured provider, or with a controlled local OpenAI-compatible endpoint that drives the real CLI's waiting command:
+
+```sh
+USINE_OPENCODE_INTEGRATION_MODEL=openai/gpt-6-astra pnpm --filter @usine/agents test:integration:opencode
+USINE_OPENCODE_CONTRACT_FIXTURE=true pnpm --filter @usine/agents test:integration:opencode
+```
+
+Install `@opencode/cli@2.2.5` on `PATH` first. Both modes check local execution and SSH forwarding. The suite also checks checkout configuration isolation and headless permission requests against the real CLI. The fixture uses temporary XDG directories and requires no provider credential.
+
 The protocol conformance baseline is 0.164.0. Preflight retains 0.159.0 through 0.159.3 for one release so existing worker images can upgrade, and refuses 0.153.4. Install 0.164.0 for its updated TLS certificate roots. Other CLI builds need verification first.
 
 When Codex 0.164.0 is on `PATH`, the unit suite also checks launch overrides with `--strict-config` and verifies project configuration isolation locally and over the SSH shim. These tests use temporary homes and start threads without sending model requests.
@@ -164,7 +176,7 @@ Remote Codex children run under a detached Node supervisor. Preflight checks tha
 
 Session records and errors use nominal Schema brands. Construct records with their schema’s `make` method. Codex request serialization is pure over validated parameters. Child backends decode responses inside Effects and report invalid responses through session operation errors.
 
-The harness implementations are grouped under `src/harness/claude/`, `src/harness/codex/`, and `src/harness/pi/`. Shared dispatch, conversation, session-channel, and usage helpers are in `src/harness/`. Consumers use the published subpaths shown above.
+The harness implementations are grouped under `src/harness/claude/`, `src/harness/codex/`, `src/harness/pi/`, and `src/harness/opencode/`. Shared dispatch, conversation, session-channel, and usage helpers are in `src/harness/`. Consumers use the published subpaths shown above.
 
 Run `pnpm --filter @usine/agents check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
 

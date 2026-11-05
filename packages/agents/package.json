@@ -1,7 +1,7 @@
 {
   "name": "@usine/agents",
   "version": "0.6.0",
-  "description": "The usine agent layer: Claude Code, Codex, and Pi child backends, Attempt prompts, and harness preflight.",
+  "description": "The usine agent layer: Claude Code, Codex, Pi, and OpenCode child backends, Attempt prompts, and harness preflight.",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -34,6 +34,10 @@
     "./codex": {
       "types": "./dist/harness/codex/codex.d.ts",
       "default": "./dist/harness/codex/codex.js"
+    },
+    "./opencode": {
+      "types": "./dist/harness/opencode/opencode.d.ts",
+      "default": "./dist/harness/opencode/opencode.js"
     },
     "./openai-prices": {
       "types": "./dist/openai-prices.d.ts",
@@ -73,6 +77,7 @@
     "test": "vitest run --exclude 'test/integration/**'",
     "test:integration:claude": "vitest run test/integration/claude.test.ts",
     "test:integration:codex": "vitest run test/integration/codex.test.ts",
+    "test:integration:opencode": "vitest run test/integration/opencode.test.ts",
     "test:integration:pi": "vitest run test/integration/pi.test.ts"
   },
   "dependencies": {
@@ -85,10 +90,10 @@
     "@earendil-works/pi-mcp": "1.4.0",
     "@earendil-works/pi-telemetry": "1.4.0",
     "@earendil-works/pi-tui": "1.4.0",
+    "@effect/platform-node": "catalog:",
     "@usine/core": "workspace:*"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@pwrdrvr/codex-app-server-protocol": "0.164.0",
     "@usine/tsconfig": "workspace:*",

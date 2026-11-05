@@ -12,7 +12,10 @@ import {
 const CALLER_TOKEN = "ugw1.sample-claims.sample-signature";
 const DIRECTORIES = {
   ghConfigDirectory: "/home/usine/.usine/workers/eu-one/gh",
-  homes: { codex: "/home/usine/.usine/workers/eu-one/codex" },
+  homes: {
+    codex: "/home/usine/.usine/workers/eu-one/codex",
+    opencode: "/home/usine/.usine/workers/eu-one/opencode",
+  },
 };
 
 const environmentFor = (llmProviders: ReadonlyArray<GatewayLlmProtocol>) => {
@@ -82,11 +85,14 @@ describe("An Attempt's environment behind a Gateway", () => {
     assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, ANTHROPIC_AUTH_TOKEN: CALLER_TOKEN });
   });
 
-  it("points Codex at the Gateway through its CODEX_HOME only when the Gateway holds the OpenAI credential", () => {
+  it("points Codex and OpenCode at the Gateway with separate homes when it holds the OpenAI credential", () => {
     const { exported, sent } = environmentFor(["openai-responses"]);
     assert.deepStrictEqual(exported, {
       ...WITHOUT_LLM,
       CODEX_HOME: "/home/usine/.usine/workers/eu-one/codex",
+      XDG_DATA_HOME: "/home/usine/.usine/workers/eu-one/opencode",
+      OPENCODE_CONFIG_CONTENT:
+        '{"providers":{"openai":{"package":"@opencode/ai/providers/openai","settings":{"baseURL":"http://llm.gw.internal/openai-responses/v1","apiKey":"{env:USINE_GATEWAY_TOKEN}","transport":"http","encoding":"none"},"body":{"store":false,"instructions":""}}}}',
     });
     assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, USINE_GATEWAY_TOKEN: CALLER_TOKEN });
     assert.deepStrictEqual(

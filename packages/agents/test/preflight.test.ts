@@ -1,3 +1,4 @@
+import { OpenCodeServer } from "../src/harness/opencode/server.ts";
 import { Harnesses, harnessesLayer, ProbeTarget } from "../src/harness/node.ts";
 import { claudeSdkLive } from "../src/harness/claude/sdk.ts";
 import { HostLoginLock } from "../src/runtime.ts";
@@ -48,6 +49,9 @@ const verifyHarness = (
   }).pipe(
     Effect.provide(
       harnessesLayer.pipe(
+        Layer.provide(
+          Layer.succeed(OpenCodeServer)({ open: () => Effect.die("Unexpected OpenCode launch") }),
+        ),
         Layer.provide(claudeSdkLive),
         Layer.provide(Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect })),
       ),
@@ -162,6 +166,48 @@ const unusedPi = Layer.succeed(PiSdk)({
 });
 
 describe("worker harness readiness", () => {
+  for (const [stdout, exitCode, capability] of [
+    ["", 127, "binary"],
+    ["opencode v1.19.5", 0, "version"],
+    ["opencode v2.2.6", 0, "version"],
+  ] as const) {
+    it.effect(`refuses an OpenCode ${capability} gap (${stdout || "missing binary"})`, () =>
+      verifyHarness(brain(Harness.make("opencode")), local, workerEnvironment, "gateway").pipe(
+        Effect.flip,
+        Effect.tap((error) =>
+          Effect.sync(() => {
+            const unavailable = Schema.is(HarnessUnavailableError)(error);
+            assert(unavailable);
+            assert.strictEqual(error.capability, capability);
+          }),
+        ),
+        Effect.provide(
+          commands({ "opencode --version": { stdout, exitCode } }).pipe(
+            Layer.provideMerge(unusedAccount),
+            Layer.provideMerge(unusedPi),
+          ),
+        ),
+      ),
+    );
+  }
+  for (const host of [local, remote]) {
+    it.effect(`checks OpenCode's pinned version without a host login on ${host._tag}`, () =>
+      verifyHarness(brain(Harness.make("opencode")), host, workerEnvironment, "api-key").pipe(
+        Effect.tap((ready) => Effect.sync(() => assert.strictEqual(ready._tag, "HarnessReady"))),
+        Effect.provide(
+          commands({
+            [host._tag === "LocalProcess"
+              ? "opencode --version"
+              : overSsh("export PATH='/usr/bin:/bin' && exec 'opencode' '--version'")]: {
+              stdout: "opencode v2.2.5",
+              exitCode: 0,
+            },
+          }).pipe(Layer.provideMerge(unusedAccount), Layer.provideMerge(unusedPi)),
+        ),
+      ),
+    );
+  }
+
   it("checks the same Codex version as the protocol conformance gate", () => {
     assert.strictEqual(
       CODEX_CLI_VERSION,

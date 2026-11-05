@@ -5,7 +5,7 @@ description: Agent harnesses, models, reasoning effort, personas, and preflight 
 
 Manage agents in **Configuration > Agents**, or edit an existing agent with `usine config edit agent developer`. An agent combines a brain spec and a persona. Loops reference its name. Saved edits apply to new runs after preflight; use **Edit and retry** to update a failed run's agent definition.
 
-Harness IDs use kebab case and must match an entry in the server’s harness catalog. The catalog contains `claude`, `codex`, and `pi`. An unregistered ID fails agent schema validation.
+Harness IDs use kebab case and must match an entry in the server’s harness catalog. The catalog contains `claude`, `codex`, `pi`, and `opencode`. An unregistered ID fails agent schema validation.
 
 The server builds one harness runtime registry at startup and shares it between worker preflight and child sessions. An incomplete registration fails startup. Preflight errors identify the harness installation to check: host-login routes include login guidance, gateway and API-key routes refer to the worker installation, and Cloudflare routes refer to the sandbox image. Successful binary probes log the installed version.
 
@@ -14,8 +14,8 @@ The server builds one harness runtime registry at startup and shares it between 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | name | kebab-case string | required | Unique instance-level agent name used by loops. |
-| `harness` | `claude`, `codex`, or `pi` | required | Coding-agent harness used by child sessions. |
-| `model` | non-blank string | required | Model ID understood by the harness, with `provider/model` for Pi. |
+| `harness` | `claude`, `codex`, `pi`, or `opencode` | required | Coding-agent harness used by child sessions. |
+| `model` | non-blank string | required | Model ID understood by the harness, with `provider/model` for Pi and OpenCode. |
 | `effort` | effort | required | Reasoning effort of child sessions. |
 | `parent_model` | string | instance setting, then Pi selection | Model for the Pi parent in `provider/model` form. |
 | `parent_effort` | effort | instance setting, then child effort | Reasoning effort of the Pi parent. |
@@ -29,7 +29,7 @@ Run the required checks, push the branch, and record blockers on the item.
 Do not merge pull requests.
 ```
 
-Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Claude Code disables thinking for `off` and treats `minimal` as `low`. Codex receives `off` as `none` and checks the selected model's supported efforts. Pi uses the value as its thinking level.
+Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Claude Code disables thinking for `off` and treats `minimal` as `low`. Codex receives `off` as `none` and checks the selected model's supported efforts. Pi uses the value as its thinking level. OpenCode uses the selected model's matching variant; `off` selects its default variant. An unavailable variant fails before the first prompt.
 
 ## Parent selection
 
@@ -49,6 +49,7 @@ The parent uses the coordinator role, which requires durable coordination: commi
 | --- | --- | --- | --- |
 | `claude` | Claude Code with `auth status --json` | Claude subscription login, setup token, or API key | Local, SSH, Cloudflare |
 | `codex` | Codex CLI 0.164.0 | ChatGPT login or API key | Local, SSH, Cloudflare |
+| `opencode` | `@opencode/cli@2.2.5` | Provider API key, OpenAI-compatible endpoint, or ChatGPT login | Local, SSH, SSH containers with host networking |
 | `pi` | Bundled Pi runtime | API key for the selected provider or ChatGPT login for `openai-codex` | Local |
 
 For a worker using subscription logins, run these commands as the user running its children:
@@ -62,6 +63,20 @@ codex login status
 
 A gateway can inject either a provider API key or a subscription credential. Cloudflare workers require provider API keys. Provisioned SSH workers require credentials from their gateway or `api_keys` settings. Local preflight and children accept managed Claude setup tokens and API keys, and Codex ChatGPT logins and API keys. Local Codex launches select file credential storage so they use the credentials managed by `usine login` and removed by `usine logout`, including when Codex configuration selects keyring storage.
 
+For OpenCode, set `harness` to `opencode` and `model` to `provider/model`, such as `openai/gpt-6-astra`. Install the pinned CLI as the worker user:
+
+```sh
+npm install -g @opencode/cli@2.2.5
+opencode auth login openai
+opencode auth list --format json
+```
+
+OpenCode reads the worker user's provider configuration and saved credentials. Use OpenCode 2.x `providers` configuration with `@opencode/ai/providers/openai-compatible` for custom endpoints. Host preflight lists enabled models and checks the requested effort without sending a prompt. Saved OpenAI OAuth credentials use `chatgptPlan`; keys and custom endpoints use `apiKeys`, with the provider ID recorded as the endpoint name. OpenCode reports tokens and model cost, but no subscription allowance windows.
+
+An OpenAI gateway slot or provisioned OpenAI key configures OpenCode's Responses provider automatically. These routes require an `openai/model` model and use a separate attempt data directory. SSH workers need TCP forwarding; their attempt containers use host networking. Cloudflare sandbox workers cannot run this adapter because their shell transport has no TCP forwarding. Claude subscription billing requires the Claude Code harness.
+
+OpenCode runs a password-protected loopback server and subscribes before sending the prompt. It accepts steering during commands, supports operator holds and interrupts, and saves a session ID for `opencode --session <id>` in the checkout. A disconnected event stream fails the child with a session operation error.
+
 For Pi children on a ChatGPT subscription, set `harness` to `pi` and `model` to an `openai-codex/...` model. Run Pi as the Unix user running the orchestrator, with the same `~/.pi/agent` or `PI_CODING_AGENT_DIR` configuration as the parent. Enter `/login` and choose **OpenAI (ChatGPT Plus/Pro)** for the `openai-codex` provider. Preflight accepts that login without an API key. Other OAuth providers have no supported usine pool and fail preflight.
 
 Each parent and child session records the billing pool resolved at launch. Usage totals read that recorded pool, including after an orchestrator restart. Older transcripts without a recorded pool use the historical harness and model rule.
@@ -74,7 +89,7 @@ Claude Code subscription sessions report allowance usage under `claudePlan`, inc
 
 Pi children save their conversations in `.usine/pi/sessions` under the attempt checkout. The transcript records the saved session ID and directory. Keep both the checkout and session files to continue a conversation after its process exits. The Pi runtime's `resume(request, savedId)` operation starts a continuation with the request's prompt in that checkout; a missing ID fails instead of starting a new conversation. An orchestrator restart still interrupts an active `subagent` call.
 
-Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, and Pi ignores project-local configuration. Repository agent instructions still apply.
+Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, Pi ignores project-local configuration, and OpenCode disables project `opencode.json`, `.opencode` plugins, and `.claude` skills. Repository agent instructions still apply.
 
 Codex disables the checkout's project-local configuration, hooks, and exec policies even if its saved configuration marks the checkout as trusted. Its app server starts in `/`, outside the checkout and home directory, to avoid loading repository configuration at startup or reporting disabled project configuration in the worker's `.codex` directory. Other Codex diagnostics log at Warning.
 
@@ -84,7 +99,7 @@ Configuration import and saved edits check every coding-agent brain against each
 
 Preflight and child launch check the catalog associated with the registered harness runtimes, including custom harness descriptors. Preflight checks the same role requirements before tools and credentials; it does not install harnesses. Startup checks each rostered child brain on every worker. A changed roster is checked before the running configuration accepts it. Each attempt also checks its selected agent. Failures identify the worker, capability, and remediation.
 
-For workers using harness credentials, Claude Code must report a first-party subscription login, setup token, or API key, and Codex must report a ChatGPT login or API key. Gateway-injected and attempt API-key credentials use the same harness binary and version checks, with authentication supplied by their credential route. Claude Code accepts any installed version; Codex requires a supported version. Claude Code's host-login checks and child startup share a lock for the same worker login. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
+For workers using harness credentials, Claude Code must report a first-party subscription login, setup token, or API key, and Codex must report a ChatGPT login or API key. Gateway-injected and attempt API-key credentials use the same harness binary and version checks, with authentication supplied by their credential route. Claude Code accepts any installed version; Codex requires a supported version, and OpenCode requires exactly 2.2.5. Claude Code's host-login checks and child startup share a lock for the same worker login. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
 
 Every GitHub comment, issue, pull request, and review written by an agent ends with `— usine agent: <name>`. Agents share the App identity, so this signature attributes their work to an attempt. Commits use the App's bot identity.
 
