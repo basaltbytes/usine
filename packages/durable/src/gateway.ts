@@ -57,6 +57,15 @@ export interface GatewayModelTransport {
 
 const Payload = Schema.Record(Schema.String, Schema.Unknown);
 
+const Items = Schema.Array(Schema.Unknown);
+
+const isInstructionItem = Schema.is(
+  Schema.Struct({
+    role: Schema.Literals(["system", "developer"]),
+    content: Schema.String,
+  }),
+);
+
 const codexResponse = (response: Response): Response => {
   const body = response.body;
   if (!response.ok || body === null) return response;
@@ -147,25 +156,20 @@ export const gatewayModelAccess: (
       if (provider.id === "openai-codex") {
         prepared.onPayload = async (payload) => {
           const decoded = await Schema.decodeUnknownPromise(Payload)(payload);
-          const input = decoded.input;
-          const leading = Array.isArray(input) ? input[0] : undefined;
-          const systemItem = Schema.decodeUnknownOption(
-            Schema.Struct({
-              role: Schema.Literals(["system", "developer"]),
-            }),
-          )(leading);
+          const leading = context.messages[0];
+          const instructions = leading?.role === "system" ? getSystemMessageText(leading) : "";
+          // pi-ai places the `additional_tools` items that declare tools before the system prompt item.
+          const input = Option.match(Schema.decodeUnknownOption(Items)(decoded.input), {
+            onNone: () => decoded.input,
+            onSome: (items) => {
+              const prompt = instructions === "" ? -1 : items.findIndex(isInstructionItem);
+              return items.filter((_, index) => index !== prompt);
+            },
+          });
           return {
             ...decoded,
-            input:
-              context.messages[0]?.role === "system" &&
-              Option.isSome(systemItem) &&
-              Array.isArray(input)
-                ? input.slice(1)
-                : input,
-            instructions:
-              context.messages[0]?.role === "system"
-                ? getSystemMessageText(context.messages[0])
-                : "You are a helpful assistant.",
+            input,
+            instructions: instructions === "" ? "You are a helpful assistant." : instructions,
             max_output_tokens: undefined,
             temperature: undefined,
             prompt_cache_retention: undefined,
