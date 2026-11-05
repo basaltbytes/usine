@@ -2,10 +2,16 @@ import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 import { Harness, BrainSpec } from "@usine/core/agent/brain";
-import { ChildSession, EndpointName, SessionStarted } from "@usine/core/agent/session";
-import { Deferred, Effect, Layer, Option, Stream } from "effect";
+import {
+  ChildSession,
+  EndpointName,
+  HarnessSessionId,
+  SessionStarted,
+} from "@usine/core/agent/session";
+import { Deferred, Effect, Layer, Match, Option, type Scope, Stream } from "effect";
 import {
   AgentResultError,
+  type AgentSessionError,
   type ChildRequest,
   ChildBackend,
   PoolUnavailableError,
@@ -15,7 +21,7 @@ import {
   UnsupportedEffortError,
 } from "../../runtime.ts";
 import { sessionChannel, subscribePiSession } from "../session.ts";
-import { PiSdk, type PiStartResult, usePiStart } from "./sdk.ts";
+import { PiSdk, type PiSessionStorage, type PiStartResult, usePiStart } from "./sdk.ts";
 import { piPauseGate, piTurns } from "./turns.ts";
 import { requiredPiPool, splitPiModel } from "./authentication.ts";
 
@@ -26,6 +32,7 @@ export {
   type PiSessionEvent,
   type PiStartOptions,
   type PiStartResult,
+  type PiSessionStorage,
 } from "./sdk.ts";
 
 const childError = (
@@ -60,8 +67,8 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
 const makePiChild = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
-  const launch: ChildBackend["Service"]["launch"] = Effect.fn("PiRuntime.launch")(
-    function* (request) {
+  const start = Effect.fn("PiRuntime.start")(
+    function* (request: ChildRequest, storage: PiSessionStorage) {
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
         effort: request.session.brain.effort,
@@ -80,12 +87,20 @@ const makePiChild = Effect.gen(function* () {
             "Pi children run only on local workers: their tools run in the orchestrator process, not on the worker",
         });
       }
-      yield* Effect.logInfo("Launching Pi child session");
+      yield* Effect.logInfo(
+        "Starting Pi child session",
+        Match.valueTags(storage, {
+          InMemory: () => ({ storage: "InMemory" }),
+          Create: ({ directory }) => ({ storage: "Create", directory }),
+          Resume: ({ directory, id }) => ({ storage: "Resume", directory, harnessSessionId: id }),
+        }),
+      );
       const gate = yield* piPauseGate;
       return yield* usePiStart(
         (signal) =>
           sdk.start({
             cwd: request.cwd,
+            storage,
             environment: Option.some(request.environment),
             extensions: [gate.extension],
             model: request.session.brain.model,
@@ -131,6 +146,14 @@ const makePiChild = Effect.gen(function* () {
               model: started.model,
               pool: started.pool,
               tools: started.tools,
+              ...Option.match(started.harnessSession, {
+                onNone: () => ({}),
+                onSome: (saved) => ({
+                  harnessSessionId: saved.id,
+                  cwd: saved.cwd,
+                  home: saved.home,
+                }),
+              }),
             });
             const session = ChildSession.make({
               id: request.session.id,
@@ -155,7 +178,9 @@ const makePiChild = Effect.gen(function* () {
               label: "Pi child session",
               sessionId: session.id,
             });
-            yield* channel.emit(SessionStarted.make({ session }));
+            yield* channel.emit(
+              SessionStarted.make({ session, harnessSession: started.harnessSession }),
+            );
             const subscription = yield* subscribePiSession(started.session, session, channel);
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
@@ -181,16 +206,43 @@ const makePiChild = Effect.gen(function* () {
           }),
       );
     },
+    (effect, request, storage) =>
+      effect.pipe(
+        Effect.tapError((error) =>
+          Effect.logError("Pi child session failed to start", {
+            sessionId: request.session.id,
+            storage: storage._tag,
+            errorTag: error._tag,
+            message: error.message,
+          }),
+        ),
+      ),
   );
-  return ChildBackend.of({ launch });
+  const directory = (request: ChildRequest) => `${request.cwd}/.usine/pi/sessions`;
+  const launch = Effect.fn("PiRuntime.launch")((request: ChildRequest) =>
+    start(request, { _tag: "Create", directory: directory(request) }),
+  );
+  const resume = Effect.fn("PiRuntime.resume")((request: ChildRequest, id: HarnessSessionId) =>
+    start(request, { _tag: "Resume", directory: directory(request), id }),
+  );
+  return { launch, resume };
 });
 
 /** Provides `ChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
 export const piChildLayer = Layer.effect(ChildBackend, makePiChild);
 
-/** Combines preflight and scoped launch for registration. */
+/** The Pi runtime can continue a saved conversation in the same attempt checkout. */
+export interface PiRuntime extends HarnessRuntime {
+  /** Starts a continuation turn using `request.prompt`; a missing ID fails with `SessionOperationError`. */
+  readonly resume: (
+    request: ChildRequest,
+    id: HarnessSessionId,
+  ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
+}
+
+/** Combines preflight, scoped launch, and saved-conversation resume. */
 export const piRuntime = Effect.gen(function* () {
   const child = yield* makePiChild;
   const preflight = yield* piPreflight;
-  return { id: pi.id, preflight, launch: child.launch } satisfies HarnessRuntime;
+  return { id: pi.id, preflight, launch: child.launch, resume: child.resume } satisfies PiRuntime;
 });

@@ -4,6 +4,7 @@ import { HarnessDescriptor, WorkerRequirements } from "../harness.ts";
 
 export const pi = HarnessDescriptor.make({
   id: Harness.make("pi"),
+  capabilities: ["resume-session"],
   label: "Pi",
   worker: WorkerRequirements.make({
     install: [],

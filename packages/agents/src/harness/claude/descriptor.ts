@@ -9,6 +9,7 @@ import {
 
 export const claude = HarnessDescriptor.make({
   id: Harness.make("claude"),
+  capabilities: ["resume-session"],
   label: "Claude Code",
   worker: WorkerRequirements.make({
     install: [{ name: "@anthropic-ai/claude-code", version: "2.1.311" }],
