@@ -54,15 +54,15 @@ for (const [recovery, blocker] of [
   ["machine-gone", null],
   ["checkout-gone", null],
   ["resume-fails", null],
-  ["home-gone", null],
+  ["home-gone-fallback", null],
 ] as const) {
   it.live(`recovers a durable child call after restart (${recovery})`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const fs = yield* FileSystem.FileSystem;
       const home =
-        recovery === "home-gone" ? `${database}.home` : "/workspace/usine/.usine/sessions";
-      if (recovery === "home-gone") {
+        recovery === "home-gone-fallback" ? `${database}.home` : "/workspace/usine/.usine/sessions";
+      if (recovery === "home-gone-fallback") {
         yield* fs.makeDirectory(home);
         yield* fs.writeFileString(`${home}/session.jsonl`, "saved-child\n");
       }
@@ -71,7 +71,7 @@ for (const [recovery, blocker] of [
       const replaces =
         recovery === "resume-crashes-then-replacement" ||
         recovery === "worker-gone-then-replacement" ||
-        recovery === "home-gone";
+        recovery === "home-gone-fallback";
       const failsRecovery = [
         "missing-session",
         "invalid-session",
@@ -81,7 +81,7 @@ for (const [recovery, blocker] of [
         "machine-gone",
         "checkout-gone",
         "resume-fails",
-        "home-gone",
+        "home-gone-fallback",
         "resume-fails-after-infra",
         "resume-crashes-then-replacement",
         "worker-gone-then-replacement",
@@ -225,7 +225,7 @@ for (const [recovery, blocker] of [
           }),
         );
       const first = yield* stop([delegate("Continue the task")], "Half way there.");
-      if (recovery === "home-gone") yield* fs.remove(home, { recursive: true });
+      if (recovery === "home-gone-fallback") yield* fs.remove(home, { recursive: true });
       if (recovery === "resume-twice") {
         const second = yield* stop([], "Still working.");
         assert.strictEqual(second.session.id, first.session.id);
@@ -239,7 +239,7 @@ for (const [recovery, blocker] of [
               return Context.add(services, ChildBackend, {
                 ...backend,
                 launch: (request) =>
-                  recovery === "home-gone" && Option.isSome(request.resume)
+                  recovery === "home-gone-fallback" && Option.isSome(request.resume)
                     ? fs.readFileString(`${home}/session.jsonl`).pipe(
                         Effect.mapError((cause) =>
                           SessionOperationError.make({
@@ -348,7 +348,7 @@ for (const [recovery, blocker] of [
               "worker-gone-then-replacement",
               "machine-gone",
               "checkout-gone",
-              "home-gone",
+              "home-gone-fallback",
             ].includes(recovery)
           ) {
             const child = yield* Context.get(services, StubChildren).next;
