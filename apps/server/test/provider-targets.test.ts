@@ -269,7 +269,7 @@ ${["missing-token", "unreachable", "outdated"]
           // Read the saved settings in a subprocess, with the harness's complete environment.
           return nativeSpawner.spawn(
             ChildProcess.make(
-              "node",
+              process.execPath,
               [
                 "-e",
                 `

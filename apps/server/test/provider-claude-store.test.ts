@@ -26,14 +26,14 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
         assert.equal(command.command, "claude");
         assert.deepEqual(command.options.env, {
           HOME: home,
-          PATH: "/usr/bin:/bin",
+          PATH: home,
           CLAUDE_CONFIG_DIR: directory,
         });
         assert.isFalse(command.options.extendEnv);
         commands.push(command.args.join(" "));
         return native.spawn(
           ChildProcess.make(
-            "node",
+            process.execPath,
             [
               "-e",
               `
@@ -70,7 +70,7 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
               ConfigProvider.ConfigProvider,
               ConfigProvider.fromUnknown({
                 HOME: home,
-                PATH: "/usr/bin:/bin",
+                PATH: home,
                 CLAUDE_CONFIG_DIR: directory,
               }),
             ),
