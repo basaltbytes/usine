@@ -21,8 +21,12 @@ export const configuredLaunchdService = Config.option(
   Config.schema(LaunchdService, "USINE_LAUNCHD_SERVICE"),
 ).pipe(Effect.orDie);
 
+const LAUNCHCTL_TIMEOUT = "30 seconds";
+/** The `launchctl print` exit code for a job that isn't loaded. */
+const LAUNCHCTL_UNKNOWN_SERVICE = 113;
+
 export const launchctl = (service: LaunchdService, args: ReadonlyArray<string>) =>
-  runCommand("launchctl", args, "/", "30 seconds").pipe(
+  runCommand("launchctl", args, "/", LAUNCHCTL_TIMEOUT).pipe(
     Effect.mapBoth({
       onSuccess: ({ stdout }) => stdout,
       onFailure: ({ command, reason }) => LaunchctlError.make({ command, service, reason }),
@@ -37,26 +41,28 @@ interface LaunchdState {
 /** Returns `None` only when launchd reports that the job isn't loaded. */
 export const launchdState = Effect.fn("Instance.launchdState")(function* (service: LaunchdService) {
   yield* Effect.annotateCurrentSpan({ service });
-  return yield* launchctl(service, ["print", service]).pipe(
-    Effect.map((output) => {
-      const pid = Option.fromNullishOr(/^\s*pid = ([0-9]+)\s*$/mu.exec(output)?.[1]).pipe(
-        Option.flatMap(Schema.decodeOption(Schema.FiniteFromString)),
-      );
-      const state = /^\s*state = (.+)$/mu.exec(output)?.[1]?.trim() ?? "unknown";
-      const exited = /^\s*last (?:exit code|terminating signal) = /mu.test(output);
-      return Option.some({
-        pid,
-        state: Option.isNone(pid) && exited && state === "spawn scheduled" ? "auto-restart" : state,
-      });
-    }),
-    Effect.catchIf(
-      (error) => error.reason.startsWith("exited with status 113:"),
-      () =>
-        Effect.logDebug("The launchd job isn't loaded", { service }).pipe(
-          Effect.as(Option.none<LaunchdState>()),
-        ),
-    ),
+  const { exitCode, stdout } = yield* runCommand(
+    "launchctl",
+    ["print", service],
+    "/",
+    LAUNCHCTL_TIMEOUT,
+    [LAUNCHCTL_UNKNOWN_SERVICE],
+  ).pipe(
+    Effect.mapError(({ command, reason }) => LaunchctlError.make({ command, service, reason })),
   );
+  if (exitCode === LAUNCHCTL_UNKNOWN_SERVICE) {
+    yield* Effect.logDebug("The launchd job isn't loaded", { service });
+    return Option.none<LaunchdState>();
+  }
+  const pid = Option.fromNullishOr(/^\s*pid = ([0-9]+)\s*$/mu.exec(stdout)?.[1]).pipe(
+    Option.flatMap(Schema.decodeOption(Schema.FiniteFromString)),
+  );
+  const state = /^\s*state = (.+)$/mu.exec(stdout)?.[1]?.trim() ?? "unknown";
+  const exited = /^\s*last (?:exit code|terminating signal) = /mu.test(stdout);
+  return Option.some<LaunchdState>({
+    pid,
+    state: Option.isNone(pid) && exited && state === "spawn scheduled" ? "auto-restart" : state,
+  });
 });
 
 export const supervisingLaunchdService = Effect.fn("Instance.supervisingLaunchdService")(function* (

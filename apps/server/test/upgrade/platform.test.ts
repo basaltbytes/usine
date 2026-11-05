@@ -197,6 +197,7 @@ it.live("preflights and launches an independent launchd helper, and detects a st
         `case "$1" in
   print)
     if [ "$2" = gui/501/dev.usine ]; then printf 'state = running\\npid = 4242\\n';
+    elif [ -e '${folder}/helper-unloaded' ]; then echo 'Bad request.' >&2; exit 113;
     else echo 'state = not running'; fi;;
   kickstart) echo "$2" > '${folder}/started';;
   *) exit 1;;
@@ -209,6 +210,11 @@ esac`,
         const dependencies = yield* platform.value.preflight.pipe(Effect.flip);
         expect(dependencies.message).toContain("GNU coreutils and findutils");
         executable("stat", "exit 0");
+        writeFileSync(join(folder, "helper-unloaded"), "");
+        const unloaded = yield* platform.value.preflight.pipe(Effect.flip);
+        expect(unloaded.message).toContain("Load gui/501/dev.usine-upgrade from");
+        expect(unloaded.message).toContain("dev.usine-upgrade.plist before upgrading");
+        rmSync(join(folder, "helper-unloaded"));
         yield* platform.value.preflight;
         yield* platform.value.launch(ReleaseVersion.make("1.1.0"));
         expect(readFileSync(join(folder, "started"), "utf8").trim()).toBe(

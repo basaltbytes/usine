@@ -101,7 +101,7 @@ usine upgrade --check
 usine upgrade
 ```
 
-For a global installation managed by systemd or launchd, the command requests the separate upgrade helper and exits after acceptance. The default waits for admitted attempts to finish. **Settings** and the helper journal report the final outcome. The helper backs up stores, installs, restarts, and checks version and readiness. Installation or readiness failure restores the prior package and databases.
+For a global installation managed by systemd or launchd, the command requests the separate upgrade helper and exits after acceptance. The default waits for admitted attempts to finish. **Settings** and the helper's journal or log report the final outcome. The helper backs up stores, installs, restarts, and checks version and readiness. Installation or readiness failure restores the prior package and databases.
 
 For an instance-local registry pin, upgrade backs up stores in `.usine/backups/`, changes package pins, installs with the instance package manager, commits manifest and lockfile changes, and restarts if the instance was running. It refuses active attempts unless forced. Failed installation restores manifests and lockfiles and leaves the instance stopped. Startup failure prints recovery instructions. A stopped instance receives the package update without starting.
 

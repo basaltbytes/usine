@@ -6,7 +6,7 @@ import { runCommand } from "../command.ts";
 import { realPathOrSelf, SERVER_PACKAGE } from "../instance/manifest.ts";
 import type { InstanceRecord } from "../instance/record.ts";
 import { SystemdUnit, systemctl } from "../instance/systemd.ts";
-import { LaunchdService, launchctl, launchdPlist } from "../instance/launchd.ts";
+import { LaunchdService, launchctl, launchdPlist, launchdState } from "../instance/launchd.ts";
 import { type ServiceError, supervisingService, serviceState } from "../instance/service.ts";
 import { dependenciesOf, resolveVersion } from "../registry.ts";
 import { UpgradeError, type UpgradePlatform } from "./control.ts";
@@ -103,10 +103,16 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     }
     return result;
   });
+  const helperPlist = Schema.is(LaunchdService)(helperUnit) ? yield* launchdPlist(helperUnit) : "";
   const preflight = Effect.fn("Server.upgradePreflight")(function* () {
     yield* Effect.annotateCurrentSpan({ previous, unit: service, helperUnit, prefix });
     if (Schema.is(LaunchdService)(helperUnit)) {
-      yield* launchctl(helperUnit, ["print", helperUnit]).pipe(Effect.mapError(serviceFailure));
+      const loaded = yield* launchdState(helperUnit).pipe(Effect.mapError(serviceFailure));
+      if (Option.isNone(loaded)) {
+        return yield* UpgradeError.make({
+          message: `Load ${helperUnit} from ${helperPlist} before upgrading. See the macOS hosting guide.`,
+        });
+      }
     } else {
       const loaded = yield* systemctl(helperUnit, ["show", "--property=LoadState", "--value"]).pipe(
         Effect.mapError(serviceFailure),

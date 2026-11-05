@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -83,8 +84,8 @@ const run = (
   shutdown: "normal" | "exit-term" | "exit-kill" | "stuck" = "normal",
   manager: "systemd" | "launchd" = "systemd",
 ) => {
-  const root = mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-helper-"));
-  const executables = mkdtempSync(join(tmpdir(), "usine-upgrade-commands-"));
+  const root = realpathSync(mkdtempSync(join(sqliteTempDirectory(), "usine-upgrade-helper-")));
+  const executables = realpathSync(mkdtempSync(join(tmpdir(), "usine-upgrade-commands-")));
   const storage = join(root, ".usine");
   const folder = join(storage, "upgrade");
   const externalBackups =

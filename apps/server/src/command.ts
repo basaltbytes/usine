@@ -21,12 +21,16 @@ const commandLine = (command: string, args: ReadonlyArray<string>) => [command, 
 
 const firstLine = (text: string): string => text.trim().split("\n")[0] ?? "";
 
-/** Runs a command in `cwd` and returns its output. Fails if it exits non-zero or times out. */
+/**
+ * Runs a command in `cwd` and returns its exit code and output. Fails if it times out or exits
+ * non-zero with a code outside `expectedExitCodes`.
+ */
 export const runCommand = Effect.fn("Cli.runCommand")(function* (
   command: string,
   args: ReadonlyArray<string>,
   cwd: string,
   timeout: Duration.Input,
+  expectedExitCodes: ReadonlyArray<number> = [],
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const line = commandLine(command, args);
@@ -55,7 +59,7 @@ export const runCommand = Effect.fn("Cli.runCommand")(function* (
     Effect.timeout(timeout),
     Effect.mapError((cause) => CommandError.make({ command: line, reason: cause.message })),
   );
-  if (result.exitCode !== 0) {
+  if (result.exitCode !== 0 && !expectedExitCodes.includes(result.exitCode)) {
     const reason = `exited with status ${result.exitCode}: ${firstLine(result.stderr) || firstLine(result.stdout)}`;
     yield* Effect.logWarning("A command exited non-zero", { command: line, reason });
     return yield* CommandError.make({ command: line, reason });
