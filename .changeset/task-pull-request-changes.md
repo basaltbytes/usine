@@ -11,3 +11,5 @@ Show whole pull request and recorded attempt changes on task pages with collapse
 Keep recorded attempt changes available after failed or canceled CI waits, including when a later retry succeeds.
 
 Backfill older comparisons only when their producing attempt is identifiable, and let each attempt's completion replace an existing backfilled result.
+
+Classify generated files by path to avoid marking hand-written files whose patches mention generated-file markers.

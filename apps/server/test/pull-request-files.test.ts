@@ -164,7 +164,7 @@ it.live(
     }).pipe(Effect.scoped),
 );
 
-it.live("returns an explicit range with truncated patches and test and generated marks", () =>
+it.live("returns truncated patches and classifies test and generated files by path", () =>
   Effect.gen(function* () {
     const app = yield* fixture((url) => {
       assert.strictEqual(url.pathname, `/repos/${repository}/compare/${base}...${head}`);
@@ -172,6 +172,28 @@ it.live("returns an explicit range with truncated patches and test and generated
         files: [
           { ...file, filename: "src/reader.test.ts", additions: 2 },
           { ...file, filename: "pnpm-lock.yaml" },
+          {
+            ...file,
+            filename: "packages/github/src/files/model.ts",
+            patch: "@@ -1 +1 @@\n-before\n+const marker = /@generated|DO NOT EDIT/iu;",
+          },
+          {
+            ...file,
+            filename: "src/formerly-generated.ts",
+            patch: "@@ -1 +1 @@\n-// Code generated. DO NOT EDIT.\n+// Maintained by hand.",
+          },
+          {
+            ...file,
+            filename: "src/template.ts",
+            patch: "@@ -1,2 +1,2 @@\n // @generated\n-before\n+after",
+          },
+          {
+            ...file,
+            filename: "src/banner.ts",
+            status: "added",
+            deletions: 0,
+            patch: '@@ -0,0 +1 @@\n+export const banner = "do not edit";',
+          },
         ],
       });
     });
@@ -186,6 +208,15 @@ it.live("returns an explicit range with truncated patches and test and generated
       truncated: true,
     });
     assert.strictEqual(changes.files[1]?.generated, true);
+    assert.deepStrictEqual(
+      changes.files.slice(2).map(({ path, generated }) => ({ path, generated })),
+      [
+        { path: "packages/github/src/files/model.ts", generated: false },
+        { path: "src/formerly-generated.ts", generated: false },
+        { path: "src/template.ts", generated: false },
+        { path: "src/banner.ts", generated: false },
+      ],
+    );
     assert.strictEqual(changes.filesTruncated, false);
   }).pipe(Effect.scoped),
 );

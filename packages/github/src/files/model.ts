@@ -100,6 +100,6 @@ export const changedFile = (file: typeof GitHubFile.Type): ChangedFile => {
     generated:
       /(?:^|\/)(?:generated|dist|vendor)(?:\/|$)|(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock)$|\.(?:gen|generated|min)\.[^/]+$|\.snap$/iu.test(
         file.filename,
-      ) || /@generated|DO NOT EDIT/iu.test(file.patch ?? ""),
+      ),
   });
 };
