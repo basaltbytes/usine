@@ -144,7 +144,7 @@ It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3 for one release)** (`
 
 `pnpm --filter @usine/durable test` also replays restart and credential-kind-change fixtures through `AttemptRuntime.execute`, the durable `subagent` tool, and SQLite. Each case closes the first runtime during a tool call, opens another runtime on the same database, and checks the child's events and the final report.
 
-The shared fixture format in `test/fixtures/replay/` contains protocol, harness version, model, scenario, and redacted environment metadata. Its entries are `expect_outbound`, `emit_inbound`, and `runtime_exit`. Replay matches each outbound request and requires every entry to be consumed. Changing a resume argument fails its matching fixture. Temporary paths and credential values use placeholders; supervisor frames contain decoded base64 bytes so redaction also applies to their payloads.
+The shared fixture format in `test/fixtures/replay/` contains protocol, harness version, model, scenario, and redacted environment metadata. Its entries are `expect_outbound`, `emit_inbound`, and `runtime_exit`. Replay matches each outbound request and requires every entry to be consumed. Changing a resume argument fails its matching fixture. Temporary paths and credential values use placeholders; supervisor frames contain decoded base64 bytes so redaction also applies to their payloads. Frames that split a UTF-8 character use a byte string that preserves each byte.
 
 Record fresh fixtures with Claude Code 2.1.311 and Codex 0.164.0 installed, working harness credentials or gateway configuration, and explicit models:
 
@@ -154,9 +154,11 @@ USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/agents test:int
 USINE_CLAUDE_INTEGRATION_MODEL=claude-sonnet-5-5 USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/durable exec vitest run test/integration/replay.test.ts
 ```
 
+The interrupt-and-guidance fixture includes a supervised guidance turn and a separate command interrupted through the harness API. Restart fixtures change the ambient harness home and assert that the child uses its saved home. Credential-change fixtures require `USINE_GATEWAY_TOKEN` and add the API-key auth variable on resume, checking the child environment as well as its billing pool.
+
 The recorder runs in disposable directories and writes fixtures only after the scenario passes. Review fixture diffs before committing them. Transport-loss recordings use an SSH shim that runs real processes locally and Linux `/proc` to terminate the Codex app-server; replay uses recorded traffic and needs neither harness credentials nor model access. Early-exit recordings terminate the real harness before it sends a protocol message. Recorder tests stay outside `pnpm test` and CI, and skip when their model variables are unset.
 
-Hand-scripted fixtures remain for cases that require traffic a working binary cannot produce on demand, such as malformed responses, unavailable models, refresh-lock failures, provider retries, and shutdown races.
+Hand-scripted fixtures remain for cases that require traffic a working binary cannot produce on demand, such as malformed responses, unavailable models, refresh-lock failures, provider retries, and shutdown races. Focused usage tests also verify seeded token and cost totals and the closure of an open tool call after SSH loss.
 
 Pi's in-process SDK retains its opt-in live contract:
 

@@ -1,9 +1,11 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit } from "effect";
-import { openFixture, providers, scenarios } from "./fixture.ts";
+import { Cause, Effect, Exit, Schema } from "effect";
+import { openFixture, providers, scenarios, recordingPid } from "./fixture.ts";
 import { ChildRequest } from "../../src/runtime.ts";
 import { Tape } from "./transcript.ts";
+import { decodeWire, encodeWire } from "./process.ts";
+import { Base64 } from "effect/encoding";
 import { runScenario } from "./scenarios.ts";
 
 describe("recorded harness transports", () => {
@@ -57,3 +59,45 @@ it("redacts credential values before JSON escaping", () => {
     },
   );
 });
+
+it("rejects empty and malformed recorder PID files before signaling a process", () => {
+  for (const provider of providers) {
+    for (const invalid of ["", " ", "0", "-1", "123partial", "NaN", "1.5"])
+      assert.throws(() => recordingPid(provider, invalid));
+  }
+  assert.strictEqual(recordingPid("claude", "123\n"), 123);
+  assert.strictEqual(recordingPid("codex", "-123"), -123);
+  assert.throws(() => recordingPid("claude", "-123"));
+  assert.throws(() => recordingPid("codex", "123"));
+});
+
+it.effect("preserves UTF-8 characters split across supervisor frames", () =>
+  Effect.gen(function* () {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode("a€𐍈z");
+    for (const key of ["data", "stdout", "stderr"]) {
+      for (let split = 1; split < bytes.length; split++) {
+        for (const chunk of [bytes.slice(0, split), bytes.slice(split)]) {
+          const frame = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+            [key]: Base64.encode(chunk),
+          });
+          const decoded = yield* decodeWire(frame);
+          const encoded = yield* encodeWire(decoded);
+          assert.strictEqual(encoded, frame);
+        }
+      }
+    }
+    const tape = new Tape("record");
+    tape.bind("secret", "$TOKEN");
+    const partial = Uint8Array.from([...encoder.encode("secret"), 0xe2]);
+    const frame = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+      stdout: Base64.encode(partial),
+    });
+    const decoded = yield* decodeWire(frame);
+    const redacted = yield* encodeWire(tape.normalize(decoded));
+    const expected = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+      stdout: Base64.encode(Uint8Array.from([...encoder.encode("$TOKEN"), 0xe2])),
+    });
+    assert.strictEqual(redacted, expected);
+  }),
+);

@@ -6,7 +6,7 @@ import {
   type InterventionState,
 } from "@usine/core/attempt/channel";
 import type { AgentSessionEvent } from "@usine/core/agent/session";
-import { Effect, Fiber, FileSystem, Option, Queue, Schema, Stream } from "effect";
+import { Effect, Fiber, FileSystem, Option, Queue, Result, Schema, Stream } from "effect";
 import { ChildBackend, ChildRequest, SessionOperationError } from "../../src/runtime.ts";
 import type { Scenario } from "./transcript.ts";
 
@@ -72,6 +72,8 @@ export const runScenario = (
         yield* until("SessionIdle");
         const delivered = yield* Queue.take(delivery);
         assert(Option.isSome(delivered));
+        assert(delivered.value.held);
+        assert(!delivered.value.queued);
         assert(!events.some((event) => event._tag === "SessionFinished"));
         if (scenario === "hold-release") {
           yield* running.intervene(
@@ -106,6 +108,32 @@ export const runScenario = (
       assert.strictEqual(events[0]?._tag, "SessionStarted");
       assert.strictEqual(events.at(-1)?._tag, "SessionFinished");
       assert(events.some((event) => event._tag === "TextOutput" && event.text.includes(expected)));
+      if (scenario === "interrupt-guidance") {
+        yield* fs.remove(`${base.cwd}/release`);
+        const interrupted = yield* backend.launch(request);
+        const started = yield* Queue.unbounded<void>();
+        const output: Array<AgentSessionEvent> = [];
+        const draining = yield* interrupted.events.pipe(
+          Stream.runForEach((event) => {
+            output.push(event);
+            return event._tag === "ToolStarted" ? Queue.offer(started, undefined) : Effect.void;
+          }),
+          Effect.result,
+          Effect.forkScoped,
+        );
+        yield* Queue.take(started);
+        yield* interrupted.interrupt;
+        const outcome = yield* interrupted.result.pipe(Effect.result, Effect.timeout("30 seconds"));
+        const stream = yield* Fiber.join(draining);
+        assert.strictEqual(stream._tag, outcome._tag);
+        if (Result.isFailure(outcome)) assert.strictEqual(outcome.failure._tag, "AgentResultError");
+        else assert.notInclude(outcome.success.message, "REPLAY_DONE");
+        assert(
+          !output.some(
+            (event) => event._tag === "TextOutput" && event.text.includes("REPLAY_DONE"),
+          ),
+        );
+      }
       return events;
     }),
   );

@@ -12,6 +12,8 @@ import {
   HarnessSessionId,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
+  TokenCount,
+  UsdAmount,
   sessionPool,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
@@ -43,6 +45,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  CHILD_STOP_SCRIPT,
+  sshArguments,
   type ChildHost,
   LocalProcess,
   RemoteShell,
@@ -326,6 +330,63 @@ const droppedLaunch = (onDrop: () => void = () => {}) => {
 };
 
 describe("Claude child backend", () => {
+  it.effect("continues the saved conversation supplied by a restarted durable call", () => {
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-claude"),
+      cwd: request().cwd,
+      home: Option.some("/worker/attempt/claude"),
+    });
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (_input, options) => {
+        assert.strictEqual(options.resume, saved.id);
+        assert.strictEqual(options.env?.CLAUDE_CONFIG_DIR, "/worker/attempt/claude");
+        return scripted(
+          [
+            {
+              type: "result",
+              subtype: "success",
+              result: "Continued.",
+              modelUsage: {
+                model: {
+                  inputTokens: 400,
+                  outputTokens: 100,
+                  cacheCreationInputTokens: 0,
+                  costUSD: 0.125,
+                },
+              },
+            },
+          ],
+          undefined,
+          saved.id,
+        );
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...request(),
+            resume: Option.some(saved),
+            usage: Option.some({
+              totalTokens: TokenCount.make(1000),
+              costUsd: Option.some(UsdAmount.make(0.25)),
+            }),
+          }),
+        );
+        const events = yield* Effect.forkChild(Stream.runCollect(running.events));
+        assert.strictEqual((yield* running.result).message, "Continued.");
+        const transcript = yield* Fiber.join(events);
+        const started = transcript.find((event) => event._tag === "SessionStarted");
+        assert(started !== undefined);
+        assert.deepStrictEqual(started.harnessSession, Option.some(saved));
+        const usage = transcript.filter((event) => event._tag === "SessionTokensUpdated").at(-1);
+        assert(usage !== undefined);
+        assert.strictEqual(usage.totalTokens, 1500);
+        assert.deepStrictEqual(usage.costUsd, Option.some(0.375));
+      }),
+    ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+  });
+
   for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
     it.effect(`restores a ${supervision} Claude child without starting a turn`, () =>
       Effect.gen(function* () {
@@ -1104,6 +1165,49 @@ describe("Claude child backend", () => {
       Effect.provideService(ChildSessionLifecycle, { isStopping: Effect.sync(() => stopping) }),
       Effect.provide(Logger.layer([logger])),
       Effect.timeout("5 seconds"),
+      Effect.scoped,
+    );
+  });
+
+  it.effect("resumes a remote child's saved session after its SSH connection breaks", () => {
+    const { resumed, prompts, sdk } = droppedLaunch();
+    const worker = workerCommands(0, "/workspace/repo.child-1.pid stopped");
+    const host = exitingHost(SSH_FAILURE);
+    return Effect.gen(function* () {
+      const session = yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
+      const fiber = yield* Effect.forkChild(
+        Effect.all([Stream.runCollect(session.events), session.result]),
+      );
+      const [events, result] = yield* joinAdvancingClock(fiber);
+      assert.strictEqual(result.message, "Tests pass.", "the same child returns the answer");
+      assert.deepStrictEqual(resumed, ["claude-session-1"]);
+      assert.match(prompts[0] ?? "", /^usine lost its connection to this session/u);
+      assert.deepStrictEqual(worker.commands, [
+        [
+          host.ssh.command,
+          ...sshArguments(host, {
+            command: "sh",
+            args: ["-c", CHILD_STOP_SCRIPT, "sh", "/workspace/repo.child-1.pid"],
+          }),
+        ],
+      ]);
+      assert.deepStrictEqual(
+        events.flatMap((event) =>
+          event._tag === "ToolFinished" ? [[event.callId, event.isError]] : [],
+        ),
+        [["call-1", true]],
+        "the call that the broken process ran is closed",
+      );
+      assert.lengthOf(
+        events.filter((event) => event._tag === "SessionStarted"),
+        1,
+      );
+      const usage = events.filter((event) => event._tag === "SessionTokensUpdated").at(-1);
+      assert(usage?._tag === "SessionTokensUpdated");
+      assert.strictEqual(usage.totalTokens, 180, "usage carries over from the broken launch");
+      assert.deepStrictEqual(usage.costUsd, Option.some(0.5));
+    }).pipe(
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
       Effect.scoped,
     );
   });

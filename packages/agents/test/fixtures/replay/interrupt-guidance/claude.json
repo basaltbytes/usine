@@ -126,7 +126,7 @@
         "type": "system",
         "subtype": "init",
         "cwd": "$WORKTREE",
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
         "tools": [
           "Task",
           "Bash",
@@ -264,11 +264,11 @@
         ],
         "analytics_disabled": false,
         "product_feedback_disabled": false,
-        "uuid": "b5bdd8f6-ddf8-4848-8857-fba4d7b28f5c",
-        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-lVXj6y/memory/" },
+        "uuid": "2027efd4-9c30-4af5-b699-a88eecdf87a9",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-RBffQQ/memory/" },
         "original_cwd": "$WORKTREE",
         "additional_directories": [],
-        "messaging_socket_path": "/tmp/cc-socks/6934.sock",
+        "messaging_socket_path": "/tmp/cc-socks/1505.sock",
         "fast_mode_state": "off",
         "fast_mode_disabled_reason": "sdk_opt_in_required",
         "per_turn_effort_active": true,
@@ -282,13 +282,13 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkGFXcPWar4xcznHXH7u",
+          "id": "msg_011CgkLHCroULHeofa93ZxK6",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "tool_use",
-              "id": "toolu_01Ega4uKjm5jCDH7y2XMDfED",
+              "id": "toolu_017eWa2oTmN2sChUn7KDb24P",
               "name": "Bash",
               "input": { "command": "node wait.cjs" },
               "caller": { "type": "direct" }
@@ -300,9 +300,12 @@
           "stop_details": null,
           "usage": {
             "input_tokens": 2,
-            "cache_creation_input_tokens": 3238,
-            "cache_read_input_tokens": 11236,
-            "cache_creation": { "ephemeral_5m_input_tokens": 3238, "ephemeral_1h_input_tokens": 0 },
+            "cache_creation_input_tokens": 14481,
+            "cache_read_input_tokens": 0,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 14481,
+              "ephemeral_1h_input_tokens": 0
+            },
             "output_tokens": 16,
             "service_tier": "standard",
             "inference_geo": "global",
@@ -312,10 +315,10 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
-        "uuid": "cfcc4181-1155-4de5-87f6-74b4a55007ee",
-        "timestamp": "2026-11-05T18:35:27.365Z",
-        "request_id": "req_011CgkGFX5Pu8EnEriuu1ns4"
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "uuid": "fb205628-a8d1-4e76-9a5c-745d287f7860",
+        "timestamp": "2026-11-05T19:28:21.764Z",
+        "request_id": "req_011CgkLHCR1n9w3p5itBsdZd"
       }
     },
     {
@@ -339,7 +342,7 @@
           "role": "user",
           "content": [
             {
-              "tool_use_id": "toolu_01Ega4uKjm5jCDH7y2XMDfED",
+              "tool_use_id": "toolu_017eWa2oTmN2sChUn7KDb24P",
               "type": "tool_result",
               "content": "(Bash completed with no output)",
               "is_error": false
@@ -347,9 +350,9 @@
           ]
         },
         "parent_tool_use_id": null,
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
-        "uuid": "e22d83cc-8427-4c12-9d79-2a5e97cc20ad",
-        "timestamp": "2026-11-05T18:35:27.434Z",
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "uuid": "e52bf54c-547b-421f-be6a-999899b69893",
+        "timestamp": "2026-11-05T19:28:21.915Z",
         "tool_use_result": {
           "stdout": "",
           "stderr": "",
@@ -359,7 +362,7 @@
         },
         "tool_result_meta": [
           {
-            "id": "toolu_01Ega4uKjm5jCDH7y2XMDfED",
+            "id": "toolu_017eWa2oTmN2sChUn7KDb24P",
             "permission_decision": {
               "decision": "accept",
               "source": "config",
@@ -377,8 +380,8 @@
         "subtype": "thinking_tokens",
         "estimated_tokens": 50,
         "estimated_tokens_delta": 50,
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
-        "uuid": "8c16d5d0-1c30-4add-ab14-640c3b1e0b91"
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "uuid": "4a60ec5a-178a-438d-bac7-01e1c3717eb5"
       }
     },
     {
@@ -387,10 +390,10 @@
       "payload": {
         "type": "system",
         "subtype": "thinking_tokens",
-        "estimated_tokens": 207,
-        "estimated_tokens_delta": 157,
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
-        "uuid": "a9a2a256-66b1-40d0-aefa-d486b12ab4e5"
+        "estimated_tokens": 216,
+        "estimated_tokens_delta": 166,
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "uuid": "bf13c89c-b494-4926-9d62-421f69223f03"
       }
     },
     {
@@ -400,14 +403,14 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkGFivYL27mhSP6xwyB6",
+          "id": "msg_011CgkLHhefRw9Vw98nRrJEr",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "thinking",
               "thinking": "",
-              "signature": "CAQSsAYKEAgTGAI4AUIIdGhpbmtpbmcSDPa0s7NrUfTEcNb7bhoMkXA5wTBahwTEp2oVIjBHeUD4TmP+FPMh3+xurvKzFyCmIGC264nT9RCCOpQ2uSPGtdqPWDxzhpXI9P1wEG4qzQXShJzno8EmREGQLH3yWuN0SMjHVbHag+5pxuj/rZp+Sekar1b35Bg++Z6RHpdKG3i0v9I4luVjoXrQ2XJfJqkZD0yF/RmXo4F8bZnkoLsJIyCsxF+QMxauEDF65D+2TBh7egAnjDrl+BUi4t3TBd0/I/bDOuYTlKu6vJA/PG0DvvGRWVLU/m7N944SrITBAh1uKtLqed18i2cto2pEEgx/egTwQ3+jwkolKHNT8RjhOh3G0Od7YCr49JUYc9q2oSrEcUd6/gWOJe9VvQfqrLU6qdIOpu5kLt6PO3ZYD0KdXa/Eqhc3ZPH67hjJ359ja3ipV1lKrMEsjJm2+cjaAFzWEoNrj84cKrL05qsq4oJG+dO74ny90z+fyjDXihEqsnjU6hYWTtcR4C9/S1Tiqmlsp8K7abASgzD4rbZuzCiBTsFphsC2R6OThnYCfuzXRjpAus/dkitjIk1A46gF5GDL52NmLsNzX50d89Eh8EM4OhB9tl6CSkvoS7FdJlCpAPC7/Vo+WxhAbbLvAIDDY5PWotXx2YsWAAsJQTN5v/nE4nG8tnNDxxlcgT2+4wdG58vgGSrr9CaLazAbo3BIrGnzvvegvUEDxxbMxD+CjxArxQXOnhw0JdRMBKaSeFkbU9x/14hb5KPwazU45ae5QN9MG4izM0cpR40HnsMCEoLP0Qi4uaE0aOZ8QpgCWU8HiV/wf09wuuJOkI/eIxC/uY/mR1S1e998mR8nqB6GVEwvGxY8t4D0x2A5OJthch6j0Eg4HoJOLHPFGANPiP8GzfKTbbrmRw1tvn5gAecYTA4+9MSTwE8i2boaJ51Oy2t13i2XsMtJRX3JNbr3FT1nkjUpft5xNYNzHXKlM1b/fk8psjI9aeMvRTTyY/AC64uB7FkIgi44XY89IQ0uJcBeHnys1crGv2GucoX8dU5rWPNIvJElV+mw4pnasUMdaj8YAQ=="
+              "signature": "CAQS1wYKEAgTGAI4AUIIdGhpbmtpbmcSDAV5PG2xejdwuNae2RoMKy7Zo48g7rbLG1ePIjB5Qp0wRIXLTD5vbVMaX/C6b5lwyRye/hhtzFsx9bk7Akv0HJbBpEwJhcFf0wQLQGcq9AWiS0+SVJ3hZ4PkM+z77V9UEHYNBxn3U3QzF6iU93kvD4x1nNTGzj5yYvVvfDP71hXBMkYU81r9AyoBwnL/XDTySFdMkRuh/Bim/LEC5Y2zsfQJ86EVJz2wBkrE5uFUfbuNl4/nK/eZKAdgP8TmFb+Q3OvkxT3jzkDXx/WBIzqT3eRfxM7RauFoT9uCEPP4mwpGD2ge1QL/SQz3W4O2X2HyKZTG1LHnz0qSd+Sv8Z+PXfKioComTuSEiwV+VZgNyYD/ZOPN/9ZMOP1aAyNx0/bAKHxD68Wa2DiiXr62621eegXY3QntVLsqOmaTEudKCyUpE/ZlJPFhXB9HAEeVFNd0ELNFjx3p49F/8AXSUvqPG4Nyxlte13b/0hq0yDVoaQ/3hNp242W8pqk9PGA5uXkZZkjIOV7bshcIsoEpufcY5B/GeI6Ko8kHcBLIoTxPDKmr7H4JZ0rm63VAUvjpIBoTyXdKkuhZ/0qrPbEvCO7gNRKNIQXHlXpiCuNVVZ4ovg0RxyMUv6XG9Gxa8xbPUibrGkHySz+0RRzyBCo6R2A2BZBSA2eUR+BcBwzqpTk3FSfwnKI/UDzhtmCT1EwqPYrA9Za7MvaX+87bDRqhxOAfvarVoytQAdIotzhVWzIqn+aVUupYKdOcougqg/tLf9P6ryxpd7NDlzMKUuXq4/8uq2zNs+KGcj96dBNymnOYf3cTAHiYZYIEo1njUdh9Fb1ArlFHVekH6ExR2pzDHK6c2WjhRMK2TBuOTd3lUeKX0OTEfPw45f1kBkftvQ1lk5nTSUgQTqLEJkH47RF+KMVmsCXLuymXtJLCO9mIcVlNeI7FSXW5YHhPeTDPbY0BedB1jIACNoneuk3fqSTRxF1+6jxzmzsaaTmnPBu5DvH2t/psGL7XZ9RvvGrQ6mvuD5DlNGPZBLbn89qq4nNrn+KJkvFbiBTKs0o6SDnUt6Mommk4B7edndFTrpp9yflOlTo4SYlrnZiw/y6Per2tqt6TJ0+2Ow8YAQ=="
             }
           ],
           "container": null,
@@ -417,7 +420,7 @@
           "usage": {
             "input_tokens": 2,
             "cache_creation_input_tokens": 204,
-            "cache_read_input_tokens": 14474,
+            "cache_read_input_tokens": 14481,
             "cache_creation": { "ephemeral_5m_input_tokens": 204, "ephemeral_1h_input_tokens": 0 },
             "output_tokens": 3,
             "service_tier": "standard",
@@ -428,11 +431,11 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
-        "uuid": "ccd6436a-2f08-4b15-a104-ca3f7a3ea860",
-        "timestamp": "2026-11-05T18:35:32.243Z",
-        "request_id": "req_011CgkGFiMZ1cKPZsugPK319",
-        "thinking_duration_ms": 314,
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "uuid": "04b214e4-4641-4f58-b32d-f7fb619190e3",
+        "timestamp": "2026-11-05T19:28:27.100Z",
+        "request_id": "req_011CgkLHhTWWoWvDMeKg1xoW",
+        "thinking_duration_ms": 280,
         "thinking_display": "updates"
       }
     },
@@ -443,7 +446,7 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkGFivYL27mhSP6xwyB6",
+          "id": "msg_011CgkLHhefRw9Vw98nRrJEr",
           "type": "message",
           "role": "assistant",
           "content": [{ "type": "text", "text": "REPLAY_GUIDED" }],
@@ -454,7 +457,7 @@
           "usage": {
             "input_tokens": 2,
             "cache_creation_input_tokens": 204,
-            "cache_read_input_tokens": 14474,
+            "cache_read_input_tokens": 14481,
             "cache_creation": { "ephemeral_5m_input_tokens": 204, "ephemeral_1h_input_tokens": 0 },
             "output_tokens": 3,
             "service_tier": "standard",
@@ -465,29 +468,29 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
-        "uuid": "846015b3-74f1-42d5-9413-f10345dea034",
-        "timestamp": "2026-11-05T18:35:32.244Z",
-        "request_id": "req_011CgkGFiMZ1cKPZsugPK319"
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "uuid": "7dcb6f6e-4889-44ab-9f1c-8275120bc2bc",
+        "timestamp": "2026-11-05T19:28:27.102Z",
+        "request_id": "req_011CgkLHhTWWoWvDMeKg1xoW"
       }
     },
     {
       "type": "emit_inbound",
       "port": "claude:1/output",
       "payload": {
-        "duration_api_ms": 8119,
+        "duration_api_ms": 12914,
         "stop_reason": "end_turn",
-        "session_id": "dd62379e-61a0-4fd7-a18e-a04bbb870458",
-        "total_cost_usd": 0.015016,
+        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "total_cost_usd": 0.042080599999999996,
         "usage": {
           "input_tokens": 4,
-          "cache_creation_input_tokens": 3442,
-          "cache_read_input_tokens": 25710,
-          "output_tokens": 121,
-          "output_tokens_details": { "thinking_tokens": 55 },
+          "cache_creation_input_tokens": 14685,
+          "cache_read_input_tokens": 14481,
+          "output_tokens": 127,
+          "output_tokens_details": { "thinking_tokens": 61 },
           "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
           "service_tier": "standard",
-          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 3442 },
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 14685 },
           "inference_geo": "global",
           "iterations": [],
           "speed": "standard",
@@ -496,15 +499,15 @@
         "modelUsage": {
           "claude-sonnet-5-5": {
             "inputTokens": 1230,
-            "outputTokens": 138,
-            "cacheReadInputTokens": 25710,
-            "cacheCreationInputTokens": 3442,
+            "outputTokens": 146,
+            "cacheReadInputTokens": 14481,
+            "cacheCreationInputTokens": 14685,
             "webSearchRequests": 0,
-            "costUSD": 0.015016,
+            "costUSD": 0.042080599999999996,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
-            "thinkingTokens": 55,
-            "cacheCreationEphemeral5mInputTokens": 3442,
+            "thinkingTokens": 61,
+            "cacheCreationEphemeral5mInputTokens": 14685,
             "cacheCreationEphemeral1hInputTokens": 0,
             "canonicalModel": "claude-sonnet-5-5",
             "provider": "firstParty",
@@ -533,27 +536,27 @@
         "subtype": "success",
         "api_error_status": null,
         "result": "REPLAY_GUIDED",
-        "ttft_ms": 2344,
+        "ttft_ms": 6682,
         "type": "result",
-        "duration_ms": 7230,
-        "uuid": "62007495-5366-4b86-8db2-e081378e4a6f",
-        "ttft_stream_ms": 2192,
-        "time_to_request_ms": 28,
-        "first_content_frame_ms": 2192,
+        "duration_ms": 12031,
+        "uuid": "8bbfe75a-f8cc-4686-9af8-e337d97765f2",
+        "ttft_stream_ms": 6500,
+        "time_to_request_ms": 79,
+        "first_content_frame_ms": 6500,
         "queued_turn_count": 0,
         "result_index": 0,
         "model_usage_since_last_result": {
           "claude-sonnet-5-5": {
             "inputTokens": 1230,
-            "outputTokens": 138,
-            "cacheReadInputTokens": 25710,
-            "cacheCreationInputTokens": 3442,
+            "outputTokens": 146,
+            "cacheReadInputTokens": 14481,
+            "cacheCreationInputTokens": 14685,
             "webSearchRequests": 0,
-            "costUSD": 0.015016,
+            "costUSD": 0.042080599999999996,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
-            "thinkingTokens": 55,
-            "cacheCreationEphemeral5mInputTokens": 3442,
+            "thinkingTokens": 61,
+            "cacheCreationEphemeral5mInputTokens": 14685,
             "cacheCreationEphemeral1hInputTokens": 0,
             "canonicalModel": "claude-sonnet-5-5",
             "provider": "firstParty",
@@ -562,6 +565,443 @@
         }
       }
     },
+    {
+      "type": "expect_outbound",
+      "port": "claude:2",
+      "payload": {
+        "method": "open",
+        "options": {
+          "allowDangerouslySkipPermissions": true,
+          "cwd": "$WORKTREE",
+          "env": {
+            "HOME": "$HOME",
+            "PATH": "$PATH",
+            "CODEX_HOME": "$CODEX_HOME",
+            "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
+            "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+          },
+          "model": "claude-sonnet-5-5",
+          "pathToClaudeCodeExecutable": "claude",
+          "permissionMode": "bypassPermissions",
+          "persistSession": true,
+          "settingSources": ["user"],
+          "effort": "low",
+          "thinking": { "type": "adaptive" },
+          "hooks": {
+            "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
+            "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
+          },
+          "spawnClaudeCodeProcess": false
+        }
+      }
+    },
+    { "type": "expect_outbound", "port": "claude:2", "payload": { "method": "supportedModels" } },
+    { "type": "runtime_exit", "port": "claude:1/output", "code": 0, "error": null },
+    {
+      "type": "emit_inbound",
+      "port": "claude:2/supportedModels",
+      "payload": [
+        {
+          "value": "default",
+          "resolvedModel": "claude-opus-5-5",
+          "displayName": "Default (recommended)",
+          "description": "Use the default model (currently Opus 5.5) · $4/$20 per Mtok",
+          "supportsEffort": true,
+          "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"],
+          "supportsAdaptiveThinking": true,
+          "supportsFastMode": true,
+          "supportsAutoMode": true,
+          "supportsThinkingOff": false
+        },
+        {
+          "value": "opus",
+          "resolvedModel": "claude-opus-5-5",
+          "displayName": "Opus",
+          "description": "Opus 5.5 · Best for everyday, complex tasks · $4/$20 per Mtok",
+          "supportsEffort": true,
+          "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"],
+          "supportsAdaptiveThinking": true,
+          "supportsFastMode": true,
+          "supportsAutoMode": true,
+          "supportsThinkingOff": false
+        },
+        {
+          "value": "fable",
+          "resolvedModel": "claude-fable-5-1",
+          "displayName": "Fable",
+          "description": "Fable 5.1 · Most capable for your hardest and longest-running tasks · $10/$50 per Mtok",
+          "supportsEffort": true,
+          "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"],
+          "supportsAdaptiveThinking": true,
+          "supportsAutoMode": true,
+          "supportsThinkingOff": false
+        },
+        {
+          "value": "sonnet",
+          "resolvedModel": "claude-sonnet-5-5",
+          "displayName": "Sonnet",
+          "description": "Sonnet 5.5 · Efficient for routine tasks · $2/$10 per Mtok",
+          "supportsEffort": true,
+          "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"],
+          "supportsAdaptiveThinking": true,
+          "supportsAutoMode": true,
+          "supportsThinkingOff": false
+        },
+        {
+          "value": "haiku",
+          "resolvedModel": "claude-haiku-5-5",
+          "displayName": "Haiku",
+          "description": "Haiku 5.5 · Fastest for quick answers · $0.10/$0.50 per Mtok ($0.50/$2.50 for prompts over 100k)",
+          "supportsEffort": true,
+          "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"],
+          "supportsAdaptiveThinking": true,
+          "supportsAutoMode": true,
+          "supportsThinkingOff": false
+        }
+      ]
+    },
+    {
+      "type": "expect_outbound",
+      "port": "claude:2/input",
+      "payload": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+        },
+        "parent_tool_use_id": null
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:2/output",
+      "payload": {
+        "type": "system",
+        "subtype": "init",
+        "cwd": "$WORKTREE",
+        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
+        "tools": [
+          "Task",
+          "Bash",
+          "CronCreate",
+          "CronDelete",
+          "CronList",
+          "DesignSync",
+          "Edit",
+          "EnterWorktree",
+          "ExitWorktree",
+          "ListAgents",
+          "Monitor",
+          "NotebookEdit",
+          "Read",
+          "ReportFindings",
+          "ScheduleWakeup",
+          "SendMessage",
+          "Skill",
+          "TaskStop",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Workflow",
+          "Write"
+        ],
+        "mcp_servers": [],
+        "model": "claude-sonnet-5-5",
+        "permissionMode": "bypassPermissions",
+        "slash_commands": [
+          "deep-research",
+          "design",
+          "design-sync",
+          "dataviz",
+          "update-config",
+          "verify",
+          "debug",
+          "code-review",
+          "simplify",
+          "batch",
+          "fewer-permission-prompts",
+          "doctor",
+          "loop",
+          "claude-api",
+          "workflow-authoring",
+          "run",
+          "run-skill-generator",
+          "plugin-authoring",
+          "agents",
+          "auto-mode-setup",
+          "autocompact",
+          "clear",
+          "color",
+          "compact",
+          "config",
+          "output-style",
+          "context",
+          "effort",
+          "fast",
+          "focus",
+          "heapdump",
+          "init",
+          "mcp",
+          "model",
+          "__remote-workflow",
+          "workflow-launch-exec",
+          "reload-plugins",
+          "reload-skills",
+          "rename",
+          "security-review",
+          "usage",
+          "insights",
+          "recap",
+          "goal",
+          "design-consent",
+          "design-revoke",
+          "list-agents",
+          "team-onboarding"
+        ],
+        "terminal_slash_commands": ["doctor", "color", "focus", "reload-plugins"],
+        "apiKeySource": "none",
+        "claude_code_version": "2.1.311",
+        "output_style": "default",
+        "agents": ["claude", "Explore", "general-purpose", "Plan", "statusline-setup"],
+        "skills": [
+          "deep-research",
+          "design",
+          "design-sync",
+          "dataviz",
+          "update-config",
+          "verify",
+          "debug",
+          "code-review",
+          "simplify",
+          "batch",
+          "fewer-permission-prompts",
+          "doctor",
+          "loop",
+          "claude-api",
+          "workflow-authoring",
+          "run",
+          "run-skill-generator",
+          "plugin-authoring"
+        ],
+        "plugins": [
+          {
+            "name": "cc-plugin-agents-md",
+            "path": "builtin",
+            "source": "cc-plugin-agents-md@builtin"
+          },
+          {
+            "name": "cc-plugin-telemetry",
+            "path": "builtin",
+            "source": "cc-plugin-telemetry@builtin"
+          },
+          {
+            "name": "cc-plugin-plugin-authoring",
+            "path": "builtin",
+            "source": "cc-plugin-plugin-authoring@builtin"
+          }
+        ],
+        "capabilities": [
+          "interrupt_receipt_v1",
+          "interrupt_cancel_queued_v1",
+          "interrupt_send_now_v1",
+          "interrupt_requeue_taken_v1",
+          "msg_lifecycle_v1",
+          "request_marker_lists_v1",
+          "lifecycle_wakeup_source_v1",
+          "sdk_mcp_tools_list_changed",
+          "sdk_mcp_manifests",
+          "mcp_read_resource_v1",
+          "mcp_tool_ui_meta_v1",
+          "ui_surface_v1",
+          "mcp_call_result_not_for_model_v1"
+        ],
+        "analytics_disabled": false,
+        "product_feedback_disabled": false,
+        "uuid": "7fd92516-b3e4-4ca0-93d3-214d9feae4ec",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-RBffQQ/memory/" },
+        "original_cwd": "$WORKTREE",
+        "additional_directories": [],
+        "messaging_socket_path": "/tmp/cc-socks/1834.sock",
+        "fast_mode_state": "off",
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "per_turn_effort_active": true,
+        "view_mode": "default"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:2/output",
+      "payload": {
+        "type": "assistant",
+        "message": {
+          "model": "claude-sonnet-5-5",
+          "id": "msg_011CgkLJ8JzDi9ZbYH37rQap",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01JbWzVyvW4TEX8jqQbgX74X",
+              "name": "Bash",
+              "input": { "command": "node wait.cjs" },
+              "caller": { "type": "direct" }
+            }
+          ],
+          "container": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "stop_details": null,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 14481,
+            "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
+            "output_tokens": 16,
+            "service_tier": "standard",
+            "inference_geo": "global",
+            "speed": "standard"
+          },
+          "diagnostics": null,
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
+        "uuid": "9105f598-cec3-4470-ad95-c2c97761c380",
+        "timestamp": "2026-11-05T19:28:31.143Z",
+        "request_id": "req_011CgkLJ85LvYADC4ccCe6e5"
+      }
+    },
+    { "type": "expect_outbound", "port": "claude:2", "payload": { "method": "interrupt" } },
+    { "type": "emit_inbound", "port": "claude:2/interrupt", "payload": null },
+    {
+      "type": "emit_inbound",
+      "port": "claude:2/output",
+      "payload": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "content": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+              "is_error": true,
+              "tool_use_id": "toolu_01JbWzVyvW4TEX8jqQbgX74X"
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
+        "uuid": "e5b27d36-0b55-4cd3-ad25-b973256ad366",
+        "timestamp": "2026-11-05T19:28:31.204Z",
+        "tool_use_result": "User rejected tool use",
+        "tool_result_meta": [
+          { "id": "toolu_01JbWzVyvW4TEX8jqQbgX74X", "non_execution_kind": "user-rejected" }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:2/output",
+      "payload": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [{ "type": "text", "text": "[Request interrupted by user for tool use]" }]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
+        "uuid": "19b52cab-c222-417c-80bb-34b4ec9c7476",
+        "timestamp": "2026-11-05T19:28:31.210Z"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:2/output",
+      "payload": {
+        "duration_api_ms": 4559,
+        "stop_reason": "tool_use",
+        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
+        "total_cost_usd": 0.004624100000000001,
+        "usage": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 14481,
+          "output_tokens": 53,
+          "output_tokens_details": { "thinking_tokens": 0 },
+          "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
+          "service_tier": "standard",
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
+          "inference_geo": "global",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        },
+        "modelUsage": {
+          "claude-sonnet-5-5": {
+            "inputTokens": 1228,
+            "outputTokens": 72,
+            "cacheReadInputTokens": 14481,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.004624100000000001,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 128000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 0,
+            "canonicalModel": "claude-sonnet-5-5",
+            "provider": "firstParty",
+            "costBasis": "list"
+          }
+        },
+        "permission_denials": [],
+        "terminal_reason": "aborted_tools",
+        "fast_mode_state": "off",
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "subagent_stats": {
+          "spawned": 0,
+          "requested": { "background": 0, "foreground": 0, "unset": 0 },
+          "started_in_background": 0,
+          "max_depth": 0,
+          "spawned_by_subagents": 0,
+          "completed": 0,
+          "failed": 0,
+          "killed": { "parent": 0, "user": 0, "system": 0 },
+          "refused": { "depth_limit": 0, "concurrency_limit": 0, "budget": 0 },
+          "by_type": {}
+        },
+        "safety_stops": 0,
+        "is_error": true,
+        "num_turns": 3,
+        "subtype": "error_during_execution",
+        "errors": ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"],
+        "type": "result",
+        "duration_ms": 3589,
+        "uuid": "cf482025-ac19-4f64-8fc3-2fed0efbe984",
+        "queued_turn_count": 0,
+        "result_index": 0,
+        "model_usage_since_last_result": {
+          "claude-sonnet-5-5": {
+            "inputTokens": 1228,
+            "outputTokens": 72,
+            "cacheReadInputTokens": 14481,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.004624100000000001,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 128000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 0,
+            "canonicalModel": "claude-sonnet-5-5",
+            "provider": "firstParty",
+            "costBasis": "list"
+          }
+        }
+      }
+    },
+    { "type": "expect_outbound", "port": "claude:2", "payload": { "method": "close" } },
     { "type": "expect_outbound", "port": "claude:1", "payload": { "method": "close" } }
   ]
 }

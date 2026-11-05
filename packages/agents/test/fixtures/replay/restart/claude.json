@@ -9,7 +9,8 @@
     "CODEX_HOME": "$CODEX_HOME",
     "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
-    "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+    "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
+    "CLAUDE_CONFIG_DIR": "$HOME/.claude"
   },
   "entries": [
     {
@@ -26,7 +27,8 @@
             "CODEX_HOME": "$CODEX_HOME",
             "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
             "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
-            "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+            "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
+            "CLAUDE_CONFIG_DIR": "$HOME/.claude"
           },
           "model": "claude-sonnet-5-5",
           "pathToClaudeCodeExecutable": "claude",
@@ -126,7 +128,7 @@
         "type": "system",
         "subtype": "init",
         "cwd": "$WORKTREE",
-        "session_id": "ac174ec4-40fc-4569-a08f-0261c2924675",
+        "session_id": "993d08a0-f558-4c50-af6a-82c464e49935",
         "tools": [
           "Task",
           "Bash",
@@ -264,11 +266,11 @@
         ],
         "analytics_disabled": false,
         "product_feedback_disabled": false,
-        "uuid": "096d0798-f9f4-4944-8979-182a5c0310d4",
-        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-pr9ny5/memory/" },
+        "uuid": "b766ada5-fb2d-442b-8d07-7069be803112",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-nf32oK/memory/" },
         "original_cwd": "$WORKTREE",
         "additional_directories": [],
-        "messaging_socket_path": "/tmp/cc-socks/7240.sock",
+        "messaging_socket_path": "/tmp/cc-socks/1750.sock",
         "fast_mode_state": "off",
         "fast_mode_disabled_reason": "sdk_opt_in_required",
         "per_turn_effort_active": true,
@@ -282,13 +284,13 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkGNFBcs4nYpNzaMF7zr",
+          "id": "msg_011CgkLHr1DC2JRXKZCpkKvy",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "tool_use",
-              "id": "toolu_01YKgACRM5Wcu8adqZdr7ggr",
+              "id": "toolu_01HNaVAsycniAZqy6FrYXpPT",
               "name": "Bash",
               "input": { "command": "node wait.cjs" },
               "caller": { "type": "direct" }
@@ -300,9 +302,9 @@
           "stop_details": null,
           "usage": {
             "input_tokens": 2,
-            "cache_creation_input_tokens": 4675,
+            "cache_creation_input_tokens": 4681,
             "cache_read_input_tokens": 10890,
-            "cache_creation": { "ephemeral_5m_input_tokens": 4675, "ephemeral_1h_input_tokens": 0 },
+            "cache_creation": { "ephemeral_5m_input_tokens": 4681, "ephemeral_1h_input_tokens": 0 },
             "output_tokens": 16,
             "service_tier": "standard",
             "inference_geo": "global",
@@ -312,10 +314,10 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "ac174ec4-40fc-4569-a08f-0261c2924675",
-        "uuid": "d1a5c18c-893b-4633-89a5-92131ec66982",
-        "timestamp": "2026-11-05T18:36:57.739Z",
-        "request_id": "req_011CgkGNEtkikSkhQ89FR5b8"
+        "session_id": "993d08a0-f558-4c50-af6a-82c464e49935",
+        "uuid": "9a4f2fae-c69d-4b18-b7d0-1af40b90001d",
+        "timestamp": "2026-11-05T19:28:30.536Z",
+        "request_id": "req_011CgkLHqkpkUoanv19hSgMN"
       }
     },
     { "type": "expect_outbound", "port": "claude:1", "payload": { "method": "interrupt" } },
@@ -335,13 +337,14 @@
             "CODEX_HOME": "$CODEX_HOME",
             "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
             "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
-            "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+            "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
+            "CLAUDE_CONFIG_DIR": "$HOME/.claude"
           },
           "model": "claude-sonnet-5-5",
           "pathToClaudeCodeExecutable": "claude",
           "permissionMode": "bypassPermissions",
           "persistSession": true,
-          "resume": "ac174ec4-40fc-4569-a08f-0261c2924675",
+          "resume": "993d08a0-f558-4c50-af6a-82c464e49935",
           "settingSources": ["user"],
           "effort": "low",
           "thinking": { "type": "adaptive" },
@@ -354,6 +357,7 @@
       }
     },
     { "type": "expect_outbound", "port": "claude:2", "payload": { "method": "supportedModels" } },
+    { "type": "runtime_exit", "port": "claude:1/output", "code": 0, "error": null },
     {
       "type": "emit_inbound",
       "port": "claude:2/supportedModels",
@@ -436,7 +440,7 @@
         "type": "system",
         "subtype": "init",
         "cwd": "$WORKTREE",
-        "session_id": "ac174ec4-40fc-4569-a08f-0261c2924675",
+        "session_id": "993d08a0-f558-4c50-af6a-82c464e49935",
         "tools": [
           "Task",
           "Bash",
@@ -574,18 +578,17 @@
         ],
         "analytics_disabled": false,
         "product_feedback_disabled": false,
-        "uuid": "5a09f4db-802a-4dee-a7da-e9d10a61a6f2",
-        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-pr9ny5/memory/" },
+        "uuid": "67413e74-1d74-4bda-b250-111114682e07",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-nf32oK/memory/" },
         "original_cwd": "$WORKTREE",
         "additional_directories": [],
-        "messaging_socket_path": "/tmp/cc-socks/7295.sock",
+        "messaging_socket_path": "/tmp/cc-socks/2001.sock",
         "fast_mode_state": "off",
         "fast_mode_disabled_reason": "sdk_opt_in_required",
         "per_turn_effort_active": true,
         "view_mode": "default"
       }
     },
-    { "type": "runtime_exit", "port": "claude:1/output", "code": 0, "error": null },
     {
       "type": "emit_inbound",
       "port": "claude:2/output",
@@ -593,13 +596,13 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkGNP4t8EREtjfdAsmBE",
+          "id": "msg_011CgkLJPL82FwzQUQm1VJhf",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "tool_use",
-              "id": "toolu_01As1gcL38LSZTyQg3X7jYBp",
+              "id": "toolu_01XH2VdKwrSzGvf5W2NBUw9z",
               "name": "Bash",
               "input": { "command": "node wait.cjs" },
               "caller": { "type": "direct" }
@@ -612,7 +615,7 @@
           "usage": {
             "input_tokens": 2,
             "cache_creation_input_tokens": 1392,
-            "cache_read_input_tokens": 15565,
+            "cache_read_input_tokens": 15571,
             "cache_creation": { "ephemeral_5m_input_tokens": 1392, "ephemeral_1h_input_tokens": 0 },
             "output_tokens": 17,
             "service_tier": "standard",
@@ -623,10 +626,10 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "ac174ec4-40fc-4569-a08f-0261c2924675",
-        "uuid": "9c21fab9-d910-4d6e-a48b-f074c1f4036d",
-        "timestamp": "2026-11-05T18:36:59.989Z",
-        "request_id": "req_011CgkGNNioHyNRm76WawCNY"
+        "session_id": "993d08a0-f558-4c50-af6a-82c464e49935",
+        "uuid": "65236e9a-17c9-416c-af20-1eb4421c0a4d",
+        "timestamp": "2026-11-05T19:28:33.715Z",
+        "request_id": "req_011CgkLJP8TYL95KFGXzuKHo"
       }
     },
     {
@@ -638,7 +641,7 @@
           "role": "user",
           "content": [
             {
-              "tool_use_id": "toolu_01As1gcL38LSZTyQg3X7jYBp",
+              "tool_use_id": "toolu_01XH2VdKwrSzGvf5W2NBUw9z",
               "type": "tool_result",
               "content": "(Bash completed with no output)",
               "is_error": false
@@ -646,9 +649,9 @@
           ]
         },
         "parent_tool_use_id": null,
-        "session_id": "ac174ec4-40fc-4569-a08f-0261c2924675",
-        "uuid": "10a2d632-a1f7-46b1-b4f9-0072ab2bb030",
-        "timestamp": "2026-11-05T18:37:00.060Z",
+        "session_id": "993d08a0-f558-4c50-af6a-82c464e49935",
+        "uuid": "013aae17-1991-4955-939f-d2f991c7ca25",
+        "timestamp": "2026-11-05T19:28:33.874Z",
         "tool_use_result": {
           "stdout": "",
           "stderr": "",
@@ -658,7 +661,7 @@
         },
         "tool_result_meta": [
           {
-            "id": "toolu_01As1gcL38LSZTyQg3X7jYBp",
+            "id": "toolu_01XH2VdKwrSzGvf5W2NBUw9z",
             "permission_decision": {
               "decision": "accept",
               "source": "config",
@@ -675,7 +678,7 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkGNXUQZpMpwH4irihkU",
+          "id": "msg_011CgkLJakThTodm9jnt2Ue8",
           "type": "message",
           "role": "assistant",
           "content": [{ "type": "text", "text": "REPLAY_DONE" }],
@@ -686,7 +689,7 @@
           "usage": {
             "input_tokens": 2,
             "cache_creation_input_tokens": 92,
-            "cache_read_input_tokens": 16957,
+            "cache_read_input_tokens": 16963,
             "cache_creation": { "ephemeral_5m_input_tokens": 92, "ephemeral_1h_input_tokens": 0 },
             "output_tokens": 11,
             "service_tier": "standard",
@@ -697,24 +700,24 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "ac174ec4-40fc-4569-a08f-0261c2924675",
-        "uuid": "164df24e-3877-4beb-8ba6-e4d21b5b18bc",
-        "timestamp": "2026-11-05T18:37:04.126Z",
-        "request_id": "req_011CgkGNX9JhLmQVxpysbt73"
+        "session_id": "993d08a0-f558-4c50-af6a-82c464e49935",
+        "uuid": "2c1d46ee-dadf-4d60-aac3-1c2611817e96",
+        "timestamp": "2026-11-05T19:28:36.062Z",
+        "request_id": "req_011CgkLJaY4Y28jDw4kwP7ug"
       }
     },
     {
       "type": "emit_inbound",
       "port": "claude:2/output",
       "payload": {
-        "duration_api_ms": 8307,
+        "duration_api_ms": 12461,
         "stop_reason": "end_turn",
-        "session_id": "ac174ec4-40fc-4569-a08f-0261c2924675",
-        "total_cost_usd": 0.0257347,
+        "session_id": "993d08a0-f558-4c50-af6a-82c464e49935",
+        "total_cost_usd": 0.0257509,
         "usage": {
           "input_tokens": 4,
           "cache_creation_input_tokens": 1484,
-          "cache_read_input_tokens": 32522,
+          "cache_read_input_tokens": 32534,
           "output_tokens": 64,
           "output_tokens_details": { "thinking_tokens": 0 },
           "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
@@ -730,12 +733,12 @@
             "inputTokens": 2323,
             "outputTokens": 135,
             "thinkingTokens": 0,
-            "cacheReadInputTokens": 43412,
-            "cacheCreationInputTokens": 6159,
-            "cacheCreationEphemeral5mInputTokens": 6159,
+            "cacheReadInputTokens": 43424,
+            "cacheCreationInputTokens": 6165,
+            "cacheCreationEphemeral5mInputTokens": 6165,
             "cacheCreationEphemeral1hInputTokens": 0,
             "webSearchRequests": 0,
-            "costUSD": 0.0257347,
+            "costUSD": 0.0257509,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
             "canonicalModel": "claude-sonnet-5-5",
@@ -765,23 +768,23 @@
         "subtype": "success",
         "api_error_status": null,
         "result": "REPLAY_DONE",
-        "ttft_ms": 1931,
+        "ttft_ms": 2562,
         "type": "result",
-        "duration_ms": 6074,
-        "uuid": "ab5688f4-26b9-4154-98a3-40852d844982",
-        "ttft_stream_ms": 1746,
-        "time_to_request_ms": 41,
-        "first_content_frame_ms": 1746,
+        "duration_ms": 4919,
+        "uuid": "9053d292-8936-4978-9492-ba1d68e91b39",
+        "ttft_stream_ms": 2372,
+        "time_to_request_ms": 78,
+        "first_content_frame_ms": 2372,
         "queued_turn_count": 0,
         "result_index": 0,
         "model_usage_since_last_result": {
           "claude-sonnet-5-5": {
             "inputTokens": 4,
             "outputTokens": 64,
-            "cacheReadInputTokens": 32522,
+            "cacheReadInputTokens": 32534,
             "cacheCreationInputTokens": 1484,
             "webSearchRequests": 0,
-            "costUSD": 0.007610200000000001,
+            "costUSD": 0.007611400000000001,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
             "thinkingTokens": 0,

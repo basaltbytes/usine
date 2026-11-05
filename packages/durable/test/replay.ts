@@ -7,7 +7,7 @@ import { Agent, AgentPersona } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
 import { RunSpec } from "@usine/core/attempt/channel";
 import { GatewayCredentialKind } from "@usine/core/worker";
-import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect";
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Schema } from "effect";
 import { openFixture, providers, recordingModel } from "../../agents/test/replay/fixture.ts";
 import { waitingPrompt, waitScript } from "../../agents/test/replay/scenarios.ts";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
@@ -90,13 +90,28 @@ export const restartReplays = (mode: "record" | "replay"): void => {
                 }),
               );
               yield* fs.writeFileString(`${fixture.cwd}/release`, "ready");
+              const homeVariable = provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
+              const tokenVariable = provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+              const gatewayToken = request.environment.USINE_GATEWAY_TOKEN;
+              const changedEnvironment = {
+                ...request.environment,
+                [homeVariable]: `${fixture.cwd}/unused-home`,
+              };
+              if (scenario === "credential-changed") {
+                assert(
+                  gatewayToken !== undefined,
+                  "credential-change recordings require a gateway caller token",
+                );
+                changedEnvironment[tokenVariable] = gatewayToken;
+              }
               const resumed =
                 scenario === "credential-changed"
                   ? AttemptRequest.make({
                       ...request,
+                      environment: changedEnvironment,
                       gatewayCredential: Effect.succeedSome(GatewayCredentialKind.make("api-key")),
                     })
-                  : request;
+                  : AttemptRequest.make({ ...request, environment: changedEnvironment });
               const report = yield* Effect.scoped(
                 Effect.gen(function* () {
                   const services = yield* Layer.build(runtime([answer("REPLAY_PARENT_DONE")]));
@@ -118,6 +133,39 @@ export const restartReplays = (mode: "record" | "replay"): void => {
               assert.lengthOf(starts, 2);
               assert.strictEqual(starts[0]?.session.id, starts[1]?.session.id);
               assert.deepStrictEqual(starts[0]?.harnessSession, starts[1]?.harnessSession);
+              const saved = starts[0]?.harnessSession;
+              assert(
+                saved !== undefined && Option.isSome(saved) && Option.isSome(saved.value.home),
+              );
+              const savedHome = saved.value.home.value;
+              const environmentSchema = Schema.Record(Schema.String, Schema.String);
+              const launchSchema = Schema.decodeUnknownOption(
+                Schema.Union([
+                  Schema.Struct({
+                    method: Schema.Literal("open"),
+                    options: Schema.Struct({ env: environmentSchema }),
+                  }),
+                  Schema.Struct({ env: environmentSchema }),
+                ]),
+              );
+              const environments = fixture.tape.entries.flatMap((entry) => {
+                if (entry.type !== "expect_outbound") return [];
+                const launch = launchSchema(entry.payload);
+                if (Option.isNone(launch)) return [];
+                return ["options" in launch.value ? launch.value.options.env : launch.value.env];
+              });
+              assert.lengthOf(environments, 2);
+              assert.strictEqual(
+                environments[1]?.[homeVariable],
+                fixture.tape.normalize(savedHome),
+              );
+              if (scenario === "credential-changed") {
+                assert.strictEqual(environments[0]?.[tokenVariable], undefined);
+                assert.strictEqual(
+                  environments[1]?.[tokenVariable],
+                  fixture.tape.normalize(changedEnvironment[tokenVariable] ?? ""),
+                );
+              }
               const child = starts[1]?.session;
               assert(child !== undefined);
               assert.deepStrictEqual(

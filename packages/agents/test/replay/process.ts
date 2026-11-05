@@ -6,6 +6,7 @@ import {
   Layer,
   Predicate,
   PlatformError,
+  Result,
   Schema,
   Sink,
   Stream,
@@ -28,8 +29,8 @@ const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json)
 const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
 
 // Supervisor frames wrap JSON-RPC bytes in base64. Store the decoded bytes so path and token
-// redaction also applies inside those frames.
-const decodeWire = (line: string) =>
+// redaction also applies inside those frames. Incomplete UTF-8 uses a lossless byte string.
+export const decodeWire = (line: string) =>
   Effect.gen(function* () {
     const payload = yield* decodeLine(line).pipe(Effect.orElseSucceed(() => line));
     if (!isJsonObject(payload)) return payload;
@@ -37,12 +38,22 @@ const decodeWire = (line: string) =>
     for (const [key, value] of Object.entries(payload)) {
       if ((key === "data" || key === "stdout" || key === "stderr") && Predicate.isString(value)) {
         const bytes = yield* Effect.fromResult(Base64.decode(value));
-        decoded[key] = { base64: new TextDecoder().decode(bytes) };
+        decoded[key] = Result.getOrElse(
+          Result.try({
+            try: () => ({
+              base64: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
+            }),
+            catch: () => ({
+              byteString: Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""),
+            }),
+          }),
+          (raw) => raw,
+        );
       } else decoded[key] = value;
     }
     return decoded;
   });
-const encodeWire = (payload: Schema.Json) => {
+export const encodeWire = (payload: Schema.Json) => {
   if (Predicate.isString(payload)) return Effect.succeed(payload);
   if (!isJsonObject(payload)) return encodeLine(payload);
   return encodeLine(
@@ -50,7 +61,9 @@ const encodeWire = (payload: Schema.Json) => {
       Object.entries(payload).map(([key, value]) =>
         isJsonObject(value) && Predicate.isString(value.base64)
           ? [key, Base64.encode(encoder.encode(value.base64))]
-          : [key, value],
+          : isJsonObject(value) && Predicate.isString(value.byteString)
+            ? [key, Base64.encode(Uint8Array.from(value.byteString, (char) => char.charCodeAt(0)))]
+            : [key, value],
       ),
     ),
   );

@@ -44,16 +44,6 @@
       }
     },
     {
-      "type": "expect_outbound",
-      "port": "process:1/stdin",
-      "payload": {
-        "sequence": 1,
-        "data": {
-          "base64": "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"usine\",\"title\":\"usine\",\"version\":\"0.0.1\"},\"capabilities\":null}}\n"
-        }
-      }
-    },
-    {
       "type": "emit_inbound",
       "port": "process:1/stdout",
       "payload": { "ready": true, "offset": 0 }
@@ -63,7 +53,7 @@
       "port": "process:1/stdout",
       "payload": {
         "stderr": {
-          "base64": "\u001b[2m2026-11-05T18:41:42.290782Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\n"
+          "base64": "\u001b[2m2026-11-05T19:28:27.723176Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\n"
         },
         "offset": 238
       }
@@ -75,7 +65,7 @@
         "stdout": {
           "base64": "{\"id\":1,\"result\":{\"userAgent\":\"usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)\",\"codexHome\":\"$CODEX_HOME\",\"platformFamily\":\"unix\",\"platformOs\":\"linux\"}}\n"
         },
-        "offset": 576
+        "offset": 592
       }
     },
     {
@@ -83,9 +73,19 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"configWarning\",\"params\":{\"summary\":\"Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\",\"details\":null},\"emittedAtMs\":1793904102293}\n{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"box-node-7fa8779128fd65fa\",\"installationId\":\"234da117-cd45-4452-8cc5-76dae6e71052\",\"environmentId\":null},\"emittedAtMs\":1793904102293}\n"
+          "base64": "{\"method\":\"configWarning\",\"params\":{\"summary\":\"Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\",\"details\":null},\"emittedAtMs\":1793906907729}\n"
         },
-        "offset": 1118
+        "offset": 842
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"usine-worker-1\",\"installationId\":\"c29e70b3-22c3-4081-a4a1-04748493899f\",\"environmentId\":null},\"emittedAtMs\":1793906907729}\n"
+        },
+        "offset": 1136
       }
     },
     {
@@ -113,7 +113,7 @@
         "stdout": {
           "base64": "{\"id\":2,\"result\":{\"data\":[{\"id\":\"gpt-6.1-sol\",\"model\":\"gpt-6.1-sol\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":{\"message\":\"Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.\"},\"displayName\":\"GPT-6.1-Sol\",\"description\":\"Latest workhorse model for coding and everyday work.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"2x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":true},{\"id\":\"gpt-6-astra\",\"model\":\"gpt-6-astra\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"GPT-6-Astra\",\"description\":\"Frontier intelligence for the most demanding work.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"2x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-6-sol\",\"model\":\"gpt-6-sol\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"GPT-6-Sol\",\"description\":\"Previous generation workhorse model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed\"}],\"defaultServiceTier\":\"priority\",\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-6-luna\",\"model\":\"gpt-6-luna\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"GPT-6-Luna\",\"description\":\"Fast and affordable model for easier tasks.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed\"}],\"defaultServiceTier\":\"priority\",\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.6-sol\",\"model\":\"gpt-5.6-sol\",\"upgrade\":\"gpt-6-sol\",\"upgradeInfo\":{\"model\":\"gpt-6-sol\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Sol\\n\\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.6-Sol\",\"description\":\"Older generation workhorse model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.6-terra\",\"model\":\"gpt-5.6-terra\",\"upgrade\":\"gpt-6-sol\",\"upgradeInfo\":{\"model\":\"gpt-6-sol\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Sol\\n\\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.6-Terra\",\"description\":\"Older balanced model for straightforward work.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.6-luna\",\"model\":\"gpt-5.6-luna\",\"upgrade\":\"gpt-6-luna\",\"upgradeInfo\":{\"model\":\"gpt-6-luna\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Luna\\n\\nOur latest Luna is significantly more efficient, so your usage limits go even further. Reach for it for any job that doesn't require frontier intelligence.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.6-Luna\",\"description\":\"Older fast and efficient model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v1\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-daybreak-blue-latest\",\"model\":\"gpt-daybreak-blue-latest\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"Daybreak Blue\",\"description\":\"Latest frontier agentic coding model for broad defensive cybersecurity work.\",\"modelSpecialty\":\"cyber\",\"hidden\":true,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[],\"serviceTiers\":[],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-daybreak-red-latest\",\"model\":\"gpt-daybreak-red-latest\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"Daybreak Red\",\"description\":\"Cyber-permissive variant of our latest frontier agentic coding model for advanced, authorized cybersecurity research.\",\"modelSpecialty\":\"cyber\",\"hidden\":true,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[],\"serviceTiers\":[],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.5\",\"model\":\"gpt-5.5\",\"upgrade\":\"gpt-6-sol\",\"upgradeInfo\":{\"model\":\"gpt-6-sol\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Sol\\n\\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.5\",\"description\":\"Legacy coding model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":null,\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"codex-auto-review\",\"model\":\"codex-auto-review\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"Codex Auto Review\",\"description\":\"Automatic approval review model for Codex.\",\"modelSpecialty\":null,\"hidden\":true,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v1\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false}],\"nextCursor\":null}}\n"
         },
-        "offset": 18564
+        "offset": 18582
       }
     },
     {
@@ -131,9 +131,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"id\":3,\"result\":{\"thread\":{\"id\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793904102,\"updatedAt\":1793904102,\"recencyAt\":1793904102,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T18-41-42-01a1ad04-4bc7-7402-a421-7966a8e79bb2.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]},\"model\":\"gpt-5.6-terra\",\"modelProvider\":\"usine-gateway\",\"serviceTier\":null,\"disabledPluginIds\":[],\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"],\"instructionSources\":[],\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"dangerFullAccess\"},\"activePermissionProfile\":null,\"reasoningEffort\":null,\"multiAgentMode\":\"explicitRequestOnly\"}}\n"
+          "base64": "{\"id\":3,\"result\":{\"thread\":{\"id\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793906907,\"updatedAt\":1793906907,\"recencyAt\":1793906907,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-27-01a1ad2f-1a85-7973-b81a-14328e40df66.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]},\"model\":\"gpt-5.6-terra\",\"modelProvider\":\"usine-gateway\",\"serviceTier\":null,\"disabledPluginIds\":[],\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"],\"instructionSources\":[],\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"dangerFullAccess\"},\"activePermissionProfile\":null,\"reasoningEffort\":null,\"multiAgentMode\":\"explicitRequestOnly\"}}\n{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793906907,\"updatedAt\":1793906907,\"recencyAt\":1793906907,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-27-01a1ad2f-1a85-7973-b81a-14328e40df66.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]}},\"emittedAtMs\":1793906907805}\n"
         },
-        "offset": 20466
+        "offset": 21948
       }
     },
     {
@@ -142,7 +142,7 @@
       "payload": {
         "sequence": 5,
         "data": {
-          "base64": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"input\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
+          "base64": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"input\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
         }
       }
     },
@@ -151,9 +151,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793904102,\"updatedAt\":1793904102,\"recencyAt\":1793904102,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T18-41-42-01a1ad04-4bc7-7402-a421-7966a8e79bb2.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]}},\"emittedAtMs\":1793904102349}\n"
+          "base64": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"rootTurnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":null,\"completedAt\":null,\"durationMs\":null}}}\n"
         },
-        "offset": 21912
+        "offset": 22294
       }
     },
     {
@@ -161,9 +161,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"rootTurnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":null,\"completedAt\":null,\"durationMs\":null}}}\n"
+          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"active\",\"activeFlags\":[]}},\"emittedAtMs\":1793906907854}\n"
         },
-        "offset": 22258
+        "offset": 22532
       }
     },
     {
@@ -171,9 +171,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"status\":{\"type\":\"active\",\"activeFlags\":[]}},\"emittedAtMs\":1793904102373}\n"
+          "base64": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turn\":{\"id\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"rootTurnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":1793906907,\"completedAt\":null,\"durationMs\":null}},\"emittedAtMs\":1793906907854}\n"
         },
-        "offset": 22496
+        "offset": 23014
       }
     },
     {
@@ -181,9 +181,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turn\":{\"id\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"rootTurnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":1793904102,\"completedAt\":null,\"durationMs\":null}},\"emittedAtMs\":1793904102373}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-1ae0-73c0-8073-1f33c3194282\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"startedAtMs\":1793906907874},\"emittedAtMs\":1793906907874}\n"
         },
-        "offset": 22978
+        "offset": 23712
       }
     },
     {
@@ -191,9 +191,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad04-4be9-7271-a37a-8d0afb8ecfe8\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"startedAtMs\":1793904102377},\"emittedAtMs\":1793904102377}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-1ae0-73c0-8073-1f33c3194282\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"completedAtMs\":1793906907874},\"emittedAtMs\":1793906907885}\n"
         },
-        "offset": 23676
+        "offset": 24414
       }
     },
     {
@@ -201,9 +201,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad04-4be9-7271-a37a-8d0afb8ecfe8\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"completedAtMs\":1793904102377},\"emittedAtMs\":1793904102378}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8de6cfc87d298f235661f50e534\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"startedAtMs\":1793906910455},\"emittedAtMs\":1793906910455}\n"
         },
-        "offset": 24378
+        "offset": 24836
       }
     },
     {
@@ -211,9 +211,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_0de38029ff1c994c016aeccde8d19c87d2b24d622ee738e00b\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"startedAtMs\":1793904104866},\"emittedAtMs\":1793904104866}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8de6cfc87d298f235661f50e534\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"completedAtMs\":1793906910836},\"emittedAtMs\":1793906910840}\n"
         },
-        "offset": 24800
+        "offset": 25266
       }
     },
     {
@@ -221,36 +221,16 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_0de38029ff1c994c016aeccde8d19c87d2b24d622ee738e00b\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"completedAtMs\":1793904105007},\"emittedAtMs\":1793904105008}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-d98af463-d4e5-4a21-bb01-128459395a24\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40206\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":null,\"durationMs\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"startedAtMs\":1793906912229},\"emittedAtMs\":1793906912232}\n"
         },
-        "offset": 25230
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:1/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-dad4d8f3-5897-4b97-8473-013c2aa1b819\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"81116\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":null,\"durationMs\":null},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"startedAtMs\":1793904106381},\"emittedAtMs\":1793904106384}\n"
-        },
-        "offset": 26016
+        "offset": 26052
       }
     },
     { "type": "expect_outbound", "port": "scenario", "payload": { "method": "drop" } },
     {
       "type": "emit_inbound",
       "port": "process:1/stdout",
-      "payload": {
-        "stderr": {
-          "base64": "\u001b[2m2026-11-05T18:41:46.413082Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_core::session\u001b[0m\u001b[2m:\u001b[0m failed to record rollout items: thread 01a1ad04-4bc7-7402-a421-7966a8e79bb2 not found\n"
-        },
-        "offset": 26262
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:1/stdout",
-      "payload": { "exitCode": 0, "offset": 26277 }
+      "payload": { "exitCode": 0, "offset": 26067 }
     },
     {
       "type": "expect_outbound",
@@ -309,16 +289,6 @@
       }
     },
     {
-      "type": "expect_outbound",
-      "port": "process:3/stdin",
-      "payload": {
-        "sequence": 1,
-        "data": {
-          "base64": "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"usine\",\"title\":\"usine\",\"version\":\"0.0.1\"},\"capabilities\":null}}\n"
-        }
-      }
-    },
-    {
       "type": "emit_inbound",
       "port": "process:3/stdout",
       "payload": { "ready": true, "offset": 0 }
@@ -328,7 +298,7 @@
       "port": "process:3/stdout",
       "payload": {
         "stderr": {
-          "base64": "\u001b[2m2026-11-05T18:41:46.555864Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\n"
+          "base64": "\u001b[2m2026-11-05T19:28:32.581292Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\n"
         },
         "offset": 238
       }
@@ -340,7 +310,7 @@
         "stdout": {
           "base64": "{\"id\":1,\"result\":{\"userAgent\":\"usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)\",\"codexHome\":\"$CODEX_HOME\",\"platformFamily\":\"unix\",\"platformOs\":\"linux\"}}\n"
         },
-        "offset": 576
+        "offset": 592
       }
     },
     {
@@ -348,7 +318,7 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"configWarning\",\"params\":{\"summary\":\"Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\",\"details\":null},\"emittedAtMs\":1793904106558}\n{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"box-node-7fa8779128fd65fa\",\"installationId\":\"234da117-cd45-4452-8cc5-76dae6e71052\",\"environmentId\":null},\"emittedAtMs\":1793904106558}\n"
+          "base64": "{\"method\":\"configWarning\",\"params\":{\"summary\":\"Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\",\"details\":null},\"emittedAtMs\":1793906912590}\n{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"usine-worker-1\",\"installationId\":\"c29e70b3-22c3-4081-a4a1-04748493899f\",\"environmentId\":null},\"emittedAtMs\":1793906912590}\n"
         },
         "offset": 1118
       }
@@ -367,7 +337,7 @@
       "payload": {
         "sequence": 3,
         "data": {
-          "base64": "{\"id\":2,\"method\":\"thread/resume\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"model\":\"gpt-5.6-terra\",\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandbox\":\"danger-full-access\",\"excludeTurns\":false}}\n"
+          "base64": "{\"id\":2,\"method\":\"thread/resume\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"model\":\"gpt-5.6-terra\",\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandbox\":\"danger-full-access\",\"excludeTurns\":false}}\n"
         }
       }
     },
@@ -376,7 +346,7 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"deprecationNotice\",\"params\":{\"summary\":\"Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`, then page with `thread/turns/list` and `thread/items/list`.\",\"details\":null},\"emittedAtMs\":1793904106586}\n"
+          "base64": "{\"method\":\"deprecationNotice\",\"params\":{\"summary\":\"Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`, then page with `thread/turns/list` and `thread/items/list`.\",\"details\":null},\"emittedAtMs\":1793906912635}\n"
         },
         "offset": 1456
       }
@@ -386,7 +356,7 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"status\":{\"type\":\"idle\"}},\"emittedAtMs\":1793904106600}\n"
+          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"idle\"}},\"emittedAtMs\":1793906912694}\n"
         },
         "offset": 1670
       }
@@ -396,9 +366,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793904102,\"updatedAt\":1793904106,\"recencyAt\":1793904102,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T18-41-42-01a1ad04-4bc7-7402-a421-7966a8e79bb2.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[{\"id\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"rootTurnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"items\":[{\"type\":\"userMessage\",\"id\":\"01a1ad04-4be9-7271-a37a-8d0afb8ecfe8\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},{\"type\":\"reasoning\",\"id\":\"rs_0de38029ff1c994c016aeccde8d19c87d2b24d622ee738e00b\",\"summary\":[],\"content\":[]},{\"type\":\"commandExecution\",\"id\":\"exec-dad4d8f3-5897-4b97-8473-013c2aa1b819\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"81116\",\"source\":\"unifiedExecStartup\",\"status\":\"failed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":-1,\"durationMs\":28}],\"itemsView\":\"full\",\"status\":\"interrupted\",\"error\":null,\"startedAt\":1793904102,\"completedAt\":1793904106,\"durationMs\":4041}]},\"model\":\"gpt-5.6-terra\",\"modelProvider\":\"usine-gateway\",\"serviceTier\":null,\"disabledPluginIds\":[],\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"],\"instructionSources\":[],\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"dangerFullAccess\"},\"activePermissionProfile\":null,\"reasoningEffort\":null,\"collaborationMode\":{\"mode\":\"default\",\"settings\":{\"model\":\"gpt-5.6-terra\",\"reasoning_effort\":null,\"developer_instructions\":null}},\"multiAgentMode\":\"explicitRequestOnly\",\"initialTurnsPage\":null,\"turnsBackwardsCursor\":\"{\\\"requestedThreadId\\\":\\\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\\\",\\\"rolloutOrdinal\\\":1,\\\"includeAnchor\\\":true,\\\"scope\\\":{\\\"kind\\\":\\\"turns\\\"}}\",\"itemsBackwardsCursor\":\"{\\\"requestedThreadId\\\":\\\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\\\",\\\"rolloutOrdinal\\\":21,\\\"includeAnchor\\\":true,\\\"scope\\\":{\\\"kind\\\":\\\"itemsByCreatedAtOrdinal\\\"}}\"}}\n"
+          "base64": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793906907,\"updatedAt\":1793906912,\"recencyAt\":1793906907,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-27-01a1ad2f-1a85-7973-b81a-14328e40df66.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[{\"id\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"rootTurnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"items\":[{\"type\":\"userMessage\",\"id\":\"01a1ad2f-1ae0-73c0-8073-1f33c3194282\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8de6cfc87d298f235661f50e534\",\"summary\":[],\"content\":[]},{\"type\":\"commandExecution\",\"id\":\"exec-d98af463-d4e5-4a21-bb01-128459395a24\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40206\",\"source\":\"unifiedExecStartup\",\"status\":\"failed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":-1,\"durationMs\":41}],\"itemsView\":\"full\",\"status\":\"interrupted\",\"error\":null,\"startedAt\":1793906907,\"completedAt\":1793906912,\"durationMs\":4433}]},\"model\":\"gpt-5.6-terra\",\"modelProvider\":\"usine-gateway\",\"serviceTier\":null,\"disabledPluginIds\":[],\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"],\"instructionSources\":[],\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"dangerFullAccess\"},\"activePermissionProfile\":null,\"reasoningEffort\":null,\"collaborationMode\":{\"mode\":\"default\",\"settings\":{\"model\":\"gpt-5.6-terra\",\"reasoning_effort\":null,\"developer_instructions\":null}},\"multiAgentMode\":\"explicitRequestOnly\",\"initialTurnsPage\":null,\"turnsBackwardsCursor\":\"{\\\"requestedThreadId\\\":\\\"01a1ad2f-1a85-7973-b81a-14328e40df66\\\",\\\"rolloutOrdinal\\\":1,\\\"includeAnchor\\\":true,\\\"scope\\\":{\\\"kind\\\":\\\"turns\\\"}}\",\"itemsBackwardsCursor\":\"{\\\"requestedThreadId\\\":\\\"01a1ad2f-1a85-7973-b81a-14328e40df66\\\",\\\"rolloutOrdinal\\\":21,\\\"includeAnchor\\\":true,\\\"scope\\\":{\\\"kind\\\":\\\"itemsByCreatedAtOrdinal\\\"}}\"}}\n{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"tokenUsage\":{\"total\":{\"totalTokens\":9634,\"inputTokens\":9525,\"cachedInputTokens\":7936,\"cacheWriteInputTokens\":0,\"outputTokens\":109,\"reasoningOutputTokens\":46},\"last\":{\"totalTokens\":9634,\"inputTokens\":9525,\"cachedInputTokens\":7936,\"cacheWriteInputTokens\":0,\"outputTokens\":109,\"reasoningOutputTokens\":46},\"modelContextWindow\":258400}},\"emittedAtMs\":1793906912698}\n"
         },
-        "offset": 5836
+        "offset": 6528
       }
     },
     {
@@ -406,19 +376,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-4be0-7873-a9a4-bc1308771d6d\",\"tokenUsage\":{\"total\":{\"totalTokens\":9611,\"inputTokens\":9514,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":97,\"reasoningOutputTokens\":36},\"last\":{\"totalTokens\":9611,\"inputTokens\":9514,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":97,\"reasoningOutputTokens\":36},\"modelContextWindow\":258400}},\"emittedAtMs\":1793904106601}\n"
+          "base64": "{\"method\":\"thread/goal/cleared\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\"},\"emittedAtMs\":1793906912699}\n"
         },
-        "offset": 6526
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/goal/cleared\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\"},\"emittedAtMs\":1793904106601}\n"
-        },
-        "offset": 6704
+        "offset": 6706
       }
     },
     {
@@ -427,7 +387,7 @@
       "payload": {
         "sequence": 4,
         "data": {
-          "base64": "{\"id\":3,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"input\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
+          "base64": "{\"id\":3,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"input\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
         }
       }
     },
@@ -436,9 +396,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"id\":3,\"result\":{\"turn\":{\"id\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"rootTurnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":null,\"completedAt\":null,\"durationMs\":null}}}\n"
+          "base64": "{\"id\":3,\"result\":{\"turn\":{\"id\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"rootTurnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":null,\"completedAt\":null,\"durationMs\":null}}}\n"
         },
-        "offset": 7050
+        "offset": 7052
       }
     },
     {
@@ -446,9 +406,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"status\":{\"type\":\"active\",\"activeFlags\":[]}},\"emittedAtMs\":1793904106638}\n"
+          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"active\",\"activeFlags\":[]}},\"emittedAtMs\":1793906912750}\n"
         },
-        "offset": 7288
+        "offset": 7290
       }
     },
     {
@@ -456,9 +416,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turn\":{\"id\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"rootTurnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":1793904106,\"completedAt\":null,\"durationMs\":null}},\"emittedAtMs\":1793904106638}\n"
+          "base64": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turn\":{\"id\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"rootTurnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":1793906912,\"completedAt\":null,\"durationMs\":null}},\"emittedAtMs\":1793906912750}\n"
         },
-        "offset": 7770
+        "offset": 7772
       }
     },
     {
@@ -466,9 +426,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad04-5c90-7f82-85fd-e7eb2f2a4921\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"startedAtMs\":1793904106641},\"emittedAtMs\":1793904106641}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-2dfa-7150-b0ef-d7be5551b78b\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906912764},\"emittedAtMs\":1793906912764}\n"
         },
-        "offset": 8396
+        "offset": 8398
       }
     },
     {
@@ -476,9 +436,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad04-5c90-7f82-85fd-e7eb2f2a4921\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"completedAtMs\":1793904106641},\"emittedAtMs\":1793904106641}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-2dfa-7150-b0ef-d7be5551b78b\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906912764},\"emittedAtMs\":1793906912771}\n"
         },
-        "offset": 9026
+        "offset": 9028
       }
     },
     {
@@ -486,9 +446,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_0de38029ff1c994c016aeccdee5e1c87d28965a348fd927f2c\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"startedAtMs\":1793904110415},\"emittedAtMs\":1793904110415}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8e422b087d2a60a3fa26dfe33a7\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906916159},\"emittedAtMs\":1793906916159}\n"
         },
-        "offset": 9448
+        "offset": 9450
       }
     },
     {
@@ -496,9 +456,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_0de38029ff1c994c016aeccdee5e1c87d28965a348fd927f2c\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"completedAtMs\":1793904110555},\"emittedAtMs\":1793904110556}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8e422b087d2a60a3fa26dfe33a7\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906916360},\"emittedAtMs\":1793906916363}\n"
         },
-        "offset": 9878
+        "offset": 9880
       }
     },
     {
@@ -506,9 +466,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"text\":\"\",\"phase\":\"commentary\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"startedAtMs\":1793904110556},\"emittedAtMs\":1793904110556}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-235edf41-697f-47f3-87ae-87954cd669e0\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40425\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":null,\"durationMs\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906917630},\"emittedAtMs\":1793906917633}\n"
         },
-        "offset": 10388
+        "offset": 10666
       }
     },
     {
@@ -516,9 +476,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\"The\"},\"emittedAtMs\":1793904110556}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" prior\"},\"emittedAtMs\":1793904110556}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" command\"},\"emittedAtMs\":1793904110556}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-235edf41-697f-47f3-87ae-87954cd669e0\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40425\",\"source\":\"unifiedExecStartup\",\"status\":\"completed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":0,\"durationMs\":0},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906917630},\"emittedAtMs\":1793906917635}\n"
         },
-        "offset": 11430
+        "offset": 11448
       }
     },
     {
@@ -526,9 +486,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" was\"},\"emittedAtMs\":1793904110699}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" aborted\"},\"emittedAtMs\":1793904110699}\n"
+          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"tokenUsage\":{\"total\":{\"totalTokens\":19504,\"inputTokens\":19252,\"cachedInputTokens\":16896,\"cacheWriteInputTokens\":0,\"outputTokens\":252,\"reasoningOutputTokens\":126},\"last\":{\"totalTokens\":9870,\"inputTokens\":9727,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":143,\"reasoningOutputTokens\":80},\"modelContextWindow\":258400}},\"emittedAtMs\":1793906917654}\n"
         },
-        "offset": 12132
+        "offset": 12146
       }
     },
     {
@@ -536,9 +496,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" before\"},\"emittedAtMs\":1793904110699}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" it\"},\"emittedAtMs\":1793904110699}\n"
+          "base64": "{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":67,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793906917654}\n"
         },
-        "offset": 12830
+        "offset": 12720
       }
     },
     {
@@ -546,9 +506,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" produced\"},\"emittedAtMs\":1793904110874}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" a\"},\"emittedAtMs\":1793904110874}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"text\":\"\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906919070},\"emittedAtMs\":1793906919070}\n"
         },
-        "offset": 13528
+        "offset": 13230
       }
     },
     {
@@ -556,9 +516,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" result\"},\"emittedAtMs\":1793904110874}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\".\"},\"emittedAtMs\":1793904110874}\n"
+          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"itemId\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"delta\":\"RE\"},\"emittedAtMs\":1793906919070}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"itemId\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"delta\":\"PLAY\"},\"emittedAtMs\":1793906919070}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"itemId\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"delta\":\"_DONE\"},\"emittedAtMs\":1793906919070}\n"
         },
-        "offset": 14222
+        "offset": 14264
       }
     },
     {
@@ -566,9 +526,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" I\"},\"emittedAtMs\":1793904110996}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906919147},\"emittedAtMs\":1793906919150}\n"
         },
-        "offset": 14576
+        "offset": 14794
       }
     },
     {
@@ -576,9 +536,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\"’ll\"},\"emittedAtMs\":1793904110998}\n"
+          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"tokenUsage\":{\"total\":{\"totalTokens\":29437,\"inputTokens\":29178,\"cachedInputTokens\":25856,\"cacheWriteInputTokens\":0,\"outputTokens\":259,\"reasoningOutputTokens\":126},\"last\":{\"totalTokens\":9933,\"inputTokens\":9926,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":7,\"reasoningOutputTokens\":0},\"modelContextWindow\":258400}},\"emittedAtMs\":1793906919161}\n"
         },
-        "offset": 14934
+        "offset": 15488
       }
     },
     {
@@ -586,9 +546,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" rer\"},\"emittedAtMs\":1793904110998}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\"un\"},\"emittedAtMs\":1793904110998}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" the\"},\"emittedAtMs\":1793904110998}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" required\"},\"emittedAtMs\":1793904110998}\n"
+          "base64": "{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":67,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793906919161}\n"
         },
-        "offset": 16312
+        "offset": 16062
       }
     },
     {
@@ -596,139 +556,9 @@
       "port": "process:3/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" command\"},\"emittedAtMs\":1793904111079}\n"
+          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"idle\"}},\"emittedAtMs\":1793906919175}\n{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turn\":{\"id\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"rootTurnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"items\":[{\"type\":\"agentMessage\",\"id\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null}],\"itemsView\":\"summary\",\"status\":\"completed\",\"error\":null,\"startedAt\":1793906912,\"completedAt\":1793906919,\"durationMs\":6423}},\"emittedAtMs\":1793906919175}\n"
         },
-        "offset": 16674
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" and\"},\"emittedAtMs\":1793904111079}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" wait\"},\"emittedAtMs\":1793904111079}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" for\"},\"emittedAtMs\":1793904111079}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\" completion\"},\"emittedAtMs\":1793904111079}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"delta\":\".\"},\"emittedAtMs\":1793904111079}\n"
-        },
-        "offset": 18396
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_0de38029ff1c994c016aeccdee831887d2a6a8e54368369d7f\",\"text\":\"The prior command was aborted before it produced a result. I’ll rerun the required command and wait for completion.\",\"phase\":\"commentary\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"completedAtMs\":1793904111468},\"emittedAtMs\":1793904111469}\n"
-        },
-        "offset": 19066
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-265c7b4b-179c-4a62-8615-cd4d23dfeaeb\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"20558\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":null,\"durationMs\":null},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"startedAtMs\":1793904112627},\"emittedAtMs\":1793904112628}\n"
-        },
-        "offset": 19852
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-265c7b4b-179c-4a62-8615-cd4d23dfeaeb\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"20558\",\"source\":\"unifiedExecStartup\",\"status\":\"completed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":0,\"durationMs\":0},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"completedAtMs\":1793904112627},\"emittedAtMs\":1793904112628}\n"
-        },
-        "offset": 20634
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"tokenUsage\":{\"total\":{\"totalTokens\":19500,\"inputTokens\":19218,\"cachedInputTokens\":17920,\"cacheWriteInputTokens\":0,\"outputTokens\":282,\"reasoningOutputTokens\":130},\"last\":{\"totalTokens\":9889,\"inputTokens\":9704,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":185,\"reasoningOutputTokens\":94},\"modelContextWindow\":258400}},\"emittedAtMs\":1793904112644}\n"
-        },
-        "offset": 21332
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":66,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793904112644}\n"
-        },
-        "offset": 21906
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_0de38029ff1c994c016aeccdf26cac87d2881ce5259124ca78\",\"text\":\"\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"startedAtMs\":1793904114474},\"emittedAtMs\":1793904114474}\n"
-        },
-        "offset": 22416
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdf26cac87d2881ce5259124ca78\",\"delta\":\"RE\"},\"emittedAtMs\":1793904114474}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdf26cac87d2881ce5259124ca78\",\"delta\":\"PLAY\"},\"emittedAtMs\":1793904114474}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"itemId\":\"msg_0de38029ff1c994c016aeccdf26cac87d2881ce5259124ca78\",\"delta\":\"_DONE\"},\"emittedAtMs\":1793904114474}\n"
-        },
-        "offset": 23450
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_0de38029ff1c994c016aeccdf26cac87d2881ce5259124ca78\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"completedAtMs\":1793904114541},\"emittedAtMs\":1793904114542}\n"
-        },
-        "offset": 23980
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"tokenUsage\":{\"total\":{\"totalTokens\":29451,\"inputTokens\":29162,\"cachedInputTokens\":26880,\"cacheWriteInputTokens\":0,\"outputTokens\":289,\"reasoningOutputTokens\":130},\"last\":{\"totalTokens\":9951,\"inputTokens\":9944,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":7,\"reasoningOutputTokens\":0},\"modelContextWindow\":258400}},\"emittedAtMs\":1793904114609}\n"
-        },
-        "offset": 24674
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":66,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793904114609}\n"
-        },
-        "offset": 25248
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"status\":{\"type\":\"idle\"}},\"emittedAtMs\":1793904114611}\n"
-        },
-        "offset": 25462
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"01a1ad04-4bc7-7402-a421-7966a8e79bb2\",\"turn\":{\"id\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"rootTurnId\":\"01a1ad04-5c8b-7e73-ba9b-89a82dd50470\",\"items\":[{\"type\":\"agentMessage\",\"id\":\"msg_0de38029ff1c994c016aeccdf26cac87d2881ce5259124ca78\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null}],\"itemsView\":\"summary\",\"status\":\"completed\",\"error\":null,\"startedAt\":1793904106,\"completedAt\":1793904114,\"durationMs\":7972}},\"emittedAtMs\":1793904114611}\n"
-        },
-        "offset": 26196
+        "offset": 16996
       }
     },
     {
@@ -740,7 +570,7 @@
     {
       "type": "emit_inbound",
       "port": "process:3/stdout",
-      "payload": { "exitCode": 0, "offset": 26211 }
+      "payload": { "exitCode": 0, "offset": 17011 }
     },
     {
       "type": "expect_outbound",

@@ -137,6 +137,7 @@ export class Tape {
       this.fail(cause);
       throw cause;
     }
+    this.entries.push({ type: "expect_outbound", port, payload });
     this.#cursor += 1;
     this.#pump();
   }

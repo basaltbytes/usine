@@ -33,6 +33,15 @@ export const scenarios: ReadonlyArray<Scenario> = [
 export const recordingModel = (provider: Provider): string | undefined =>
   env[`USINE_${provider.toUpperCase()}_INTEGRATION_MODEL`];
 
+export const recordingPid = (provider: Provider, savedPid: string): number => {
+  const pid = Number(savedPid);
+  assert(
+    Number.isSafeInteger(pid) && (provider === "claude" ? pid > 0 : pid < -1),
+    "pid file contains the expected process or process-group ID",
+  );
+  return pid;
+};
+
 const fixtureFile = (provider: Provider, scenario: Scenario) =>
   fileURLToPath(new URL(`../fixtures/replay/${scenario}/${provider}.json`, import.meta.url));
 const environmentKeys = [
@@ -79,6 +88,9 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
     if (source !== "record" && env.PATH !== undefined && environment.PATH !== undefined) {
       tape.bind(env.PATH, "$PATH");
       environment.PATH = env.PATH;
+    }
+    if (provider === "claude" && (scenario === "restart" || scenario === "credential-changed")) {
+      environment.CLAUDE_CONFIG_DIR ??= `${environment.HOME}/.claude`;
     }
     const model = source === "record" ? recordingModel(provider) : source.model;
     assert(model !== undefined, "set the integration model to record traffic");
@@ -152,7 +164,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
       tape.outbound("scenario", { method: "drop" });
       if (mode !== "record") return;
       const savedPid = yield* fs.readFileString(childPidFile(cwd, request.session.id));
-      const pid = Number(savedPid);
+      const pid = recordingPid(provider, savedPid);
       if (provider === "claude") {
         yield* fs.writeFileString(`${cwd}/drop`, "drop");
         process.kill(pid, "SIGKILL");
@@ -167,6 +179,26 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
     });
     const save = Effect.gen(function* () {
       tape.assertComplete();
+      if (scenario === "interrupt-guidance") {
+        const traffic = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          tape.entries,
+        );
+        assert.include(traffic, provider === "claude" ? '"method":"interrupt"' : "turn/interrupt");
+      }
+      if (provider === "codex" && scenario === "transport-loss") {
+        const sequences = new Map<string, Set<number>>();
+        for (const entry of tape.entries) {
+          if (entry.type !== "expect_outbound") continue;
+          const frame = Schema.decodeUnknownOption(Schema.Struct({ sequence: Schema.Int }))(
+            entry.payload,
+          );
+          if (Option.isNone(frame)) continue;
+          const seen = sequences.get(entry.port) ?? new Set<number>();
+          assert(!seen.has(frame.value.sequence), "a relay sends each input sequence once");
+          seen.add(frame.value.sequence);
+          sequences.set(entry.port, seen);
+        }
+      }
       if (mode !== "record") return;
       const transcript = {
         protocol: provider === "claude" ? "claude-sdk" : "codex-app-server",

@@ -68,6 +68,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     yield* Effect.annotateCurrentSpan(fields);
     const cursor = yield* Ref.get(offset);
     const replay = [...history];
+    const replayed = new Set(replay);
     const handle = yield* spawner.spawn(
       hostCommand(
         client.host,
@@ -81,9 +82,10 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
           detached: false,
           forceKillAfter: "5 seconds",
           stdin: {
-            stream: Stream.concat(Stream.fromIterable(replay), Stream.fromQueue(outgoing)).pipe(
-              Stream.map((line) => encoder.encode(`${line}\n`)),
-            ),
+            stream: Stream.concat(
+              Stream.fromIterable(replay),
+              Stream.fromQueue(outgoing).pipe(Stream.filter((line) => !replayed.has(line))),
+            ).pipe(Stream.map((line) => encoder.encode(`${line}\n`))),
             endOnDone: false,
           },
         },
