@@ -601,6 +601,12 @@ export const fakeMachine = () => {
             0,
           )
         : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
+    if (line.includes('rm -rf "$1"') && line.includes("retained")) {
+      const home = remoteWords(line).at(-2) ?? "";
+      if (state.attemptHomes.get(home) === true) return oneShotHandle("retained", 0);
+      state.attemptHomes.delete(home);
+      return oneShotHandle("removed", 0);
+    }
     // Lists the Codex homes whose Attempt has no checkout.
     if (line.includes("basename")) {
       const listed = [...state.attemptHomes].filter(([, checkout]) => !checkout);

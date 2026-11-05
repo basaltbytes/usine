@@ -889,7 +889,9 @@ describe("Provisioned SSH Worker", () => {
         const currentGatewayCredential = yield* given.gatewayCredential;
         assert.deepStrictEqual(currentGatewayCredential, Option.some("api-key"));
         assert.isTrue(
-          machine.state.calls.some(({ line }) => line === `exec 'rm' '-rf' '${CODEX_HOME}'`),
+          machine.state.calls.some(
+            ({ line }) => line.includes('rm -rf "$1"') && line.includes(CODEX_HOME),
+          ),
           "the Attempt's Codex home is removed",
         );
         yield* machines.release(grant.hold);
