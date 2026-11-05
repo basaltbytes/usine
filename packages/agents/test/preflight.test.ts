@@ -421,6 +421,7 @@ describe("worker harness readiness", () => {
       });
       const started: PiStartResult = {
         _tag: "Started",
+        harnessSession: Option.none(),
         model: piBrain.model,
         pool,
         tools: [],
@@ -442,6 +443,7 @@ describe("worker harness readiness", () => {
         assert.deepStrictEqual(available, HarnessReady.make({ harness: Harness.make("pi") }));
         assert.strictEqual(disposed, 1);
         assert.strictEqual(options?.model, piBrain.model);
+        assert.deepStrictEqual(options?.storage, { _tag: "InMemory" });
         // The session's bash tool would run with the worker's environment, not this process's.
         assert.deepStrictEqual(options?.environment, Option.some(workerEnvironment));
       }).pipe(

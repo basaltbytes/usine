@@ -62,12 +62,17 @@ const TokenRates = Schema.Struct({
   output: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
+/** A session behavior supported by a harness. */
+export const HarnessCapability = Schema.Literals(["resume-session"]);
+export type HarnessCapability = typeof HarnessCapability.Type;
+
 /** Platform-free harness data shared by configuration, workers, and operator reads. */
 export class HarnessDescriptor extends Schema.Class<
   HarnessDescriptor,
   Brand.Brand<"@usine/agents/harness/HarnessDescriptor">
 >("@usine/agents/HarnessDescriptor")({
   ...HarnessPresentation.fields,
+  capabilities: Schema.Array(HarnessCapability).check(Schema.isUnique()),
   worker: WorkerRequirements,
   /** None when the harness supplies its own prices. */
   prices: Schema.Option(Schema.Record(Schema.String, TokenRates)),

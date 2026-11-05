@@ -25,6 +25,7 @@ const check = Effect.fn("PiRuntime.check")(function* (brain: BrainSpec, target: 
     (signal) =>
       sdk.start({
         cwd: homedir(),
+        storage: { _tag: "InMemory" },
         environment: Option.some(environment),
         extensions: [],
         model: brain.model,

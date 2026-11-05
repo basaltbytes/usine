@@ -35,3 +35,9 @@ Every child and its commands get exactly the attempt's environment, because the 
 The runtime includes the stored rendered loop task unchanged in every child's initial prompt. This includes edit-and-retry amendments. The parent's `subagent.task` argument supplies supplemental context or a focused assignment within that task; conflicting parent context does not replace the task's instructions.
 
 The durable runtime records the exact child prompt on `SessionStarted.prompt`, alongside saved harness session metadata. The run page displays it in the attempt details, including when the launch is outside the loaded transcript page. Older transcripts omit the prompt.
+
+## Amendment (2026-11-05, #959): saved Pi child conversations
+
+Pi children persist conversations in a session directory under each attempt checkout and expose an explicit resume operation by saved Pi ID. This makes a child conversation available after its process exits, while keeping the files with the attempt that owns them. `SessionStarted.harnessSession` records the ID and directory, and the Pi descriptor declares `resume-session`. Preflight probes remain in memory because they have no conversation to continue.
+
+The October restart rule for the durable `subagent` call still applies: an in-flight call ends as interrupted after an orchestrator restart. Persisting a Pi conversation and resuming it through the Pi runtime does not replay that call. Durable child reattachment is tracked in #976.
