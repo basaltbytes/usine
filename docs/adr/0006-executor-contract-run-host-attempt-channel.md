@@ -160,3 +160,11 @@ The executor reads credential provider mappings, login file mounts, and login eg
 `Harnesses` pairs each platform-free descriptor with one Node runtime. Registration fails for a descriptor without a runtime, a runtime without a descriptor, or duplicate runtime IDs. Child dispatch selects the runtime by harness ID. Each runtime owns preflight and launch, so gateway, injected-key, and Cloudflare checks use the same binary and version policies as host-login checks. Host-login routes also verify authentication. Claude versions remain unpinned, Codex retains its accepted version list, and Pi remains local-only.
 
 `HostLoginLock` replaces `ClaudeLoginLock` and keys locks by harness, worker, and provisioned machine. Claude’s runtime takes its lock for authentication checks and child startup. Keeping the lock inside the runtime removes the executor’s harness branch while preserving serialization of commands that can refresh the same login. The executor and attempt runtime share one lock service.
+
+## Amendment (2026-11-05, #977): child recovery stops with the attempt channel
+
+An orderly restart detached attempt channels and released worker credentials while harness children still consumed output in the durable harness's scope. Codex interpreted the resulting relay exits as crashes, resumed saved threads over the closing transport, and reported infrastructure failures.
+
+The existing channel attachment owns the child lifecycle signal. The durable tool supplies the optional `ChildSessionLifecycle` service to each backend launch, comparing the attachment that supplied the child's host with the current attachment. Detachment makes the signal true before executor resources close; a later attachment cannot reactivate an older child. `RunningSession.interrupt` remains an operator control, and `RunEngineShutdown` remains an engine admission latch, so neither carries this per-attachment state. Direct backend callers without the service retain their existing behavior.
+
+Codex skips reconnect, thread resume, EOF, remote process stops, and journal removal while stopping. Claude Code skips recovery, including after a pending retry delay. Shared child failure reporting suppresses shutdown errors for Codex, Claude Code, and Pi. Real transport failures while the channel is attached retain their existing recovery and typed failure behavior.

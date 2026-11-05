@@ -6,7 +6,7 @@ import { childPidFile, type RemoteShell, SSH_FAILURE } from "../../child-host/ch
 import { hostCommand, hostOutput } from "../../child-host/command.ts";
 import { type CodexClient, operationError } from "./connection.ts";
 import { CODEX_SUPERVISOR } from "./supervisor.ts";
-import { SessionOperationError } from "../../runtime.ts";
+import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
 
 export class RemoteCodexProcessLost extends Schema.TaggedError<
   RemoteCodexProcessLost,
@@ -35,6 +35,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
   args: ReadonlyArray<string>,
   input: Stream.Stream<Uint8Array>,
 ) {
+  const lifecycle = yield* ChildSessionLifecycle.current;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const stdout = yield* Queue.make<Uint8Array, SessionOperationError | Cause.Done>();
   const stderr = yield* Queue.make<Uint8Array, SessionOperationError | Cause.Done>();
@@ -137,37 +138,42 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     });
     return code;
   });
-  const stopRemote = hostOutput(client.host, {
-    command: "node",
-    args: ["-e", CODEX_SUPERVISOR, "stop", pidFile, "0"],
-    environment: client.environment,
-  }).pipe(
-    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-    Effect.flatMap((result) =>
-      result.exitCode === 0
-        ? Effect.void
-        : operationError(
-            "interrupt",
-            client,
-            "Could not confirm the remote Codex process group stopped",
-            { exitCode: result.exitCode },
-          ),
-    ),
-    Effect.tap(() => Effect.logInfo("Confirmed the remote Codex process group stopped", fields)),
-    Effect.mapError((cause) =>
-      Schema.is(SessionOperationError)(cause)
-        ? cause
-        : operationError(
-            "interrupt",
-            client,
-            "Could not stop the remote Codex process group",
-            cause,
-          ),
-    ),
-  );
+  const stopRemote = Effect.gen(function* () {
+    if (yield* lifecycle.isStopping) return;
+    yield* hostOutput(client.host, {
+      command: "node",
+      args: ["-e", CODEX_SUPERVISOR, "stop", pidFile, "0"],
+      environment: client.environment,
+    }).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.flatMap((result) =>
+        result.exitCode === 0
+          ? Effect.void
+          : operationError(
+              "interrupt",
+              client,
+              "Could not confirm the remote Codex process group stopped",
+              { exitCode: result.exitCode },
+            ),
+      ),
+      Effect.tap(() => Effect.logInfo("Confirmed the remote Codex process group stopped", fields)),
+      Effect.mapError((cause) =>
+        Schema.is(SessionOperationError)(cause)
+          ? cause
+          : operationError(
+              "interrupt",
+              client,
+              "Could not stop the remote Codex process group",
+              cause,
+            ),
+      ),
+    );
+  });
   const monitor = yield* Effect.gen(function* () {
     while (!(yield* Deferred.isDone(exit))) {
+      if (yield* lifecycle.isStopping) return yield* Effect.never;
       const code = yield* Effect.scoped(relay());
+      if (yield* lifecycle.isStopping) return yield* Effect.never;
       if (yield* Deferred.isDone(exit)) break;
       if (code !== SSH_FAILURE)
         return yield* operationError(
@@ -197,9 +203,11 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
         : operationError("stream", client, "Could not reattach the remote Codex app-server", cause),
     ),
     Effect.catchTag("SessionOperationError", (error) =>
-      Schema.is(RemoteCodexProcessLost)(error.cause)
-        ? stopRemote.pipe(Effect.andThen(error))
-        : error,
+      Effect.gen(function* () {
+        if (yield* lifecycle.isStopping) return yield* Effect.never;
+        if (Schema.is(RemoteCodexProcessLost)(error.cause)) yield* stopRemote;
+        return yield* error;
+      }),
     ),
     Effect.tapError((error) =>
       Effect.logWarning("Remote Codex transport failed", {
@@ -218,26 +226,32 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     Effect.forkScoped,
   );
   yield* Effect.addFinalizer(() =>
-    hostOutput(client.host, {
-      command: "node",
-      args: ["-e", CODEX_SUPERVISOR, "remove", pidFile, "0"],
-      environment: client.environment,
-    }).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.timeout("5 seconds"),
-      Effect.tap((result) =>
-        Effect.logDebug(
-          result.exitCode === 0
-            ? "Removed remote Codex transport journals"
-            : "Kept remote Codex transport journals while its supervisor is live",
-          fields,
+    Effect.gen(function* () {
+      if (yield* lifecycle.isStopping) return;
+      yield* hostOutput(client.host, {
+        command: "node",
+        args: ["-e", CODEX_SUPERVISOR, "remove", pidFile, "0"],
+        environment: client.environment,
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.timeout("5 seconds"),
+        Effect.tap((result) =>
+          Effect.logDebug(
+            result.exitCode === 0
+              ? "Removed remote Codex transport journals"
+              : "Kept remote Codex transport journals while its supervisor is live",
+            fields,
+          ),
         ),
-      ),
-      Effect.tapError((cause) =>
-        Effect.logWarning("Could not remove remote Codex transport journals", { ...fields, cause }),
-      ),
-      Effect.ignore,
-    ),
+        Effect.tapError((cause) =>
+          Effect.logWarning("Could not remove remote Codex transport journals", {
+            ...fields,
+            cause,
+          }),
+        ),
+        Effect.ignore,
+      );
+    }),
   );
   const kill = () => stopRemote.pipe(Effect.andThen(Fiber.interrupt(monitor)));
 
