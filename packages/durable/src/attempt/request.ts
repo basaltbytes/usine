@@ -23,7 +23,12 @@ export const attemptIdOf = (input: JsonValue): Option.Option<AttemptId> =>
 
 export const taskInput = (request: AttemptRequest) =>
   encodeStored(
-    StoredRequest.make({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
+    StoredRequest.make({
+      spec: request.spec,
+      worker: request.worker,
+      cwd: request.cwd,
+      coordinatorCredential: Option.isSome(request.modelGateway) ? "gateway" : "host-login",
+    }),
   );
 
 /** Decodes a stored task input. Dies on a malformed input, since only this package writes it. */

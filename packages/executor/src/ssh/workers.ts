@@ -41,6 +41,7 @@ export class SshWorkers extends Context.Service<
 
 interface HeldForward {
   readonly forward: GatewayForward;
+  readonly llmForward: Effect.Effect<GatewayForward>;
   readonly scope: Scope.Closeable;
   readonly workers: ReadonlySet<WorkerName>;
 }
@@ -161,7 +162,16 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       settings.destination,
       settings.adminPort,
     ).pipe(Scope.provide(forwardScope));
-    return { forward, scope: forwardScope };
+    const llmForward = yield* Effect.cached(
+      gatewayForwardFor(
+        spawner,
+        commands.shellFor(base, settings.destination),
+        settings.destination,
+        80,
+        "model proxy",
+      ).pipe(Scope.provide(forwardScope)),
+    );
+    return { forward, llmForward, scope: forwardScope };
   });
 
   /** Returns the Gateway for `address`'s machine with the forward it shares or opens, and the updated forwards. */
@@ -172,9 +182,11 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   ) {
     const key = forwardKey(settings);
     const shared = Option.fromNullishOr(current.forwards.get(key));
-    const { forward, scope: forwardScope } = Option.isSome(shared)
-      ? shared.value
-      : yield* openForward(settings);
+    const {
+      forward,
+      llmForward,
+      scope: forwardScope,
+    } = Option.isSome(shared) ? shared.value : yield* openForward(settings);
     const admin = yield* gatewayAdminFor(address.name, settings, forward).pipe(
       Effect.provideService(HttpClient.HttpClient, http),
     );
@@ -193,10 +205,16 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
           egress: Option.isSome(tailnetOf(address)) ? "direct" : "proxy",
         },
         forward,
+        llmForward,
         admin,
         credentials,
       } satisfies MachineGateway,
-      forwards: new Map(current.forwards).set(key, { forward, scope: forwardScope, workers }),
+      forwards: new Map(current.forwards).set(key, {
+        forward,
+        llmForward,
+        scope: forwardScope,
+        workers,
+      }),
       opened: Option.isNone(shared),
     };
   });

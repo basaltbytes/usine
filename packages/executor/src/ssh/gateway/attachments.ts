@@ -1,3 +1,5 @@
+import { HttpClient } from "effect/http";
+import { PiGateway, PiGatewayConnectionError } from "@usine/agents/pi/gateway";
 import type { HarnessCatalog } from "@usine/agents/harness";
 import { Harnesses } from "@usine/agents/harness/node";
 import { reclaimOnceFor } from "../../remote/reclaim.ts";
@@ -80,6 +82,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
   holdAttemptHome: AttemptHomes["hold"],
   onDetachFailure: (machine: SshMachine) => Effect.Effect<void>,
 ) {
+  const httpClient = yield* HttpClient.HttpClient;
   const { catalog } = yield* Harnesses;
   const provider = yield* CredentialProvider;
   const active = new Set<AttachmentId>();
@@ -311,7 +314,22 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       ...directories,
       callerToken,
     });
+    const proxyForward = yield* gateway.llmForward;
+    const modelGateway = PiGateway.make({
+      httpClient,
+      baseUrl: proxyForward.current.pipe(
+        Effect.catchTag("GatewayForwardClosed", (closed) => proxyForward.reopen(closed.generation)),
+        Effect.mapBoth({
+          onSuccess: (open) => open.url.origin,
+          onFailure: (cause) => PiGatewayConnectionError.make({ message: cause.reason }),
+        }),
+      ),
+      host: `llm.${settings.domain}`,
+      callerToken,
+      credentials: yield* Ref.get(gateway.credentials),
+    });
     return {
+      modelGateway,
       shell: sendingShell(machine.shell, sent),
       secrets: sent,
       apiKeyHarnesses: new Set(),

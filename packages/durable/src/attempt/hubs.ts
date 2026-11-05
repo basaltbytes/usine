@@ -120,7 +120,7 @@ export interface AttemptHubs {
   /**
    * Completes when an `execute` call is relaying the Attempt, even if the hub doesn't exist yet.
    */
-  readonly attached: (attemptId: AttemptId) => Effect.Effect<void>;
+  readonly attached: (attemptId: AttemptId) => Effect.Effect<AttemptRequest>;
   /**
    * Returns the Attempts whose `execute` a storage failure ended since the last call, and forgets
    * them.
@@ -271,7 +271,7 @@ export const attemptHubs = Effect.gen(function* () {
         const kept = awaited.get(attemptId) ?? Deferred.makeUnsafe<AttemptRequest>();
         awaited.set(attemptId, kept);
         return Deferred.await(kept);
-      }).pipe(Effect.asVoid),
+      }),
     listener,
   } satisfies AttemptHubs;
 });

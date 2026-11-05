@@ -62,6 +62,10 @@
     "./harness/node": {
       "types": "./dist/harness/node.d.ts",
       "default": "./dist/harness/node.js"
+    },
+    "./pi/gateway": {
+      "types": "./dist/harness/pi/gateway.d.ts",
+      "default": "./dist/harness/pi/gateway.js"
     }
   },
   "publishConfig": {

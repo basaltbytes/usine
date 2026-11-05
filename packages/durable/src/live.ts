@@ -5,9 +5,10 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import type { Harnesses } from "@usine/agents/harness/node";
 import type { ChildBackend } from "@usine/agents/runtime";
 import { childDispatcherLayer } from "@usine/agents/children";
+import type { WorkerName } from "@usine/core/worker";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
-import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
+import { layerWithGateways } from "./attempt/runtime.ts";
 import {
   type DurableHarnessOptions,
   durableError,
@@ -71,8 +72,11 @@ export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = ch
  * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every
  * unfinished Attempt.
  */
-export const layer = (instanceDirectory: InstanceDirectory) =>
-  attemptRuntimeLayer.pipe(
+export const layer = (
+  instanceDirectory: InstanceDirectory,
+  gatewayWorkers: ReadonlyArray<WorkerName> = [],
+) =>
+  layerWithGateways(gatewayWorkers).pipe(
     Layer.provideMerge(harnessLayer(instanceDirectory)),
     Layer.provide(childBackendLayer),
   );

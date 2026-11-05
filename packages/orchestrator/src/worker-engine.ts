@@ -1,3 +1,4 @@
+import type { SshExecutorOptions } from "@usine/executor/ssh";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import type { RunDatabase, TranscriptCodec } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
@@ -26,6 +27,7 @@ export const workerEngineLayer = (
     RunDatabase | StepOutputStore | TranscriptCodec,
     EnginePersistenceError
   > = localSqliteLayer(instanceDirectory),
+  coordinator: Pick<SshExecutorOptions, "coordinatorPreflight"> = {},
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -53,6 +55,7 @@ export const workerEngineLayer = (
           config,
           brains,
           {
+            ...coordinator,
             workers: [],
             instance,
             instanceId,

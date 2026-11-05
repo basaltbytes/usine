@@ -214,6 +214,15 @@ export const fakeGateway = (
                     : `connect ECONNREFUSED 127.0.0.1:${String(port)}`,
               }),
             });
+          if (request.headers.host === "llm.gw.test") {
+            return HttpServerResponse.toClientResponse(
+              HttpServerResponse.empty({
+                status: 401,
+                headers: { "x-usine-gateway-refusal": "missing-caller-token" },
+              }),
+              { request },
+            );
+          }
           const detached = path.slice("/v1/attachments/".length);
           if (request.method === "DELETE" && switches.refusedDetaches.has(detached))
             return HttpServerResponse.toClientResponse(
@@ -266,7 +275,7 @@ export const gatewayRuntime = (
     readonly storage?: StubStorage;
     readonly harnesses?: typeof harnessesLive;
     /** Replaces the executor's own login and binary checks; the Gateway's checks still run. */
-    readonly probes?: Pick<SshExecutorOptions, "harnessReadiness">;
+    readonly probes?: Pick<SshExecutorOptions, "harnessReadiness" | "coordinatorPreflight">;
   } = {},
 ) =>
   executorLayer(

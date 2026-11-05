@@ -96,6 +96,7 @@ export class DurableHarness extends Context.Service<
   DurableHarness,
   {
     readonly models: Models;
+    readonly installModels: (models: Models) => Effect.Effect<void>;
     readonly defaultModel: Option.Option<ModelRef>;
     /**
      * Installs or replaces an extension. Conversations that select it use the new code from their
@@ -179,6 +180,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
   const fork = Effect.runForkWith(services);
   const scope = yield* Effect.scope;
   const registry = createRegistry();
+  let models = options.models;
   const listeners = new Set<HarnessListener>();
   let resumed = Option.none<BeforeResume>();
   let finalizing = false;
@@ -252,7 +254,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
         Harness.open(
           storage,
           {
-            models: options.models,
+            models: () => models,
             registry,
             settings: { restartLimit: Infinity },
             onReport: (error) => report(generation, error),
@@ -464,6 +466,10 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
 
   return DurableHarness.of({
     models: options.models,
+    installModels: (next) =>
+      Effect.sync(() => {
+        models = next;
+      }),
     defaultModel: options.defaultModel,
     install: (extension) =>
       Effect.sync(() => registry.install(extension)).pipe(

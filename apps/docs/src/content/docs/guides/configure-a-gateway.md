@@ -57,8 +57,12 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 
 ## Check the result
 
-Preflight reaches the admin API and the gateway from the worker. A test attempt receives a caller token and uses `git.gw.internal` and `llm.gw.internal`. Its run page attributes usage to the configured API key or subscription plan.
+Preflight reaches the admin API, checks the coordinator’s provider credential and model proxy from the orchestrator, and checks the gateway from the worker. A test attempt receives a caller token and uses `git.gw.internal` and `llm.gw.internal`. Its run page attributes usage to the configured API key or subscription plan.
 
 The executor manages its own admin API forward; omit `LocalForward` from the gateway SSH alias. A private Hetzner worker reaches the gateway only. A Boat worker uses [the Tailscale connection procedure](/guides/connect-boat-to-a-gateway/). A long-lived worker outside the private network uses [worker-level tailnet settings](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
 Gateway slots use wire protocols. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic Messages API and `openai-responses` for the OpenAI Responses API or a ChatGPT login. Upgrade the gateway first, then the orchestrator. For one release, the gateway accepts the previous `/anthropic` and `/openai` prefixes and logs a deprecation warning so running attempts can finish. A gateway without credential reporting fails preflight with an instruction to upgrade `@usine/gateway`. Credential environment-variable names stay the same. See the [worker reference](/reference/configuration/workers/#gateway).
+
+The attempt’s Pi coordinator uses the gateway’s credentials through an SSH forward and the attempt’s caller token. The orchestrator host needs no provider login. Set `parent_model` in the instance settings or agent frontmatter to `openai-codex/<model>` for a ChatGPT subscription, `openai/<model>` for an OpenAI API key, or `anthropic/<model>` for an Anthropic API key. Include the matching wire protocol in the worker’s `gateway.llm_providers`. Pi cannot use a Claude subscription token; Claude Code children can.
+
+Coordinator usage counts under `chatgptPlan` for a gateway ChatGPT login or `apiKeys` for an API key. After an orchestrator restart, the coordinator waits for its attempt’s gateway attachment before making model requests. Workers without a gateway keep the coordinator’s local Pi login.

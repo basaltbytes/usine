@@ -438,3 +438,5 @@ Run `pnpm --filter @usine/orchestrator check` after building dependencies to che
 ## Step outputs
 
 Worker compositions share the engine's `StepOutputStore` with the runtime database. Custom database layers provide both `RunDatabase` and `StepOutputStore`, allowing recovered completions to store documents before attempt success. Operator run projections continue to use output refs from the stored step result.
+
+SSH gateway preflight validates every configured coordinator model against the worker’s gateway credential kinds. A missing credential reports the provider before an attempt starts. The Pi coordinator uses the gateway’s login with an attempt caller token, so the orchestrator host needs no provider login for gateway workers. Runtime startup restores unfinished gateway parents before resuming durable tasks; they wait for reattachment before sending model requests. Without a gateway, coordinators use the local Pi login.

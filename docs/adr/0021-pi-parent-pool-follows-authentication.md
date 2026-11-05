@@ -25,3 +25,7 @@ Preflight accepts a supported Pi credential on a local worker, and child launch 
 The parent previously resolved its pool from authentication at launch, then inferred it again from the model prefix for accounting. An API-key credential for an `openai-codex` model could therefore appear in the ChatGPT plan pool. Parent and child sessions now record the resolved pool at launch. The durable parent record preserves it for transcript relay after a restart.
 
 Usage reads the recorded pool. One compatibility rule infers the pool only for sessions recorded before this field existed. API-key sessions also record the selected endpoint's provider name when available, including OpenAI-compatible endpoints and local models. The endpoint name contains no URL or credential.
+
+## Amendment (2026-11-05, #961): resolve gateway parents from the gateway credential
+
+A coordinator on the orchestrator previously read its own Pi login even when the worker used a gateway. That left two independent credential sources for one attempt and required a second subscription login. Gateway parents now use their attempt’s renewable caller token for generation and compaction. The gateway retains the real API key or ChatGPT login. The coordinator’s pool follows the gateway’s reported credential kind, including after reattachment, rather than local Pi authentication. Without a gateway, the local-login rule still applies.

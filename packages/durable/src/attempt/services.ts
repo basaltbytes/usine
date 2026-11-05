@@ -1,3 +1,4 @@
+import type { WorkerName } from "@usine/core/worker";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import type { ChildBackend } from "@usine/agents/runtime";
 import type { Effect, Option } from "effect";
@@ -5,6 +6,7 @@ import type { AttemptHubs } from "./hubs.ts";
 
 /** The runtime services that the usine extension's tool and task use. */
 export interface ExtensionServices {
+  readonly gatewayWorkers: ReadonlySet<WorkerName>;
   readonly hubs: AttemptHubs;
   readonly backend: ChildBackend["Service"];
   readonly defaultModel: Option.Option<ModelRef>;

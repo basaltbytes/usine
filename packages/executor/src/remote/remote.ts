@@ -1017,6 +1017,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                   provisioned.gitHooks,
                 ),
                 gatewayCredential,
+                modelGateway: access.modelGateway,
                 harvest: (windows) => harvest(prepared, access, shell, windows),
                 readOutputs: readOutputs(
                   prepared.spec,

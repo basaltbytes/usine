@@ -34,7 +34,7 @@ export interface OpenForward {
 }
 
 /**
- * The error for a closed admin API forward, whose SSH client didn't open or exited. `since` is
+ * The error for a closed gateway forward, whose SSH client didn't open or exited. `since` is
  * when the Gateway became unreachable, and `reason` is the SSH client's error.
  */
 export class GatewayForwardClosed extends Schema.TaggedError<
@@ -48,7 +48,7 @@ export class GatewayForwardClosed extends Schema.TaggedError<
 }) {}
 
 /**
- * An SSH forward from a local port to a Gateway's admin API (ADR 0027, amendment of
+ * An SSH forward from a local port to a Gateway service (ADR 0027, amendment of
  * 2026-10-19). It opens with the first Worker behind the Gateway, reopens after a pause when
  * its client exits, and closes with the last Worker or the executor.
  */
@@ -140,7 +140,7 @@ const pauseAfter = (failures: number): number =>
   Math.min(1000 * 2 ** Math.max(failures - 1, 0), MAX_PAUSE_MILLIS);
 
 /**
- * Opens a forward to the admin API at `adminPort` on `gateway`, using the SSH client and
+ * Opens a forward to a gateway service at `remotePort` on `gateway`, using the SSH client and
  * environment of `shell`, and keeps it open until the caller's scope closes. Each client
  * listens on a kernel-picked port of 127.0.0.1, so it never conflicts with an operator's
  * forward.
@@ -149,11 +149,12 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   shell: Pick<RemoteShell, "ssh" | "sshEnvironment">,
   gateway: SshDestination,
-  adminPort: GatewayAdminPort,
+  remotePort: GatewayAdminPort | 80,
+  service: "admin API" | "model proxy" = "admin API",
 ) {
-  const fields = { gateway, adminPort };
+  const fields = { gateway, remotePort, service };
   yield* Effect.annotateCurrentSpan(fields);
-  const forwardSpec = (port: number) => `127.0.0.1:${String(port)}:127.0.0.1:${String(adminPort)}`;
+  const forwardSpec = (port: number) => `127.0.0.1:${String(port)}:127.0.0.1:${String(remotePort)}`;
   const command = [
     shell.ssh.command,
     ...shell.ssh.args,
@@ -161,7 +162,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
     "-o",
     "ExitOnForwardFailure=yes",
     "-L",
-    forwardSpec(adminPort),
+    forwardSpec(remotePort),
     gateway,
   ].join(" ");
   const argumentsFor = (port: number) => [
@@ -200,7 +201,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
       return notOpened(`no free port on 127.0.0.1: ${picked.failure.message}`);
     const port = picked.success;
     yield* Effect.annotateCurrentSpan({ port });
-    yield* Effect.logDebug("Starting an SSH client for the forward to the Gateway's admin API", {
+    yield* Effect.logDebug(`Starting an SSH client for the forward to the Gateway's ${service}`, {
       ...fields,
       generation: generation.number,
       port,
@@ -246,13 +247,13 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
         yield* Deferred.succeed(generation.opened, open);
         yield* Option.match(closedSince, {
           onNone: () =>
-            Effect.logInfo("Opened the forward to the Gateway's admin API", {
+            Effect.logInfo(`Opened the forward to the Gateway's ${service}`, {
               ...fields,
               generation: generation.number,
               port,
             }),
           onSome: (since) =>
-            Effect.logInfo("Reopened the forward to the Gateway's admin API", {
+            Effect.logInfo(`Reopened the forward to the Gateway's ${service}`, {
               ...fields,
               generation: generation.number,
               port,
@@ -309,7 +310,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
         failures = 0;
         closedSince = Option.some(now);
         yield* Effect.logInfo(
-          "Replacing the forward to the Gateway's admin API, which a request found unanswered",
+          `Replacing the forward to the Gateway's ${service}, which a request found unanswered`,
           { ...fields, generation: generation.number },
         );
       } else {
@@ -327,8 +328,8 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
         yield* Deferred.fail(generation.opened, closed);
         yield* Effect.logWarning(
           end._tag === "Exited"
-            ? "The forward to the Gateway's admin API exited; reopening it after a pause"
-            : "Could not open the forward to the Gateway's admin API; trying again after a pause",
+            ? `The forward to the Gateway's ${service} exited; reopening it after a pause`
+            : `Could not open the forward to the Gateway's ${service}; trying again after a pause`,
           {
             ...fields,
             generation: generation.number,
@@ -342,7 +343,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
           Effect.as("request"),
           Effect.timeoutOrElse({ duration: pause, orElse: () => Effect.succeed("pause elapsed") }),
         );
-        yield* Effect.logInfo("Reopening the forward to the Gateway's admin API", {
+        yield* Effect.logInfo(`Reopening the forward to the Gateway's ${service}`, {
           ...fields,
           generation: generation.number + 1,
           closedSince: DateTime.formatIso(since),
@@ -357,7 +358,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
   });
   yield* supervise.pipe(
     Effect.onInterrupt(() =>
-      Effect.logInfo("Closed the forward to the Gateway's admin API", fields),
+      Effect.logInfo(`Closed the forward to the Gateway's ${service}`, fields),
     ),
     Effect.forkScoped,
   );
@@ -396,7 +397,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
     const now = yield* Ref.get(state);
     if (now.generation.number !== generation) {
       yield* Effect.logDebug(
-        "Another request replaced the forward to the Gateway's admin API already",
+        `Another request replaced the forward to the Gateway's ${service} already`,
         { ...fields, generation, current: now.generation.number },
       );
       return yield* current;

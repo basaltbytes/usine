@@ -21,7 +21,9 @@ import { Effect, Option, Result } from "effect";
 import { durableError } from "../harness.ts";
 import { AttemptRecordDoc } from "./documents.ts";
 import type { EndedAttempt } from "./hubs.ts";
-import { attemptIdOf } from "./request.ts";
+import { parentProviderSession } from "./models.ts";
+import type { WorkerName } from "@usine/core/worker";
+import { attemptIdOf, storedRequestOf } from "./request.ts";
 import { ATTEMPT_TASK } from "./task.ts";
 
 const call = <A>(operation: string, run: () => Promise<A>) =>
@@ -246,3 +248,42 @@ export const abortEndedAttempts: (
     );
   }
 });
+
+/** Routes unfinished parents through their configured gateways before tasks resume. */
+export const routeGatewayParents = (
+  harness: Harness,
+  gatewayWorkers: ReadonlySet<WorkerName>,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    if (gatewayWorkers.size === 0) return;
+    const { tasks } = yield* call("inspect parent gateway routes", () =>
+      harness.inspect(BACKGROUND_CONTEXT),
+    );
+    for (const { record: task } of tasks) {
+      if (task.kind !== ATTEMPT_TASK || task.state.status === "terminal") continue;
+      const request = yield* storedRequestOf(task.input);
+      if (!gatewayWorkers.has(request.worker)) continue;
+      const record = yield* call("read the parent gateway route", () =>
+        harness.snapshot(AttemptRecordDoc, request.spec.attemptId, BACKGROUND_CONTEXT),
+      );
+      if (record?.parentConversation === undefined || record.parentConversation === null) continue;
+      const parent = record.parentConversation;
+      yield* call("route the parent through its gateway", () =>
+        harness.commit(async (tx) => {
+          (await tx.doc(ProviderDoc, parent)).sessionId = parentProviderSession(
+            request.spec.attemptId,
+          );
+        }, BACKGROUND_CONTEXT),
+      );
+      yield* Effect.logInfo("Restored the coordinator's gateway route", {
+        attemptId: request.spec.attemptId,
+        worker: request.worker,
+      });
+    }
+  }).pipe(
+    Effect.tapError((error) =>
+      Effect.logError("Could not restore coordinator gateway routes", { message: error.message }),
+    ),
+    Effect.ignore,
+    Effect.withSpan("AttemptRepair.routeGatewayParents"),
+  );

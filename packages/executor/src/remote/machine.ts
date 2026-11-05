@@ -1,3 +1,4 @@
+import type { PiGateway } from "@usine/agents/pi/gateway";
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
@@ -35,6 +36,7 @@ export interface RemoteMachine {
 }
 
 export interface RemoteAccess {
+  readonly modelGateway?: PiGateway;
   /** The harnesses whose model API keys were installed with this access. */
   readonly apiKeyHarnesses: ReadonlySet<Harness>;
   /**

@@ -1,3 +1,4 @@
+import type { PiGateway } from "@usine/agents/pi/gateway";
 import { keyedLockFor } from "./keyed-lock.ts";
 import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId, StopReason } from "@usine/core/attempt";
@@ -54,6 +55,7 @@ interface ActiveAttempt {
 }
 
 export interface DurableCheckout {
+  readonly modelGateway?: PiGateway | undefined;
   /** The host with the checkout, where the children run. */
   readonly host: ChildHost;
   /**
@@ -359,6 +361,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
             machine: checkout.machine,
             environment: checkout.environment,
             gatewayCredential: checkout.gatewayCredential,
+            modelGateway: Option.fromUndefinedOr(checkout.modelGateway),
           }),
           io,
         )

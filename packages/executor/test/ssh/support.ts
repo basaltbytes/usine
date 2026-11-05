@@ -946,7 +946,10 @@ export const executorLayer = (
   /** Rebuilding on the same storage simulates an orchestrator restart. */
   storage: StubStorage = new StubStorage(),
   /** Replaces the executor's own login and binary checks. */
-  probes: Pick<SshExecutorOptions, "harnessReadiness" | "attemptConnections"> = {},
+  probes: Pick<
+    SshExecutorOptions,
+    "harnessReadiness" | "attemptConnections" | "coordinatorPreflight"
+  > = {},
   harnesses: typeof harnessesLive = harnessesLive,
 ) =>
   sshLayer({

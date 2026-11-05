@@ -20,7 +20,11 @@ import { layer as durableLayer } from "@usine/durable/live";
 const attempts = durableLayer(instanceDirectory);
 ```
 
-The parent record stores the pool and endpoint resolved from its credential at launch. Transcript relay uses those stored values after a restart. Records created before these fields were stored retain the historical accounting rule.
+With a gateway, `AttemptRequest.modelGateway` routes parent generation and compaction through the live attachment. No provider login is required on the orchestrator. The stored request records that it requires a gateway without persisting the caller token. A resumed parent waits for reattachment, and unfinished parents on gateway workers switch to the gateway before resuming. Without a gateway, the parent retains its local Pi login.
+
+The parent record stores the pool and endpoint resolved from its credential at launch. Transcript relay uses those stored values after a restart; gateway reattachment refreshes them from the gateway’s credential kind. Records created before these fields were stored retain the historical accounting rule.
+
+`DurableHarness.installModels` installs the model access used by generation and compaction before tasks resume and retains it across storage reopens.
 
 Building the layer installs the usine extension and resumes tasks. Closing it writes no task outcome, so the next start resumes the same work. Each child receives a `ChildSessionLifecycle` tied to the channel attachment that supplied its host and environment. When that attachment detaches, the child stops recovering connections and reporting shutdown errors before the executor releases its transports and credentials.
 

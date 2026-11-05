@@ -1,3 +1,4 @@
+import { type PiGateway, piGatewayModels, piGatewayPool } from "@usine/agents/pi/gateway";
 import { getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import {
@@ -58,6 +59,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
   models: Models,
   defaultModel: Option.Option<ModelRef>,
   spec: RunSpec,
+  gateway: Option.Option<PiGateway>,
 ) {
   if (Option.isSome(spec.parentModel)) {
     const named = spec.parentModel.value;
@@ -82,7 +84,10 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
     return configured.value;
   }
   const available = yield* Effect.tryPromise({
-    try: (signal) => models.getAvailable(undefined, { signal }),
+    try: (signal) =>
+      Option.isSome(gateway)
+        ? Promise.resolve(piGatewayModels(models.getModels(), gateway.value.credentials))
+        : models.getAvailable(undefined, { signal }),
     catch: (cause) =>
       launchError(spec, "Can't list the models that have a configured credential", cause),
   });
@@ -109,13 +114,14 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
   models: Models,
   defaultModel: Option.Option<ModelRef>,
   spec: RunSpec,
+  gateway: Option.Option<PiGateway> = Option.none(),
 ) {
   yield* Effect.annotateCurrentSpan({
     attemptId: spec.attemptId,
     parentEffort: spec.parentEffort,
     parentModel: Option.getOrUndefined(spec.parentModel),
   });
-  const selected = yield* selectModel(models, defaultModel, spec);
+  const selected = yield* selectModel(models, defaultModel, spec, gateway);
   const model = ModelId.make(`${selected.provider}/${selected.id}`);
   const supported = getSupportedThinkingLevels(selected);
   if (!supported.includes(spec.parentEffort)) {
@@ -130,6 +136,25 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       effort: spec.parentEffort,
       message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
     });
+  }
+  if (Option.isSome(gateway)) {
+    const pool = yield* piGatewayPool(model, gateway.value.credentials).pipe(
+      Effect.mapError((cause) =>
+        PoolUnavailableError.make({
+          harness: Harness.make("pi"),
+          model,
+          pool: requiredPiPool(selected.provider),
+          message: cause.message,
+        }),
+      ),
+    );
+    return {
+      ref: { provider: selected.provider, modelId: selected.id },
+      model,
+      pool,
+      endpoint:
+        pool === "apiKeys" ? Option.some(EndpointName.make(selected.provider)) : Option.none(),
+    } satisfies ResolvedParent;
   }
   const check = yield* Effect.tryPromise({
     try: (signal) => models.checkAuth(selected.provider, { signal }),

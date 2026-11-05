@@ -241,7 +241,9 @@ describe("SSH Worker behind a Gateway", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           yield* (yield* executor.prepare(request)).launch(sink);
-          const [forward, ...others] = machine.state.forwards;
+          const [forward, ...others] = machine.state.forwards.filter(({ command }) =>
+            command.args.some((arg) => arg.endsWith(":7070")),
+          );
           assert(forward !== undefined, "the executor opened a forward");
           assert.strictEqual(others.length, 0, "one forward serves every request");
           const { command, args, options } = forward.command;
@@ -332,7 +334,11 @@ describe("SSH Worker behind a Gateway", () => {
       assert(first !== undefined);
       yield* first.drop;
       yield* (yield* executor.prepare(request)).launch(sink);
-      assert.strictEqual(machine.state.forwards.length, 2, "one reopen, without the clock moving");
+      assert.strictEqual(
+        machine.state.forwards.length,
+        3,
+        "one admin reopen and one model proxy forward",
+      );
       const attach = gateway.calls.find(({ method }) => method === "POST");
       assert(attach?.delivered === true && attach.port === machine.state.forwards[1]?.port);
     }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
@@ -361,13 +367,17 @@ describe("SSH Worker behind a Gateway", () => {
             ({ method, port, delivered, body }) =>
               method === "PUT" &&
               delivered &&
-              port === machine.state.forwards[1]?.port &&
+              port === machine.state.forwards.at(-1)?.port &&
               Option.exists(body, ({ credential }) => credential.token === `${TOKEN_PREFIX}2`),
           );
         yield* eventually(renewedThroughSecond);
         // The Gateway records the renewal before its handler stores the new expiration.
         yield* gateway.settled;
-        assert.strictEqual(machine.state.forwards.length, 2, "one reopen");
+        assert.strictEqual(
+          machine.state.forwards.length,
+          3,
+          "one admin reopen and one model proxy forward",
+        );
         assert(
           gateway.calls.some(
             ({ method, port, delivered }) => method === "PUT" && port === first.port && !delivered,
@@ -1288,3 +1298,37 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 });
+
+it.effect(
+  "checks the coordinator credential and orchestrator model proxy without attaching an attempt",
+  () => {
+    const machine = fakeMachine();
+    const gateway = fakeGateway(machine);
+    const checked: Array<string> = [];
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      assert.deepStrictEqual(checked, [WORKER]);
+      assert(gateway.calls.some(({ path }) => path === "/openai-responses/v1/responses"));
+      assert.isTrue(
+        machine.state.forwards.some(({ command }) =>
+          command.args.some((arg) => arg.endsWith(":80")),
+        ),
+      );
+      assert.isFalse(gateway.calls.some(({ method }) => method === "POST"));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        gatewayRuntime(machine, mintingProvider(), gateway, {
+          probes: {
+            coordinatorPreflight: (worker, credentials) =>
+              Effect.sync(() => {
+                checked.push(worker);
+                assert.deepStrictEqual(credentials["anthropic-messages"], Option.some("api-key"));
+              }),
+          },
+        }),
+      ),
+    );
+  },
+);

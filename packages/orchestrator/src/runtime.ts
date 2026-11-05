@@ -34,6 +34,7 @@ import { Orchestrator } from "./orchestrator.ts";
 import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { triggerConditionLayer } from "./trigger-condition.ts";
+import { coordinatorPreflight } from "./coordinator-preflight.ts";
 import { workerEngineLayer } from "./worker-engine.ts";
 import { WorkerStatus } from "./worker-status.ts";
 
@@ -91,7 +92,17 @@ export const runtimeLayer = (
   );
   // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
   // executor's preflight and the Attempts' Claude children.
-  const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
+  const attemptRuntime = Layer.unwrap(
+    Effect.gen(function* () {
+      const startup = yield* (yield* CurrentInstance).get;
+      return durableAttemptRuntimeLayer(
+        instanceDirectory,
+        startup.config.workers
+          .filter((worker) => worker.kind === "ssh" && worker.gateway._tag === "Some")
+          .map(({ name }) => name),
+      );
+    }),
+  ).pipe(
     Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),
     Layer.provide(NodeServices.layer),
@@ -99,6 +110,7 @@ export const runtimeLayer = (
   const engine = Layer.unwrap(
     Effect.gen(function* () {
       const startup = yield* (yield* CurrentInstance).get;
+      const checkCoordinator = yield* coordinatorPreflight;
       return workerEngineLayer(
         instanceDirectory,
         instanceId,
@@ -107,6 +119,7 @@ export const runtimeLayer = (
           BrainSpec.make({ harness, model, effort }),
         ),
         database,
+        { coordinatorPreflight: checkCoordinator },
       );
     }),
   ).pipe(

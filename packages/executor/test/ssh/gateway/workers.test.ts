@@ -152,7 +152,7 @@ describe("SSH Workers added and removed while the executor runs", () => {
             assert(
               machine.state.calls.some(({ command }) => command.args.includes("usine@203.0.113.8")),
             );
-            assert.strictEqual(machine.state.forwards.length, 2);
+            assert.strictEqual(machine.state.forwards.length, 3);
             assert(machine.state.forwards.every(({ live }) => live));
             const originalAttachments = (yield* attachmentsInForce).map(({ id }) => id);
             yield* Effect.scoped(

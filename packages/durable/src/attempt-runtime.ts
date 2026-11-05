@@ -1,3 +1,4 @@
+import { PiGateway } from "@usine/agents/pi/gateway";
 import { ChildHost } from "@usine/agents/child-host";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
@@ -5,13 +6,17 @@ import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
 import { StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
 import type { StepOutput } from "@usine/core/step/output";
 import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
-import { type Brand, Context, type Duration, Effect, type Option, Result, Schema } from "effect";
+import { type Brand, Context, type Duration, Effect, Option, Result, Schema } from "effect";
 
 /** The persisted part of an Attempt's request, without `host`, `machine`, and `environment`. */
 export class StoredRequest extends Schema.Class<
   StoredRequest,
   Brand.Brand<"@usine/durable/attempt-runtime/StoredRequest">
 >("@usine/durable/StoredRequest")({
+  coordinatorCredential: Schema.Literals(["host-login", "gateway"]).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("host-login" as const)),
+    Schema.withConstructorDefault(Effect.succeed("host-login" as const)),
+  ),
   spec: AttemptChannel.RunSpec,
   worker: WorkerName,
   /** The absolute path of the Attempt's worktree on the Worker's machine. */
@@ -23,6 +28,7 @@ export class AttemptRequest extends Schema.Class<
   Brand.Brand<"@usine/durable/attempt-runtime/AttemptRequest">
 >("@usine/durable/AttemptRequest")({
   ...StoredRequest.fields,
+  modelGateway: Schema.Option(PiGateway).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
   host: ChildHost,
   /**
    * The provider's ID of the machine that a provisioned Worker created for the Attempt, or `None`

@@ -167,3 +167,9 @@ These workers retain direct internet access. Tailnet grants restrict worker acce
 ## Amendment (2026-11-05, #957): descriptor credential wiring and protocol slots
 
 Gateway credential slots and URL prefixes identify wire protocols: `anthropic-messages` and `openai-responses`. Provider names remain appropriate for provisioner API keys and Cloudflare outbound handlers. The change lets multiple harnesses share one protocol slot while each descriptor defines its own credential wiring. The route allowlists stay specific to their wire protocol; the credential environment-variable names and subscription terms remain unchanged. Upgrade the gateway before the orchestrator, with `gateway.llm_providers` updated to the protocol IDs. For one release, the gateway accepts the previous provider prefixes as deprecated aliases so reattached attempts retain working routes. The orchestrator normalizes previous provider IDs in admin reports and refuses gateways without credential reporting before starting attempts.
+
+## Amendment (2026-11-05, #961): orchestrator coordinators use the gateway
+
+The Pi coordinator runs on the orchestrator, but its location does not require a separate credential source. It uses the attempt’s caller token through an SSH forward to the gateway’s HTTP listener, with the LLM host header preserved. This keeps one provider credential source for gateway attempts and avoids concurrent refreshes by independent copies of a ChatGPT login. Startup checks the selected provider credential and the orchestrator’s model-proxy connection. Restarted coordinators wait for a fresh attachment; caller tokens and forward addresses are not stored in durable task input.
+
+The supervisor’s runtime follows the same gateway route when implemented in #799, as recorded in decision 10 of `docs/research/harness-adapters.md`. A worker without a gateway retains the coordinator’s local Pi login.

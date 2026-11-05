@@ -13,8 +13,17 @@ import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./docume
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
 import { encodeResult, finishedOf } from "./outcome.ts";
+import type { WorkerName } from "@usine/core/worker";
+import { PiGatewayUnavailable, piGatewayPool } from "@usine/agents/pi/gateway";
+import { parentModels } from "./models.ts";
+import { EndpointName } from "@usine/core/agent/session";
+import { ModelId } from "@usine/core/agent/brain";
 import { parentSessionId } from "./parent.ts";
-import { abortEndedAttempts, repairUnreadableConversations } from "./repair.ts";
+import {
+  abortEndedAttempts,
+  repairUnreadableConversations,
+  routeGatewayParents,
+} from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt, relayDeliveries } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
 import { queueParentSteer } from "./steering.ts";
@@ -45,22 +54,50 @@ const LIVE_STATUSES: ReadonlyArray<string> = ["pending", "running", "waiting"];
 
 const encodeIntervention = Schema.encodeEffect(AttemptChannel.Intervention);
 
-const makeAttemptRuntime = Effect.gen(function* () {
+const makeAttemptRuntime = Effect.fnUntraced(function* (gatewayWorkers: ReadonlySet<WorkerName>) {
   const durable = yield* DurableHarness;
   const backend = yield* ChildBackend;
   const services = yield* Effect.context<never>();
   const hubs = yield* attemptHubs;
   const { extension, task } = usineExtension({
     hubs,
+    gatewayWorkers,
     backend,
     defaultModel: durable.defaultModel,
     run: (program, signal) => Effect.runPromiseWith(services)(program, { signal }),
   });
+  yield* durable.installModels(
+    parentModels(
+      durable.models,
+      (attemptId, model, signal) =>
+        Effect.runPromiseWith(services)(
+          Effect.gen(function* () {
+            const request = yield* hubs.attached(attemptId);
+            if (Option.isNone(request.modelGateway))
+              return yield* PiGatewayUnavailable.make({
+                model,
+                message:
+                  "The coordinator requires a gateway attachment; the worker no longer supplies one.",
+              });
+            yield* piGatewayPool(model, request.modelGateway.value.credentials);
+            const baseUrl = yield* request.modelGateway.value.baseUrl;
+            return { ...request.modelGateway.value, baseUrl };
+          }),
+          { signal },
+        ),
+      (attemptId, cause) =>
+        Effect.runPromiseWith(services)(
+          Effect.logError("Coordinator model route failed", { attemptId, cause }),
+        ),
+      (program, signal) => Effect.runPromiseWith(services)(program, { signal }),
+    ),
+  );
   yield* durable.install(extension);
   yield* durable.subscribe(hubs.listener);
   yield* durable.use("open the root conversation", (harness, context) => harness.root(context));
   yield* durable.resume((harness, storage) =>
     repairUnreadableConversations(harness, storage).pipe(
+      Effect.andThen(routeGatewayParents(harness, gatewayWorkers)),
       Effect.andThen(Effect.suspend(() => abortEndedAttempts(harness, hubs.takeEnded()))),
     ),
   );
@@ -98,6 +135,23 @@ const makeAttemptRuntime = Effect.gen(function* () {
           : "Reattached to the Attempt's durable task",
         { taskId: found.taskId },
       );
+      if (Option.isSome(request.modelGateway)) {
+        const record = yield* readRecord(durable, attemptId);
+        if (record?.parentModel !== null && record?.parentModel !== undefined) {
+          const model = ModelId.make(record.parentModel);
+          const pool = yield* piGatewayPool(model, request.modelGateway.value.credentials).pipe(
+            Effect.mapError((cause) => InfraFailure.make({ message: cause.message, cause })),
+          );
+          yield* durable.use("restore the coordinator's billing pool", (harness, context) =>
+            harness.commit(async (tx) => {
+              const saved = await tx.doc(AttemptRecordDoc, attemptId, null);
+              saved.parentPool = pool;
+              saved.parentEndpoint =
+                pool === "apiKeys" ? EndpointName.make(model.slice(0, model.indexOf("/"))) : null;
+            }, context),
+          );
+        }
+      }
       const hub = yield* hubs.hub(attemptId, found.taskId);
       const settled = yield* relayAttempt(durable, hubs, hub, request, io).pipe(
         Effect.raceFirst(
@@ -702,4 +756,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
  * Provides `AttemptRuntime` on the durable harness. Building it installs the usine extension and
  * resumes unfinished Attempts.
  */
-export const layer = Layer.effect(AttemptRuntime, makeAttemptRuntime);
+export const layerWithGateways = (workers: ReadonlyArray<WorkerName>) =>
+  Layer.effect(AttemptRuntime, makeAttemptRuntime(new Set(workers)));
+
+export const layer = layerWithGateways([]);

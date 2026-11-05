@@ -8,8 +8,18 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Cache, Context, type Crypto, Effect, FileSystem, Layer, Option, type Path } from "effect";
-import type { HttpClient } from "effect/http";
+import {
+  Cache,
+  Context,
+  type Crypto,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Ref,
+  type Path,
+} from "effect";
+import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import {
   type CredentialProvider,
@@ -31,6 +41,7 @@ import {
   gatewayCredentialFor,
   gatewayHarnessProbe,
   verifyGatewayAdmin,
+  verifyCoordinatorGateway,
 } from "./gateway/preflight.ts";
 import type { SshExecutorOptions, SshMachine, SshWorkerAddress } from "./model.ts";
 import { sshMachinePreflightFor, sshPreflightFor } from "./preflight.ts";
@@ -41,6 +52,7 @@ import { sshMachinesFor, SshWorkers } from "./workers.ts";
 
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
+    const modelHttp = yield* HttpClient.HttpClient;
     const harnesses = yield* Harnesses;
     const { catalog } = harnesses;
     const remoteCommands = yield* remoteCommandsFor;
@@ -308,7 +320,23 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           worker: machine.address.name,
         });
       }),
-      preflight: sshPreflightFor(workerFor, verifyMachine, provisioned.verifyProvisioned),
+      preflight: (worker, brains, slots) =>
+        Effect.gen(function* () {
+          const entry = yield* workerFor(worker);
+          if (Option.isSome(entry.gateway) && options.coordinatorPreflight !== undefined) {
+            yield* verifyGatewayAdmin(worker, entry.gateway.value);
+            const credentials = yield* Ref.get(entry.gateway.value.credentials);
+            yield* options.coordinatorPreflight(worker, credentials);
+            yield* verifyCoordinatorGateway(worker, entry.gateway.value).pipe(
+              Effect.provideService(HttpClient.HttpClient, modelHttp),
+            );
+          }
+          return yield* sshPreflightFor(workerFor, verifyMachine, provisioned.verifyProvisioned)(
+            worker,
+            brains,
+            slots,
+          );
+        }),
       harnessProbe,
       isolation: containers.isolation,
       runsContainers: true,

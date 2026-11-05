@@ -6,6 +6,7 @@ import {
 import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usine/core/worker";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import { Effect, Option, Redacted, Ref } from "effect";
 import type { CommandResult } from "../../child-command.ts";
 import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts";
@@ -182,6 +183,48 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
     attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });
 });
+
+/** Checks the coordinator's model proxy from the orchestrator without creating an attachment. */
+export const verifyCoordinatorGateway = Effect.fn("SshExecutor.verifyCoordinatorGateway")(
+  function* (worker: WorkerName, gateway: MachineGateway) {
+    yield* Effect.annotateCurrentSpan({ worker, domain: gateway.settings.domain });
+    const forward = yield* gateway.llmForward;
+    const http = yield* HttpClient.HttpClient;
+    const checked = yield* Effect.gen(function* () {
+      const open = yield* forward.current.pipe(
+        Effect.catchTag("GatewayForwardClosed", (closed) => forward.reopen(closed.generation)),
+      );
+      const response = yield* http.execute(
+        HttpClientRequest.get(`${open.url.origin}/openai-responses/v1/responses`).pipe(
+          HttpClientRequest.setHeader("host", `llm.${gateway.settings.domain}`),
+        ),
+      );
+      return (
+        response.status === 401 &&
+        response.headers["x-usine-gateway-refusal"] === "missing-caller-token"
+      );
+    }).pipe(
+      Effect.timeout("10 seconds"),
+      Effect.mapError((cause) =>
+        gatewayGap(
+          worker,
+          `The coordinator cannot reach the model proxy on gateway "${gateway.settings.domain}". Check the gateway's HTTP listener on port 80.`,
+          cause,
+        ),
+      ),
+    );
+    if (!checked)
+      return yield* gatewayGap(
+        worker,
+        `The coordinator's model proxy on gateway "${gateway.settings.domain}" did not refuse a request without a caller token. Check the gateway's llm host routing.`,
+        "unexpected gateway response",
+      );
+    yield* Effect.logInfo("Coordinator gateway model proxy verified", {
+      worker,
+      domain: gateway.settings.domain,
+    });
+  },
+);
 
 /**
  * Verifies the Gateway from an SSH Worker's machine without attaching anything: the machine's

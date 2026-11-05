@@ -5,6 +5,7 @@ import { withAbortSignal } from "@earendil-works/chord/context";
 import {
   AssistantEntry,
   configure,
+  ProviderDoc,
   type ConversationId,
   defineTask,
   type EntryId,
@@ -56,6 +57,7 @@ import {
 } from "./documents.ts";
 import { assistantText } from "./events.ts";
 import { completedOutcome, failedOutcome } from "./outcome.ts";
+import { parentProviderSession } from "./models.ts";
 import { parentSession, parentSessionId, resolveParent } from "./parent.ts";
 import { type AttemptTaskInput, storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
@@ -179,9 +181,26 @@ export const attemptTask = (
       taskId: task.id,
       sessionId: parentSessionId(spec.attemptId),
     });
-    const resolved = yield* resolveParent(runtime.models, services.defaultModel, spec).pipe(
-      Effect.result,
-    );
+    const requiresGateway =
+      request.coordinatorCredential === "gateway" || services.gatewayWorkers.has(request.worker);
+    const gateway = requiresGateway
+      ? (yield* services.hubs.attached(spec.attemptId)).modelGateway
+      : Option.none();
+    if (requiresGateway && Option.isNone(gateway)) {
+      const message =
+        "The coordinator requires a gateway attachment; the worker no longer supplies one.";
+      yield* Effect.logError(message, { attemptId: spec.attemptId, worker: request.worker });
+      yield* commit(runtime, context, "record the missing gateway", () =>
+        failedOutcome(InfraFailure.make({ message, cause: message })),
+      );
+      return;
+    }
+    const resolved = yield* resolveParent(
+      runtime.models,
+      services.defaultModel,
+      spec,
+      gateway,
+    ).pipe(Effect.result);
     if (Result.isFailure(resolved)) {
       yield* Effect.logError("Pi parent could not start", {
         attemptId: spec.attemptId,
@@ -207,6 +226,10 @@ export const attemptTask = (
           tools: [tool],
         });
       }
+      if (requiresGateway)
+        (await tx.doc(ProviderDoc, conversation.id)).sessionId = parentProviderSession(
+          spec.attemptId,
+        );
       await tx.doc(HoldDoc, task.id);
       const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
       record.parentModel = model;

@@ -30,6 +30,7 @@ import type {
   WorkerRoot,
 } from "@usine/core/worker";
 import { Option, type Duration, type Effect, type Redacted, type Ref } from "effect";
+import type { WorkerCapabilityError } from "../executor.ts";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 import type { GatewayAdmin } from "./gateway/admin.ts";
@@ -156,6 +157,10 @@ export interface SshWorkerAddress {
 
 export interface SshExecutorOptions {
   readonly workers: ReadonlyArray<SshWorkerAddress>;
+  readonly coordinatorPreflight?: (
+    worker: WorkerName,
+    credentials: GatewayCredentials,
+  ) => Effect.Effect<void, WorkerCapabilityError>;
   /** Restores attempt connections after a restart. Omit for an in-memory executor. */
   readonly attemptConnections?: AttemptConnections<SshWorkerAddress>;
   /**
@@ -196,6 +201,7 @@ export interface SshExecutorOptions {
 export interface MachineGateway {
   readonly settings: SshWorkerGateway & { readonly egress: "proxy" | "direct" };
   readonly forward: GatewayForward;
+  readonly llmForward: Effect.Effect<GatewayForward>;
   readonly admin: GatewayAdmin;
   /**
    * The credential kind the Gateway uses for each provider, from the last preflight: Anthropic
