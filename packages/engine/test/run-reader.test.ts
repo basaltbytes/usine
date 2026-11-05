@@ -20,6 +20,7 @@ import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Queue, Ref } from "effect";
 import { RunDatabase } from "../src/database/database.ts";
 import { layer } from "../src/database/local-sqlite.ts";
+import { transcriptCodecLayer } from "../src/database/transcript-codec.ts";
 import { RunEngine, Submission } from "../src/engine/engine.ts";
 import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -135,7 +136,10 @@ describe("Run evidence reader", () => {
           ).pipe(Layer.provide(readConnection));
           // The engine already provides RunReader; keep this reader on its own
           // connection instead of reusing the engine layer's memoized instance.
-          const reader = RunReader.layer.pipe(Layer.provide(database), Layer.fresh);
+          const reader = RunReader.layer.pipe(
+            Layer.provide(Layer.merge(database, transcriptCodecLayer)),
+            Layer.fresh,
+          );
           const evidence = yield* Effect.flatMap(RunReader, (reader) =>
             reader.evidence(submitted.runId),
           ).pipe(Effect.provide(reader));

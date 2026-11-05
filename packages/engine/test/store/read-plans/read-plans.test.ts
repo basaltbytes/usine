@@ -1,3 +1,4 @@
+import { TranscriptCodec } from "../../../src/store/transcript/codec.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
@@ -70,6 +71,7 @@ it.live(
       const context = yield* Layer.build(localSqliteLayer(directory));
       const migrationMillis = performance.now() - startup;
       const client = Context.get(context, SqlClient.SqlClient);
+      const codec = Layer.succeed(TranscriptCodec)(Context.get(context, TranscriptCodec));
       yield* client`PRAGMA wal_checkpoint(TRUNCATE)`;
       const migrationBytes = Number((yield* fs.stat(`${directory}/.usine/runtime.sqlite`)).size);
       if (!exists)
@@ -96,7 +98,7 @@ it.live(
       yield* Effect.gen(function* () {
         const reader = yield* RunReader;
         const store = yield* RunStore;
-        const query = queriesFor(database);
+        const query = queriesFor(database, Context.get(context, TranscriptCodec));
         const runId = RunId.make("run-0");
         const itemKey = ItemKey.make("item-0");
         const attemptId = AttemptId.make("attempt-0");
@@ -170,7 +172,7 @@ it.live(
       }).pipe(
         Effect.provide(
           Layer.merge(RunReader.layer, RunStore.layer).pipe(
-            Layer.provideMerge(RunDatabase.layer(database)),
+            Layer.provideMerge(Layer.merge(RunDatabase.layer(database), codec)),
           ),
         ),
       );
@@ -215,7 +217,9 @@ it.live(
           const plan = details.join("\n");
           const message = `${statement.reader} ${statistics}: ${plan}\n${statement.sql}`;
           assert.notMatch(plan, /SCAN usine_attempt_transcripts/iu, message);
-          if (/worker state|session state/iu.test(statement.reader)) {
+          if (/FROM "usine_attempt_transcript_seals"/iu.test(statement.sql)) {
+            assert.match(plan, /SEARCH usine_attempt_transcript_seals .*attempt_id=\?/iu, message);
+          } else if (/worker state|session state/iu.test(statement.reader)) {
             assert.match(
               plan,
               /SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind .*payload_tag/iu,

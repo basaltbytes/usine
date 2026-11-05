@@ -33,3 +33,5 @@ export class RunDatabase extends Context.Service<RunDatabase, RunDatabaseClient>
 }
 
 export { RepositoryProject, migrateProjectLoops } from "./project-migration.ts";
+
+export { TranscriptCodec } from "../store/transcript/codec.ts";

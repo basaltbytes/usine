@@ -63,7 +63,7 @@ test("pnpm stages only unpublished workspace versions and skips approved version
     `registry=${registry}\nfetch-retries=0\n//127.0.0.1:${server.address().port}/:_authToken=fixture-token\n`,
   );
   const stage = () =>
-    exec("pnpm", ["stage", "publish", "-r", "--tag", "latest", "--no-git-checks"], {
+    exec("corepack", ["pnpm", "stage", "publish", "-r", "--tag", "latest", "--no-git-checks"], {
       cwd: directory,
       timeout: 30_000,
     });

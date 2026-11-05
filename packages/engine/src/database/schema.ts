@@ -24,6 +24,7 @@ import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { sql } from "drizzle-orm";
 import {
+  blob,
   check,
   foreignKey,
   index,
@@ -361,6 +362,36 @@ export const attemptTranscripts = snakeCase.table(
     ),
   ],
 );
+
+/** Compressed transcript rows, in append order, with at most 500 rows per segment. */
+export const transcriptSegments = snakeCase.table(
+  "usine_attempt_transcript_segments",
+  {
+    attemptId: text()
+      .$type<AttemptId>()
+      .notNull()
+      .references(() => attempts.attemptId),
+    firstSequence: integer().notNull(),
+    lastSequence: integer().notNull(),
+    rows: integer().notNull(),
+    rawBytes: integer().notNull(),
+    codec: text({ enum: ["brotli"] }).notNull(),
+    body: blob({ mode: "buffer" }).$type<Uint8Array>().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.firstSequence] })],
+);
+
+/** Direction high-water marks retain deduplication after hot rows are removed. */
+export const transcriptSeals = snakeCase.table("usine_attempt_transcript_seals", {
+  attemptId: text()
+    .$type<AttemptId>()
+    .primaryKey()
+    .references(() => attempts.attemptId),
+  sealedAt: text().notNull(),
+  lastInboundSequence: integer(),
+  lastOutboundSequence: integer(),
+  lastReceivedAt: text().notNull(),
+});
 
 /** The highest token report of each attempt session, copied from its transcript row. */
 export const sessionUsage = snakeCase.table(
