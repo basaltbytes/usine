@@ -7,7 +7,7 @@ import {
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
-import { catalog } from "./catalog.ts";
+import type { HarnessCatalog } from "./harness.ts";
 import { hostPlacement } from "./launch.ts";
 import { ChildHost } from "../child-host/child-host.ts";
 import { type ChildBackendService, SessionOperationError } from "../runtime.ts";
@@ -36,6 +36,46 @@ export interface HarnessRuntime extends ChildBackendService {
 export const loginUnavailable = (brain: BrainSpec, message: string) =>
   HarnessUnavailableError.make({ harness: brain.harness, capability: "login", message });
 
+/** Checks preflight requirements against the dispatched runtime's catalog. */
+export const admitPreflight = Effect.fn("HarnessAdmission.preflight")(function* (
+  catalog: HarnessCatalog,
+  brain: BrainSpec,
+  target: ProbeTarget,
+) {
+  yield* Effect.annotateCurrentSpan({
+    harness: brain.harness,
+    model: brain.model,
+    worker: target.worker,
+  });
+  return yield* Effect.fromResult(
+    admitBrain(
+      catalog,
+      "coding-agent",
+      brain,
+      AdmissionContext.make({
+        placement: target.credential === "sandbox-api-key" ? "sandbox" : hostPlacement(target.host),
+        credential: target.credential === "sandbox-api-key" ? "api-key" : target.credential,
+      }),
+    ),
+  ).pipe(
+    Effect.tapError((error) =>
+      Effect.logWarning("Worker brain refused", {
+        role: error.role,
+        harness: error.harness,
+        missing: error.missing,
+        worker: target.worker,
+      }),
+    ),
+    Effect.mapError((error) =>
+      HarnessUnavailableError.make({
+        harness: error.harness,
+        capability: "binary",
+        message: error.message,
+      }),
+    ),
+  );
+});
+
 /** Applies the shared preflight deadline and reports capability gaps without retrying them. */
 export const checkedPreflight = <R>(
   check: (
@@ -53,26 +93,6 @@ export const checkedPreflight = <R>(
         credential: target.credential,
         ...Option.match(target.machine, { onNone: () => ({}), onSome: (machine) => ({ machine }) }),
       });
-      yield* Effect.fromResult(
-        admitBrain(
-          catalog,
-          "coding-agent",
-          brain,
-          AdmissionContext.make({
-            placement:
-              target.credential === "sandbox-api-key" ? "sandbox" : hostPlacement(target.host),
-            credential: target.credential === "sandbox-api-key" ? "api-key" : target.credential,
-          }),
-        ),
-      ).pipe(
-        Effect.mapError((error) =>
-          HarnessUnavailableError.make({
-            harness: error.harness,
-            capability: "binary",
-            message: error.message,
-          }),
-        ),
-      );
       yield* check(brain, target);
       yield* Effect.logInfo("Worker harness verified", {
         harness: brain.harness,

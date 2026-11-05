@@ -1,3 +1,4 @@
+import { HarnessCatalog } from "../harness.ts";
 import { admitChild } from "../launch.ts";
 import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
@@ -57,6 +58,8 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
   });
 });
 
+const piCatalog = HarnessCatalog.make({ descriptors: [pi] });
+
 const makePiChild = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
@@ -70,7 +73,7 @@ const makePiChild = Effect.gen(function* () {
         parentSessionId: request.session.parentId,
         sessionId: request.session.id,
       });
-      yield* admitChild(request);
+      yield* admitChild(piCatalog, request);
       yield* Effect.logInfo("Launching Pi child session");
       const gate = yield* piPauseGate;
       return yield* usePiStart(

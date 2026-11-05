@@ -8,7 +8,6 @@ import {
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
-import { admitChild } from "@usine/agents/harness/node";
 import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
   type AgentSessionError,
@@ -192,7 +191,6 @@ export const subagentTool = (services: ExtensionServices) => {
         context: task,
       }),
     });
-    yield* admitChild(childRequest);
     yield* Effect.annotateCurrentSpan({ agent: session.agent, sessionId: session.id });
     yield* Effect.logInfo(
       "Spawning child session with the rendered task and supplemental parent context",
