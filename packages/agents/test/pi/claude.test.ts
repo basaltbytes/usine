@@ -57,6 +57,7 @@ import {
   AgentResultError,
   AgentCapacityError,
   ChildBackend,
+  ChildSessionLifecycle,
   ChildRequest,
   HostLoginLock,
   type OnDelivery,
@@ -258,7 +259,7 @@ const exitingHost = (code: number) =>
  * does, once its SSH client exits. Later launches finish the task; `resumed` records the session
  * each one resumes, and `prompts` its first message.
  */
-const droppedLaunch = () => {
+const droppedLaunch = (onDrop: () => void = () => {}) => {
   const resumed: Array<string | undefined> = [];
   const prompts: Array<string> = [];
   let launches = 0;
@@ -289,7 +290,9 @@ const droppedLaunch = () => {
                 content: [{ type: "tool_use", id: "call-1", name: "Bash", input: {} }],
               },
             };
-            throw new Error(`Claude Code process exited with code ${String(await exited)}`);
+            const code = await exited;
+            onDrop();
+            throw new Error(`Claude Code process exited with code ${String(code)}`);
           },
         };
       }
@@ -1201,6 +1204,33 @@ describe("Claude child backend", () => {
         assert.strictEqual(spawned.env.RECORD_TO, record);
         assert.strictEqual(spawned.env.HOME, undefined, "the SSH client inherits nothing");
       }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
+    );
+  });
+
+  it.live("leaves a remote child for reattachment when its attempt is stopping", () => {
+    let stopping = false;
+    const { resumed, sdk } = droppedLaunch(() => {
+      stopping = true;
+    });
+    const worker = workerCommands(0, "stopped");
+    const errors: unknown[] = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (["WARN", "ERROR"].includes(logLevel.toUpperCase())) errors.push(message);
+    });
+    return Effect.gen(function* () {
+      yield* (yield* ChildBackend).launch(request(undefined, undefined, exitingHost(SSH_FAILURE)));
+      // The SSH stand-in exits on the real clock; yield until its output has drained.
+      while (!stopping) yield* Effect.sleep("10 millis");
+      yield* Effect.sleep("20 millis");
+      assert.deepStrictEqual(resumed, []);
+      assert.deepStrictEqual(worker.commands, []);
+      assert.deepStrictEqual(errors, []);
+    }).pipe(
+      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
+      Effect.provideService(ChildSessionLifecycle, { isStopping: Effect.sync(() => stopping) }),
+      Effect.provide(Logger.layer([logger])),
+      Effect.timeout("5 seconds"),
+      Effect.scoped,
     );
   });
 

@@ -12,6 +12,7 @@ import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
   type AgentSessionError,
   ChildRequest,
+  ChildSessionLifecycle,
   ChildSessionBudgetExceededError,
   SessionOperationError,
   reportText,
@@ -119,14 +120,21 @@ export const subagentTool = (services: ExtensionServices) => {
     const hub = yield* services.hubs.hub(spec.attemptId, owner.taskId);
     services.hubs.bindParent(hub, api.conversationId);
     const excerpt = taskExcerpt(task);
-    const childCount = yield* call("count the child spawn", () =>
+    const { childCount, supersededChild } = yield* call("count the child spawn", () =>
       api.commit(async (tx) => {
         const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
         record.children += 1;
-        if (record.children > spec.maxChildren && record.childBudgetExceeded === null) {
-          record.childBudgetExceeded = { attempted: record.children, max: spec.maxChildren };
+        if (record.children > spec.maxChildren) {
+          record.childBudgetExceeded ??= { attempted: record.children, max: spec.maxChildren };
+          return { childCount: record.children, supersededChild: null };
         }
-        return record.children;
+        const supersededChild =
+          record.childBlocker?.kind === "infra" &&
+          !hub.childSpawns.has(record.childBlocker.sessionId)
+            ? record.childBlocker.sessionId
+            : null;
+        if (supersededChild !== null) record.childBlocker = null;
+        return { childCount: record.children, supersededChild };
       }, context),
     );
     const attemptedChildren = ChildSessionCount.make(childCount);
@@ -150,6 +158,17 @@ export const subagentTool = (services: ExtensionServices) => {
       });
     }
     const sessionId = AgentSessionId.make(`${parentId}:child:${attemptedChildren}`);
+    hub.childSpawns.add(sessionId);
+    if (supersededChild !== null) {
+      yield* Effect.logInfo(
+        "New delegation supersedes the previous child's infrastructure failure",
+        {
+          attemptId: spec.attemptId,
+          sessionId,
+          previousChildSessionId: supersededChild,
+        },
+      );
+    }
     if (!(yield* Deferred.isDone(hub.attached))) {
       yield* Effect.logInfo(
         "Waiting for execute to supply the Attempt's child host and environment before spawning a child",
@@ -159,8 +178,12 @@ export const subagentTool = (services: ExtensionServices) => {
       );
     }
     // An abort, such as the harness closing at shutdown, ends a wait for a released Attempt.
+    const attachment = hub.attached;
+    const lifecycle = ChildSessionLifecycle.of({
+      isStopping: Effect.sync(() => hub.attached !== attachment),
+    });
     const request = yield* untilAborted(
-      Deferred.await(hub.attached),
+      Deferred.await(attachment),
       context,
       sessionId,
       Effect.logInfo(
@@ -235,6 +258,7 @@ export const subagentTool = (services: ExtensionServices) => {
       services.backend
         .launch(childRequest)
         .pipe(
+          Effect.provideService(ChildSessionLifecycle, lifecycle),
           Effect.tapError(recordInfrastructureFailure),
           Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }),
         ),

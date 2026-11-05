@@ -22,10 +22,10 @@ import { FetchHttpClient, HttpServer, type HttpRouter } from "effect/http";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
-import { ServerUpgrades } from "./upgrade/control.ts";
+import { ServerUpgrades, UpgradeError } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
 import { localSqliteLayer, SqliteReader } from "@usine/engine/local-sqlite";
-import type { RunDatabase } from "@usine/engine/database";
+import type { RunDatabase, TranscriptCodec } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { configurationLayer, initializeConfiguration } from "./configuration/runtime.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
@@ -177,7 +177,7 @@ const start = Effect.fnUntraced(function* (
   instances: CurrentInstance["Service"],
   port: Port,
   record: InstanceRecord,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError>,
+  database: Layer.Layer<RunDatabase | StepOutputStore | TranscriptCodec, EnginePersistenceError>,
   configurationEditor: ConfigurationEditor["Service"],
   auth: AuthServices,
 ) {
@@ -226,7 +226,11 @@ const start = Effect.fnUntraced(function* (
       ServerUpgrades.layer({
         running: record.version,
         settings: Effect.map(instances.get, ({ config }) => config.settings),
-        platform: Option.none(),
+        platform: Result.fail(
+          UpgradeError.make({
+            message: "App upgrades are available after GitHub App setup is complete.",
+          }),
+        ),
         drain: () => Effect.void,
         resume: Effect.void,
       }),
@@ -275,11 +279,16 @@ const start = Effect.fnUntraced(function* (
     const operator = Context.get(context, Operator);
     const orchestrator = Context.get(context, Orchestrator);
     const engine = Context.get(context, RunEngine);
+    const platform = yield* systemUpgradePlatform(directory, record);
     const upgradeContext = yield* Layer.build(
       ServerUpgrades.layer({
         running: record.version,
         settings: Effect.map(instances.get, ({ config }) => config.settings),
-        platform: yield* systemUpgradePlatform(directory, record),
+        platform: Result.fromOption(platform, () =>
+          UpgradeError.make({
+            message: "App upgrades require a global npm install managed by systemd.",
+          }),
+        ),
         drain: engine.waitForUpgrade,
         resume: engine.cancelUpgrade,
       }),

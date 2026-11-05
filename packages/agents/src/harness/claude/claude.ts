@@ -45,6 +45,7 @@ import {
   type AgentResultError,
   HostLoginLock,
   ChildBackend,
+  ChildSessionLifecycle,
   type ChildRequest,
   type RunningSession,
   SessionOperationError,
@@ -524,6 +525,7 @@ const makeClaudeChild = Effect.gen(function* () {
           PostToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
         },
       };
+      const lifecycle = yield* ChildSessionLifecycle.current;
       // The launch that runs the session; a resume replaces it.
       let current = yield* launchWithRetries(request, options, [request.prompt], scope);
 
@@ -791,6 +793,7 @@ const makeClaudeChild = Effect.gen(function* () {
           }).pipe(Effect.as(Option.none<ClaudeLaunch>()));
         const host = request.host;
         const harnessSession = harnessSessionId;
+        if (yield* lifecycle.isStopping) return yield* notResumed("its attempt is stopping");
         if (host._tag !== "RemoteShell") return yield* notResumed("it runs on this machine");
         if (Option.isNone(harnessSession)) return yield* notResumed("Claude saved no session");
         if (!(yield* broken.lostConnection))
@@ -832,7 +835,8 @@ const makeClaudeChild = Effect.gen(function* () {
             delay: Duration.format(delay),
           });
           yield* Effect.sleep(delay);
-          if (yield* channel.isTerminal) return Option.none<ClaudeLaunch>();
+          if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal))
+            return Option.none<ClaudeLaunch>();
           // A paused or idle child waits for the operator, so only a working child gets a turn.
           const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
           const messages = [...(working ? [RESUME_PROMPT] : []), ...(yield* conversation.unread)];
@@ -869,7 +873,7 @@ const makeClaudeChild = Effect.gen(function* () {
       const consume = Effect.gen(function* () {
         for (;;) {
           const broken = yield* drain(current);
-          if (yield* channel.isTerminal) return;
+          if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
           const error = Option.getOrElse(broken, () =>
             operationError(
               "stream",

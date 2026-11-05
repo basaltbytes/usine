@@ -35,6 +35,7 @@ import {
   AgentResultError,
   ChildRequest,
   ChildBackend,
+  ChildSessionLifecycle,
   type OnDelivery,
   PoolUnavailableError,
   toAttemptFailure,
@@ -227,6 +228,75 @@ describe("Codex child backend", () => {
         }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
       }).pipe(Effect.scoped),
   );
+  it.effect(
+    "does not resume or report an infrastructure failure after its attempt is released",
+    () =>
+      Effect.gen(function* () {
+        const notifications = yield* Queue.make<
+          CodexNotification,
+          SessionOperationError | Cause.Done
+        >();
+        const stopping = yield* Deferred.make<void>();
+        const errors: unknown[] = [];
+        const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+          if (logLevel.toUpperCase() === "ERROR" || logLevel.toUpperCase() === "WARN")
+            errors.push(message);
+        });
+        let opens = 0;
+        let closes = 0;
+        const responses: Record<string, Schema.Json> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const server = Layer.succeed(CodexAppServer)({
+          open: () =>
+            Effect.sync(() => {
+              opens += 1;
+              return {
+                notifications: Stream.fromQueue(notifications),
+                notify: () => Effect.void,
+                close: Effect.sync(() => {
+                  closes += 1;
+                }),
+                request: (_operation, method) => Effect.succeed(responses[method] ?? {}),
+              } satisfies CodexConnection;
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            request(
+              undefined,
+              undefined,
+              RemoteShell.make({
+                ssh: { command: "ssh", args: [] },
+                sshEnvironment: {},
+                destination: "worker",
+              }),
+            ),
+          );
+          yield* Deferred.succeed(stopping, undefined);
+          yield* Queue.fail(
+            notifications,
+            SessionOperationError.make({
+              operation: "stream",
+              sessionId: Option.some(running.session.id),
+              message: "The transport closed during shutdown",
+              cause: RemoteCodexProcessLost.make({ message: "relay exit code 143" }),
+            }),
+          );
+          yield* TestClock.adjust(0);
+          yield* running.interrupt;
+          assert.strictEqual(opens, 1);
+          assert.strictEqual(closes, 0);
+          assert.deepStrictEqual(errors, []);
+        }).pipe(
+          Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+          Effect.provideService(ChildSessionLifecycle, { isStopping: Deferred.isDone(stopping) }),
+          Effect.provide(Logger.layer([logger])),
+          Effect.scoped,
+        );
+      }),
+  );
+
   for (const state of ["working", "queued", "paused", "interrupting", "idle"] as const) {
     it.effect(`preserves unread guidance and ${state} state after app-server recovery`, () =>
       Effect.gen(function* () {

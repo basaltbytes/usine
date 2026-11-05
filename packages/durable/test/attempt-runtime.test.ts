@@ -26,7 +26,7 @@ import { CommitSha } from "@usine/core/repository";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import { Commit, StepCompletion, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { ChildBackend, SessionOperationError } from "@usine/agents/runtime";
+import { ChildBackend, ChildSessionLifecycle, SessionOperationError } from "@usine/agents/runtime";
 import {
   Context,
   DateTime,
@@ -498,6 +498,99 @@ describe("durable AttemptRuntime", () => {
         assert.match(output, /interrupted/u);
       }).pipe(Effect.scoped),
   );
+
+  for (const completion of ["reply", "ask", "block", "crash"] as const) {
+    it.live(
+      `uses the replacement child's ${completion} report after an infrastructure failure and restart`,
+      () =>
+        Effect.gen(function* () {
+          const database = yield* temporaryDatabase;
+          const request = attemptRequest(`restart/infra/${completion}`);
+          const recording = recordingSink();
+          const waiting = yield* Deferred.make<void>();
+          const callbackContext = yield* Effect.context<never>();
+          const run = Effect.runPromiseWith(callbackContext);
+          const interruptedParent: ParentStep = (context, options) => {
+            const result = [...context.messages]
+              .reverse()
+              .find(({ role }) => role === "toolResult");
+            assert(result?.role === "toolResult");
+            assert.isTrue(result.isError);
+            assert.include(jsonKey(result.content), "The first child lost its connection.");
+            const signal = options?.signal;
+            assert(signal !== undefined);
+            return run(Deferred.succeed(waiting, undefined).pipe(Effect.andThen(Effect.never)), {
+              signal,
+            });
+          };
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const services = yield* Layer.build(
+                layer({ database, parent: [delegate("Complete the task"), interruptedParent] }),
+              );
+              const runtime = Context.get(services, AttemptRuntime);
+              const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+              const child = yield* Context.get(services, StubChildren).next;
+              yield* child.crash("The first child lost its connection.");
+              yield* Deferred.await(waiting).pipe(Effect.timeout("5 seconds"));
+              yield* Fiber.interrupt(execution);
+            }),
+          );
+
+          const message = "The replacement child's report.";
+          const relay: ParentStep = (context) => {
+            const result = [...context.messages]
+              .reverse()
+              .find(({ role }) => role === "toolResult");
+            assert(result?.role === "toolResult");
+            assert.strictEqual(result.isError, completion === "crash");
+            const text = result.content
+              .flatMap((part) => (part.type === "text" ? [part.text] : []))
+              .join("");
+            assert.include(text, message);
+            return answer(completion === "ask" ? "The child needs a decision." : text);
+          };
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const services = yield* Layer.build(
+                layer({ database, parent: [delegate("Retry the interrupted work"), relay] }),
+              );
+              const runtime = Context.get(services, AttemptRuntime);
+              const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+              const child = yield* Context.get(services, StubChildren).next;
+              assert.isTrue(child.request.session.id.endsWith(":child:2"));
+              yield* child[completion](message);
+              const outcome = yield* Fiber.join(execution).pipe(Effect.result);
+              if (completion === "reply") {
+                assert(Result.isSuccess(outcome));
+                assert.strictEqual(outcome.success.message, message);
+                const finished = yield* runtime.finished(request.spec.attemptId);
+                assert.deepStrictEqual(
+                  finished,
+                  Option.some(ParentReported.make({ report: outcome.success })),
+                );
+              } else {
+                assert(Result.isFailure(outcome));
+                const expected =
+                  completion === "ask"
+                    ? QuestionFailure.make({ question: message })
+                    : completion === "block"
+                      ? BlockedFailure.make({ message })
+                      : InfraFailure.make({ message, cause: message });
+                assert.deepStrictEqual(outcome.failure, expected);
+              }
+            }),
+          );
+          const outbound = recording.outbound();
+          assertAdmitted(request.spec.attemptId, outbound);
+          assert.strictEqual(
+            outbound.filter(({ payload }) => payload._tag === "Started").length,
+            1,
+          );
+        }).pipe(Effect.scoped),
+    );
+  }
 
   for (const boundary of ["before", "after"] as const) {
     it.live(`replays a child envelope after a restart ${boundary} its append`, () =>
@@ -1598,6 +1691,45 @@ describe("durable AttemptRuntime", () => {
         const currentFinished = yield* runtime.finished(request.spec.attemptId);
         assert.deepStrictEqual(currentFinished, Option.none());
       }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("marks a child's attempt stopping when its execute call detaches", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const launched = yield* Deferred.make<ChildSessionLifecycle["Service"]>();
+      const backend = Layer.succeed(ChildBackend)({
+        launch: () =>
+          Effect.gen(function* () {
+            const lifecycle = yield* ChildSessionLifecycle.current;
+            yield* Deferred.succeed(launched, lifecycle);
+            return yield* Effect.never;
+          }),
+      });
+      const services = attemptRuntimeLayer.pipe(
+        Layer.provideMerge(
+          durableHarnessLayer({
+            ...fauxParent([delegate("Fix the flaky test")]),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open the durable storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const execution = yield* Effect.forkChild(
+          runtime.execute(attemptRequest("run/step/977"), recordingSink().sink),
+        );
+        const lifecycle = yield* Deferred.await(launched).pipe(Effect.timeout("5 seconds"));
+        const stoppingBefore = yield* lifecycle.isStopping;
+        assert.isFalse(stoppingBefore);
+        yield* Fiber.interrupt(execution);
+        const stoppingAfter = yield* lifecycle.isStopping;
+        assert.isTrue(stoppingAfter);
+      }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
   );
 

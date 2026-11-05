@@ -22,7 +22,7 @@ const attempts = durableLayer(instanceDirectory);
 
 The parent record stores the pool and endpoint resolved from its credential at launch. Transcript relay uses those stored values after a restart. Records created before these fields were stored retain the historical accounting rule.
 
-Building the layer installs the usine extension and resumes tasks. Closing it writes no task outcome, so the next start resumes the same work.
+Building the layer installs the usine extension and resumes tasks. Closing it writes no task outcome, so the next start resumes the same work. Each child receives a `ChildSessionLifecycle` tied to the channel attachment that supplied its host and environment. When that attachment detaches, the child stops recovering connections and reporting shutdown errors before the executor releases its transports and credentials.
 
 Before opening the first harness, `/live` installs Pi's HTTP dispatcher once for the process. It uses HTTP/1.1, CONNECT proxy tunnels, five-minute body and header timeouts, and a two-second address-family connection attempt timeout. Pi's global `httpProxy` setting fills unset `HTTP_PROXY` and `HTTPS_PROXY` variables; existing environment values and `NO_PROXY` retain their precedence. Project settings do not configure the proxy.
 
@@ -51,6 +51,8 @@ The task doesn't store the host or environment. It stores the run spec, worker, 
 Every child receives the stored rendered loop task unchanged. The parent supplies supplemental context through `subagent.task`. The child's `SessionStarted.prompt` records its exact initial prompt for the run page, including its persona, task, parent context, and completion instructions. Older transcripts leave this field absent.
 
 Children aren't resumed after a restart: the tool call ends as interrupted with the output committed so far, and the parent model decides next.
+
+After a restart, admitting another delegation clears a previous process's stored child infrastructure failure. The replacement child's report determines the attempt outcome. The previous failure remains in the transcript. If the parent finishes without another delegation, the stored infrastructure failure still fails the attempt. Infrastructure failures recorded in the current process retain their precedence and trigger the existing automatic retry.
 
 ## Operator input
 

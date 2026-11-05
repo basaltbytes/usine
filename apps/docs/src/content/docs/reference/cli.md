@@ -145,7 +145,7 @@ A checkout installation requires updating and building its checkout, then restar
 usine backup /backups/instance.sqlite
 ```
 
-The command uses SQLite’s backup API while the instance runs. It copies durable storage first and the runtime store second, with owner-only permissions, and refuses an existing destination. The directory must exist and support hard links. A runtime backup failure removes the durable copy. An instance without durable storage produces only the runtime copy and reports it.
+The command creates a compact runtime snapshot with `VACUUM INTO` while the instance runs and syncs the file and destination directory before reporting success. Durable storage uses SQLite’s backup API. It copies durable storage first and the runtime store second, with owner-only permissions, and refuses an existing destination. The directory must exist and support hard links. A runtime backup failure removes the durable copy. An instance without durable storage produces only the runtime copy and reports it.
 
 The durable path inserts `.durable` before `.sqlite` or `.db`, or appends `.durable.sqlite` for another extension. Backups omit credentials and connection-record files. See [Back up instance state](/guides/back-up-instance-state/).
 

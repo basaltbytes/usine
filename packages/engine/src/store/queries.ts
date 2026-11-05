@@ -101,7 +101,8 @@ import {
 
 import { boardHistoryQueries, runPullRequestUrl } from "./board.ts";
 import { loopItemQueries } from "./loop-items.ts";
-import { transcriptQueries } from "./transcript.ts";
+import type { TranscriptCodec } from "./transcript/codec.ts";
+import { transcriptQueries } from "./transcript/queries.ts";
 
 /** The newest queued submission and the Events read with it. */
 export interface QueuedEvents {
@@ -198,7 +199,11 @@ const attemptSummarySelection = Struct.omit(attemptSelection, ["task", "comments
 const storedStateTag = jsonExtract(runs.stateJson, "$._tag");
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
-export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) => {
+export const queriesFor = (
+  database: RunDatabaseClient,
+  codec: TranscriptCodec["Service"],
+  record?: RecordChange,
+) => {
   const changedRun = (runId: RunId) =>
     Effect.gen(function* () {
       if (record === undefined) return;
@@ -1256,7 +1261,7 @@ export const queriesFor = (database: RunDatabaseClient, record?: RecordChange) =
     salvageCandidate,
     cycles: cycleQueries(database, record),
     loopItems: loopItemQueries(database),
-    ...transcriptQueries(database),
+    ...transcriptQueries(database, codec),
     addAttempt,
     recordReattach,
     nextStart,

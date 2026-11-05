@@ -1,3 +1,6 @@
+import { transcriptCodecLayer } from "./transcript-codec.ts";
+import type { TranscriptCodec } from "../store/transcript/codec.ts";
+import { transcriptMaintenanceLayer, transcriptSealerLayer } from "../store/transcript/sealer.ts";
 import { StepOutputStore } from "../step-outputs/store.ts";
 import { sqliteStepOutputLayer } from "../step-outputs/sqlite.ts";
 import { type SqlError, SqlClient } from "effect/sql";
@@ -147,7 +150,9 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
       return drizzle;
     }).pipe(Effect.mapError((cause) => startupError("initialize local database", cause))),
   );
-  return Layer.merge(database, sqliteStepOutputLayer).pipe(Layer.provideMerge(sqlClient));
+  return Layer.mergeAll(database, sqliteStepOutputLayer, transcriptCodecLayer).pipe(
+    Layer.provideMerge(sqlClient),
+  );
 };
 
 /**
@@ -158,9 +163,10 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
-    instanceDirectory,
-  ),
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    EnginePersistenceError
+  > = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
   | AttentionAcknowledgements
   | BoardMoves
@@ -177,7 +183,16 @@ export const layer = (
   | UnconfirmedStops,
   RunEngineError,
   StepExecutor | TriggerCondition
-> => layerWithDatabase(database).pipe(Layer.provide(NodeServices.layer));
+> =>
+  layerWithDatabase(database).pipe(
+    Layer.merge(
+      transcriptMaintenanceLayer.pipe(
+        Layer.provide(transcriptSealerLayer),
+        Layer.provide(database),
+      ),
+    ),
+    Layer.provide(NodeServices.layer),
+  );
 
 /**
  * Returns the observation services without recovering runs or starting attempts.
@@ -187,9 +202,10 @@ export const layer = (
  */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
-    instanceDirectory,
-  ),
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    EnginePersistenceError
+  > = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
   | AttentionAcknowledgements
   | CycleBudgets
@@ -249,7 +265,7 @@ export const runReaderLayer = (
   const database = Layer.effect(RunDatabase, SQLiteDrizzle.makeWithDefaults()).pipe(
     Layer.provide(sqlClient),
   );
-  return RunReader.layer.pipe(Layer.provide(database));
+  return RunReader.layer.pipe(Layer.provide(Layer.merge(database, transcriptCodecLayer)));
 };
 
 /** An error from a backup, with both paths because a copy error can come from either file. */
@@ -313,7 +329,7 @@ export const backup = Effect.fn("LocalSqlite.backup")(
     const failed = (operation: RuntimeStoreBackupError["operation"]) =>
       Effect.mapError(failure(operation));
     yield* readableRuntimeStore(source).pipe(failed("open"));
-    const { totalPages } = yield* Effect.scoped(
+    yield* Effect.scoped(
       Effect.gen(function* () {
         const directory = path.dirname(destination);
         const temporary = yield* fileSystem
@@ -325,18 +341,21 @@ export const backup = Effect.fn("LocalSqlite.backup")(
           .pipe(failed("stage"));
         const backupContext = yield* Layer.build(readOnlySqliteLayer(source, failure("open")));
         const client = Context.get(backupContext, SqliteClient.SqliteClient);
-        // Node's backup can't be canceled; wait before closing the database or deleting staging.
-        const metadata = yield* client.backup(staged).pipe(failed("copy"), Effect.uninterruptible);
+        // VACUUM INTO copies one consistent snapshot and omits pages freed by transcript sealing.
+        yield* client`VACUUM main INTO ${staged}`.pipe(failed("copy"), Effect.uninterruptible);
+        const stagedFile = yield* fileSystem.open(staged, { flag: "r+" }).pipe(failed("copy"));
+        yield* stagedFile.sync.pipe(failed("copy"));
         // A hard link atomically creates the destination without overwriting it.
         yield* fileSystem.link(staged, destination).pipe(failed("publish"));
-        return metadata;
+        const destinationDirectory = yield* fileSystem.open(directory).pipe(failed("publish"));
+        yield* destinationDirectory.sync.pipe(failed("publish"));
       }),
     );
-    yield* Effect.annotateCurrentSpan({ totalPages });
+    const { size } = yield* fileSystem.stat(destination).pipe(failed("copy"));
     yield* Effect.logInfo("Runtime store backup completed", {
       instanceDirectory,
       destination,
-      totalPages,
+      bytes: size,
     });
   },
   Effect.tapError((error) =>

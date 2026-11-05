@@ -12,6 +12,7 @@ import {
   Layer,
   Option,
   Ref,
+  Result,
   Schema,
   Semaphore,
 } from "effect";
@@ -33,7 +34,7 @@ export interface UpgradePlatform {
 interface UpgradeOptions {
   readonly running: string;
   readonly settings: Effect.Effect<Pick<Settings, "upgradeChannel" | "upgradeMode">>;
-  readonly platform: Option.Option<UpgradePlatform>;
+  readonly platform: Result.Result<UpgradePlatform, UpgradeError>;
   readonly drain: (target: ReleaseVersion) => Effect.Effect<void>;
   readonly resume: Effect.Effect<void>;
 }
@@ -88,9 +89,9 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       ),
     );
   const progress = yield* Ref.make<Progress>({ phase: "idle" });
-  const outcome = Option.match(options.platform, {
-    onNone: () => Effect.succeed(Option.none<UpgradeRecord>()),
-    onSome: (platform) => platform.outcome,
+  const outcome = Result.match(options.platform, {
+    onFailure: () => Effect.succeed(Option.none<UpgradeRecord>()),
+    onSuccess: (platform) => platform.outcome,
   });
   const status = Effect.fn("Server.upgradeStatus")(function* () {
     const settings = yield* options.settings;
@@ -118,7 +119,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       running: options.running,
       channel: settings.upgradeChannel,
       mode: settings.upgradeMode,
-      supported: Option.isSome(options.platform),
+      supported: Result.isSuccess(options.platform),
       available: Option.getOrNull(availableVersion),
       phase: Option.exists(result, (record) => record.status === "installing")
         ? "installing"
@@ -136,12 +137,14 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
 
   const request = Effect.fn("Server.requestUpgrade")(
     function* (input: UpgradeRequest) {
-      if (Option.isNone(options.platform)) {
-        return yield* UpgradeError.make({
-          message: "App upgrades require a global npm install managed by systemd.",
+      if (Result.isFailure(options.platform)) {
+        yield* Effect.logWarning("Server upgrade request rejected", {
+          running: options.running,
+          reason: options.platform.failure.message,
         });
+        return yield* options.platform.failure;
       }
-      const platform = options.platform.value;
+      const platform = options.platform.success;
       const settings = yield* options.settings;
       const latest = yield* availableFor(settings.upgradeChannel);
       const target = Option.orElse(input.version, () => latest);
@@ -241,24 +244,24 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
 
   const check = Effect.fn("Server.checkUpgrade")(function* () {
     const settings = yield* options.settings;
-    if (settings.upgradeMode === "off" || Option.isNone(options.platform)) {
+    if (settings.upgradeMode === "off" || Result.isFailure(options.platform)) {
       const previous = yield* Ref.getAndSet(available, Option.none());
       if (Option.isSome(previous)) yield* changed;
       yield* Effect.logDebug("Server upgrade check skipped", {
         running: options.running,
         mode: settings.upgradeMode,
-        supported: Option.isSome(options.platform),
+        supported: Result.isSuccess(options.platform),
       });
       return;
     }
-    const target = yield* options.platform.value.lookup(settings.upgradeChannel);
+    const target = yield* options.platform.success.lookup(settings.upgradeChannel);
     yield* Effect.annotateCurrentSpan({
       previous: options.running,
       target,
       channel: settings.upgradeChannel,
     });
     const newer = compareVersions(target, options.running) > 0;
-    if (newer) yield* options.platform.value.checkDependencies(target);
+    if (newer) yield* options.platform.success.checkDependencies(target);
     const candidate = newer
       ? Option.some(UpgradeCandidate.make({ channel: settings.upgradeChannel, version: target }))
       : Option.none();
