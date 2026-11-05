@@ -1,3 +1,8 @@
+import { NodeServices } from "@effect/platform-node";
+import { harvestFacts } from "@usine/core/step/harvest";
+import { jsonKey } from "@usine/core/json-key";
+import { AttemptWindows } from "@usine/core/attempt";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { boardHistory } from "./support/run-reader.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
@@ -8,17 +13,23 @@ import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
-import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
+import {
+  AttemptAwaitingCi,
+  AttemptCanceled,
+  AttemptFailed,
+  AttemptSucceeded,
+} from "@usine/core/attempt/outcome";
+import { CiHandoff } from "@usine/core/ci";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
-import { Comment, PullRequest, StepResult } from "@usine/core/step/result";
+import { Comment, Commit, PullRequest, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
   ItemContentHash,
@@ -30,7 +41,8 @@ import { UnconfirmedStops } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { RunEvent, RunReader, RunSnapshot, summarizeRun } from "@usine/engine/run-reader";
-import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schema } from "effect";
+import { harvestedAttemptChanges } from "../src/operator/task-changes.ts";
 import { OperatorObservation } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
@@ -140,8 +152,9 @@ const pullRequest = (
       mergedAt: state.merged ? "2026-10-03T10:00:00Z" : null,
       author: { login: "usine-bot" },
       baseRefName: "main",
+      baseRefOid: "c".repeat(40),
       headRefName: `fix/${number}`,
-      headRefOid: "410607d",
+      headRefOid: "a".repeat(40),
       additions: 1,
       deletions: 1,
       changedFiles: 1,
@@ -212,7 +225,9 @@ const summary = (
       openedAt: at(openedAt),
     }),
     step: Step.make({ runId, name: StepName.make("run"), result }),
-    attempts: attempts(runId),
+    attempts: attempts(runId).map((attempt, index, all) =>
+      index === all.length - 1 ? Attempt.make({ ...attempt, result }) : attempt,
+    ),
     resolvedFailureAttemptId: Option.none(),
     closedAt: Option.none(),
     approval: Option.none(),
@@ -247,6 +262,13 @@ const runs = [
       attempt(
         runId,
         1,
+        "2026-10-02T08:00:00.000Z",
+        Option.some(AttemptFailed.make({ failure: AgentFailure.make({ message: "Retry" }) })),
+        Option.some("2026-10-02T08:05:00.000Z"),
+      ),
+      attempt(
+        runId,
+        2,
         "2026-10-02T09:00:00.000Z",
         succeeded,
         Option.some("2026-10-02T09:20:00.000Z"),
@@ -256,7 +278,14 @@ const runs = [
       StepResult.make({
         message: "Opened the plan.",
         facts: [
-          PullRequest.make({ number: 41, url: new URL(pullUrl(41)) }),
+          Commit.make({ sha: CommitSha.make("b".repeat(40)), summary: "First plan commit" }),
+          Commit.make({ sha: CommitSha.make("a".repeat(40)), summary: "Second plan commit" }),
+          PullRequest.make({
+            number: 41,
+            base: Option.some(CommitSha.make("c".repeat(40))),
+            url: new URL(pullUrl(41)),
+            head: Option.some(CommitSha.make("a".repeat(40))),
+          }),
           Comment.make({
             url: new URL(`https://github.com/${repository}/issues/40#issuecomment-1`),
             kind: "issue-comment",
@@ -478,6 +507,32 @@ describe("Task view", () => {
       const { task, requested } = yield* readTask(40);
       assert.strictEqual(task.number, 40);
       assert.strictEqual(task.title, "Rework the reader");
+      assert.strictEqual(
+        task.items.find(({ number }) => number === 41)?.pullRequest?.head,
+        "a".repeat(40),
+      );
+      assert.strictEqual(
+        task.items.find(({ number }) => number === 41)?.pullRequest?.base,
+        "c".repeat(40),
+      );
+      assert.deepStrictEqual(
+        task.attemptChanges.map(({ runId, attemptId, pullRequest, base, head }) => ({
+          runId,
+          attemptId,
+          pullRequest,
+          base,
+          head,
+        })),
+        [
+          {
+            runId: "run-plan",
+            attemptId: "run-plan/2",
+            pullRequest: 41,
+            base: "c".repeat(40),
+            head: "a".repeat(40),
+          },
+        ],
+      );
       assert.deepStrictEqual(
         task.items.map(({ kind, number, state, conflicting }) => [
           kind,
@@ -524,6 +579,218 @@ describe("Task view", () => {
       );
       // Run histories come from every Item the Board considers, not the overview's recent window.
       assert.strictEqual(requested.length, items.length);
+    }),
+  );
+
+  it.effect(
+    "compares a merge of main from the checkout base rather than the first harvested parent",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-attempt-range-" });
+        const git = (...args: Array<string>) =>
+          spawner
+            .string(ChildProcess.make("git", args, { cwd: directory }))
+            .pipe(Effect.map((text) => text.trim()));
+        yield* git("init", "-b", "main");
+        yield* git("config", "user.name", "Test");
+        yield* git("config", "user.email", "test@example.com");
+        yield* git("commit", "--allow-empty", "-m", "Common ancestor");
+        yield* git("checkout", "-b", "feature");
+        yield* fs.writeFileString(path.join(directory, "previous-round.txt"), "Previous PR work\n");
+        yield* git("add", ".");
+        yield* git("commit", "-m", "Previous round");
+        const baseOutput = yield* git("rev-parse", "HEAD");
+        const base = CommitSha.make(baseOutput);
+        yield* git("checkout", "main");
+        yield* fs.writeFileString(path.join(directory, "main-update.txt"), "Main update\n");
+        yield* git("add", ".");
+        yield* git("commit", "-m", "Main update");
+        const mainOutput = yield* git("rev-parse", "HEAD");
+        const main = CommitSha.make(mainOutput);
+        yield* git("checkout", "feature");
+        yield* git("merge", "--no-ff", "main", "-m", "Merge main");
+        const headOutput = yield* git("rev-parse", "HEAD");
+        const head = CommitSha.make(headOutput);
+        const facts = yield* harvestFacts(
+          {
+            attemptId: AttemptId.make("run-plan/2"),
+            repository,
+            baseCommit: base,
+            revision: RepositoryRevision.make("feature"),
+            payload: {},
+            preparedAt: Option.none(),
+            botLogin: Option.none(),
+            agent: developer,
+          },
+          (command, args) =>
+            command === "git"
+              ? args[0] === "ls-remote"
+                ? Effect.succeed([`${head}\trefs/heads/feature`])
+                : git(...args).pipe(Effect.map((text) => text.split("\n")))
+              : Effect.succeed([
+                  jsonKey([[{ number: 41, html_url: pullUrl(41), head: { sha: head } }]]),
+                ]),
+          Effect.succeed(AttemptWindows.make({ own: Option.none(), overlapping: [] })),
+        );
+        assert.deepStrictEqual(
+          facts.flatMap((fact) => (fact._tag === "Commit" ? [fact.sha] : [])).slice(0, 1),
+          [main],
+        );
+        const snapshot = summary(
+          "run-plan",
+          40,
+          "plan",
+          RunState.Succeeded.make(),
+          "2026-10-02T09:00:00Z",
+          (runId) => [
+            attempt(
+              runId,
+              2,
+              "2026-10-02T09:00:00Z",
+              succeeded,
+              Option.some("2026-10-02T09:20:00Z"),
+            ),
+          ],
+          Option.some(StepResult.make({ message: "Merged main", facts })),
+        );
+        const changes = harvestedAttemptChanges(snapshot);
+        assert.strictEqual(changes[0]?.base, base);
+        assert.strictEqual(changes[0]?.head, head);
+        const files = yield* git("diff", "--name-only", `${base}...${head}`);
+        assert.strictEqual(files, "main-update.txt");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("omits legacy attempt comparisons whose checkout base was not recorded", () =>
+    Effect.gen(function* () {
+      const legacy = yield* Schema.decodeEffect(PullRequest)({
+        _tag: "PullRequest",
+        number: 41,
+        url: pullUrl(41),
+        head: "a".repeat(40),
+      });
+      assert.isTrue(Option.isNone(legacy.base));
+      const original = runs[0];
+      assert.isDefined(original);
+      if (original === undefined) return;
+      const snapshot = RunSnapshot.make({
+        ...original,
+        step: Step.make({
+          ...original.step,
+          result: Option.some(StepResult.make({ message: "Legacy result", facts: [legacy] })),
+        }),
+        attempts: original.attempts.map((attempt) =>
+          Attempt.make({
+            ...attempt,
+            result: Option.some(StepResult.make({ message: "Legacy result", facts: [legacy] })),
+          }),
+        ),
+      });
+      assert.deepStrictEqual(harvestedAttemptChanges(snapshot), []);
+    }),
+  );
+
+  it.effect.each([
+    AttemptCanceled.make(),
+    AttemptFailed.make({ failure: AgentFailure.make({ message: "CI failed" }) }),
+  ])("preserves recorded attempt changes after CI settles as $_tag", (outcome) =>
+    Effect.sync(() => {
+      const original = runs[0];
+      assert(original !== undefined);
+      assert(Option.isSome(original.step.result));
+      const producerId = AttemptId.make("run-plan/2");
+      const result = StepResult.make({
+        ...original.step.result.value,
+        attemptId: Option.some(producerId),
+      });
+      const waiting = RunSnapshot.make({
+        ...original,
+        run: Run.make({
+          ...original.run,
+          state: RunState.AwaitingCi.make({
+            handoff: CiHandoff.make({
+              pullRequest: ItemNumber.make(41),
+              head: CommitSha.make("a".repeat(40)),
+              fixLoop: LoopName.make("fix-ci"),
+              timeoutSeconds: 1800,
+              onGreen: [],
+            }),
+          }),
+        }),
+        step: Step.make({ ...original.step, result: Option.some(result) }),
+        attempts: original.attempts.map((attempt) =>
+          attempt.id === producerId
+            ? Attempt.make({
+                ...attempt,
+                outcome: Option.some(AttemptAwaitingCi.make()),
+                result: Option.some(result),
+              })
+            : attempt,
+        ),
+      });
+      const expected = harvestedAttemptChanges(waiting);
+      assert.strictEqual(expected[0]?.attemptId, producerId);
+      const settled = RunSnapshot.make({
+        ...waiting,
+        run: Run.make({
+          ...waiting.run,
+          state:
+            outcome._tag === "Canceled"
+              ? RunState.Canceled.make({
+                  reason: RunState.HeadChanged.make({ head: CommitSha.make("b".repeat(40)) }),
+                })
+              : RunState.Failed.make(),
+        }),
+        attempts: waiting.attempts.map((attempt) =>
+          attempt.id === producerId
+            ? Attempt.make({ ...attempt, outcome: Option.some(outcome) })
+            : attempt,
+        ),
+      });
+      assert.deepStrictEqual(harvestedAttemptChanges(settled), expected);
+      if (outcome._tag === "Failed") {
+        const retrying = RunSnapshot.make({
+          ...settled,
+          run: Run.make({ ...settled.run, state: RunState.Running.make() }),
+          attempts: [
+            ...settled.attempts,
+            attempt(original.run.id, 3, "2026-10-02T10:00:00Z", Option.none(), Option.none()),
+          ],
+        });
+        assert.deepStrictEqual(harvestedAttemptChanges(retrying), expected);
+        const nextBase = CommitSha.make("a".repeat(40));
+        const nextHead = CommitSha.make("b".repeat(40));
+        const nextResult = StepResult.make({
+          message: "Retry succeeded",
+          facts: [
+            PullRequest.make({
+              number: 41,
+              url: new URL(pullUrl(41)),
+              base: Option.some(nextBase),
+              head: Option.some(nextHead),
+            }),
+          ],
+        });
+        const completed = RunSnapshot.make({
+          ...retrying,
+          run: Run.make({ ...retrying.run, state: RunState.Succeeded.make() }),
+          step: Step.make({ ...retrying.step, result: Option.some(nextResult) }),
+          attempts: retrying.attempts.map((attempt) =>
+            attempt.number === 3
+              ? Attempt.make({ ...attempt, outcome: succeeded, result: Option.some(nextResult) })
+              : attempt,
+          ),
+        });
+        const changes = harvestedAttemptChanges(completed);
+        assert.deepStrictEqual(changes.slice(0, 1), expected);
+        assert.strictEqual(changes.length, 2);
+        assert.strictEqual(changes[1]?.number, 3);
+        assert.strictEqual(changes[1]?.base, nextBase);
+        assert.strictEqual(changes[1]?.head, nextHead);
+      }
     }),
   );
 

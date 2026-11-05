@@ -144,3 +144,9 @@ Run `pnpm --filter @usine/github check` after building dependencies to check Typ
 ## CI failure evidence
 
 `GitHubChecks` reads the pull request head and aggregate check state. For failed Actions jobs, it extracts bounded failed-step logs from the run-attempt archive. If the archive is unavailable or lacks the failed step, it reads the completed job's plain log, including when other matrix jobs are running. Rate limits defer polling; unavailable job logs use the check output.
+
+## Pull request files
+
+`GitHubFiles` from `/files` reads changed files with the installation token, bounded transient retries, and typed rate-limit errors. `read(repository, item, selection)` accepts `PullRequestFilesQuery` or `CommitRangeFilesQuery`, each with `base` and `head` commit SHAs. Attempt comparisons use the recorded checkout base and pushed head.
+
+PR reads follow up to 30 pages of 100 files and verify the selected head and base before and after pagination. Comparisons report GitHub's 300-file limit. Missing patches use `kind: "omitted"`; incomplete text patches have `truncated: true`. Paths identify test and generated files. Successful responses are cached by repository, PR, and commit selection without expiration, in a shared 128-entry cache. Failures are retried on the next read. `GitHubFiles.layer` requires `GitHubApp` and an Effect HTTP client.

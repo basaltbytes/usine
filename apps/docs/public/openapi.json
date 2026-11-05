@@ -13795,6 +13795,635 @@
         "summary": "Read the next page of board cards"
       }
     },
+    "/api/projects/{project}/pull-requests/{repository}/{item}/files": {
+      "get": {
+        "tags": [
+          "Operator"
+        ],
+        "operationId": "operator.pullRequestFiles",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "required": true
+          },
+          {
+            "name": "repository",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+            },
+            "required": true
+          },
+          {
+            "name": "item",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
+            },
+            "required": true
+          },
+          {
+            "name": "_tag",
+            "in": "query",
+            "required": true,
+            "description": "Select the whole PR or a commit range.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PullRequestFiles",
+                "CommitRangeFiles"
+              ]
+            }
+          },
+          {
+            "name": "head",
+            "in": "query",
+            "required": true,
+            "description": "The full pushed head commit SHA.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+            }
+          },
+          {
+            "name": "base",
+            "in": "query",
+            "required": true,
+            "description": "The full PR base commit SHA or attempt checkout base commit SHA.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "FileChanges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileChangesEncoded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid instance token or browser session is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AuthenticationError"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error Requests with an Origin header require an allowed origin. Unknown origins receive no CORS headers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "AccessDenied",
+                            "WorkerPreflightRejectedError",
+                            "UpgradeError",
+                            "ConfigurationNotFound",
+                            "ConfigurationStoreError",
+                            "SchemaError",
+                            "InvalidRequestError",
+                            "CrossSiteRequestError",
+                            "RunNotFoundError",
+                            "TranscriptAttemptNotFoundError",
+                            "BoardProjectNotFoundError",
+                            "BoardItemNotFoundError",
+                            "BoardLaneNotFoundError",
+                            "GitHubItemNotFoundError",
+                            "RunOperationRejectedError",
+                            "RunRetryBlockedError",
+                            "RunInterventionRejectedError",
+                            "LeftoversDiscardRejectedError",
+                            "RosterAgentNotFoundError",
+                            "LoopNotFoundError",
+                            "CycleBudgetResetRejectedError",
+                            "BoardLaneReadOnlyError",
+                            "RestartRequiredError",
+                            "ReloadPreflightError",
+                            "FactoryConfigError",
+                            "EnginePersistenceError",
+                            "AttemptCancellationError",
+                            "HttpBodyError",
+                            "GitHubApiError",
+                            "InvalidGitHubResponseError",
+                            "BackendUnavailableError",
+                            "InstallationDiscoveryError",
+                            "AppPermissionError",
+                            "GitHubRateLimitError"
+                          ],
+                          "description": "Domain failure tag that selects the HTTP status."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Diagnostic text safe to show to the operator."
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "CrossSiteRequestError"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error",
+                        "message"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "AccessDenied",
+                        "WorkerPreflightRejectedError",
+                        "UpgradeError",
+                        "ConfigurationNotFound",
+                        "ConfigurationStoreError",
+                        "SchemaError",
+                        "InvalidRequestError",
+                        "CrossSiteRequestError",
+                        "RunNotFoundError",
+                        "TranscriptAttemptNotFoundError",
+                        "BoardProjectNotFoundError",
+                        "BoardItemNotFoundError",
+                        "BoardLaneNotFoundError",
+                        "GitHubItemNotFoundError",
+                        "RunOperationRejectedError",
+                        "RunRetryBlockedError",
+                        "RunInterventionRejectedError",
+                        "LeftoversDiscardRejectedError",
+                        "RosterAgentNotFoundError",
+                        "LoopNotFoundError",
+                        "CycleBudgetResetRejectedError",
+                        "BoardLaneReadOnlyError",
+                        "RestartRequiredError",
+                        "ReloadPreflightError",
+                        "FactoryConfigError",
+                        "EnginePersistenceError",
+                        "AttemptCancellationError",
+                        "HttpBodyError",
+                        "GitHubApiError",
+                        "InvalidGitHubResponseError",
+                        "BackendUnavailableError",
+                        "InstallationDiscoveryError",
+                        "AppPermissionError",
+                        "GitHubRateLimitError"
+                      ],
+                      "description": "Domain failure tag that selects the HTTP status."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Diagnostic text safe to show to the operator."
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "description": "Returns commit-pinned files for a whole pull request or a comparison from an attempt checkout base to its pushed head. Reports missing patches and truncated file lists. Requires read access to the repository's project.",
+        "summary": "Read pull request or attempt changes"
+      }
+    },
     "/api/projects/{project}/tasks/{item}": {
       "get": {
         "tags": [
@@ -44995,6 +45624,54 @@
             "items": {
               "$ref": "#/components/schemas/_usine_orchestrator_TaskCommentViewEncoded"
             }
+          },
+          "attemptChanges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "attemptId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "loop": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "pullRequest": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "base": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                },
+                "head": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                }
+              },
+              "required": [
+                "runId",
+                "attemptId",
+                "number",
+                "loop",
+                "pullRequest",
+                "base",
+                "head"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -45636,6 +46313,53 @@
           },
           "conflicting": {
             "type": "boolean"
+          },
+          "pullRequest": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "base": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "head": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+                  },
+                  "checks": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "review": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "base",
+                  "head",
+                  "checks",
+                  "review"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -45716,6 +46440,133 @@
           "prerequisites",
           "harnesses",
           "containerLimits"
+        ],
+        "additionalProperties": false
+      },
+      "FileChangesEncoded": {
+        "type": "object",
+        "properties": {
+          "base": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          },
+          "head": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChangedFileEncoded"
+            }
+          },
+          "filesTruncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base",
+          "head",
+          "files",
+          "filesTruncated"
+        ],
+        "additionalProperties": false
+      },
+      "ChangedFileEncoded": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "oldPath": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "added",
+              "modified",
+              "removed",
+              "renamed"
+            ]
+          },
+          "additions": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "deletions": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "patch": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "text",
+                  "truncated"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "omitted"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "test": {
+            "type": "boolean"
+          },
+          "generated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "oldPath",
+          "status",
+          "additions",
+          "deletions",
+          "patch",
+          "test",
+          "generated"
         ],
         "additionalProperties": false
       },
@@ -47357,6 +48208,10 @@
       "StepResultEncoded": {
         "type": "object",
         "properties": {
+          "attemptId": {
+            "type": "string",
+            "minLength": 1
+          },
           "message": {
             "type": "string",
             "minLength": 1
@@ -47468,6 +48323,10 @@
           },
           "url": {
             "type": "string"
+          },
+          "base": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
           },
           "head": {
             "type": "string",

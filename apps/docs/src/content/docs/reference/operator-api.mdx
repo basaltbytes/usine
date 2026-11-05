@@ -43,6 +43,18 @@ Read `GET /api/runs/:runId` for the run's task, result message, each attempt's t
 
 Session records in transcripts and usage responses include an optional `pool` resolved at launch and an optional `endpoint` provider name for API-key models. Usage reads the recorded pool; older records without it use the historical harness and model rule. Endpoint names exclude URLs and credentials.
 
+## Pull request changes
+
+The task page lists **Changes** beneath each pull request. Open the disclosure and use **Compare** to select the whole PR or an attempt with recorded commits. Files are collapsed initially, show added and removed counts, and mark test and generated files by path. Patch text does not affect these marks. The latest polled CI checks and review decision appear beside the diff. Open a file to read the patch without leaving usine.
+
+Recorded attempt changes remain available after CI fails or a newer push cancels the CI wait. Each result is stored with the producing attempt. A successful retry adds a comparison and retains earlier attempt numbers and commit ranges.
+
+For older records, an upgrade associates the saved step result with its recorded producer. Without a producer ID, the upgrade uses the latest attempt only if its outcome is Succeeded or AwaitingCi. Other older results remain in run detail and are omitted from the comparison selector.
+
+`GET /api/projects/:project/pull-requests/:repository/:item/files` requires read access to the project. Encode the repository (`owner/name`) as one path segment. The query's `_tag` selects `PullRequestFiles` for the whole PR or `CommitRangeFiles` for an attempt. Both require `base` and `head` as full commit SHAs. Use the projected PR base for whole-PR reads and the recorded checkout base for attempts. Older attempts without a recorded base are omitted from the selector. Task detail provides those commit selections in `attemptChanges`, including runs beyond the first history page.
+
+Responses contain the resolved `base`, `head`, `files`, and `filesTruncated`. Each file has paths, status, counts, test and generated marks, and either a text patch with a truncation flag or an omitted patch. GitHub omits patches for some binary and large files. PR lists are limited to 3,000 files and comparisons to 300; a limited list is marked explicitly. Successful reads are cached on the server by commit selection and in the browser without automatic refetch. Task live updates supply PR base and head SHAs, so retargeting a PR refreshes its changes even when its head stays the same.
+
 ## Operations
 
 <OperatorApiReference />

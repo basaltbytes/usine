@@ -164,6 +164,7 @@ const pullRequest = objectType("PullRequestPayload", [
   ["mergedAt", "string", "nullable"],
   ["author", "Actor", "nullable"],
   ["baseRefName", "string"],
+  ["baseRefOid", "string", "nullable"],
   ["headRefName", "string"],
   ["headRefOid", "string"],
   ["additions", "int"],

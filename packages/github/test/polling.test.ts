@@ -133,6 +133,7 @@ const pullRequestPayload = {
   mergedAt: null,
   author: { login: "usine-bot" },
   baseRefName: "main",
+  baseRefOid: "b".repeat(40),
   headRefName: "feature/issue-28-polling-triggers",
   headRefOid: "abc123",
   additions: 10,

@@ -81,7 +81,10 @@ export const TaskPage = ({ repository, number }: TaskPageProps) => {
         <TaskHeader task={view} project={project} disabled={overview._tag === "NeedsSetup"} />
       )}
       <TaskRuns task={view} openRun={openRun} />
-      <TaskPullRequests task={view} />
+      <TaskPullRequests
+        task={view}
+        project={project === undefined ? undefined : projectId(project)}
+      />
       <TaskComments task={view} />
     </TaskLayout>
   );

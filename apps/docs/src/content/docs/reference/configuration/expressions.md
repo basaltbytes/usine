@@ -72,6 +72,7 @@ The pull-request payload slice.
 | `mergedAt` | string | — | yes | ISO 8601 UTC timestamp. |
 | `author.login` | string | — | `author` | `author` is null for a deleted account. |
 | `baseRefName` | string | — | | The target branch. |
+| `baseRefOid` | string | — | yes | The full target branch commit SHA. Null for stored payloads polled before this field was available. Test with `item.baseRefOid != null`. |
 | `headRefName` | string | — | | The source branch. |
 | `headRefOid` | string | — | | The head commit SHA. Attempts of `pr` loops start from this commit. |
 | `additions` | int | — | | Added lines in the diff. |

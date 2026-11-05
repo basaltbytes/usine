@@ -1,3 +1,4 @@
+import { pullRequestFilesRead } from "./files-http.ts";
 import { HarnessPresentation } from "@usine/agents/harness";
 import {
   repositoryPart,
@@ -656,6 +657,7 @@ export const OperatorApi = operatorApi.add(
           "Returns the project and its board across member repositories.",
         ),
       boardLaneItemsRead,
+      pullRequestFilesRead,
       HttpApiEndpoint.get("projectTask", "/api/projects/:project/tasks/:item", {
         params: {
           project: ProjectId,
@@ -957,6 +959,7 @@ export const operatorPermissions = {
   project: "read",
   boardLaneItems: "read",
   projectTask: "read",
+  pullRequestFiles: "read",
   task: "read",
   taskRuns: "read",
   detail: "read",

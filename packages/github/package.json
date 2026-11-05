@@ -42,6 +42,10 @@
     "./checks": {
       "types": "./dist/checks.d.ts",
       "default": "./dist/checks.js"
+    },
+    "./files": {
+      "types": "./dist/files/files.d.ts",
+      "default": "./dist/files/files.js"
     }
   },
   "publishConfig": {

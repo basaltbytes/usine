@@ -25,9 +25,12 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { BrainSpec } from "@usine/core/agent/brain";
 
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
+import { PullRequest, StepResult } from "@usine/core/step/result";
+import { CommitSha } from "@usine/core/repository";
 import { RunApproval, ApprovalSource } from "@usine/core/run/approval";
 
-import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 
 import { RunDatabase } from "../../src/database/database.ts";
@@ -38,7 +41,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 
 import { RunStore } from "../../src/store/store.ts";
 
-import { testAgent, lifecycleSubmission } from "./support.ts";
+import { testAgent, lifecycleSubmission, withRunStore } from "./support.ts";
 
 /** Seeds a pending Run in an old schema directly, because the current store writes columns from later migrations. */
 const seedPendingRun = (runId: RunId) =>
@@ -58,114 +61,206 @@ const seedPendingRun = (runId: RunId) =>
   });
 
 describe("Attempt migrations", () => {
-  it.live("upgrades populated Attempts without losing transcripts or disabling foreign keys", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const currentDirectory = yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-intervention-upgrade-",
-      });
-      const directory = InstanceDirectory.make(currentDirectory);
-      const historical = yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-historical-migrations-",
-      });
-      const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
-      for (const name of yield* fs.readDirectory(source)) {
-        if (name >= "20260912111855_operator_intervention") continue;
-        yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
-      }
-      yield* fs.makeDirectory(`${directory}/.usine`);
-      const oldDatabase = Layer.effect(
-        RunDatabase,
-        Effect.gen(function* () {
-          const database = yield* SQLiteDrizzle.makeWithDefaults();
-          yield* migrate(database, {
-            migrationsFolder: historical,
-            migrationsTable: "usine_migrations",
-          });
-          return database;
-        }),
-      ).pipe(
-        Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` })),
-      );
-      const runId = RunId.make("upgrade-run");
-      const id = "upgrade-attempt";
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient;
-          const valueDecoded2 = yield* Schema.encodeEffect(Agent)(testAgent);
-          // Seeds the old schema directly, because the current store writes columns from later migrations.
-          const json2 = jsonKey(valueDecoded2);
-          const agent = json2;
-          const eventId = lifecycleSubmission.event.id;
-          yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
-            VALUES (${eventId}, 'upgrade-event', '{}', '2026-09-12T00:00:00.000Z')`;
-          yield* sql`INSERT INTO usine_trigger_events (event_id, item_key, loop_name, step_name, approval, repository, revision, task, agent_json)
-            VALUES (${eventId}, ${lifecycleSubmission.itemKey}, ${lifecycleSubmission.loop}, ${lifecycleSubmission.step}, 'none', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
-          yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
-            VALUES (${runId}, ${eventId}, ${lifecycleSubmission.loop}, '{"_tag":"Pending"}', '2026-09-12T00:00:00.000Z', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
-          yield* sql`INSERT INTO usine_steps (run_id, step_name) VALUES (${runId}, ${lifecycleSubmission.step})`;
-          const decodedValue1 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
-          const json3 = jsonKey(decodedValue1);
-          yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at)
-        VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${json3}, '2026-09-12T00:00:00.000Z')`;
-          const json4 = jsonKey({
-            _tag: "OutboundEnvelope",
-            version: 4,
-            attemptId: id,
-            sequence: 1,
-            sentAt: "2026-09-12T00:00:00.000Z",
-            payload: { _tag: "Started", parentModel: "openai/model" },
-          });
-          const envelope = json4;
-          yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 1, ${envelope}, '2026-09-12T00:00:00.000Z')`;
-          // v7 changed only the unstored `Start` frame; bumping the envelope literal alone once made
-          // every v6 transcript unreadable.
-          const json5 = jsonKey({
-            _tag: "OutboundEnvelope",
-            version: 6,
-            attemptId: id,
-            sequence: 2,
-            sentAt: "2026-09-12T00:00:01.000Z",
-            payload: { _tag: "Final", result: { message: "done", facts: [] } },
-          });
-          const previousVersion = json5;
-          yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 2, ${previousVersion}, '2026-09-12T00:00:01.000Z')`;
-        }).pipe(Effect.provide(oldDatabase)),
-      );
-      yield* Effect.gen(function* () {
-        const store = yield* RunStore;
-        const snapshot = yield* store.snapshot(runId);
-        assert(Option.isNone(snapshot.resolvedFailureAttemptId));
-        assert.strictEqual(snapshot.attempts[0]?.task, lifecycleSubmission.task);
-        assert.strictEqual(snapshot.attempts[0]?.agent, testAgent.name);
-        assert.strictEqual(snapshot.attempts[0]?.operatorIntervened, false);
-        const attempt = snapshot.attempts[0];
-        assert(attempt !== undefined);
-        assert.deepStrictEqual(attempt.failureResolution, Option.none());
-        const transcript = yield* store.transcript(
-          TranscriptAllQuery.make({ attemptId: attempt.id }),
+  it.live.each([
+    { attributed: false, outcome: "Succeeded", retry: "none", retained: true },
+    { attributed: false, outcome: "AwaitingCi", retry: "none", retained: true },
+    { attributed: false, outcome: null, retry: "none", retained: false },
+    { attributed: false, outcome: "Failed", retry: "running", retained: false },
+    { attributed: false, outcome: "Failed", retry: "failed", retained: false },
+    { attributed: true, outcome: "Failed", retry: "running", retained: true },
+    { attributed: true, outcome: "Failed", retry: "failed", retained: true },
+    { attributed: true, outcome: null, retry: "none", retained: false },
+  ])(
+    "upgrades populated Attempts with result attribution: %j",
+    ({ attributed, outcome, retry, retained }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const currentDirectory = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-intervention-upgrade-",
+        });
+        const directory = InstanceDirectory.make(currentDirectory);
+        const historical = yield* fs.makeTempDirectoryScoped({
+          directory: sqliteTempDirectory(),
+          prefix: "usine-historical-migrations-",
+        });
+        const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
+        for (const name of yield* fs.readDirectory(source)) {
+          if (name >= "20260912111855_operator_intervention") continue;
+          yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
+        }
+        yield* fs.makeDirectory(`${directory}/.usine`);
+        const oldDatabase = Layer.effect(
+          RunDatabase,
+          Effect.gen(function* () {
+            const database = yield* SQLiteDrizzle.makeWithDefaults();
+            yield* migrate(database, {
+              migrationsFolder: historical,
+              migrationsTable: "usine_migrations",
+            });
+            return database;
+          }),
+        ).pipe(
+          Layer.provideMerge(
+            SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` }),
+          ),
         );
-        assert.deepStrictEqual(
-          transcript.map(({ envelope }) => [envelope.version, envelope.payload._tag]),
-          [
-            [4, "Started"],
-            [6, "Final"],
+        const runId = RunId.make("upgrade-run");
+        const id = "upgrade-attempt";
+        const result = StepResult.make({
+          message: "Recorded comparison",
+          attemptId: attributed ? Option.some(AttemptId.make(id)) : Option.none(),
+          facts: [
+            PullRequest.make({
+              number: 1003,
+              url: new URL("https://github.com/basaltbytes/usine/pull/1003"),
+              base: Option.some(CommitSha.make("a".repeat(40))),
+              head: Option.some(CommitSha.make("b".repeat(40))),
+            }),
           ],
+        });
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const valueDecoded2 = yield* Schema.encodeEffect(Agent)(testAgent);
+            // Seeds the old schema directly, because the current store writes columns from later migrations.
+            const json2 = jsonKey(valueDecoded2);
+            const agent = json2;
+            const eventId = lifecycleSubmission.event.id;
+            yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
+            VALUES (${eventId}, 'upgrade-event', '{}', '2026-09-12T00:00:00.000Z')`;
+            yield* sql`INSERT INTO usine_trigger_events (event_id, item_key, loop_name, step_name, approval, repository, revision, task, agent_json)
+            VALUES (${eventId}, ${lifecycleSubmission.itemKey}, ${lifecycleSubmission.loop}, ${lifecycleSubmission.step}, 'none', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
+            yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
+            VALUES (${runId}, ${eventId}, ${lifecycleSubmission.loop}, '{"_tag":"Pending"}', '2026-09-12T00:00:00.000Z', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
+            yield* sql`INSERT INTO usine_steps (run_id, step_name) VALUES (${runId}, ${lifecycleSubmission.step})`;
+            const decodedValue1 = yield* Schema.encodeEffect(BrainSpec)(testAgent.brain);
+            const json3 = jsonKey(decodedValue1);
+            yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at)
+        VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${json3}, '2026-09-12T00:00:00.000Z')`;
+            const json4 = jsonKey({
+              _tag: "OutboundEnvelope",
+              version: 4,
+              attemptId: id,
+              sequence: 1,
+              sentAt: "2026-09-12T00:00:00.000Z",
+              payload: { _tag: "Started", parentModel: "openai/model" },
+            });
+            const envelope = json4;
+            yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 1, ${envelope}, '2026-09-12T00:00:00.000Z')`;
+            const encodedResult = yield* Schema.encodeEffect(StepResult)(result);
+            const resultJson = jsonKey(encodedResult);
+            yield* sql`UPDATE usine_steps SET result = ${resultJson} WHERE run_id = ${runId}`;
+            const failed = jsonKey({
+              _tag: "Failed",
+              failure: { _tag: "AgentFailure", message: "CI failed" },
+            });
+            const outcomeJson =
+              outcome === null ? null : outcome === "Failed" ? failed : jsonKey({ _tag: outcome });
+            yield* sql`UPDATE usine_attempts SET outcome_json = ${outcomeJson} WHERE attempt_id = ${id}`;
+            if (retry !== "none") {
+              const retryOutcome = retry === "failed" ? failed : null;
+              yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at, outcome_json)
+              VALUES ('upgrade-retry', ${runId}, ${lifecycleSubmission.step}, 'local', 2, ${json3}, '2026-09-12T00:01:00.000Z', ${retryOutcome})`;
+            }
+            // v7 changed only the unstored `Start` frame; bumping the envelope literal alone once made
+            // every v6 transcript unreadable.
+            const json5 = jsonKey({
+              _tag: "OutboundEnvelope",
+              version: 6,
+              attemptId: id,
+              sequence: 2,
+              sentAt: "2026-09-12T00:00:01.000Z",
+              payload: { _tag: "Final", result: { message: "done", facts: [] } },
+            });
+            const previousVersion = json5;
+            yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 2, ${previousVersion}, '2026-09-12T00:00:01.000Z')`;
+          }).pipe(Effect.provide(oldDatabase)),
         );
-        const sql = yield* SqlClient.SqlClient;
-        const rows = yield* sql`PRAGMA foreign_key_check`;
-        assert.deepStrictEqual(rows, []);
+        yield* Effect.gen(function* () {
+          const store = yield* RunStore;
+          const snapshot = yield* store.snapshot(runId);
+          assert(Option.isNone(snapshot.resolvedFailureAttemptId));
+          assert.strictEqual(snapshot.attempts[0]?.task, lifecycleSubmission.task);
+          assert.strictEqual(snapshot.attempts[0]?.agent, testAgent.name);
+          assert.strictEqual(snapshot.attempts[0]?.operatorIntervened, false);
+          const attempt = snapshot.attempts[0];
+          assert(attempt !== undefined);
+          assert.deepStrictEqual(attempt.failureResolution, Option.none());
+          assert.deepStrictEqual(
+            attempt.result,
+            retained
+              ? Option.some(
+                  StepResult.make({
+                    ...result,
+                    attemptId: Option.some(attempt.id),
+                  }),
+                )
+              : Option.none(),
+          );
+          assert.deepStrictEqual(snapshot.step.result, Option.some(result));
+          if (retry !== "none") assert.deepStrictEqual(snapshot.attempts[1]?.result, Option.none());
+          const transcript = yield* store.transcript(
+            TranscriptAllQuery.make({ attemptId: attempt.id }),
+          );
+          assert.deepStrictEqual(
+            transcript.map(({ envelope }) => [envelope.version, envelope.payload._tag]),
+            [
+              [4, "Started"],
+              [6, "Final"],
+            ],
+          );
+          const sql = yield* SqlClient.SqlClient;
+          const rows = yield* sql`PRAGMA foreign_key_check`;
+          assert.deepStrictEqual(rows, []);
 
-        assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
-        const before = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
-        yield* sql`UPDATE usine_attempts SET operator_intervened = 1 WHERE attempt_id = ${id}`;
-        const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
-        assert(Schema.is(Schema.Int)(before));
-        assert.strictEqual(after, before + 1);
-      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+          assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
+          const before = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
+          yield* sql`UPDATE usine_attempts SET operator_intervened = 1 WHERE attempt_id = ${id}`;
+          const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
+          assert(Schema.is(Schema.Int)(before));
+          assert.strictEqual(after, before + 1);
+        }).pipe(
+          Effect.provide(RunStore.layer.pipe(Layer.provideMerge(localSqliteLayer(directory)))),
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("an attempt's completion replaces an incorrect backfilled result", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const sql = yield* SqlClient.SqlClient;
+        const runId = RunId.make("backfilled-result");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const attempt = started.execution.attempt;
+        const previous = StepResult.make({ message: "Previous attempt", facts: [] });
+        const encoded = yield* Schema.encodeEffect(StepResult)(previous);
+        yield* sql`UPDATE usine_attempts SET result_json = ${jsonKey(encoded)} WHERE attempt_id = ${attempt.id}`;
+        const result = StepResult.make({
+          message: "This attempt's comparison",
+          facts: [
+            PullRequest.make({
+              number: 1003,
+              url: new URL("https://github.com/basaltbytes/usine/pull/1003"),
+              base: Option.some(CommitSha.make("b".repeat(40))),
+              head: Option.some(CommitSha.make("c".repeat(40))),
+            }),
+          ],
+        });
+        yield* store.finishAttempt(attempt, Result.succeed(result));
+        const completed = yield* store.snapshot(runId);
+        const expected = Option.some(
+          StepResult.make({ ...result, attemptId: Option.some(attempt.id) }),
+        );
+        assert.deepStrictEqual(completed.attempts[0]?.result, expected);
+        assert.deepStrictEqual(completed.step.result, expected);
+        yield* store.finishAttempt(attempt, Result.succeed(previous));
+        assert.deepStrictEqual((yield* store.snapshot(runId)).attempts[0]?.result, expected);
+      }),
+    ),
   );
 });
 

@@ -1,3 +1,6 @@
+import type { ItemNumber } from "@usine/core/item";
+import type { RepositoryName } from "@usine/core/repository";
+import type { FileChangesQuery } from "@usine/github/files";
 import { changes } from "~/lib/query-changes";
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
 import type { ProjectId } from "@usine/core/project";
@@ -54,3 +57,19 @@ export const taskRunsQuery = (task: TaskView) => {
     },
   });
 };
+
+export const pullRequestFilesQuery = (
+  project: ProjectId,
+  repository: RepositoryName,
+  item: ItemNumber,
+  selection: FileChangesQuery,
+) =>
+  queryOptions({
+    queryKey: ["pull-request-files", project, repository, item, selection] as const,
+    queryFn: () =>
+      api((client) =>
+        client.pullRequestFiles({ params: { project, repository, item }, query: selection }),
+      ),
+    staleTime: "static",
+    gcTime: Infinity,
+  });

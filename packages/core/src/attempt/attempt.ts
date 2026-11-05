@@ -5,18 +5,16 @@ import { closedStruct } from "../closed-struct.ts";
 import { OperatorActor } from "../operator.ts";
 import type { RunState } from "../run/state.ts";
 import { RunId } from "../run/run.ts";
-import { Comment } from "../step/result.ts";
+import { Comment, StepResult } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
 import { ContainerId, ContainerMemoryMib, WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
 import { AttemptStart } from "./start.ts";
+import { AttemptId } from "./id.ts";
 
-/** The ID of an Attempt; each retry gets a new ID under the same Run and Step. */
-export const AttemptId = Schema.NonEmptyString.pipe(Schema.brand("AttemptId"));
-
-export type AttemptId = typeof AttemptId.Type;
+export { AttemptId } from "./id.ts";
 
 /** The 1-based position of the Attempt in its Step. */
 export const AttemptNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
@@ -148,6 +146,11 @@ export class Attempt extends Schema.Class<
   startedAt: Schema.DateTimeUtc,
   /** The terminal result, or `None` while the attempt is open. */
   outcome: Schema.Option(AttemptOutcome),
+  /** The harvested result retained independently of later retries and CI settlement. */
+  result: Schema.Option(StepResult).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The time the outcome was recorded, or `None` while open or for older records. */
   endedAt: Schema.Option(Schema.DateTimeUtc),
   /** The workspace recovery result after an unsuccessful end, or `None` if none was recorded. */

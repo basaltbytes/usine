@@ -1,6 +1,7 @@
 import { type Brand, Effect, Schema } from "effect";
 import { StepOutput, StepOutputRef } from "./output.ts";
 import { CommitSha } from "../repository.ts";
+import { AttemptId } from "../attempt/id.ts";
 
 /** A commit between the workspace base and the final HEAD. */
 export class Commit extends Schema.TaggedClass<
@@ -22,6 +23,10 @@ export class PullRequest extends Schema.TaggedClass<
   number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The GitHub pull request URL, encoded as a string for storage. */
   url: Schema.URLFromString,
+  /** The checkout base used to harvest this attempt, or `None` for older facts. */
+  base: Schema.OptionFromOptionalKey(CommitSha).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The pushed head, or `None` for facts recorded before CI handoffs. */
   head: Schema.OptionFromOptionalKey(CommitSha).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
@@ -61,6 +66,10 @@ export class StepResult extends Schema.Class<
   StepResult,
   Brand.Brand<"@usine/core/step/result/StepResult">
 >("StepResult")({
+  /** The producing attempt, assigned by the engine; `None` for older results. */
+  attemptId: Schema.OptionFromOptionalKey(AttemptId).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The agent's final response for the completed step. */
   message: Schema.NonEmptyString,
   /** The commits and GitHub writes retained as evidence after checkout cleanup. */

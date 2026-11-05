@@ -1,3 +1,4 @@
+import { GitHubFiles } from "@usine/github/files";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { GitHubChecks } from "@usine/github/checks";
 import { CiMonitor } from "./ci.ts";
@@ -129,6 +130,7 @@ export const runtimeLayer = (
     Layer.provide(app),
     Layer.provide(externalHttpClientLayer),
   );
+  const files = GitHubFiles.layer.pipe(Layer.provide(app), Layer.provide(externalHttpClientLayer));
   const itemHistory = GitHubItemHistory.layer.pipe(
     Layer.provide(app),
     Layer.provide(externalHttpClientLayer),
@@ -162,5 +164,5 @@ export const runtimeLayer = (
     OperatorConfiguration.layer,
     Orchestrator.layer,
   ).pipe(Layer.provide(Layer.mergeAll(dependencies, triggers, itemHistory, app)));
-  return Layer.mergeAll(dependencies, triggers, services, app, WebhookHealth.layer);
+  return Layer.mergeAll(dependencies, triggers, services, app, files, WebhookHealth.layer);
 };

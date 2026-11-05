@@ -10,6 +10,8 @@ A task is named after its originating item: the earliest issue, or else, for a t
 
 A mark is the item's GitHub icon and number in GitHub's state colour: an issue icon or a pull request icon, open, merged, or closed. It links to the item on GitHub, and its tooltip says the kind, number, and state, such as `Pull request #530, closed`. A mark inside a row, card, or entry that opens something else doesn't link. While a state is unknown, the mark shows the kind's icon in the muted colour.
 
+Each pull request on the task page has a **Changes** disclosure. **Compare** selects the whole pull request or an attempt with recorded commits. Files start collapsed, show added and removed counts, and mark test and generated files. Missing and truncated patches and GitHub's file-list limits are reported in the view. The latest polled checks and review decision appear beside the comparison. Commit-based reads remain cached while navigating and do not poll GitHub.
+
 ## Needs attention
 
 When a cloud provider refuses a worker’s quota, Needs attention shows the provider message and suggests requesting a limit increase in its console, choosing a smaller `server_type` (`size` on Boat), or freeing capacity. Runs waiting for that worker to create their machine show the worker and refusal on their board cards and run pages. The entry’s **Details** menu opens the full provider message and recovery steps on desktop and phones. Machine creation keeps retrying with backoff; a successful creation clears the warning. Dismiss hides the entry while the affected runs keep their waiting reason.
