@@ -71,6 +71,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
       hostCommand(
         client.host,
         {
+          cwd: "/",
           command: "node",
           args: ["-e", CODEX_SUPERVISOR, "attach", pidFile, String(cursor), ...args],
           environment: client.environment,
