@@ -4,7 +4,7 @@
 // Fixture JSON is decoded synchronously at the test boundary.
 // @effect-diagnostics schemaSync:off
 import { assert } from "@effect/vitest";
-import { Predicate, Schema } from "effect";
+import { Deferred, Effect, Exit, Predicate, Schema } from "effect";
 
 export const Scenario = Schema.Literals([
   "simple",
@@ -83,13 +83,24 @@ export class Tape {
   readonly entries: Array<Entry> = [];
   readonly #inboxes = new Map<string, Inbox>();
   readonly #bindings = new Map<string, string>();
-  #cursor = 0;
+  readonly #groups = new Map<
+    string,
+    { entries: Array<{ entry: Entry; index: number }>; cursor: number }
+  >();
+  readonly failure = Deferred.makeUnsafe<never>();
   #ports = new Map<string, number>();
   #failure: { readonly cause: unknown } | undefined;
 
   readonly source: "record" | Transcript;
   constructor(source: "record" | Transcript) {
     this.source = source;
+    if (source !== "record")
+      source.entries.forEach((entry, index) => {
+        const name = this.#group(entry.port);
+        const group = this.#groups.get(name) ?? { entries: [], cursor: 0 };
+        group.entries.push({ entry, index });
+        this.#groups.set(name, group);
+      });
   }
 
   port(protocol: string): string {
@@ -126,19 +137,22 @@ export class Tape {
       return;
     }
     this.#pump();
-    const expected = this.source.entries[this.#cursor];
+    const group = this.#groups.get(this.#group(port));
+    const expected = group?.entries[group.cursor];
     try {
       assert.deepStrictEqual(
         { type: "expect_outbound", port, payload },
-        expected,
-        `outbound request differs at transcript entry ${this.#cursor}`,
+        expected?.entry,
+        `outbound request differs at transcript entry ${expected?.index ?? "end"} on ${port}\n` +
+          `- expected: ${expected === undefined ? "<end>" : encode(expected.entry)}\n` +
+          `+ received: ${encode({ type: "expect_outbound", port, payload })}`,
       );
     } catch (cause) {
       this.fail(cause);
       throw cause;
     }
     this.entries.push({ type: "expect_outbound", port, payload });
-    this.#cursor += 1;
+    if (group !== undefined) group.cursor += 1;
     this.#pump();
   }
 
@@ -163,6 +177,7 @@ export class Tape {
 
   fail(cause: unknown): void {
     this.#failure ??= { cause };
+    Deferred.doneUnsafe(this.failure, Exit.die(this.#failure.cause));
     for (const inbox of this.#inboxes.values()) inbox.fail(this.#failure.cause);
   }
 
@@ -170,7 +185,12 @@ export class Tape {
     if (this.#failure !== undefined) throw this.#failure.cause;
     if (this.source !== "record") {
       this.#pump();
-      assert.strictEqual(this.#cursor, this.source.entries.length, "unconsumed transcript entries");
+      for (const [name, group] of this.#groups)
+        assert.strictEqual(
+          group.cursor,
+          group.entries.length,
+          `unconsumed transcript entries in ${name}`,
+        );
       for (const [port, inbox] of this.#inboxes)
         assert.lengthOf(inbox.pending, 0, `unread transport output on ${port}`);
     }
@@ -184,13 +204,21 @@ export class Tape {
     return inbox;
   }
 
+  readonly guard = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.raceFirst(effect, Deferred.await(this.failure));
+
+  #group(port: string): string {
+    return port.split("/")[0] ?? port;
+  }
+
   #pump(): void {
-    if (this.source === "record") return;
-    for (;;) {
-      const entry = this.source.entries[this.#cursor];
-      if (entry === undefined || entry.type === "expect_outbound") return;
-      this.#cursor += 1;
-      this.#inbox(entry.port).offer(entry);
+    for (const group of this.#groups.values()) {
+      for (;;) {
+        const next = group.entries[group.cursor];
+        if (next === undefined || next.entry.type === "expect_outbound") break;
+        group.cursor += 1;
+        this.#inbox(next.entry.port).offer(next.entry);
+      }
     }
   }
 }

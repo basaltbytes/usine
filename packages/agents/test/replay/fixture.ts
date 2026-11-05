@@ -4,7 +4,7 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
-import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
+import { Deferred, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { env } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -131,11 +131,19 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
             sshEnvironment: { ...environment, REPLAY_DROP: `${cwd}/drop` },
           })
         : LocalProcess.make();
+    const boundary = yield* Deferred.make<void>();
+    const started = yield* Deferred.make<void>();
+    const released = yield* Deferred.make<void>();
     const transport: Layer.Layer<ChildBackend, never, ChildProcessSpawner.ChildProcessSpawner> =
       provider === "claude"
         ? claudeChildLayer.pipe(
             Layer.provide(
-              claudeTransport(tape, sdk, scenario === "early-exit" ? "early-exit" : "none"),
+              claudeTransport(
+                tape,
+                sdk,
+                scenario === "early-exit" ? "early-exit" : "none",
+                scenario === "interrupt-guidance" ? { boundary, started, released } : undefined,
+              ),
             ),
             Layer.provide(Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect })),
             Layer.provide(processes),
@@ -174,6 +182,40 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
           tape.entries,
         );
         assert.include(traffic, provider === "claude" ? '"method":"interrupt"' : "turn/interrupt");
+      }
+      if (provider === "codex" && scenario === "interrupt-guidance") {
+        const recorded = tape.source === "record" ? tape.entries : tape.source.entries;
+        const method = (name: string) => Schema.is(Schema.Struct({ method: Schema.Literal(name) }));
+        const interrupt = recorded.findIndex(
+          (entry) =>
+            entry.type === "expect_outbound" &&
+            entry.port === "process:1/stdin" &&
+            method("turn/interrupt")(entry.payload),
+        );
+        const completed = recorded.findIndex(
+          (entry) =>
+            entry.type === "emit_inbound" &&
+            entry.port === "process:1/stdout" &&
+            Schema.is(
+              Schema.Struct({
+                method: Schema.Literal("turn/completed"),
+                params: Schema.Struct({
+                  turn: Schema.Struct({ status: Schema.Literal("interrupted") }),
+                }),
+              }),
+            )(entry.payload),
+        );
+        const guided = recorded.findIndex(
+          (entry, index) =>
+            index > completed &&
+            entry.type === "expect_outbound" &&
+            entry.port === "process:1/stdin" &&
+            method("turn/start")(entry.payload),
+        );
+        assert(
+          interrupt >= 0 && completed > interrupt && guided > completed,
+          "interrupt completes before guidance starts a new turn",
+        );
       }
       if (provider === "codex" && scenario === "transport-loss") {
         const recorded = tape.source === "record" ? tape.entries : tape.source.entries;
@@ -237,5 +279,36 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
       yield* fs.makeDirectory(path.dirname(file), { recursive: true });
       yield* fs.writeFileString(file, encoded + "\n");
     });
-    return { tape, cwd, backend, request, drop: drop.pipe(Effect.orDie), save };
+    return {
+      tape,
+      cwd,
+      backend,
+      request,
+      controls: {
+        drop: drop.pipe(Effect.orDie),
+        // Release must precede this connection's clean exit, independently of later launches.
+        sessionReleased:
+          provider === "claude" && scenario === "interrupt-guidance"
+            ? Effect.sync(() => tape.outbound("claude:1/scenario", { method: "release" }))
+            : Effect.void,
+        releaseCommand: Effect.gen(function* () {
+          // A recorded completion cannot overtake the operator's command release.
+          if (scenario === "interrupt-guidance")
+            tape.outbound(`${provider === "claude" ? "claude" : "process"}:1/scenario`, {
+              method: "release-command",
+            });
+          yield* fs.writeFileString(`${cwd}/release`, "ready");
+          yield* Deferred.succeed(released, undefined);
+        }).pipe(Effect.asVoid, Effect.orDie),
+        boundary: Deferred.await(boundary).pipe(Effect.timeout("30 seconds"), Effect.orDie),
+        toolReady: Effect.gen(function* () {
+          if (scenario !== "interrupt-guidance") return;
+          if (provider === "claude") yield* Deferred.await(started);
+          if (mode === "record") {
+            while (!(yield* fs.exists(`${cwd}/started`))) yield* Effect.sleep("10 millis");
+          }
+        }).pipe(Effect.timeout("30 seconds"), Effect.orDie),
+      },
+      save,
+    };
   });

@@ -12,8 +12,9 @@ export const recordContracts = (provider: Provider): void => {
         Effect.scoped(
           Effect.gen(function* () {
             const fixture = yield* openFixture(provider, scenario, "record");
-            yield* runScenario(scenario, fixture.request, fixture.drop).pipe(
+            yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
               Effect.provide(fixture.backend),
+              fixture.tape.guard,
             );
             yield* fixture.save;
           }),

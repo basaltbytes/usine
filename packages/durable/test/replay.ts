@@ -87,7 +87,7 @@ export const restartReplays = (mode: "record" | "replay"): void => {
                     .pipe(Effect.forkChild);
                   yield* Deferred.await(checkpoint);
                   yield* Fiber.interrupt(execution);
-                }),
+                }).pipe(fixture.tape.guard),
               );
               yield* fs.writeFileString(`${fixture.cwd}/release`, "ready");
               const homeVariable = provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
@@ -112,10 +112,9 @@ export const restartReplays = (mode: "record" | "replay"): void => {
               const report = yield* Effect.scoped(
                 Effect.gen(function* () {
                   const services = yield* Layer.build(runtime([answer("REPLAY_PARENT_DONE")]));
-                  return yield* Context.get(services, AttemptRuntime).execute(
-                    resumed,
-                    recorded.sink,
-                  );
+                  return yield* Context.get(services, AttemptRuntime)
+                    .execute(resumed, recorded.sink)
+                    .pipe(fixture.tape.guard);
                 }),
               );
               assert.strictEqual(report.message, "REPLAY_PARENT_DONE");

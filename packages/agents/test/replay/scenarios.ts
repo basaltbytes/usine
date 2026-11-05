@@ -11,6 +11,7 @@ import { ChildBackend, ChildRequest, SessionOperationError } from "../../src/run
 import type { Scenario } from "./transcript.ts";
 
 export const waitScript = `const fs = require('node:fs');
+fs.writeFileSync('started', 'ready');
 const timer = setInterval(() => {
   if (fs.existsSync('release')) { clearInterval(timer); process.exit(0); }
 }, 25);
@@ -24,12 +25,25 @@ const guidance = "Change the final reply to exactly REPLAY_GUIDED. Do not use an
 export const runScenario = (
   scenario: Scenario,
   base: ChildRequest,
-  drop: Effect.Effect<void> = Effect.void,
+  controls?: {
+    readonly drop: Effect.Effect<void>;
+    readonly boundary: Effect.Effect<void>;
+    readonly toolReady: Effect.Effect<void>;
+    readonly releaseCommand: Effect.Effect<void>;
+    readonly sessionReleased: Effect.Effect<void>;
+  },
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const backend = yield* ChildBackend;
+      const control = controls ?? {
+        drop: Effect.void,
+        boundary: Effect.void,
+        toolReady: Effect.void,
+        releaseCommand: fs.writeFileString(`${base.cwd}/release`, "ready").pipe(Effect.orDie),
+        sessionReleased: Effect.void,
+      };
       if (scenario !== "simple") yield* fs.writeFileString(`${base.cwd}/wait.cjs`, waitScript);
       const request =
         scenario === "simple" ? base : ChildRequest.make({ ...base, prompt: waitingPrompt });
@@ -56,9 +70,9 @@ export const runScenario = (
             if (event._tag === tag) return event;
           }
         }).pipe(Effect.timeout("90 seconds"));
-      const releaseCommand = fs.writeFileString(`${base.cwd}/release`, "ready");
+      const releaseCommand = control.releaseCommand;
       if (scenario !== "simple") yield* until("ToolStarted");
-      if (scenario === "transport-loss") yield* drop;
+      if (scenario === "transport-loss") yield* control.drop;
       if (scenario === "steer") yield* running.steer(guidance);
       if (scenario === "queued-message" || scenario === "hold-release") {
         const delivery = yield* Queue.unbounded<Option.Option<InterventionState>>();
@@ -86,13 +100,18 @@ export const runScenario = (
           yield* until("SessionIdle");
         }
         yield* running.intervene(Release.make(), () => Effect.void);
+        yield* control.sessionReleased;
       } else if (scenario === "interrupt-guidance") {
+        yield* control.toolReady;
         yield* running.intervene(Interrupt.make(), () => Effect.void);
-        yield* running.intervene(OperatorMessage.make({ message: guidance }), () => Effect.void);
         yield* releaseCommand;
+        if (base.session.brain.harness === "claude") yield* control.boundary;
+        else yield* until("SessionIdle");
+        yield* running.intervene(OperatorMessage.make({ message: guidance }), () => Effect.void);
         yield* until("SessionResumed");
         yield* until("SessionIdle");
         yield* running.intervene(Release.make(), () => Effect.void);
+        yield* control.sessionReleased;
       } else if (scenario !== "simple") {
         yield* releaseCommand;
       }

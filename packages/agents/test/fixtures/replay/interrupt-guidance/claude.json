@@ -126,7 +126,7 @@
         "type": "system",
         "subtype": "init",
         "cwd": "$WORKTREE",
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
+        "session_id": "4938949d-5ee3-44dc-9a49-7622558f30b3",
         "tools": [
           "Task",
           "Bash",
@@ -264,11 +264,11 @@
         ],
         "analytics_disabled": false,
         "product_feedback_disabled": false,
-        "uuid": "2027efd4-9c30-4af5-b699-a88eecdf87a9",
-        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-RBffQQ/memory/" },
+        "uuid": "ae764875-51d2-47ef-a906-dab680da76b6",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-aDhxxl/memory/" },
         "original_cwd": "$WORKTREE",
         "additional_directories": [],
-        "messaging_socket_path": "/tmp/cc-socks/1505.sock",
+        "messaging_socket_path": "/tmp/cc-socks/3898.sock",
         "fast_mode_state": "off",
         "fast_mode_disabled_reason": "sdk_opt_in_required",
         "per_turn_effort_active": true,
@@ -282,13 +282,13 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkLHCroULHeofa93ZxK6",
+          "id": "msg_011CgkaXp2AJfxaZyAMAkMwB",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "tool_use",
-              "id": "toolu_017eWa2oTmN2sChUn7KDb24P",
+              "id": "toolu_01UR9aEnz2snGxdiatypgcpF",
               "name": "Bash",
               "input": { "command": "node wait.cjs" },
               "caller": { "type": "direct" }
@@ -300,12 +300,9 @@
           "stop_details": null,
           "usage": {
             "input_tokens": 2,
-            "cache_creation_input_tokens": 14481,
-            "cache_read_input_tokens": 0,
-            "cache_creation": {
-              "ephemeral_5m_input_tokens": 14481,
-              "ephemeral_1h_input_tokens": 0
-            },
+            "cache_creation_input_tokens": 3238,
+            "cache_read_input_tokens": 11236,
+            "cache_creation": { "ephemeral_5m_input_tokens": 3238, "ephemeral_1h_input_tokens": 0 },
             "output_tokens": 16,
             "service_tier": "standard",
             "inference_geo": "global",
@@ -315,10 +312,56 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
-        "uuid": "fb205628-a8d1-4e76-9a5c-745d287f7860",
-        "timestamp": "2026-11-05T19:28:21.764Z",
-        "request_id": "req_011CgkLHCR1n9w3p5itBsdZd"
+        "session_id": "4938949d-5ee3-44dc-9a49-7622558f30b3",
+        "uuid": "f28c24f5-8608-43f3-801f-fb9e4a462a4a",
+        "timestamp": "2026-11-05T22:35:11.569Z",
+        "request_id": "req_011CgkaXobcjCKSr6J3mFd4F"
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:1/hooks",
+      "payload": {
+        "session_id": "4938949d-5ee3-44dc-9a49-7622558f30b3",
+        "transcript_path": "$HOME/.claude/projects/-tmp-usine-replay-aDhxxl/4938949d-5ee3-44dc-9a49-7622558f30b3.jsonl",
+        "cwd": "$WORKTREE",
+        "prompt_id": "b8a1a3e4-1be6-4ff3-a825-1095e3fd6308",
+        "permission_mode": "bypassPermissions",
+        "effort": { "level": "low" },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": "node wait.cjs" },
+        "tool_use_id": "toolu_01UR9aEnz2snGxdiatypgcpF"
+      }
+    },
+    { "type": "expect_outbound", "port": "claude:1/hooks", "payload": {} },
+    {
+      "type": "expect_outbound",
+      "port": "claude:1/scenario",
+      "payload": { "method": "release-command" }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "claude:1/hooks",
+      "payload": {
+        "session_id": "4938949d-5ee3-44dc-9a49-7622558f30b3",
+        "transcript_path": "$HOME/.claude/projects/-tmp-usine-replay-aDhxxl/4938949d-5ee3-44dc-9a49-7622558f30b3.jsonl",
+        "cwd": "$WORKTREE",
+        "prompt_id": "b8a1a3e4-1be6-4ff3-a825-1095e3fd6308",
+        "permission_mode": "bypassPermissions",
+        "effort": { "level": "low" },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": "node wait.cjs" },
+        "tool_response": {
+          "stdout": "",
+          "stderr": "",
+          "interrupted": false,
+          "isImage": false,
+          "noOutputExpected": false
+        },
+        "tool_use_id": "toolu_01UR9aEnz2snGxdiatypgcpF",
+        "duration_ms": 62
       }
     },
     {
@@ -333,6 +376,7 @@
         "parent_tool_use_id": null
       }
     },
+    { "type": "expect_outbound", "port": "claude:1/hooks", "payload": {} },
     {
       "type": "emit_inbound",
       "port": "claude:1/output",
@@ -342,7 +386,7 @@
           "role": "user",
           "content": [
             {
-              "tool_use_id": "toolu_017eWa2oTmN2sChUn7KDb24P",
+              "tool_use_id": "toolu_01UR9aEnz2snGxdiatypgcpF",
               "type": "tool_result",
               "content": "(Bash completed with no output)",
               "is_error": false
@@ -350,9 +394,9 @@
           ]
         },
         "parent_tool_use_id": null,
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
-        "uuid": "e52bf54c-547b-421f-be6a-999899b69893",
-        "timestamp": "2026-11-05T19:28:21.915Z",
+        "session_id": "4938949d-5ee3-44dc-9a49-7622558f30b3",
+        "uuid": "ae594679-908f-4b42-8194-1814d71c9490",
+        "timestamp": "2026-11-05T22:35:11.654Z",
         "tool_use_result": {
           "stdout": "",
           "stderr": "",
@@ -362,7 +406,7 @@
         },
         "tool_result_meta": [
           {
-            "id": "toolu_017eWa2oTmN2sChUn7KDb24P",
+            "id": "toolu_01UR9aEnz2snGxdiatypgcpF",
             "permission_decision": {
               "decision": "accept",
               "source": "config",
@@ -376,77 +420,10 @@
       "type": "emit_inbound",
       "port": "claude:1/output",
       "payload": {
-        "type": "system",
-        "subtype": "thinking_tokens",
-        "estimated_tokens": 50,
-        "estimated_tokens_delta": 50,
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
-        "uuid": "4a60ec5a-178a-438d-bac7-01e1c3717eb5"
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "claude:1/output",
-      "payload": {
-        "type": "system",
-        "subtype": "thinking_tokens",
-        "estimated_tokens": 216,
-        "estimated_tokens_delta": 166,
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
-        "uuid": "bf13c89c-b494-4926-9d62-421f69223f03"
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "claude:1/output",
-      "payload": {
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkLHhefRw9Vw98nRrJEr",
-          "type": "message",
-          "role": "assistant",
-          "content": [
-            {
-              "type": "thinking",
-              "thinking": "",
-              "signature": "CAQS1wYKEAgTGAI4AUIIdGhpbmtpbmcSDAV5PG2xejdwuNae2RoMKy7Zo48g7rbLG1ePIjB5Qp0wRIXLTD5vbVMaX/C6b5lwyRye/hhtzFsx9bk7Akv0HJbBpEwJhcFf0wQLQGcq9AWiS0+SVJ3hZ4PkM+z77V9UEHYNBxn3U3QzF6iU93kvD4x1nNTGzj5yYvVvfDP71hXBMkYU81r9AyoBwnL/XDTySFdMkRuh/Bim/LEC5Y2zsfQJ86EVJz2wBkrE5uFUfbuNl4/nK/eZKAdgP8TmFb+Q3OvkxT3jzkDXx/WBIzqT3eRfxM7RauFoT9uCEPP4mwpGD2ge1QL/SQz3W4O2X2HyKZTG1LHnz0qSd+Sv8Z+PXfKioComTuSEiwV+VZgNyYD/ZOPN/9ZMOP1aAyNx0/bAKHxD68Wa2DiiXr62621eegXY3QntVLsqOmaTEudKCyUpE/ZlJPFhXB9HAEeVFNd0ELNFjx3p49F/8AXSUvqPG4Nyxlte13b/0hq0yDVoaQ/3hNp242W8pqk9PGA5uXkZZkjIOV7bshcIsoEpufcY5B/GeI6Ko8kHcBLIoTxPDKmr7H4JZ0rm63VAUvjpIBoTyXdKkuhZ/0qrPbEvCO7gNRKNIQXHlXpiCuNVVZ4ovg0RxyMUv6XG9Gxa8xbPUibrGkHySz+0RRzyBCo6R2A2BZBSA2eUR+BcBwzqpTk3FSfwnKI/UDzhtmCT1EwqPYrA9Za7MvaX+87bDRqhxOAfvarVoytQAdIotzhVWzIqn+aVUupYKdOcougqg/tLf9P6ryxpd7NDlzMKUuXq4/8uq2zNs+KGcj96dBNymnOYf3cTAHiYZYIEo1njUdh9Fb1ArlFHVekH6ExR2pzDHK6c2WjhRMK2TBuOTd3lUeKX0OTEfPw45f1kBkftvQ1lk5nTSUgQTqLEJkH47RF+KMVmsCXLuymXtJLCO9mIcVlNeI7FSXW5YHhPeTDPbY0BedB1jIACNoneuk3fqSTRxF1+6jxzmzsaaTmnPBu5DvH2t/psGL7XZ9RvvGrQ6mvuD5DlNGPZBLbn89qq4nNrn+KJkvFbiBTKs0o6SDnUt6Mommk4B7edndFTrpp9yflOlTo4SYlrnZiw/y6Per2tqt6TJ0+2Ow8YAQ=="
-            }
-          ],
-          "container": null,
-          "stop_reason": null,
-          "stop_sequence": null,
-          "stop_details": null,
-          "usage": {
-            "input_tokens": 2,
-            "cache_creation_input_tokens": 204,
-            "cache_read_input_tokens": 14481,
-            "cache_creation": { "ephemeral_5m_input_tokens": 204, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 3,
-            "service_tier": "standard",
-            "inference_geo": "global",
-            "speed": "standard"
-          },
-          "diagnostics": null,
-          "context_management": null
-        },
-        "parent_tool_use_id": null,
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
-        "uuid": "04b214e4-4641-4f58-b32d-f7fb619190e3",
-        "timestamp": "2026-11-05T19:28:27.100Z",
-        "request_id": "req_011CgkLHhTWWoWvDMeKg1xoW",
-        "thinking_duration_ms": 280,
-        "thinking_display": "updates"
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "claude:1/output",
-      "payload": {
-        "type": "assistant",
-        "message": {
-          "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkLHhefRw9Vw98nRrJEr",
+          "id": "msg_011CgkaY2EP3EBDmhZ5CF7CV",
           "type": "message",
           "role": "assistant",
           "content": [{ "type": "text", "text": "REPLAY_GUIDED" }],
@@ -457,9 +434,9 @@
           "usage": {
             "input_tokens": 2,
             "cache_creation_input_tokens": 204,
-            "cache_read_input_tokens": 14481,
+            "cache_read_input_tokens": 14474,
             "cache_creation": { "ephemeral_5m_input_tokens": 204, "ephemeral_1h_input_tokens": 0 },
-            "output_tokens": 3,
+            "output_tokens": 13,
             "service_tier": "standard",
             "inference_geo": "global",
             "speed": "standard"
@@ -468,29 +445,29 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
-        "uuid": "7dcb6f6e-4889-44ab-9f1c-8275120bc2bc",
-        "timestamp": "2026-11-05T19:28:27.102Z",
-        "request_id": "req_011CgkLHhTWWoWvDMeKg1xoW"
+        "session_id": "4938949d-5ee3-44dc-9a49-7622558f30b3",
+        "uuid": "0cbfdec2-436b-459e-9dc5-dbd67edfb010",
+        "timestamp": "2026-11-05T22:35:13.237Z",
+        "request_id": "req_011CgkaY1t43EExVmj2EzJ7b"
       }
     },
     {
       "type": "emit_inbound",
       "port": "claude:1/output",
       "payload": {
-        "duration_api_ms": 12914,
+        "duration_api_ms": 5644,
         "stop_reason": "end_turn",
-        "session_id": "4181a4e5-a4e7-4644-b2a4-01aac50c17bf",
-        "total_cost_usd": 0.042080599999999996,
+        "session_id": "4938949d-5ee3-44dc-9a49-7622558f30b3",
+        "total_cost_usd": 0.014486,
         "usage": {
           "input_tokens": 4,
-          "cache_creation_input_tokens": 14685,
-          "cache_read_input_tokens": 14481,
-          "output_tokens": 127,
-          "output_tokens_details": { "thinking_tokens": 61 },
+          "cache_creation_input_tokens": 3442,
+          "cache_read_input_tokens": 25710,
+          "output_tokens": 66,
+          "output_tokens_details": { "thinking_tokens": 0 },
           "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
           "service_tier": "standard",
-          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 14685 },
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 3442 },
           "inference_geo": "global",
           "iterations": [],
           "speed": "standard",
@@ -499,15 +476,15 @@
         "modelUsage": {
           "claude-sonnet-5-5": {
             "inputTokens": 1230,
-            "outputTokens": 146,
-            "cacheReadInputTokens": 14481,
-            "cacheCreationInputTokens": 14685,
+            "outputTokens": 85,
+            "cacheReadInputTokens": 25710,
+            "cacheCreationInputTokens": 3442,
             "webSearchRequests": 0,
-            "costUSD": 0.042080599999999996,
+            "costUSD": 0.014486,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
-            "thinkingTokens": 61,
-            "cacheCreationEphemeral5mInputTokens": 14685,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 3442,
             "cacheCreationEphemeral1hInputTokens": 0,
             "canonicalModel": "claude-sonnet-5-5",
             "provider": "firstParty",
@@ -536,27 +513,27 @@
         "subtype": "success",
         "api_error_status": null,
         "result": "REPLAY_GUIDED",
-        "ttft_ms": 6682,
+        "ttft_ms": 2860,
         "type": "result",
-        "duration_ms": 12031,
-        "uuid": "8bbfe75a-f8cc-4686-9af8-e337d97765f2",
-        "ttft_stream_ms": 6500,
-        "time_to_request_ms": 79,
-        "first_content_frame_ms": 6500,
+        "duration_ms": 4541,
+        "uuid": "641e113d-8aed-41c3-9bfc-9a20c418b9c2",
+        "ttft_stream_ms": 2708,
+        "time_to_request_ms": 48,
+        "first_content_frame_ms": 2708,
         "queued_turn_count": 0,
         "result_index": 0,
         "model_usage_since_last_result": {
           "claude-sonnet-5-5": {
             "inputTokens": 1230,
-            "outputTokens": 146,
-            "cacheReadInputTokens": 14481,
-            "cacheCreationInputTokens": 14685,
+            "outputTokens": 85,
+            "cacheReadInputTokens": 25710,
+            "cacheCreationInputTokens": 3442,
             "webSearchRequests": 0,
-            "costUSD": 0.042080599999999996,
+            "costUSD": 0.014486,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
-            "thinkingTokens": 61,
-            "cacheCreationEphemeral5mInputTokens": 14685,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 3442,
             "cacheCreationEphemeral1hInputTokens": 0,
             "canonicalModel": "claude-sonnet-5-5",
             "provider": "firstParty",
@@ -565,6 +542,7 @@
         }
       }
     },
+    { "type": "expect_outbound", "port": "claude:1/scenario", "payload": { "method": "release" } },
     {
       "type": "expect_outbound",
       "port": "claude:2",
@@ -597,6 +575,7 @@
       }
     },
     { "type": "expect_outbound", "port": "claude:2", "payload": { "method": "supportedModels" } },
+    { "type": "runtime_exit", "port": "claude:1/hooks", "code": 0, "error": null },
     { "type": "runtime_exit", "port": "claude:1/output", "code": 0, "error": null },
     {
       "type": "emit_inbound",
@@ -680,7 +659,7 @@
         "type": "system",
         "subtype": "init",
         "cwd": "$WORKTREE",
-        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
+        "session_id": "b8e5d1b9-1bd8-4c86-b459-15d573d4d09c",
         "tools": [
           "Task",
           "Bash",
@@ -818,11 +797,11 @@
         ],
         "analytics_disabled": false,
         "product_feedback_disabled": false,
-        "uuid": "7fd92516-b3e4-4ca0-93d3-214d9feae4ec",
-        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-RBffQQ/memory/" },
+        "uuid": "1c7d4e04-d191-4b72-9c64-80e711c01838",
+        "memory_paths": { "auto": "$HOME/.claude/projects/-tmp-usine-replay-aDhxxl/memory/" },
         "original_cwd": "$WORKTREE",
         "additional_directories": [],
-        "messaging_socket_path": "/tmp/cc-socks/1834.sock",
+        "messaging_socket_path": "/tmp/cc-socks/4037.sock",
         "fast_mode_state": "off",
         "fast_mode_disabled_reason": "sdk_opt_in_required",
         "per_turn_effort_active": true,
@@ -836,13 +815,13 @@
         "type": "assistant",
         "message": {
           "model": "claude-sonnet-5-5",
-          "id": "msg_011CgkLJ8JzDi9ZbYH37rQap",
+          "id": "msg_011CgkaYAkbQfEd5Kt7QGtfX",
           "type": "message",
           "role": "assistant",
           "content": [
             {
               "type": "tool_use",
-              "id": "toolu_01JbWzVyvW4TEX8jqQbgX74X",
+              "id": "toolu_01AbFY3bDRssSm7RWyDdhzCB",
               "name": "Bash",
               "input": { "command": "node wait.cjs" },
               "caller": { "type": "direct" }
@@ -855,7 +834,7 @@
           "usage": {
             "input_tokens": 2,
             "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 14481,
+            "cache_read_input_tokens": 14474,
             "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
             "output_tokens": 16,
             "service_tier": "standard",
@@ -866,13 +845,30 @@
           "context_management": null
         },
         "parent_tool_use_id": null,
-        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
-        "uuid": "9105f598-cec3-4470-ad95-c2c97761c380",
-        "timestamp": "2026-11-05T19:28:31.143Z",
-        "request_id": "req_011CgkLJ85LvYADC4ccCe6e5"
+        "session_id": "b8e5d1b9-1bd8-4c86-b459-15d573d4d09c",
+        "uuid": "86f7a664-2478-441f-8558-0fdd08c86316",
+        "timestamp": "2026-11-05T22:35:15.337Z",
+        "request_id": "req_011CgkaYATFAiNVYCFiS2o6n"
       }
     },
     { "type": "expect_outbound", "port": "claude:2", "payload": { "method": "interrupt" } },
+    {
+      "type": "emit_inbound",
+      "port": "claude:2/hooks",
+      "payload": {
+        "session_id": "b8e5d1b9-1bd8-4c86-b459-15d573d4d09c",
+        "transcript_path": "$HOME/.claude/projects/-tmp-usine-replay-aDhxxl/b8e5d1b9-1bd8-4c86-b459-15d573d4d09c.jsonl",
+        "cwd": "$WORKTREE",
+        "prompt_id": "8129e591-b178-4f33-af71-6772c098fe89",
+        "permission_mode": "bypassPermissions",
+        "effort": { "level": "low" },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": "node wait.cjs" },
+        "tool_use_id": "toolu_01AbFY3bDRssSm7RWyDdhzCB"
+      }
+    },
+    { "type": "expect_outbound", "port": "claude:2/hooks", "payload": {} },
     { "type": "emit_inbound", "port": "claude:2/interrupt", "payload": null },
     {
       "type": "emit_inbound",
@@ -886,17 +882,17 @@
               "type": "tool_result",
               "content": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
               "is_error": true,
-              "tool_use_id": "toolu_01JbWzVyvW4TEX8jqQbgX74X"
+              "tool_use_id": "toolu_01AbFY3bDRssSm7RWyDdhzCB"
             }
           ]
         },
         "parent_tool_use_id": null,
-        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
-        "uuid": "e5b27d36-0b55-4cd3-ad25-b973256ad366",
-        "timestamp": "2026-11-05T19:28:31.204Z",
+        "session_id": "b8e5d1b9-1bd8-4c86-b459-15d573d4d09c",
+        "uuid": "50f8ce1b-8b5d-4f40-93bb-6f4bb3b1b780",
+        "timestamp": "2026-11-05T22:35:15.355Z",
         "tool_use_result": "User rejected tool use",
         "tool_result_meta": [
-          { "id": "toolu_01JbWzVyvW4TEX8jqQbgX74X", "non_execution_kind": "user-rejected" }
+          { "id": "toolu_01AbFY3bDRssSm7RWyDdhzCB", "non_execution_kind": "user-rejected" }
         ]
       }
     },
@@ -910,23 +906,23 @@
           "content": [{ "type": "text", "text": "[Request interrupted by user for tool use]" }]
         },
         "parent_tool_use_id": null,
-        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
-        "uuid": "19b52cab-c222-417c-80bb-34b4ec9c7476",
-        "timestamp": "2026-11-05T19:28:31.210Z"
+        "session_id": "b8e5d1b9-1bd8-4c86-b459-15d573d4d09c",
+        "uuid": "5e0bd80b-cf82-41fb-9674-269230d75e57",
+        "timestamp": "2026-11-05T22:35:15.356Z"
       }
     },
     {
       "type": "emit_inbound",
       "port": "claude:2/output",
       "payload": {
-        "duration_api_ms": 4559,
+        "duration_api_ms": 2628,
         "stop_reason": "tool_use",
-        "session_id": "0a341342-4542-48f5-86a2-e1ae70de4beb",
-        "total_cost_usd": 0.004624100000000001,
+        "session_id": "b8e5d1b9-1bd8-4c86-b459-15d573d4d09c",
+        "total_cost_usd": 0.0046134,
         "usage": {
           "input_tokens": 2,
           "cache_creation_input_tokens": 0,
-          "cache_read_input_tokens": 14481,
+          "cache_read_input_tokens": 14474,
           "output_tokens": 53,
           "output_tokens_details": { "thinking_tokens": 0 },
           "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
@@ -940,11 +936,11 @@
         "modelUsage": {
           "claude-sonnet-5-5": {
             "inputTokens": 1228,
-            "outputTokens": 72,
-            "cacheReadInputTokens": 14481,
+            "outputTokens": 71,
+            "cacheReadInputTokens": 14474,
             "cacheCreationInputTokens": 0,
             "webSearchRequests": 0,
-            "costUSD": 0.004624100000000001,
+            "costUSD": 0.0046134,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
             "thinkingTokens": 0,
@@ -977,18 +973,18 @@
         "subtype": "error_during_execution",
         "errors": ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"],
         "type": "result",
-        "duration_ms": 3589,
-        "uuid": "cf482025-ac19-4f64-8fc3-2fed0efbe984",
+        "duration_ms": 1772,
+        "uuid": "9d425cf3-afc1-41f5-a643-00c286280b39",
         "queued_turn_count": 0,
         "result_index": 0,
         "model_usage_since_last_result": {
           "claude-sonnet-5-5": {
             "inputTokens": 1228,
-            "outputTokens": 72,
-            "cacheReadInputTokens": 14481,
+            "outputTokens": 71,
+            "cacheReadInputTokens": 14474,
             "cacheCreationInputTokens": 0,
             "webSearchRequests": 0,
-            "costUSD": 0.004624100000000001,
+            "costUSD": 0.0046134,
             "contextWindow": 1000000,
             "maxOutputTokens": 128000,
             "thinkingTokens": 0,

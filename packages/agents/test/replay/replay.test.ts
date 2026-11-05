@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit, Schema } from "effect";
+import { Cause, Effect, Exit, Option, Schema } from "effect";
 import { openFixture, providers, scenarios, recordingPid } from "./fixture.ts";
 import { ChildRequest } from "../../src/runtime.ts";
 import { Tape } from "./transcript.ts";
@@ -17,8 +17,9 @@ describe("recorded harness transports", () => {
           Effect.scoped(
             Effect.gen(function* () {
               const fixture = yield* openFixture(provider, scenario, "replay");
-              yield* runScenario(scenario, fixture.request, fixture.drop).pipe(
+              yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
                 Effect.provide(fixture.backend),
+                fixture.tape.guard,
               );
               yield* fixture.save;
             }),
@@ -39,7 +40,7 @@ it.live("rejects a changed outbound request through the real adapter", () =>
             ...fixture.request,
             prompt: "This request differs from the recording.",
           }),
-        ).pipe(Effect.provide(fixture.backend));
+        ).pipe(Effect.provide(fixture.backend), fixture.tape.guard);
       }),
     ).pipe(Effect.exit);
     assert(Exit.isFailure(outcome));
@@ -95,4 +96,86 @@ it.effect("preserves UTF-8 characters split across supervisor frames", () =>
     });
     assert.strictEqual(redacted, expected);
   }),
+);
+
+it.live(
+  "reports outbound mismatches from background transports without waiting for a timeout",
+  () =>
+    Effect.gen(function* () {
+      for (const provider of providers) {
+        const outcome = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const scenario = provider === "claude" ? "transport-loss" : "simple";
+            const fixture = yield* openFixture(provider, scenario, "replay");
+            if (provider === "codex") fixture.tape.bind("0.0.1", "$CHANGED_CLIENT_VERSION");
+            else {
+              assert(fixture.tape.source !== "record");
+              const resume = Schema.decodeUnknownOption(
+                Schema.Struct({ options: Schema.Struct({ resume: Schema.String }) }),
+              );
+              const saved = fixture.tape.source.entries.flatMap((entry) => {
+                if (entry.type !== "expect_outbound") return [];
+                const launch = resume(entry.payload);
+                return Option.isSome(launch) ? [launch.value.options.resume] : [];
+              });
+              assert.lengthOf(saved, 1);
+              const id = saved[0];
+              assert(id !== undefined);
+              fixture.tape.bind(id, "$CHANGED_RESUME_ID");
+            }
+            yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
+              Effect.provide(fixture.backend),
+              fixture.tape.guard,
+            );
+          }),
+        ).pipe(Effect.timeout("10 seconds"), Effect.exit);
+        assert(Exit.isFailure(outcome));
+        const failure = Cause.pretty(outcome.cause);
+        assert.include(failure, "outbound request differs at transcript entry");
+        assert.include(
+          failure,
+          provider === "claude" ? "$CHANGED_RESUME_ID" : "$CHANGED_CLIENT_VERSION",
+        );
+        assert.notInclude(failure, "TimeoutError");
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  15_000,
+);
+
+it.live(
+  "replays independent connections in either order and preserves order within a connection",
+  () =>
+    Effect.gen(function* () {
+      const tape = new Tape({
+        protocol: "claude-sdk",
+        harnessVersion: "2.1.311",
+        model: "recorded-model",
+        scenario: "simple",
+        environment: {},
+        entries: [
+          { type: "expect_outbound", port: "claude:1", payload: { method: "open" } },
+          { type: "expect_outbound", port: "process:1", payload: { method: "spawn" } },
+          { type: "emit_inbound", port: "claude:1/output", payload: "first output" },
+          { type: "expect_outbound", port: "claude:1/input", payload: "guidance" },
+          { type: "runtime_exit", port: "process:1/exit", code: 0, error: null },
+          { type: "runtime_exit", port: "claude:1/output", code: 0, error: null },
+        ],
+      });
+      tape.outbound("claude:1", { method: "open" });
+      const output = yield* Effect.promise(() => tape.read("claude:1/output"));
+      assert.deepStrictEqual(output, {
+        type: "emit_inbound",
+        port: "claude:1/output",
+        payload: "first output",
+      });
+      tape.outbound("claude:1/input", "guidance");
+      yield* Effect.promise(() => tape.read("claude:1/output"));
+      tape.outbound("process:1", { method: "spawn" });
+      yield* Effect.promise(() => tape.read("process:1/exit"));
+      tape.assertComplete();
+
+      assert(tape.source !== "record");
+      const reordered = new Tape(tape.source);
+      assert.throws(() => reordered.outbound("claude:1/input", "guidance"), /transcript entry 0/);
+    }).pipe(Effect.timeout("2 seconds")),
 );
