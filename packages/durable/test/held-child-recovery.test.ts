@@ -16,153 +16,209 @@ import { DurableHarness, durableError, layer as harnessLayer } from "../src/harn
 import { answer, delegate, fauxParent, type ParentStep } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-it.live("restores a child's Hold before its resumed turn finishes", () =>
-  Effect.gen(function* () {
-    const database = yield* temporaryDatabase;
-    const initial = attemptRequest("recovery/held-child", 1);
-    const request = AttemptRequest.make({
-      ...initial,
-      spec: {
-        ...initial.spec,
-        agent: Agent.make({
-          ...initial.spec.agent,
-          brain: BrainSpec.make({
-            harness: Harness.make("pi"),
-            model: ModelId.make("openai/model"),
-            effort: "medium",
+for (const supervision of ["held", "paused", "held-paused"] as const) {
+  const paused = supervision !== "held";
+  const held = supervision !== "paused";
+  it.live(`restores a ${supervision} child before starting another turn`, () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const initial = attemptRequest(`recovery/${supervision}-child`, 1);
+      const request = AttemptRequest.make({
+        ...initial,
+        spec: {
+          ...initial.spec,
+          agent: Agent.make({
+            ...initial.spec.agent,
+            brain: BrainSpec.make({
+              harness: Harness.make("pi"),
+              model: ModelId.make("openai/model"),
+              effort: "medium",
+            }),
           }),
-        }),
-      },
-    });
-    const saved = HarnessSession.make({
-      id: HarnessSessionId.make("held-child"),
-      cwd: request.cwd,
-    });
-    const recording = recordingSink();
-    const context = yield* Effect.context<never>();
-    const run = Effect.runPromiseWith(context);
-    let firstSession = Option.none<AgentSessionId>();
+        },
+      });
+      const saved = HarnessSession.make({
+        id: HarnessSessionId.make("held-child"),
+        cwd: request.cwd,
+      });
+      const recording = recordingSink();
+      const context = yield* Effect.context<never>();
+      const run = Effect.runPromiseWith(context);
+      let firstSession = Option.none<AgentSessionId>();
 
-    for (const resumed of [false, true]) {
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const turn = yield* Deferred.make<void>();
-          const started = yield* Deferred.make<AgentSessionId>();
-          const idle = yield* Deferred.make<void>();
-          const sdk = Layer.succeed(PiSdk)({
-            start: async (options) => {
-              assert.strictEqual(options.storage._tag, resumed ? "Resume" : "Create");
-              if (options.storage._tag === "Resume")
-                assert.strictEqual(options.storage.id, saved.id);
-              return {
-                _tag: "Started",
-                model: options.model,
-                pool: "apiKeys",
-                tools: ["read", "bash", "edit", "write"],
-                harnessSession: Option.some(saved),
-                session: {
-                  messages: [answer("The child's final report.")],
-                  subscribe: () => () => {},
-                  prompt: () => run(Deferred.await(turn)),
-                  steer: async () => "handled",
-                  abort: () => run(Deferred.succeed(turn, undefined).pipe(Effect.asVoid)),
-                  dispose: () => {},
-                },
-              };
-            },
-          });
-          const parent: ReadonlyArray<ParentStep> = resumed
-            ? [answer("Finished after release.")]
-            : [delegate("Continue the task")];
-          const services = yield* Layer.build(
-            runtimeLayer.pipe(
-              Layer.provideMerge(
-                harnessLayer({
-                  ...fauxParent(parent),
-                  openStorage: Effect.tryPromise({
-                    try: () => openNodeSqliteStorage(database),
-                    catch: (cause) => durableError("open recovery storage", cause),
-                  }),
-                }),
-              ),
-              Layer.provide(piChildLayer.pipe(Layer.provide(sdk))),
-            ),
-          );
-          const runtime = Context.get(services, AttemptRuntime);
-          const execution = yield* Effect.forkChild(
-            runtime.execute(request, {
-              ...recording.sink,
-              append: (direction, envelope) =>
-                recording.sink.append(direction, envelope).pipe(
-                  Effect.andThen(() => {
-                    if (
-                      envelope._tag !== "OutboundEnvelope" ||
-                      envelope.payload._tag !== "SessionEvent"
-                    )
-                      return Effect.void;
-                    const event = envelope.payload.event;
-                    if (event.session._tag !== "ChildSession") return Effect.void;
-                    if (event._tag === "SessionStarted")
-                      return Deferred.succeed(started, event.session.id).pipe(Effect.asVoid);
-                    if (event._tag === "SessionIdle")
-                      return Deferred.succeed(idle, undefined).pipe(Effect.asVoid);
-                    return Effect.void;
+      for (const resumed of [false, true]) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const turn = yield* Deferred.make<void>();
+            const prompted = yield* Deferred.make<void>();
+            const prompts: string[] = [];
+            const started = yield* Deferred.make<AgentSessionId>();
+            const idle = yield* Deferred.make<void>();
+            const sdk = Layer.succeed(PiSdk)({
+              start: async (options) => {
+                assert.strictEqual(options.storage._tag, resumed ? "Resume" : "Create");
+                if (options.storage._tag === "Resume")
+                  assert.strictEqual(options.storage.id, saved.id);
+                return {
+                  _tag: "Started",
+                  model: options.model,
+                  pool: "apiKeys",
+                  tools: ["read", "bash", "edit", "write"],
+                  harnessSession: Option.some(saved),
+                  session: {
+                    messages: [answer("The child's final report.")],
+                    subscribe: () => () => {},
+                    prompt: (message) => {
+                      prompts.push(message);
+                      return run(
+                        Deferred.succeed(prompted, undefined).pipe(
+                          Effect.andThen(Deferred.await(turn)),
+                        ),
+                      );
+                    },
+                    steer: async () => "handled",
+                    abort: () => run(Deferred.succeed(turn, undefined).pipe(Effect.asVoid)),
+                    dispose: () => {},
+                  },
+                };
+              },
+            });
+            const parent: ReadonlyArray<ParentStep> = resumed
+              ? [answer("Finished after release.")]
+              : [delegate("Continue the task")];
+            const services = yield* Layer.build(
+              runtimeLayer.pipe(
+                Layer.provideMerge(
+                  harnessLayer({
+                    ...fauxParent(parent),
+                    openStorage: Effect.tryPromise({
+                      try: () => openNodeSqliteStorage(database),
+                      catch: (cause) => durableError("open recovery storage", cause),
+                    }),
                   }),
                 ),
-            }),
-          );
-          const sessionId = yield* Deferred.await(started);
-          const operator = (action: AttemptChannel.OperatorAction) =>
-            runtime.intervene(
-              request.spec.attemptId,
-              AttemptChannel.Intervention.make({
-                operator: "PhilDL",
-                target: AttemptChannel.ChildTarget.make({ sessionId }),
-                action,
+                Layer.provide(piChildLayer.pipe(Layer.provide(sdk))),
+              ),
+            );
+            const runtime = Context.get(services, AttemptRuntime);
+            const execution = yield* Effect.forkChild(
+              runtime.execute(request, {
+                ...recording.sink,
+                append: (direction, envelope) =>
+                  recording.sink.append(direction, envelope).pipe(
+                    Effect.andThen(() => {
+                      if (
+                        envelope._tag !== "OutboundEnvelope" ||
+                        envelope.payload._tag !== "SessionEvent"
+                      )
+                        return Effect.void;
+                      const event = envelope.payload.event;
+                      if (event.session._tag !== "ChildSession") return Effect.void;
+                      if (event._tag === "SessionStarted")
+                        return Deferred.succeed(started, event.session.id).pipe(Effect.asVoid);
+                      if (event._tag === "SessionIdle")
+                        return Deferred.succeed(idle, undefined).pipe(Effect.asVoid);
+                      return Effect.void;
+                    }),
+                  ),
               }),
             );
-          if (!resumed) {
-            firstSession = Option.some(sessionId);
-            yield* operator(
-              AttemptChannel.OperatorMessage.make({ message: "Wait for my release." }),
-            );
-            yield* Fiber.interrupt(execution);
-            return;
-          }
-          assert.deepStrictEqual(Option.some(sessionId), firstSession);
-          yield* Deferred.succeed(turn, undefined);
-          yield* Deferred.await(idle);
-          assert.isUndefined(execution.pollUnsafe());
-          yield* operator(AttemptChannel.Release.make());
-          assert.strictEqual((yield* Fiber.join(execution)).message, "Finished after release.");
-          const state = yield* Context.get(services, DurableHarness).use(
-            "read released supervision and child budget",
-            async (harness, context) => {
-              const record = await harness.snapshot(
-                AttemptRecordDoc,
+            const sessionId = yield* Deferred.await(started);
+            const operator = (action: AttemptChannel.OperatorAction) =>
+              runtime.intervene(
                 request.spec.attemptId,
-                context,
+                AttemptChannel.Intervention.make({
+                  operator: "PhilDL",
+                  target: AttemptChannel.ChildTarget.make({ sessionId }),
+                  action,
+                }),
               );
-              const hold =
-                record?.taskId === null || record?.taskId === undefined
-                  ? undefined
-                  : await harness.snapshot(HoldDoc, record.taskId, context);
-              return { children: record?.children, held: hold?.held ?? [] };
-            },
-          );
-          assert.deepStrictEqual(state, { children: 1, held: [] });
-        }),
+            if (!resumed) {
+              firstSession = Option.some(sessionId);
+              yield* Deferred.await(prompted);
+              if (held)
+                yield* operator(
+                  AttemptChannel.OperatorMessage.make({ message: "Wait for my release." }),
+                );
+              if (paused) {
+                yield* operator(AttemptChannel.Interrupt.make());
+                yield* Deferred.succeed(turn, undefined);
+                yield* Deferred.await(idle);
+              }
+              yield* Fiber.interrupt(execution);
+              return;
+            }
+            assert.deepStrictEqual(Option.some(sessionId), firstSession);
+            if (paused) {
+              yield* Effect.raceFirst(Deferred.await(idle), Deferred.await(prompted));
+              assert.deepStrictEqual(
+                prompts,
+                [],
+                "A paused child must wait for guidance after restart",
+              );
+              const state = yield* Context.get(services, DurableHarness).use(
+                "read restored child pause",
+                async (harness, context) => {
+                  const record = await harness.snapshot(
+                    AttemptRecordDoc,
+                    request.spec.attemptId,
+                    context,
+                  );
+                  assert(record?.taskId !== null && record?.taskId !== undefined);
+                  return harness.snapshot(HoldDoc, record.taskId, context);
+                },
+              );
+              assert.deepStrictEqual(state?.pausedChildren, [sessionId]);
+              yield* operator(AttemptChannel.Release.make());
+              assert.deepStrictEqual(prompts, [], "Releasing a Hold must preserve the pause");
+              yield* operator(
+                AttemptChannel.Steer.make({ message: "Continue with my correction." }),
+              );
+              yield* Deferred.await(prompted);
+              assert.deepStrictEqual(prompts, ["Continue with my correction."]);
+            } else {
+              yield* Deferred.await(prompted);
+            }
+            yield* Deferred.succeed(turn, undefined);
+            if (held && !paused) {
+              yield* Deferred.await(idle);
+              assert.isUndefined(execution.pollUnsafe());
+              yield* operator(AttemptChannel.Release.make());
+            }
+            assert.strictEqual((yield* Fiber.join(execution)).message, "Finished after release.");
+            const state = yield* Context.get(services, DurableHarness).use(
+              "read released supervision and child budget",
+              async (harness, context) => {
+                const record = await harness.snapshot(
+                  AttemptRecordDoc,
+                  request.spec.attemptId,
+                  context,
+                );
+                const hold =
+                  record?.taskId === null || record?.taskId === undefined
+                    ? undefined
+                    : await harness.snapshot(HoldDoc, record.taskId, context);
+                return {
+                  children: record?.children,
+                  held: hold?.held ?? [],
+                  paused: hold?.pausedChildren ?? [],
+                };
+              },
+            );
+            assert.deepStrictEqual(state, { children: 1, held: [], paused: [] });
+          }),
+        );
+      }
+      const outbound = recording.outbound();
+      assert(!outbound.some(({ payload }) => payload._tag === "InterventionRejected"));
+      const finished = outbound.flatMap(({ payload }) =>
+        payload._tag === "SessionEvent" && payload.event._tag === "ToolFinished"
+          ? [payload.event]
+          : [],
       );
-    }
-    const outbound = recording.outbound();
-    assert(!outbound.some(({ payload }) => payload._tag === "InterventionRejected"));
-    const finished = outbound.flatMap(({ payload }) =>
-      payload._tag === "SessionEvent" && payload.event._tag === "ToolFinished"
-        ? [payload.event]
-        : [],
-    );
-    assert.lengthOf(finished, 1);
-    assert.include(jsonKey(finished[0]?.output), "The child's final report.");
-    assertAdmitted(request.spec.attemptId, outbound);
-  }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
-);
+      assert.lengthOf(finished, 1);
+      assert.include(jsonKey(finished[0]?.output), "The child's final report.");
+      assertAdmitted(request.spec.attemptId, outbound);
+    }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+  );
+}

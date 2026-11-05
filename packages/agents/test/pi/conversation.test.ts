@@ -44,6 +44,7 @@ const conversation = (session: ChildSession) =>
       session,
       channel,
       held: false,
+      paused: false,
       // A message to a running turn waits for the harness's next boundary.
       send: (message, activity) =>
         Effect.sync(() => {

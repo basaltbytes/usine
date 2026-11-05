@@ -55,6 +55,8 @@ export class ChildRequest extends Schema.Class<
   ),
   /** Keeps the child addressable after a turn until the operator releases its persisted Hold. */
   held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /** Waits for operator guidance before starting a turn in a restored paused child. */
+  paused: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /**
    * The complete environment of the child process and its commands: the worker's allowlisted
    * variables plus the attempt's credential configuration, with nothing inherited from the launching

@@ -15,7 +15,6 @@ import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
   ChildSession,
   HarnessSession,
-  HarnessSessionId,
   ProviderRecovered,
   ProviderRetries,
   ProviderRetrying,
@@ -539,7 +538,12 @@ const makeClaudeChild = Effect.gen(function* () {
       if (Option.isSome(request.resume) && request.host._tag === "RemoteShell")
         yield* stopRemote(request, request.host);
       // The launch that runs the session; a resume replaces it.
-      let current = yield* launchWithRetries(request, options, [request.prompt], scope);
+      let current = yield* launchWithRetries(
+        request,
+        options,
+        request.paused ? [] : [request.prompt],
+        scope,
+      );
 
       const usesApiKey = Option.isNone(request.session.gatewayCredential)
         ? yield* Effect.tryPromise({
@@ -563,10 +567,13 @@ const makeClaudeChild = Effect.gen(function* () {
       channel.onTerminal(() => {
         current.input.end();
       });
+      if (request.paused)
+        yield* channel.emit(SessionStarted.make({ session, harnessSession: request.resume }));
       const conversation = yield* sessionConversation({
         session,
         channel,
         held: request.held,
+        paused: request.paused,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
         send: (message, activity) =>
           Effect.try({
@@ -582,14 +589,14 @@ const makeClaudeChild = Effect.gen(function* () {
       const usage = claudeSessionMeter();
       const readRateLimits = claudeRateLimits(session);
       // The latest session ID from Claude, which a resume loads.
-      let harnessSessionId = Option.none<HarnessSessionId>();
+      let harnessSessionId = Option.map(request.resume, (saved) => saved.id);
       // Resumes since Claude last sent a message.
       let resumes = 0;
       let backgroundTasks: ReadonlyArray<string> = [];
       let reportsSessionState = false;
       let completedTurn = Option.none<string>();
       // Claude sends `init` with one session ID before each turn; the first is the launch record.
-      const launched = yield* Ref.make(false);
+      const launched = yield* Ref.make(request.paused);
       // API retries reported in the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;

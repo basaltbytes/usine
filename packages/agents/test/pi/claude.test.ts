@@ -366,6 +366,81 @@ describe("Claude child backend", () => {
     ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
   });
 
+  it.effect("keeps a restored paused Claude child idle until operator guidance", () =>
+    Effect.gen(function* () {
+      const output = yield* Queue.make<Schema.Json, Cause.Done>();
+      const received = yield* Queue.make<string>();
+      const context = yield* Effect.context<never>();
+      const saved = HarnessSession.make({
+        id: HarnessSessionId.make("paused-claude"),
+        cwd: request().cwd,
+      });
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (input) => {
+          Effect.runForkWith(context)(
+            Stream.fromAsyncIterable(input, (cause) =>
+              SessionOperationError.make({
+                operation: "stream",
+                sessionId: Option.none(),
+                message: "Claude test input failed",
+                cause,
+              }),
+            ).pipe(Stream.runForEach((message) => Queue.offer(received, message.message.content))),
+          );
+          return {
+            close: () => {
+              Effect.runForkWith(context)(Queue.end(output));
+            },
+            interrupt: () => Promise.resolve(),
+            usesApiKey: () => Promise.resolve(false),
+            supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
+            [Symbol.asyncIterator]: () =>
+              Stream.toAsyncIterableWith(Stream.fromQueue(output), context)[Symbol.asyncIterator](),
+          };
+        },
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...request(),
+            resume: Option.some(saved),
+            paused: true,
+          }),
+        );
+        const seen: string[] = [];
+        yield* running.events.pipe(
+          Stream.take(2),
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              seen.push(event._tag);
+            }),
+          ),
+        );
+        assert.deepStrictEqual(seen, ["SessionStarted", "SessionIdle"]);
+        const beforeRelease = yield* Queue.clear(received);
+        assert.deepStrictEqual(beforeRelease, []);
+        const state = yield* running.intervene(Release.make(), noDelivery);
+        assert.isTrue(state.paused);
+        const afterRelease = yield* Queue.clear(received);
+        assert.deepStrictEqual(afterRelease, []);
+        yield* running.intervene(
+          OperatorMessage.make({ message: "Continue with the correction." }),
+          noDelivery,
+        );
+        const guidance = yield* Queue.take(received);
+        assert.strictEqual(guidance, "Continue with the correction.");
+        const additional = yield* Queue.clear(received);
+        assert.deepStrictEqual(additional, []);
+        yield* Queue.offer(output, { type: "system", subtype: "init", session_id: saved.id });
+        yield* Queue.offer(output, { type: "result", subtype: "success", result: "Corrected." });
+        yield* running.intervene(Release.make(), noDelivery);
+        assert.strictEqual((yield* running.result).message, "Corrected.");
+        const remaining = yield* running.events.pipe(Stream.runCollect);
+        assert(!remaining.some((event) => event._tag === "SessionStarted"));
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+    }).pipe(Effect.scoped),
+  );
+
   for (const gatewayCredential of [Option.none(), Option.some("subscription" as const)]) {
     it.effect(
       `reports Claude plan windows with ${Option.isSome(gatewayCredential) ? "a gateway subscription" : "the worker login"}`,

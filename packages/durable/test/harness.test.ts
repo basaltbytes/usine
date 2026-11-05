@@ -55,6 +55,7 @@ it.live(
           const hold = await harness.snapshot(HoldDoc, taskId, context);
           assert.deepStrictEqual(hold, {
             paused: true,
+            pausedChildren: [],
             held: ["parent:legacy"],
             guidance: [
               { message: "First message", requestId: "legacy-guidance:0" },

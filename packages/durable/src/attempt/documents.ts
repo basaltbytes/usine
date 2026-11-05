@@ -121,6 +121,8 @@ export type Hold = {
   paused: boolean;
   guidance: Array<{ message: string; requestId: string }>;
   held: string[];
+  /** Paused child session IDs. Absent on older documents means no paused children. */
+  pausedChildren?: string[];
 };
 
 /** The message sent to a released parent if the operator provided none. */
@@ -138,7 +140,7 @@ export const HoldDoc = defineDoc<Hold>({
   version: 2,
   scope: "task",
   checkpointWhen: () => false,
-  initial: () => ({ paused: false, guidance: [], held: [] }),
+  initial: () => ({ paused: false, guidance: [], held: [], pausedChildren: [] }),
   migrate: (value) => {
     // Document migration callbacks return their result synchronously.
     // @effect-diagnostics-next-line schemaSync:off
@@ -146,6 +148,7 @@ export const HoldDoc = defineDoc<Hold>({
     return {
       ...legacy,
       held: [...legacy.held],
+      pausedChildren: [],
       guidance: legacy.guidance.map((message, index) => ({
         message,
         requestId: `legacy-guidance:${index}`,

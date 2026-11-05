@@ -262,14 +262,19 @@ export const subagentTool = (services: ExtensionServices) => {
         : { id: sessionId, parentId, agent: spec.agent.name, brain: spec.agent.brain }),
       gatewayCredential: yield* request.gatewayCredential,
     });
-    const held = yield* call("restore the child's Hold", async () => {
+    const { held, paused } = yield* call("restore the child's supervision", async () => {
       const hold = await api.snapshot(HoldDoc, owner.taskId, context);
-      return hold?.held.includes(sessionId) ?? false;
+      return {
+        held: hold?.held.includes(sessionId) ?? false,
+        paused: hold?.pausedChildren?.includes(sessionId) ?? false,
+      };
     });
-    if (held)
-      yield* Effect.logInfo("Restoring the child's operator Hold before launch", {
+    if (held || paused)
+      yield* Effect.logInfo("Restoring the child's operator supervision before launch", {
         attemptId: spec.attemptId,
         sessionId,
+        held,
+        paused,
       });
     const childRequest = ChildRequest.make({
       session,
@@ -280,6 +285,7 @@ export const subagentTool = (services: ExtensionServices) => {
       machine: request.machine,
       resume: Option.map(saved, (child) => child.harnessSession),
       held,
+      paused,
       prompt: assembleChildPrompt({
         baseCommit: spec.baseCommit,
         agent: spec.agent.name,

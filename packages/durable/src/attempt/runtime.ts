@@ -263,11 +263,6 @@ const makeAttemptRuntime = Effect.gen(function* () {
       }, context),
     );
 
-  const hold = (hub: AttemptHub, update: (held: ReadonlyArray<string>) => Array<string>) =>
-    supervise(hub, (document) => {
-      document.held = update(document.held);
-    });
-
   /**
    * Applies operator input to a live child. A working child reads a message at its next turn
    * boundary, so the message is first reported as queued.
@@ -305,13 +300,12 @@ const makeAttemptRuntime = Effect.gen(function* () {
           onSuccess: (state) => AttemptChannel.InterventionState.make({ ...state, forwardedTo }),
         }),
       );
-    if (action._tag === "OperatorMessage" || action._tag === "Release") {
-      yield* hold(hub, (held) =>
-        state.held
-          ? [...held.filter((id) => id !== target.sessionId), target.sessionId]
-          : held.filter((id) => id !== target.sessionId),
-      );
-    }
+    yield* supervise(hub, (document) => {
+      const held = document.held.filter((id) => id !== target.sessionId);
+      const paused = (document.pausedChildren ?? []).filter((id) => id !== target.sessionId);
+      document.held = state.held ? [...held, target.sessionId] : held;
+      document.pausedChildren = state.paused ? [...paused, target.sessionId] : paused;
+    });
     if (state.queued) {
       hub.childInputs.add(inputSequence);
       const encoded = yield* encodeIntervention(intervention).pipe(Effect.orDie);
