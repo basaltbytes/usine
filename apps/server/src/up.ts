@@ -78,6 +78,7 @@ import { serverLayer } from "./http.ts";
 import { instanceIdOf } from "./instance/id.ts";
 import { holdInstance } from "./instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
+import { configuredLaunchdService, supervisingLaunchdService } from "./instance/launchd.ts";
 import { currentSystemService } from "./instance/systemd.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
@@ -286,7 +287,7 @@ const start = Effect.fnUntraced(function* (
         settings: Effect.map(instances.get, ({ config }) => config.settings),
         platform: Result.fromOption(platform, () =>
           UpgradeError.make({
-            message: "App upgrades require a global npm install managed by systemd.",
+            message: "App upgrades require a global npm install managed by systemd or launchd.",
           }),
         ),
         drain: engine.waitForUpgrade,
@@ -354,12 +355,18 @@ export const up = (command: UpCommand) =>
         yield* monitorEventLoop;
         const directory = InstanceDirectory.make(process.cwd());
         yield* refuseVolatileInstance(directory, command.allowVolatileInstance);
+        const configuredService = yield* configuredLaunchdService;
+        const launchdService = yield* supervisingLaunchdService(
+          ProcessId.make(process.pid),
+          configuredService,
+        );
         const record = InstanceRecord.make({
           pid: ProcessId.make(process.pid),
           version: yield* packageVersion(),
           startedAt: yield* DateTime.now,
           launch: yield* currentLaunch(command),
           systemdUnit: yield* currentSystemService(),
+          launchdService,
         });
         // Acquired before any store opens and released after every store closes.
         yield* holdInstance(directory, record);

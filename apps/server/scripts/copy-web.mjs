@@ -15,3 +15,8 @@ await cp(
   resolve(packageRoot, "src/upgrade/helper.sh"),
   resolve(packageRoot, "dist/upgrade/helper.sh"),
 );
+
+await cp(
+  resolve(packageRoot, "src/upgrade/launchd.sh"),
+  resolve(packageRoot, "dist/upgrade/launchd.sh"),
+);

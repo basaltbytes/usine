@@ -9,6 +9,7 @@ export const guideGroups = [
       { label: "Overview", slug: "guides/run-usine" },
       { slug: "guides/run-usine-locally" },
       { slug: "guides/host-usine-on-linux" },
+      { slug: "guides/host-usine-on-macos" },
       { slug: "guides/keep-the-orchestrator-running" },
       { slug: "guides/expose-an-instance" },
       { slug: "guides/open-the-web-ui" },

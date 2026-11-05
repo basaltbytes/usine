@@ -15,6 +15,7 @@ import { Console, DateTime, Deferred, Duration, Effect, Option } from "effect";
 import { parseCli } from "../../src/cli.ts";
 import { holdInstance } from "../../src/instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch } from "../../src/instance/record.ts";
+import { LaunchdService } from "../../src/instance/launchd.ts";
 import { SystemdUnit } from "../../src/instance/systemd.ts";
 import { withGracefulShutdown } from "../../src/shutdown.ts";
 
@@ -103,6 +104,11 @@ NodeRuntime.runMain(
         startedAt: yield* DateTime.now,
         launch: yield* currentLaunch(command),
         systemdUnit: systemdUnit(),
+        launchdService: existsSync(fixtureFile("fixture-launchd"))
+          ? Option.some(
+              LaunchdService.make(readFileSync(fixtureFile("fixture-launchd"), "utf8").trim()),
+            )
+          : Option.none(),
       });
       yield* holdInstance(directory, record);
       writeFileSync(join(directory, ".usine/admin-token"), "l".repeat(43), { mode: 0o600 });
