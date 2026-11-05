@@ -8,27 +8,34 @@ import {
   TextOutput,
 } from "@usine/core/agent/session";
 import { jsonKey } from "@usine/core/json-key";
+import { BlockedFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { MachineId, WorkerName } from "@usine/core/worker";
-import { Context, Deferred, Effect, Fiber, Layer, Option } from "effect";
+import { Context, Deferred, Effect, Fiber, Layer, Option, Result } from "effect";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { DurableHarness } from "../src/harness.ts";
 import { answer, delegate, layer, StubChildren } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-for (const recovery of [
-  "resume",
-  "resume-twice",
-  "missing-session",
-  "worker-gone",
-  "machine-gone",
-  "checkout-gone",
-  "resume-fails",
+for (const [recovery, blocker] of [
+  ["resume", null],
+  ["resume-twice", null],
+  ["resume-after-infra", { kind: "infra", child: 1 }],
+  ["block-after-infra", { kind: "infra", child: 1 }],
+  ["resume-with-other-infra", { kind: "infra", child: 2 }],
+  ["resume-with-blocker", { kind: "blocked", child: 1 }],
+  ["resume-fails-after-infra", { kind: "infra", child: 1 }],
+  ["missing-session", null],
+  ["worker-gone", null],
+  ["machine-gone", null],
+  ["checkout-gone", null],
+  ["resume-fails", null],
 ] as const) {
   it.live(`recovers a durable child call after restart (${recovery})`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
-      const request = attemptRequest(`recovery/${recovery}`, 1);
+      const childCount = blocker?.child ?? 1;
+      const request = attemptRequest(`recovery/${recovery}`, childCount);
       const recording = recordingSink();
       const saved = HarnessSession.make({
         id: HarnessSessionId.make("saved-child"),
@@ -81,6 +88,20 @@ for (const recovery of [
               );
             yield* child.emit(TextOutput.make({ session: child.request.session, text }));
             yield* output.committed;
+            if (blocker !== null)
+              yield* Context.get(services, DurableHarness).use(
+                "persist the child blocker before shutdown",
+                (opened, context) =>
+                  opened.commit(async (tx) => {
+                    const record = await tx.doc(AttemptRecordDoc, request.spec.attemptId, null);
+                    record.children = childCount;
+                    record.childBlocker = {
+                      sessionId: `${child.request.session.parentId}:child:${blocker.child}`,
+                      message: "The pre-restart child blocker.",
+                      kind: blocker.kind,
+                    };
+                  }, context),
+              );
             yield* Fiber.interrupt(execution);
             return child.request;
           }),
@@ -117,17 +138,47 @@ for (const recovery of [
             assert.strictEqual(child.request.cwd, first.cwd);
             assert.strictEqual(child.request.worker, first.worker);
             assert.include(child.request.prompt, request.spec.task);
-            if (recovery === "resume-fails") yield* child.crash("Saved session unavailable");
+            if (recovery === "resume-fails" || recovery === "resume-fails-after-infra")
+              yield* child.crash("Saved session unavailable");
+            else if (recovery === "block-after-infra")
+              yield* child.block("The child's new blocker.");
             else yield* child.reply("The child's final report.");
           }
-          const report = yield* Fiber.join(execution);
-          assert.strictEqual(report.message, "Finished after restart.");
+          const report = yield* Fiber.join(execution).pipe(Effect.result);
+          if (recovery === "resume-with-other-infra" || recovery === "resume-fails-after-infra") {
+            assert(Result.isFailure(report));
+            assert.deepStrictEqual(
+              report.failure,
+              InfraFailure.make({
+                message: "The pre-restart child blocker.",
+                cause: "The pre-restart child blocker.",
+              }),
+            );
+          } else if (recovery === "resume-with-blocker" || recovery === "block-after-infra") {
+            assert(Result.isFailure(report));
+            assert.deepStrictEqual(
+              report.failure,
+              BlockedFailure.make({
+                message:
+                  recovery === "block-after-infra"
+                    ? "The child's new blocker."
+                    : "The pre-restart child blocker.",
+              }),
+            );
+          } else {
+            assert(Result.isSuccess(report));
+            assert.strictEqual(report.success.message, "Finished after restart.");
+          }
           const children = yield* Context.get(services, DurableHarness).use(
             "read the child budget",
             async (opened, context) =>
               (await opened.snapshot(AttemptRecordDoc, request.spec.attemptId, context))?.children,
           );
-          assert.strictEqual(children, 1, "recovery must not spend another child-session slot");
+          assert.strictEqual(
+            children,
+            childCount,
+            "recovery must not spend another child-session slot",
+          );
         }),
       );
       const finished = recording
@@ -142,11 +193,21 @@ for (const recovery of [
       assert.lengthOf(finished, 1);
       const result = finished[0];
       assert(result !== undefined);
-      const succeeds = recovery === "resume" || recovery === "resume-twice";
+      const succeeds =
+        recovery === "resume" ||
+        recovery === "resume-twice" ||
+        recovery === "resume-after-infra" ||
+        recovery === "block-after-infra" ||
+        recovery === "resume-with-other-infra" ||
+        recovery === "resume-with-blocker";
       assert.strictEqual(result.isError, !succeeds);
       assert.include(
         jsonKey(result.output),
-        succeeds ? "The child's final report." : "Half way there.",
+        recovery === "block-after-infra"
+          ? "The child's new blocker."
+          : succeeds
+            ? "The child's final report."
+            : "Half way there.",
       );
       if (!succeeds) assert.include(jsonKey(result.output), "interrupted");
       assertAdmitted(request.spec.attemptId, recording.outbound());

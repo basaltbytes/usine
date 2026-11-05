@@ -437,6 +437,25 @@ export const subagentTool = (services: ExtensionServices) => {
         if (watch === undefined) return;
         await firstAccepted(watch, (hold) => !hold.held.includes(session.id), scoped);
       });
+      if (replayed) {
+        const cleared = yield* call("clear the recovered child's infrastructure failure", () =>
+          api.commit(async (tx) => {
+            const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
+            if (
+              record.childBlocker?.kind !== "infra" ||
+              record.childBlocker.sessionId !== session.id
+            )
+              return false;
+            record.childBlocker = null;
+            return true;
+          }, context),
+        );
+        if (cleared)
+          yield* Effect.logInfo("Recovered child's report replaces its infrastructure failure", {
+            attemptId: spec.attemptId,
+            sessionId: session.id,
+          });
+      }
       const text = yield* Result.match(outcome, {
         onFailure: (report) =>
           Effect.gen(function* () {
