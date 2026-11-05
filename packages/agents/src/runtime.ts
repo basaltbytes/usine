@@ -7,6 +7,7 @@ import {
   ChildSession,
   ChildSessionBudget,
   ChildSessionCount,
+  HarnessSession,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { MachineId, WorkerName } from "@usine/core/worker";
@@ -48,6 +49,10 @@ export class ChildRequest extends Schema.Class<
   cwd: WorkingDirectory,
   /** The complete instructions to send as the child's first message. */
   prompt: Schema.NonEmptyString,
+  /** The saved conversation to continue in this checkout instead of starting a new one. */
+  resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
+  ),
   /**
    * The complete environment of the child process and its commands: the worker's allowlisted
    * variables plus the attempt's credential configuration, with nothing inherited from the launching

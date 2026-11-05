@@ -8,6 +8,8 @@ import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
+  HarnessSession,
+  HarnessSessionId,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
   sessionPool,
@@ -332,6 +334,38 @@ const droppedLaunch = (onDrop: () => void = () => {}) => {
 };
 
 describe("Claude child backend", () => {
+  it.effect("continues the saved conversation supplied by a restarted durable call", () => {
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-claude"),
+      cwd: request().cwd,
+      home: Option.some("/worker/attempt/claude"),
+    });
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (_input, options) => {
+        assert.strictEqual(options.resume, saved.id);
+        assert.strictEqual(options.env?.CLAUDE_CONFIG_DIR, "/worker/attempt/claude");
+        return scripted(
+          [{ type: "result", subtype: "success", result: "Continued." }],
+          undefined,
+          saved.id,
+        );
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), resume: Option.some(saved) }),
+        );
+        const events = yield* Effect.forkChild(Stream.runCollect(running.events));
+        assert.strictEqual((yield* running.result).message, "Continued.");
+        const transcript = yield* Fiber.join(events);
+        const started = transcript.find((event) => event._tag === "SessionStarted");
+        assert(started !== undefined);
+        assert.deepStrictEqual(started.harnessSession, Option.some(saved));
+      }),
+    ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+  });
+
   for (const gatewayCredential of [Option.none(), Option.some("subscription" as const)]) {
     it.effect(
       `reports Claude plan windows with ${Option.isSome(gatewayCredential) ? "a gateway subscription" : "the worker login"}`,

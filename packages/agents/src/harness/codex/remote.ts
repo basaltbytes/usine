@@ -170,6 +170,32 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
       ),
     );
   });
+  if (client.transport === "replace") {
+    yield* stopRemote;
+    const removed = yield* hostOutput(client.host, {
+      command: "node",
+      args: ["-e", CODEX_SUPERVISOR, "remove", pidFile, "0"],
+      environment: client.environment,
+    }).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.mapError((cause) =>
+        operationError(
+          "launch",
+          client,
+          "Could not replace remote Codex transport journals",
+          cause,
+        ),
+      ),
+    );
+    if (removed.exitCode !== 0)
+      return yield* operationError(
+        "launch",
+        client,
+        "The previous remote Codex process is still running",
+        removed.exitCode,
+      );
+    yield* Effect.logInfo("Replaced remote Codex transport for saved-thread resume", fields);
+  }
   const monitor = yield* Effect.gen(function* () {
     while (!(yield* Deferred.isDone(exit))) {
       if (yield* lifecycle.isStopping) return yield* Effect.never;

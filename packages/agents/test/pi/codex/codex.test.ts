@@ -4,6 +4,8 @@ import { Harness, BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
+  HarnessSession,
+  HarnessSessionId,
   PoolLogin,
   TokenBreakdown,
   sessionPool,
@@ -140,6 +142,59 @@ const successfulResponses = (
   }) satisfies Readonly<Record<string, Schema.Json>>;
 
 describe("Codex child backend", () => {
+  it.effect("resumes the recorded thread and CODEX_HOME after a durable restart", () => {
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-codex"),
+      cwd: request().cwd,
+      home: Option.some("/worker/attempt/codex"),
+    });
+    const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+    const clients: Array<CodexClient> = [];
+    const server = connectionLayer(
+      {
+        ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        "thread/resume": { thread: { id: saved.id, turns: [] } },
+      },
+      [
+        {
+          method: "item/completed",
+          params: {
+            threadId: saved.id,
+            turnId: "turn-1",
+            item: { type: "agentMessage", id: "report", text: "Continued." },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ],
+      calls,
+      Effect.void,
+      clients,
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), resume: Option.some(saved) }),
+        );
+        const events = yield* Effect.forkChild(Stream.runCollect(running.events));
+        assert.strictEqual((yield* running.result).message, "Continued.");
+        const transcript = yield* Fiber.join(events);
+        const started = transcript.find((event) => event._tag === "SessionStarted");
+        assert(started !== undefined);
+        assert.deepStrictEqual(started.harnessSession, Option.some(saved));
+        assert.strictEqual(clients[0]?.environment.CODEX_HOME, "/worker/attempt/codex");
+        assert.strictEqual(clients[0]?.transport, "replace");
+        assert(!calls.some(({ method }) => method === "thread/start"));
+        assert.include(
+          jsonKey(calls.find(({ method }) => method === "thread/resume")?.params),
+          saved.id,
+        );
+      }),
+    ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+  });
+
   it.effect(
     "pauses without closing Codex and resumes a held conversation on its existing thread",
     () =>

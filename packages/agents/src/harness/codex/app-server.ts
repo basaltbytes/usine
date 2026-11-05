@@ -149,23 +149,26 @@ const makeCodexAppServer = Effect.gen(function* () {
       const closing = yield* Ref.make(false);
       const failure = yield* Ref.make(Option.none<SessionOperationError>());
       const stderrTail = yield* Ref.make<ReadonlyArray<string>>([]);
-      const process: Effect.Effect<CodexProcess, PlatformError.PlatformError, Scope.Scope> =
-        Effect.gen(function* () {
-          if (request.host._tag === "RemoteShell" && Option.isSome(request.sessionId)) {
-            return yield* remoteCodexProcess(
-              { ...request, host: request.host },
-              request.sessionId.value,
-              appServerArgs(request.cwd),
-              Stream.fromQueue(input),
-            ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
-          }
-          return yield* spawner.spawn(
-            codexAppServerCommand(request, {
-              stream: Stream.fromQueue(input),
-              endOnDone: true,
-            }),
-          );
-        });
+      const process: Effect.Effect<
+        CodexProcess,
+        PlatformError.PlatformError | SessionOperationError,
+        Scope.Scope
+      > = Effect.gen(function* () {
+        if (request.host._tag === "RemoteShell" && Option.isSome(request.sessionId)) {
+          return yield* remoteCodexProcess(
+            { ...request, host: request.host },
+            request.sessionId.value,
+            appServerArgs(request.cwd),
+            Stream.fromQueue(input),
+          ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+        }
+        return yield* spawner.spawn(
+          codexAppServerCommand(request, {
+            stream: Stream.fromQueue(input),
+            endOnDone: true,
+          }),
+        );
+      });
       const handle = yield* process.pipe(
         Effect.mapError((cause) =>
           operationError("launch", request, "Codex app-server failed to start", cause),

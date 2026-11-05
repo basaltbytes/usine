@@ -16,6 +16,8 @@ export interface CodexClient {
   readonly environment: Readonly<Record<string, string>>;
   /** The local or remote host on which to start the app-server process. */
   readonly host: ChildHost;
+  /** Replace the retained remote process and journals before resuming a saved thread. */
+  readonly transport?: "replace";
 }
 
 /** A server event received without a client request ID. */

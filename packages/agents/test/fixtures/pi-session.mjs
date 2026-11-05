@@ -12,7 +12,7 @@ import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { piRuntime, piSdkLive } from "../../src/harness/pi/pi.ts";
 import { ChildRequest, WorkingDirectory } from "../../src/runtime.ts";
 
-const [cwd, id] = process.argv.slice(2);
+const [cwd, id, mode] = process.argv.slice(2);
 const request = ChildRequest.make({
   cwd: WorkingDirectory.make(cwd),
   prompt:
@@ -39,7 +39,14 @@ await Effect.runPromise(
       const runtime = yield* piRuntime;
       const running = yield* id === undefined
         ? runtime.launch(request)
-        : runtime.resume(request, HarnessSessionId.make(id));
+        : mode === "request"
+          ? runtime.launch(
+              ChildRequest.make({
+                ...request,
+                resume: Option.some(HarnessSession.make({ id: HarnessSessionId.make(id), cwd })),
+              }),
+            )
+          : runtime.resume(request, HarnessSessionId.make(id));
       const events = yield* Effect.forkChild(Stream.runCollect(running.events));
       const result = yield* running.result;
       const transcript = yield* Fiber.join(events);

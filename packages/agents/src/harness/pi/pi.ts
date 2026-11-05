@@ -214,7 +214,17 @@ const makePiChild = Effect.gen(function* () {
   );
   const directory = (request: ChildRequest) => `${request.cwd}/.usine/pi/sessions`;
   const launch = Effect.fn("PiRuntime.launch")((request: ChildRequest) =>
-    start(request, { _tag: "Create", directory: directory(request) }),
+    start(
+      request,
+      Option.match(request.resume, {
+        onNone: () => ({ _tag: "Create" as const, directory: directory(request) }),
+        onSome: (saved) => ({
+          _tag: "Resume" as const,
+          directory: Option.getOrElse(saved.home, () => directory(request)),
+          id: saved.id,
+        }),
+      }),
+    ),
   );
   const resume = Effect.fn("PiRuntime.resume")((request: ChildRequest, id: HarnessSessionId) =>
     start(request, { _tag: "Resume", directory: directory(request), id }),
