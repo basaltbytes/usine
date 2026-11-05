@@ -184,11 +184,14 @@ export const subagentTool = (services: ExtensionServices) => {
     }
     const sessionId = AgentSessionId.make(`${parentId}:child:${attemptedChildren}`);
     const interrupted = (reason: string) =>
-      Effect.logWarning("Saved child call returns as interrupted", {
-        attemptId: spec.attemptId,
-        sessionId,
-        reason,
-      }).pipe(
+      Effect.sync(() => hub.childSpawns.delete(sessionId)).pipe(
+        Effect.andThen(
+          Effect.logWarning("Saved child call returns as interrupted", {
+            attemptId: spec.attemptId,
+            sessionId,
+            reason,
+          }),
+        ),
         Effect.as({
           output: [{ type: "text" as const, text: api.retainedOutput().text || previous.output }],
           isError: true,
@@ -202,15 +205,14 @@ export const subagentTool = (services: ExtensionServices) => {
           details: { childSessionId: sessionId },
         } satisfies ToolExecutionResult<SpawnDetails>),
       );
-    const saved = yield* Option.match(Option.fromNullOr(previous.saved), {
-      onNone: () => Effect.succeedNone,
-      onSome: (value) =>
-        Schema.decodeUnknownEffect(SavedChild)(value, { onExcessProperty: "error" }).pipe(
-          Effect.orDie,
-          Effect.asSome,
-        ),
-    });
     if (replayed) api.output(previous.output);
+    const decoded = yield* Option.match(Option.fromNullOr(previous.saved), {
+      onNone: () => Effect.succeedNone,
+      onSome: (value) => Schema.decodeUnknownEffect(SavedChild)(value).pipe(Effect.asSome),
+    }).pipe(Effect.result);
+    if (Result.isFailure(decoded))
+      return yield* interrupted("the saved conversation no longer decodes");
+    const saved = decoded.success;
     if (replayed && Option.isNone(saved))
       return yield* interrupted("the child did not commit a saved conversation");
     hub.childSpawns.add(sessionId);
@@ -254,15 +256,12 @@ export const subagentTool = (services: ExtensionServices) => {
     )
       return yield* interrupted("the original worker, machine, or checkout is unavailable");
     // Read when each child starts, so a preflight that ran after the Attempt launched applies.
-    const session = Option.isSome(saved)
-      ? saved.value.session
-      : ChildSession.make({
-          id: sessionId,
-          parentId,
-          agent: spec.agent.name,
-          brain: spec.agent.brain,
-          gatewayCredential: yield* request.gatewayCredential,
-        });
+    const session = ChildSession.make({
+      ...(Option.isSome(saved)
+        ? saved.value.session
+        : { id: sessionId, parentId, agent: spec.agent.name, brain: spec.agent.brain }),
+      gatewayCredential: yield* request.gatewayCredential,
+    });
     const held = yield* call("restore the child's Hold", async () => {
       const hold = await api.snapshot(HoldDoc, owner.taskId, context);
       return hold?.held.includes(sessionId) ?? false;

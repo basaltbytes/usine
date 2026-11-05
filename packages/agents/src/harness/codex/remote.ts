@@ -1,4 +1,4 @@
-import type { AgentSessionId } from "@usine/core/agent/session";
+import { AgentSessionId } from "@usine/core/agent/session";
 import { type Brand, Cause, Deferred, Effect, Fiber, Queue, Ref, Schema, Stream } from "effect";
 import { Base64 } from "effect/encoding";
 import { ChildProcessSpawner } from "effect/process";
@@ -120,7 +120,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
           }
           if ("exitCode" in frame) {
             if (frame.exitCode === 0) {
-              yield* stopRemote;
+              yield* stopRemote();
               yield* Deferred.succeed(exit, frame.exitCode);
             } else
               return yield* operationError(
@@ -139,62 +139,76 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     });
     return code;
   });
-  const stopRemote = Effect.gen(function* () {
-    if (yield* lifecycle.isStopping) return;
-    yield* hostOutput(client.host, {
-      command: "node",
-      args: ["-e", CODEX_SUPERVISOR, "stop", pidFile, "0"],
-      environment: client.environment,
-    }).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.flatMap((result) =>
-        result.exitCode === 0
-          ? Effect.void
-          : operationError(
-              "interrupt",
-              client,
-              "Could not confirm the remote Codex process group stopped",
-              { exitCode: result.exitCode },
-            ),
-      ),
-      Effect.tap(() => Effect.logInfo("Confirmed the remote Codex process group stopped", fields)),
-      Effect.mapError((cause) =>
-        Schema.is(SessionOperationError)(cause)
-          ? cause
-          : operationError(
-              "interrupt",
-              client,
-              "Could not stop the remote Codex process group",
-              cause,
-            ),
-      ),
-    );
-  });
+  const stopRemote = (target = pidFile) =>
+    Effect.gen(function* () {
+      if (yield* lifecycle.isStopping) return;
+      yield* hostOutput(client.host, {
+        command: "node",
+        args: ["-e", CODEX_SUPERVISOR, "stop", target, "0"],
+        environment: client.environment,
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.flatMap((result) =>
+          result.exitCode === 0
+            ? Effect.void
+            : operationError(
+                "interrupt",
+                client,
+                "Could not confirm the remote Codex process group stopped",
+                { exitCode: result.exitCode },
+              ),
+        ),
+        Effect.tap(() =>
+          Effect.logInfo("Confirmed the remote Codex process group stopped", {
+            ...fields,
+            pidFile: target,
+          }),
+        ),
+        Effect.mapError((cause) =>
+          Schema.is(SessionOperationError)(cause)
+            ? cause
+            : operationError(
+                "interrupt",
+                client,
+                "Could not stop the remote Codex process group",
+                cause,
+              ),
+        ),
+      );
+    });
   if (client.transport === "replace") {
-    yield* stopRemote;
-    const removed = yield* hostOutput(client.host, {
-      command: "node",
-      args: ["-e", CODEX_SUPERVISOR, "remove", pidFile, "0"],
-      environment: client.environment,
-    }).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.mapError((cause) =>
-        operationError(
+    for (const previous of [
+      pidFile,
+      childPidFile(client.cwd, AgentSessionId.make(`${sessionId}-resume`)),
+    ]) {
+      yield* stopRemote(previous);
+      const removed = yield* hostOutput(client.host, {
+        command: "node",
+        args: ["-e", CODEX_SUPERVISOR, "remove", previous, "0"],
+        environment: client.environment,
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError((cause) =>
+          operationError(
+            "launch",
+            client,
+            "Could not replace remote Codex transport journals",
+            cause,
+          ),
+        ),
+      );
+      if (removed.exitCode !== 0)
+        return yield* operationError(
           "launch",
           client,
-          "Could not replace remote Codex transport journals",
-          cause,
-        ),
-      ),
-    );
-    if (removed.exitCode !== 0)
-      return yield* operationError(
-        "launch",
-        client,
-        "The previous remote Codex process is still running",
-        removed.exitCode,
-      );
-    yield* Effect.logInfo("Replaced remote Codex transport for saved-thread resume", fields);
+          "The previous remote Codex process is still running",
+          removed.exitCode,
+        );
+      yield* Effect.logInfo("Replaced remote Codex transport for saved-thread resume", {
+        ...fields,
+        pidFile: previous,
+      });
+    }
   }
   const monitor = yield* Effect.gen(function* () {
     while (!(yield* Deferred.isDone(exit))) {
@@ -232,7 +246,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
     Effect.catchTag("SessionOperationError", (error) =>
       Effect.gen(function* () {
         if (yield* lifecycle.isStopping) return yield* Effect.never;
-        if (Schema.is(RemoteCodexProcessLost)(error.cause)) yield* stopRemote;
+        if (Schema.is(RemoteCodexProcessLost)(error.cause)) yield* stopRemote();
         return yield* error;
       }),
     ),
@@ -280,7 +294,7 @@ export const remoteCodexProcess = Effect.fn("CodexAppServer.remoteProcess")(func
       );
     }),
   );
-  const kill = () => stopRemote.pipe(Effect.andThen(Fiber.interrupt(monitor)));
+  const kill = () => stopRemote().pipe(Effect.andThen(Fiber.interrupt(monitor)));
 
   return {
     stdout: Stream.fromQueue(stdout),

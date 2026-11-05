@@ -9,9 +9,10 @@ import {
 } from "@usine/core/agent/session";
 import { jsonKey } from "@usine/core/json-key";
 import { BlockedFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { MachineId, WorkerName } from "@usine/core/worker";
+import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Result } from "effect";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
+import { SubagentDoc } from "../src/attempt/child.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { DurableHarness } from "../src/harness.ts";
 import { answer, delegate, layer, StubChildren } from "../src/testing.ts";
@@ -25,6 +26,11 @@ for (const [recovery, blocker] of [
   ["resume-with-other-infra", { kind: "infra", child: 2 }],
   ["resume-with-blocker", { kind: "blocked", child: 1 }],
   ["resume-fails-after-infra", { kind: "infra", child: 1 }],
+  ["resume-crashes-then-replacement", { kind: "infra", child: 1 }],
+  ["worker-gone-then-replacement", { kind: "infra", child: 1 }],
+  ["credential-changed", null],
+  ["invalid-session", null],
+  ["extra-saved-fields", null],
   ["missing-session", null],
   ["worker-gone", null],
   ["machine-gone", null],
@@ -34,8 +40,14 @@ for (const [recovery, blocker] of [
   it.live(`recovers a durable child call after restart (${recovery})`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
+      const replaces =
+        recovery === "resume-crashes-then-replacement" ||
+        recovery === "worker-gone-then-replacement";
       const childCount = blocker?.child ?? 1;
-      const request = attemptRequest(`recovery/${recovery}`, childCount);
+      const request = AttemptRequest.make({
+        ...attemptRequest(`recovery/${recovery}`, childCount + (replaces ? 1 : 0)),
+        gatewayCredential: Effect.succeedSome(GatewayCredentialKind.make("subscription")),
+      });
       const recording = recordingSink();
       const saved = HarnessSession.make({
         id: HarnessSessionId.make("saved-child"),
@@ -88,6 +100,25 @@ for (const [recovery, blocker] of [
               );
             yield* child.emit(TextOutput.make({ session: child.request.session, text }));
             yield* output.committed;
+            if (recovery === "invalid-session" || recovery === "extra-saved-fields")
+              yield* Context.get(services, DurableHarness).use(
+                "restore saved data from a different version",
+                (opened, context) =>
+                  opened.commit(async (tx) => {
+                    const tasks = await tx.scanTasks({ kind: "pi.tool" }, 100);
+                    assert.lengthOf(tasks.items, 1);
+                    const task = tasks.items[0];
+                    assert(task !== undefined);
+                    const record = await tx.doc(SubagentDoc, task.id);
+                    assert(record.saved !== null);
+                    if (recovery === "invalid-session")
+                      Object.assign(record.saved.session.brain, { effort: "retired-effort" });
+                    else {
+                      Object.assign(record.saved, { newerField: true });
+                      Object.assign(record.saved.session, { newerField: true });
+                    }
+                  }, context),
+              );
             if (blocker !== null)
               yield* Context.get(services, DurableHarness).use(
                 "persist the child blocker before shutdown",
@@ -114,11 +145,17 @@ for (const [recovery, blocker] of [
       yield* Effect.scoped(
         Effect.gen(function* () {
           const services = yield* Layer.build(
-            layer({ database, parent: [answer("Finished after restart.")] }),
+            layer({
+              database,
+              parent: [
+                ...(replaces ? [delegate("Try again")] : []),
+                answer("Finished after restart."),
+              ],
+            }),
           );
           const runtime = Context.get(services, AttemptRuntime);
           const attached =
-            recovery === "worker-gone"
+            recovery === "worker-gone" || recovery === "worker-gone-then-replacement"
               ? AttemptRequest.make({ ...request, worker: WorkerName.make("replacement") })
               : recovery === "machine-gone"
                 ? AttemptRequest.make({
@@ -127,10 +164,24 @@ for (const [recovery, blocker] of [
                   })
                 : recovery === "checkout-gone"
                   ? AttemptRequest.make({ ...request, cwd: "/replacement-checkout" })
-                  : request;
+                  : recovery === "credential-changed"
+                    ? AttemptRequest.make({
+                        ...request,
+                        gatewayCredential: Effect.succeedSome(
+                          GatewayCredentialKind.make("api-key"),
+                        ),
+                      })
+                    : request;
           const execution = yield* Effect.forkChild(runtime.execute(attached, recording.sink));
           if (
-            !["missing-session", "worker-gone", "machine-gone", "checkout-gone"].includes(recovery)
+            ![
+              "missing-session",
+              "invalid-session",
+              "worker-gone",
+              "worker-gone-then-replacement",
+              "machine-gone",
+              "checkout-gone",
+            ].includes(recovery)
           ) {
             const child = yield* Context.get(services, StubChildren).next;
             assert.strictEqual(child.request.session.id, first.session.id);
@@ -138,11 +189,29 @@ for (const [recovery, blocker] of [
             assert.strictEqual(child.request.cwd, first.cwd);
             assert.strictEqual(child.request.worker, first.worker);
             assert.include(child.request.prompt, request.spec.task);
-            if (recovery === "resume-fails" || recovery === "resume-fails-after-infra")
+            assert.deepStrictEqual(
+              child.request.session.gatewayCredential,
+              Option.some(
+                GatewayCredentialKind.make(
+                  recovery === "credential-changed" ? "api-key" : "subscription",
+                ),
+              ),
+            );
+            if (
+              recovery === "resume-fails" ||
+              recovery === "resume-fails-after-infra" ||
+              recovery === "resume-crashes-then-replacement"
+            )
               yield* child.crash("Saved session unavailable");
             else if (recovery === "block-after-infra")
               yield* child.block("The child's new blocker.");
             else yield* child.reply("The child's final report.");
+          }
+          if (replaces) {
+            const replacement = yield* Context.get(services, StubChildren).next;
+            assert.notStrictEqual(replacement.request.session.id, first.session.id);
+            assert(Option.isNone(replacement.request.resume));
+            yield* replacement.reply("The replacement child's report.");
           }
           const report = yield* Fiber.join(execution).pipe(Effect.result);
           if (recovery === "resume-with-other-infra" || recovery === "resume-fails-after-infra") {
@@ -176,7 +245,7 @@ for (const [recovery, blocker] of [
           );
           assert.strictEqual(
             children,
-            childCount,
+            childCount + (replaces ? 1 : 0),
             "recovery must not spend another child-session slot",
           );
         }),
@@ -190,10 +259,16 @@ for (const [recovery, blocker] of [
             ? [payload.event]
             : [],
         );
-      assert.lengthOf(finished, 1);
+      assert.lengthOf(finished, replaces ? 2 : 1);
+      if (replaces) {
+        assert.strictEqual(finished[1]?.isError, false);
+        assert.include(jsonKey(finished[1]?.output), "The replacement child's report.");
+      }
       const result = finished[0];
       assert(result !== undefined);
       const succeeds =
+        recovery === "credential-changed" ||
+        recovery === "extra-saved-fields" ||
         recovery === "resume" ||
         recovery === "resume-twice" ||
         recovery === "resume-after-infra" ||
@@ -210,6 +285,8 @@ for (const [recovery, blocker] of [
             : "Half way there.",
       );
       if (!succeeds) assert.include(jsonKey(result.output), "interrupted");
+      if (recovery === "invalid-session")
+        assert.include(jsonKey(result.output), "the saved conversation no longer decodes");
       assertAdmitted(request.spec.attemptId, recording.outbound());
     }).pipe(Effect.scoped, Effect.timeout("20 seconds")),
   );
