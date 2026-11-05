@@ -69,9 +69,11 @@ SSH preflight also warns when the concurrent containers' combined memory limits 
 
 Every adapter runs the `@usine/agents/preflight` checks where children run: local on this machine (override with `LocalExecutorOptions.harnessReadiness`), exe.dev and SSH over SSH (`SshExecutorOptions.harnessReadiness`). Codex needs CLI 0.164.0 (or 0.159.0 through 0.159.3 for one release) and a ChatGPT login, Claude its CLI and subscription login, and Pi children an API key for their model or a ChatGPT login for an `openai-codex/...` model. Pi children run tools in the orchestrator, so exe.dev and SSH workers report Pi brains unavailable.
 
+Custom `HarnessProbe` callbacks receive the brain and a second argument with the worker and optional provisioned machine. Forward both arguments when wrapping another probe.
+
 `prepare` repeats the assigned brain's probe before acquiring credentials or a checkout, to catch roster changes and logouts. A capability gap returns `WorkerCapabilityError`, which needs the operator. Transport failures, such as an SSH client that can't reach the VM, and probe timeouts are retryable infrastructure failures.
 
-A Claude check holds the worker's `ClaudeLoginLock` (`@usine/agents/runtime`) until it returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. On a provisioned worker, each machine has its own login and lock, so attempts on different machines don't wait for each other. The local, exe.dev, and SSH layers need that service: build `claudeLoginLockLayer` from the root once and give it to the executor and the attempt runtime.
+Claude's host-login preflight holds its `HostLoginLock` (`@usine/agents/runtime`) until the check returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. On a provisioned worker, each harness and machine has its own login and lock, so attempts on different machines don't wait for each other. Build `harnessesLive` with `hostLoginLockLayer` once at the application root, then share the resulting `Harnesses` registry with the executor and the attempt runtime.
 
 It replaces exe.dev's `HarnessLoginCheck` and `harnessLoginChecks` options.
 
@@ -297,7 +299,7 @@ While an attempt runs, the executor asks the Worker every 30 seconds (`Cloudflar
 
 Preflight calls `GET /v1/health`, checks that the Worker has the image, that the worker has an API key for each harness in the roster (`anthropic` for Claude Code, `openai` for Codex; Pi can't run), and runs `claude --version` and `codex --version` in a preflight sandbox that it destroys afterwards. A refused token is a `credentials` capability error, a missing image a `toolchain` one, and a missing key a `harness-login` one. Each child's `gatewayCredential` is `api-key` when the worker holds its harness's key, so usage counts it in the API keys pool.
 
-The Cloudflare layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, a `ClaudeLoginLock`, and an `HttpClient` for the sandbox API.
+The Cloudflare layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, a `Harnesses` registry, and an `HttpClient` for the sandbox API.
 
 ```ts
 import { CloudflareImageName, WorkerName } from "@usine/core/worker"

@@ -1,8 +1,6 @@
-import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
-import { codexConfigArgs } from "@usine/agents/codex";
+import type { SshCommand } from "@usine/agents/child-host";
 import { catalog } from "@usine/agents/harness";
-import { unsupportedCodexVersion } from "@usine/agents/preflight";
-import { ClaudeLoginLock } from "@usine/agents/runtime";
+import { Harnesses } from "@usine/agents/harness/node";
 import {
   ApiKeyCredential,
   CreateSandbox,
@@ -13,7 +11,6 @@ import {
 } from "@usine/cloudflare";
 import { harnessEnvironment, SANDBOX_HOME } from "@usine/cloudflare/harness";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
-import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -40,7 +37,7 @@ import {
   Scope,
 } from "effect";
 import type { HttpClient } from "effect/http";
-import type { ChildProcessSpawner } from "effect/process";
+import { ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
 import { childEnvironment, commitIdentity } from "../child-environment.ts";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
@@ -55,7 +52,7 @@ import {
   logPreflightFailure,
   WorkerCapabilityError,
 } from "../executor.ts";
-import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
+import { agentsHarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import { prepareOutputs, readOutputs } from "../outputs.ts";
 import {
   cacheDirectoryName,
@@ -68,12 +65,11 @@ import {
   recoveryFields,
   type WorkspaceOps,
 } from "../provision.ts";
-import { type RemoteCommands, remoteCommandsFor } from "../remote/commands.ts";
+import { remoteCommandsFor } from "../remote/commands.ts";
 import { renewableCredential } from "../renewable-credential.ts";
 import type { SandboxRequestError } from "./client.ts";
 import { CloudflareWorkers, cloudflareWorkersFor, type CloudflareWorker } from "./workers.ts";
 import type { CloudflareExecutorOptions, CloudflareWorkerAddress } from "./model.ts";
-import { SHELL_FAILURE } from "./shell/environment.ts";
 
 /** The sandbox directory with the cached clone under `repos` and the checkout under `attempts`. */
 const WORKSPACE = `${SANDBOX_HOME}/workspace`;
@@ -170,50 +166,12 @@ const noCredentials = (issuedAt: DateTime.Utc) =>
 const DRAIN_MESSAGE =
   "Cloudflare is stopping the attempt's sandbox, whose disk a new container won't have; the attempt salvaged its checkout, and the next attempt resumes from the salvage";
 
-/** A probe that checks a harness's binary and version in a sandbox. Pi never reaches it. */
-const versionProbe =
-  (
-    operation: "preflight" | "prepare",
-    commands: RemoteCommands,
-    shell: RemoteShell,
-  ): HarnessProbe =>
-  (brain) =>
-    Effect.gen(function* () {
-      const command = brain.harness === "codex" ? "codex" : "claude";
-      const args = command === "codex" ? [...codexConfigArgs, "--version"] : ["--version"];
-      const result = yield* commands.inspect(operation, shell, command, args);
-      if (result.exitCode === SHELL_FAILURE)
-        return yield* ExecutorOperationError.make({
-          operation,
-          message: `Can't reach sandbox ${shell.destination} to run ${command}`,
-          cause: new Error(
-            result.stderr.trim() || `the sandbox shell exited with ${SHELL_FAILURE}`,
-          ),
-        });
-      const version = result.stdout.trim();
-      if (result.exitCode !== 0)
-        return HarnessUnavailableError.make({
-          harness: brain.harness,
-          capability: "binary",
-          message: `${command} --version failed in the sandbox image`,
-        });
-      const unsupported =
-        brain.harness === "codex" ? unsupportedCodexVersion(version) : Option.none();
-      if (Option.isSome(unsupported)) return unsupported.value;
-      yield* Effect.logInfo("Checked a harness in the sandbox image", {
-        sandbox: shell.destination,
-        harness: brain.harness,
-        version,
-      });
-      return HarnessReady.make({ harness: brain.harness });
-    });
-
 const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const commands = yield* remoteCommandsFor;
     const credentialProvider = yield* CredentialProvider;
-    const logins = yield* ClaudeLoginLock;
+    const harnesses = yield* Harnesses;
     const session = yield* durableSessionFor({
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
@@ -813,8 +771,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               workerName,
               Option.none(),
               distinct,
-              versionProbe("preflight", commands, worker.shellFor(name)),
-              logins,
+              agentsHarnessProbe(harnesses, worker.shellFor(name), {}, "sandbox-api-key"),
             );
           }),
         );
@@ -940,8 +897,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             request.worker,
             Option.none(),
             [request.agent.brain],
-            versionProbe("prepare", commands, shell),
-            logins,
+            agentsHarnessProbe(harnesses, shell, {}, "sandbox-api-key"),
           );
         }
         const access = yield* acquireSandbox(
@@ -1193,7 +1149,7 @@ export const layer = (
   Executor | CloudflareWorkers,
   never,
   | AttemptRuntime
-  | ClaudeLoginLock
+  | Harnesses
   | ChildProcessSpawner.ChildProcessSpawner
   | CredentialProvider
   | Crypto.Crypto

@@ -12,27 +12,19 @@ The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the
 
 ## Compose the child backends
 
-`/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `childDispatcherLayer` (`/children`) picks a backend from the agent's `harness`. Provide its three backends from `/claude`, `/codex`, and `/pi`, which also export their SDK contracts and production SDK layers. `@usine/durable/live` composes them:
+`/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `/harness/node` provides `Harnesses`, whose runtimes each own preflight and scoped launch. Registration rejects missing runtimes, missing descriptors, and duplicate runtime IDs. `childDispatcherLayer` (`/children`) selects a registered runtime from the agent's harness. The application composes the production SDKs:
 
 ```ts
 import { Layer } from "effect";
 import { childDispatcherLayer } from "@usine/agents/children";
-import { claudeChildBackendLayer, claudeSdkLive } from "@usine/agents/claude";
-import { codexAppServerLive, codexChildBackendLayer } from "@usine/agents/codex";
-import { piChildBackendLayer, piSdkLive } from "@usine/agents/pi";
+import { harnessesLive } from "@usine/agents/harness/node";
 
-const childBackendLayer = childDispatcherLayer.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      claudeChildBackendLayer.pipe(Layer.provide(claudeSdkLive)),
-      codexChildBackendLayer.pipe(Layer.provide(codexAppServerLive)),
-      piChildBackendLayer.pipe(Layer.provide(piSdkLive)),
-    ),
-  ),
-);
+const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive));
 ```
 
-The Claude backend also needs `ClaudeLoginLock` (`/runtime`), which every Claude command that can refresh a Claude login takes: one lock per worker, or per machine of a provisioned worker, whose machines each have their own login. Give the same instance (`claudeLoginLockLayer` from `@usine/executor`) to the backends and the executor running preflight. Like Codex's app server, it also needs a `ChildProcessSpawner`, to stop a child on its worker before it resumes the child.
+`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. A `HarnessRuntime` has an ID, `preflight(brain, target)`, and `launch(request)`. `ProbeTarget` names the host, environment, worker, optional provisioned machine, and credential route (`host-login`, `gateway`, `api-key`, or `sandbox-api-key`). Preflight reports capability gaps as `HarnessUnavailableError` values; transport failures and timeouts fail with `SessionOperationError`.
+
+The Node composition requires `ChildProcessSpawner` and `HostLoginLock` (`/runtime`). The lock is keyed by harness, worker, and provisioned machine. Build `harnessesLive` with `hostLoginLockLayer` from `@usine/executor` once at the application root. Provide that registry to both the executor and the attempt runtime. Claude's runtime takes the lock during host-login preflight and while a child starts. `/claude`, `/codex`, and `/pi` also export single-harness `ChildBackend` layers and their SDK contracts.
 
 Child prompts include the rendered loop task unchanged, including edit-and-retry amendments. Parent-written text appears separately as supplemental context and cannot replace the task instructions.
 
@@ -72,9 +64,9 @@ Child output becomes typed events: `SessionStarted`, `TextOutput` for completed 
 
 `RunningSession.intervene(action, onDelivery)` applies steer, interrupt, and holds. A message to an idle or paused child starts a turn and emits `SessionResumed`. A message to a working child joins the turn and returns `InterventionState.queued`; `onDelivery` runs once, with the child's state when the harness reads it, or with none if the child stops first. Pi reads it when the queued steering message starts, Codex when it records a `userMessage` item, and Claude Code with a result whose `queued_turn_count` no longer counts it. A finished turn has read all its queued messages.
 
-## Claude login lock
+## Host login lock
 
-A Claude child holds the `ClaudeLoginLock` of its worker, or of its machine (`ChildRequest.machine`) on a provisioned worker, from process start until its first messages prove the login (a rate-limit or thinking update, an API retry, a model answer, or the turn result), for one minute at most. `launch` returns then.
+A Claude child holds the `HostLoginLock` of its worker, or of its machine (`ChildRequest.machine`) on a provisioned worker, from process start until its first messages prove the login (a rate-limit or thinking update, an API retry, a model answer, or the turn result), for one minute at most. `launch` returns then.
 
 If the first turn ends with `Failed to refresh OAuth token: another Claude Code process ...` and no tokens spent, another process had the refresh lock. The backend stops the process and relaunches after 15, 30, then 60 seconds, logging each retry at info. Only the running launch is transcribed. If the last launch fails the same way, the parent gets Claude's error as the child's report.
 
@@ -122,7 +114,7 @@ Claude children save sessions, and Codex threads aren't ephemeral. `SessionStart
 
 ## Preflight
 
-`preflight(brain, host, environment)` (`/preflight`, Node) checks a worker without a prompt, using a `ChildProcessSpawner` layer. Each check sees `environment` as a child does. On a `RemoteShell` host, checks run over SSH, an SSH failure (exit 255) is an incomplete check rather than a missing harness, and a Pi brain is unavailable.
+`preflight(brain, target)` (`/preflight`, Node) checks a worker without a prompt through the injected `Harnesses` service. Each runtime uses the process spawner and login lock captured when the registry was built. Each check sees the target environment as a child does. On a `RemoteShell` host, checks run over SSH, an SSH failure (exit 255) is an incomplete check rather than a missing harness, and a Pi brain is unavailable.
 
 It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3 for one release)** (`supportedCodexVersions`; `unsupportedCodexVersion` returns the error for other `codex --version` output) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key or `openai-codex` ChatGPT login through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
 

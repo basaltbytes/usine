@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -16,12 +17,7 @@ import {
   type StubParent,
   StubStorage,
 } from "@usine/durable/testing";
-import {
-  claudeLoginLockLayer,
-  CheckoutRequest,
-  CredentialProvider,
-  Executor,
-} from "@usine/executor";
+import { hostLoginLockLayer, CheckoutRequest, CredentialProvider, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Redacted } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -100,9 +96,10 @@ describe("local worker Loop permissions", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentials),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
         );
         const request = (permissions: LoopPermissions) =>
           CheckoutRequest.make({

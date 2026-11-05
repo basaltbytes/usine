@@ -1,6 +1,7 @@
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
+import { harnessesLive } from "@usine/agents/harness/node";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -12,7 +13,7 @@ import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
-import { claudeLoginLockLayer, CheckoutRequest, Executor } from "@usine/executor";
+import { hostLoginLockLayer, CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
 import { stubAttemptRuntime, StubStorage, worksFor } from "@usine/durable/testing";
@@ -193,9 +194,10 @@ describe("local worker salvage", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
         );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
@@ -399,9 +401,10 @@ describe("local worker salvage", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
         );
         const request = (number: number, resume: SalvagePushed) =>
           CheckoutRequest.make({

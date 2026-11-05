@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -16,7 +17,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { HarnessReady } from "@usine/core/agent/capability";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { claudeLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
+import { hostLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
 import type { HarnessProbe, LocalExecutorOptions } from "@usine/executor/local";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -236,7 +237,8 @@ export const localRuntime = (
         ),
         Layer.provide(options.credentials ?? credentialLayer),
         Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(harnessesLive.pipe(Layer.provide(options.platform ?? NodeServices.layer))),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
       ),
     ),

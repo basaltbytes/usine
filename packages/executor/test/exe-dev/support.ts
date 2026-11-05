@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -18,7 +19,7 @@ import {
   stubAttemptRuntime,
   StubStorage,
 } from "@usine/durable/testing";
-import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
+import { CheckoutRequest, hostLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
 import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
@@ -372,8 +373,9 @@ export const runtime = (
     // The cancellation tests advance the TestClock by exactly this much.
     interruptGrace: "2 seconds",
   }).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(sshLayer),
     Layer.provide(NodeCrypto.layer),
     Layer.provide(wrap(stubAttemptRuntime(storage, parent))),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
   );

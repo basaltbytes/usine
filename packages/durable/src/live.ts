@@ -2,10 +2,9 @@ import { NodeServices } from "@effect/platform-node";
 import { getAgentDir, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import type { Harnesses } from "@usine/agents/harness/node";
+import type { ChildBackend } from "@usine/agents/runtime";
 import { childDispatcherLayer } from "@usine/agents/children";
-import { claudeChildBackendLayer, claudeSdkLive } from "@usine/agents/claude";
-import { codexAppServerLive, codexChildBackendLayer } from "@usine/agents/codex";
-import { piChildBackendLayer, piSdkLive } from "@usine/agents/pi";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
@@ -65,14 +64,8 @@ export const harnessLayer = (instanceDirectory: InstanceDirectory) =>
     Layer.provide(NodeServices.layer),
   );
 
-const childImplementations = Layer.mergeAll(
-  claudeChildBackendLayer.pipe(Layer.provide(claudeSdkLive)),
-  codexChildBackendLayer.pipe(Layer.provide(codexAppServerLive)),
-  piChildBackendLayer.pipe(Layer.provide(piSdkLive)),
-);
-
-/** Provides the Claude Code, Codex, and Pi child backends, selected by the Agent's harness. */
-export const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(childImplementations));
+/** Provides child sessions through the registered harness runtimes. */
+export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = childDispatcherLayer;
 
 /**
  * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every

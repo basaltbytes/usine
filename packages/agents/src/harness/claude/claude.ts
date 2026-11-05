@@ -1,3 +1,6 @@
+import { claudePreflight } from "./preflight.ts";
+import { claude } from "./descriptor.ts";
+import type { HarnessRuntime } from "../runtime.ts";
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import {
@@ -40,8 +43,7 @@ import { ChildProcessSpawner } from "effect/process";
 import {
   type AgentCapacityError,
   type AgentResultError,
-  ClaudeChildBackend,
-  ClaudeLoginLock,
+  HostLoginLock,
   ChildBackend,
   type ChildRequest,
   type RunningSession,
@@ -234,7 +236,7 @@ interface ClaudeLaunch {
 
 const makeClaudeChild = Effect.gen(function* () {
   const sdk = yield* ClaudeSdk;
-  const logins = yield* ClaudeLoginLock;
+  const logins = yield* HostLoginLock;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
   /**
@@ -242,7 +244,7 @@ const makeClaudeChild = Effect.gen(function* () {
    * resumed launch is the only process in the session. Fails with `SessionOperationError` if the
    * Worker can't be reached or the stop fails.
    */
-  const stopRemote = Effect.fn("ClaudeChildBackend.stopRemote")(function* (
+  const stopRemote = Effect.fn("ClaudeRuntime.stopRemote")(function* (
     request: ChildRequest,
     host: RemoteShell,
   ) {
@@ -279,7 +281,7 @@ const makeClaudeChild = Effect.gen(function* () {
    * that releases it. The lock is also released after `LOGIN_WINDOW`, so a hung launch does not
    * block other Claude launches and preflights on that login.
    */
-  const holdLogin = Effect.fn("ClaudeChildBackend.holdLogin")(function* (request: ChildRequest) {
+  const holdLogin = Effect.fn("ClaudeRuntime.holdLogin")(function* (request: ChildRequest) {
     const fields = {
       sessionId: request.session.id,
       worker: request.worker,
@@ -290,6 +292,7 @@ const makeClaudeChild = Effect.gen(function* () {
     const released = yield* Deferred.make<void>();
     yield* Effect.forkScoped(
       logins.withLock(
+        Harness.make("claude"),
         request.worker,
         request.machine,
       )(
@@ -317,7 +320,7 @@ const makeClaudeChild = Effect.gen(function* () {
   });
 
   /** Reads messages from `output` into `read` until one decides the login state. */
-  const checkLogin = Effect.fn("ClaudeChildBackend.checkLogin")(function* (
+  const checkLogin = Effect.fn("ClaudeRuntime.checkLogin")(function* (
     output: Queue.Dequeue<Schema.Json, SessionOperationError | Cause.Done>,
     read: Array<Schema.Json>,
   ) {
@@ -339,7 +342,7 @@ const makeClaudeChild = Effect.gen(function* () {
    * until the first messages decide the login state. With no messages, the launch waits for input
    * and skips the login check. Resources are added to the current scope.
    */
-  const launchOnce = Effect.fn("ClaudeChildBackend.launchOnce")(function* (
+  const launchOnce = Effect.fn("ClaudeRuntime.launchOnce")(function* (
     request: ChildRequest,
     options: ClaudeQueryOptions,
     messages: ReadonlyArray<string>,
@@ -434,7 +437,7 @@ const makeClaudeChild = Effect.gen(function* () {
    * next or when the launch fails, so a failed launch's process and messages do not reach the
    * session. Returns the launch with its scope.
    */
-  const launchWithRetries = Effect.fn("ClaudeChildBackend.launchWithRetries")(function* (
+  const launchWithRetries = Effect.fn("ClaudeRuntime.launchWithRetries")(function* (
     request: ChildRequest,
     options: ClaudeQueryOptions,
     messages: ReadonlyArray<string>,
@@ -485,7 +488,7 @@ const makeClaudeChild = Effect.gen(function* () {
     }
   });
 
-  const launch: ChildBackend["Service"]["launch"] = Effect.fn("ClaudeChildBackend.launch")(
+  const launch: ChildBackend["Service"]["launch"] = Effect.fn("ClaudeRuntime.launch")(
     function* (request) {
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
@@ -576,7 +579,7 @@ const makeClaudeChild = Effect.gen(function* () {
       let retries = 0;
       let retrying = false;
 
-      const reportRetry = Effect.fn("ClaudeChildBackend.reportRetry")(function* (
+      const reportRetry = Effect.fn("ClaudeRuntime.reportRetry")(function* (
         retry: typeof ClaudeApiRetry.Type,
       ) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
@@ -598,7 +601,7 @@ const makeClaudeChild = Effect.gen(function* () {
           }),
         );
       });
-      const reportRecovery = Effect.fn("ClaudeChildBackend.reportRecovery")(function* () {
+      const reportRecovery = Effect.fn("ClaudeRuntime.reportRecovery")(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         retrying = false;
         yield* Effect.logInfo("Claude child reached its provider again", {
@@ -767,7 +770,7 @@ const makeClaudeChild = Effect.gen(function* () {
        * stops what is left of its Claude process there, then launches Claude with the saved session,
        * retrying after each delay in `RESUME_DELAYS`. Returns `None` if the session can't be resumed.
        */
-      const resume = Effect.fn("ClaudeChildBackend.resume")(function* (
+      const resume = Effect.fn("ClaudeRuntime.resume")(function* (
         broken: ClaudeLaunch,
         error: SessionOperationError,
       ) {
@@ -882,7 +885,7 @@ const makeClaudeChild = Effect.gen(function* () {
       }).pipe(Effect.catch((error) => channel.fail(error)));
       yield* Effect.forkScoped(consume);
 
-      const steer = Effect.fn("ClaudeChildBackend.steer")((message: string) =>
+      const steer = Effect.fn("ClaudeRuntime.steer")((message: string) =>
         Effect.logDebug("Steering Claude child session", {
           sessionId: session.id,
         }).pipe(
@@ -921,5 +924,10 @@ const makeClaudeChild = Effect.gen(function* () {
 
 /** Provides `ChildBackend` with Claude Code for every delegated task. */
 export const claudeChildLayer = Layer.effect(ChildBackend, makeClaudeChild);
-/** Provides `ClaudeChildBackend` for direct use or harness-based dispatch. */
-export const claudeChildBackendLayer = Layer.effect(ClaudeChildBackend, makeClaudeChild);
+
+/** Combines preflight and scoped launch for registration. */
+export const claudeRuntime = Effect.gen(function* () {
+  const child = yield* makeClaudeChild;
+  const preflight = yield* claudePreflight;
+  return { id: claude.id, preflight, launch: child.launch } satisfies HarnessRuntime;
+});

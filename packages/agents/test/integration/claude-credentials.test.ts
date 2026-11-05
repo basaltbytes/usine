@@ -1,10 +1,13 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { Config, Effect, FileSystem, Layer, Schema } from "effect";
+import { Config, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { AsyncInput, ClaudeSdk, claudeSdkLive } from "../../src/harness/claude/sdk.ts";
-import { preflight } from "../../src/preflight/preflight.ts";
+import { claudeRuntime } from "../../src/harness/claude/claude.ts";
+import { ProbeTarget } from "../../src/harness/runtime.ts";
+import { HostLoginLock } from "../../src/runtime.ts";
+import { WorkerName } from "@usine/core/worker";
 
 it.live(
   "accepts managed Claude credentials and attributes API-key children despite an older subscription file",
@@ -13,6 +16,7 @@ it.live(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const sdk = yield* ClaudeSdk;
+        const runtime = yield* claudeRuntime;
         const path = yield* Config.String("PATH");
         const home = yield* fs.makeTempDirectoryScoped();
         const claudeHome = `${home}/custom claude`;
@@ -35,6 +39,13 @@ it.live(
           model: ModelId.make("claude-sonnet-4-6"),
           effort: "low",
         });
+        const target = ProbeTarget.make({
+          host: LocalProcess.make(),
+          environment,
+          credential: "host-login",
+          worker: WorkerName.make("test-worker"),
+          machine: Option.none(),
+        });
         for (const [name, usesApiKey] of [
           ["CLAUDE_CODE_OAUTH_TOKEN", false],
           ["ANTHROPIC_API_KEY", true],
@@ -43,7 +54,8 @@ it.live(
             env: { [name]: "fixture-not-a-credential" },
           });
           yield* fs.writeFileString(`${claudeHome}/settings.json`, settings, { mode: 0o600 });
-          const ready = yield* preflight(brain, LocalProcess.make(), environment);
+          const ready = yield* runtime.preflight(brain, target);
+          assert.equal(ready._tag, "HarnessReady");
           assert.equal(ready.harness, "claude");
           yield* Effect.acquireUseRelease(
             Effect.sync(() => {
@@ -65,11 +77,12 @@ it.live(
         }
         yield* fs.remove(`${claudeHome}/settings.json`);
         yield* fs.remove(`${claudeHome}/.credentials.json`);
-        const unavailable = yield* preflight(brain, LocalProcess.make(), environment).pipe(
-          Effect.flip,
-        );
+        const unavailable = yield* runtime.preflight(brain, target);
         assert.equal(unavailable._tag, "HarnessUnavailableError");
       }),
-    ).pipe(Effect.provide(claudeSdkLive.pipe(Layer.provideMerge(NodeServices.layer)))),
+    ).pipe(
+      Effect.provide(claudeSdkLive.pipe(Layer.provideMerge(NodeServices.layer))),
+      Effect.provideService(HostLoginLock, { withLock: () => (effect) => effect }),
+    ),
   180_000,
 );

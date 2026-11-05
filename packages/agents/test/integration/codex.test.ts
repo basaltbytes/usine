@@ -3,9 +3,9 @@ import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 
-import { CodexChildBackend } from "../../src/runtime.ts";
+import { ChildBackend } from "../../src/runtime.ts";
 import { codexAppServerLive } from "../../src/harness/codex/app-server.ts";
-import { codexChildBackendLayer } from "../../src/harness/codex/codex.ts";
+import { codexChildLayer } from "../../src/harness/codex/codex.ts";
 import { interruptionContract, localHost, shimHost, steeringContract } from "./contract.ts";
 
 const brain = Effect.gen(function* () {
@@ -19,15 +19,11 @@ const brain = Effect.gen(function* () {
 });
 
 const live = <A, E>(
-  effect: Effect.Effect<
-    A,
-    E,
-    CodexChildBackend | FileSystem.FileSystem | Path.Path | Crypto.Crypto
-  >,
+  effect: Effect.Effect<A, E, ChildBackend | FileSystem.FileSystem | Path.Path | Crypto.Crypto>,
 ) =>
   effect.pipe(
     Effect.provide(
-      codexChildBackendLayer.pipe(
+      codexChildLayer.pipe(
         Layer.provideMerge(codexAppServerLive),
         Layer.provideMerge(NodeServices.layer),
       ),
@@ -45,7 +41,7 @@ describe("Codex child live contract", () => {
         live(
           Effect.gen(function* () {
             const fixtureBrain = yield* brain;
-            const codexChildBackend = yield* CodexChildBackend;
+            const codexChildBackend = yield* ChildBackend;
 
             return yield* steeringContract(codexChildBackend, fixtureBrain, child);
           }),
@@ -59,7 +55,7 @@ describe("Codex child live contract", () => {
         live(
           Effect.gen(function* () {
             const fixtureBrain = yield* brain;
-            const codexChildBackend = yield* CodexChildBackend;
+            const codexChildBackend = yield* ChildBackend;
 
             return yield* interruptionContract(codexChildBackend, fixtureBrain, child);
           }),

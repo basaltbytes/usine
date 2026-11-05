@@ -1,7 +1,9 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { preflight } from "../../src/preflight/preflight.ts";
+import { codexRuntime } from "../../src/harness/codex/codex.ts";
+import { ProbeTarget } from "../../src/harness/runtime.ts";
+import { WorkerName } from "@usine/core/worker";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { Config, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
@@ -17,6 +19,7 @@ it.live(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const server = yield* CodexAppServer;
+        const runtime = yield* codexRuntime;
         const path = yield* Config.String("PATH");
         const home = yield* fs.makeTempDirectoryScoped();
         const codexHome = `${home}/custom codex`;
@@ -56,15 +59,21 @@ it.live(
           yield* fs.writeFileString(authFile, '{"OPENAI_API_KEY":"fixture-key-not-a-credential"}', {
             mode: 0o600,
           });
-          const ready = yield* preflight(
+          const ready = yield* runtime.preflight(
             BrainSpec.make({
               harness: Harness.make("codex"),
               model: ModelId.make("gpt-5.6-terra"),
               effort: "low",
             }),
-            LocalProcess.make(),
-            { HOME: home, CODEX_HOME: codexHome, PATH: path },
+            ProbeTarget.make({
+              host: LocalProcess.make(),
+              environment: { HOME: home, CODEX_HOME: codexHome, PATH: path },
+              credential: "host-login",
+              worker: WorkerName.make("test-worker"),
+              machine: Option.none(),
+            }),
           );
+          assert.equal(ready._tag, "HarnessReady");
           assert.equal(ready.harness, "codex");
           const connected = yield* account(sessionId);
           assert.deepEqual(connected, {
@@ -72,15 +81,20 @@ it.live(
             requiresOpenaiAuth: true,
           });
           yield* fs.remove(authFile);
-          const unavailable = yield* preflight(
+          const unavailable = yield* runtime.preflight(
             BrainSpec.make({
               harness: Harness.make("codex"),
               model: ModelId.make("gpt-5.6-terra"),
               effort: "low",
             }),
-            LocalProcess.make(),
-            { HOME: home, CODEX_HOME: codexHome, PATH: path },
-          ).pipe(Effect.flip);
+            ProbeTarget.make({
+              host: LocalProcess.make(),
+              environment: { HOME: home, CODEX_HOME: codexHome, PATH: path },
+              credential: "host-login",
+              worker: WorkerName.make("test-worker"),
+              machine: Option.none(),
+            }),
+          );
           assert.equal(unavailable._tag, "HarnessUnavailableError");
           const disconnected = yield* account(sessionId);
           assert.deepEqual(disconnected, {

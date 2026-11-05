@@ -2,7 +2,7 @@ import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
-import { ClaudeLoginLock } from "@usine/agents/runtime";
+import { Harnesses } from "@usine/agents/harness/node";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -110,10 +110,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fetches = yield* keyedLockFor<RepositoryName>();
-    const logins = yield* ClaudeLoginLock;
+    const harnesses = yield* Harnesses;
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const harnessReadiness =
-      options.harnessReadiness ?? agentsHarnessProbe(spawner, LocalProcess.make(), baseEnvironment);
+      options.harnessReadiness ??
+      agentsHarnessProbe(harnesses, LocalProcess.make(), baseEnvironment);
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: RepositoryName): string => `https://github.com/${repository}.git`);
@@ -436,7 +437,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             maxConcurrentAttempts,
             executeCommand("preflight", "cat", ["/proc/meminfo"]),
           );
-      yield* verifyHarnessReadiness(worker, Option.none(), brains, harnessReadiness, logins);
+      yield* verifyHarnessReadiness(worker, Option.none(), brains, harnessReadiness);
       yield* Effect.logInfo("Worker preflight verified", {
         worker,
         host: "local",
@@ -491,7 +492,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         Option.none(),
         [request.agent.brain],
         harnessReadiness,
-        logins,
       );
       const credential = yield* credentials(
         request.repository,
@@ -655,7 +655,7 @@ export const layer = (
   Executor,
   never,
   | AttemptRuntime
-  | ClaudeLoginLock
+  | Harnesses
   | CredentialProvider
   | Crypto.Crypto
   | FileSystem.FileSystem

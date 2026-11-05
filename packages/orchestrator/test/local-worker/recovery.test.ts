@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
@@ -6,7 +7,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, FileSystem, Layer, Option, Result } from "effect";
-import { claudeLoginLockLayer, CredentialProvider, Executor } from "@usine/executor";
+import { hostLoginLockLayer, CredentialProvider, Executor } from "@usine/executor";
 import { layer } from "@usine/executor/local";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 
@@ -35,9 +36,10 @@ const noSalvage = Effect.die("Absent checkouts have no salvage to commit");
 
 const executorLayer = (root: string, fileSystem: FileSystem.FileSystem) =>
   layer({ instanceDirectory: InstanceDirectory.make(root) }).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(credentials),
     Layer.provide(stubAttemptRuntime(new StubStorage())),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
     Layer.provide(Layer.succeed(FileSystem.FileSystem)(fileSystem)),
   );
 

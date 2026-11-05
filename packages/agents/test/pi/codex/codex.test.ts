@@ -34,7 +34,7 @@ import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-ho
 import {
   AgentResultError,
   ChildRequest,
-  CodexChildBackend,
+  ChildBackend,
   type OnDelivery,
   PoolUnavailableError,
   toAttemptFailure,
@@ -50,7 +50,7 @@ import {
   type CodexNotification,
 } from "../../../src/harness/codex/app-server.ts";
 import { RemoteCodexProcessLost } from "../../../src/harness/codex/remote.ts";
-import { codexChildBackendLayer } from "../../../src/harness/codex/codex.ts";
+import { codexChildLayer } from "../../../src/harness/codex/codex.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
 
@@ -181,7 +181,7 @@ describe("Codex child backend", () => {
             }),
         });
         yield* Effect.gen(function* () {
-          const running = yield* (yield* CodexChildBackend).launch(request());
+          const running = yield* (yield* ChildBackend).launch(request());
           const result = yield* Effect.forkScoped(running.result);
           yield* Effect.forkScoped(
             running.events.pipe(
@@ -224,7 +224,7 @@ describe("Codex child backend", () => {
           assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
           assert.strictEqual(closes, 1);
           assert.strictEqual(calls.filter(({ method }) => method === "thread/start").length, 1);
-        }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server))));
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
       }).pipe(Effect.scoped),
   );
   for (const state of ["working", "queued", "paused", "interrupting", "idle"] as const) {
@@ -295,9 +295,7 @@ describe("Codex child backend", () => {
             sshEnvironment: {},
             destination: "worker",
           });
-          const running = yield* (yield* CodexChildBackend).launch(
-            request(undefined, undefined, host),
-          );
+          const running = yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
           const result = yield* Effect.forkScoped(running.result);
           yield* Effect.forkScoped(
             running.events.pipe(
@@ -434,7 +432,7 @@ describe("Codex child backend", () => {
           assert.strictEqual(reads.length, guidance.length);
           assert(reads.every(Option.isSome));
           assert.strictEqual(opens, 2);
-        }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server))));
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
       }).pipe(Effect.scoped),
     );
   }
@@ -460,7 +458,7 @@ describe("Codex child backend", () => {
           }),
       });
       yield* Effect.gen(function* () {
-        const running = yield* (yield* CodexChildBackend).launch(request());
+        const running = yield* (yield* ChildBackend).launch(request());
         const reads: Array<Option.Option<InterventionState>> = [];
         const state = yield* running.intervene(
           OperatorMessage.make({ message: "Run the linter too." }),
@@ -491,7 +489,7 @@ describe("Codex child backend", () => {
         const [read] = reads;
         assert(read !== undefined && Option.isSome(read));
         assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server))));
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
     }).pipe(Effect.scoped),
   );
 
@@ -521,7 +519,7 @@ describe("Codex child backend", () => {
         );
         yield* Effect.scoped(
           Effect.gen(function* () {
-            const backend = yield* CodexChildBackend;
+            const backend = yield* ChildBackend;
             const running = yield* backend.launch(request());
             const result = yield* running.result.pipe(Effect.result, Effect.forkChild);
             const events = yield* running.events.pipe(
@@ -555,7 +553,7 @@ describe("Codex child backend", () => {
             }
           }).pipe(
             Effect.ensuring(Deferred.succeed(closed, undefined)),
-            Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server))),
+            Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))),
           ),
         );
       }),
@@ -620,7 +618,7 @@ describe("Codex child backend", () => {
 
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(request());
         assert.deepStrictEqual(
           clients.map(({ environment, host }) => [environment, host]),
@@ -674,7 +672,7 @@ describe("Codex child backend", () => {
         assert.strictEqual(turn.effort, "none");
         assert(calls.some(({ method }) => method === "turn/steer"));
         assert(calls.some(({ method }) => method === "turn/interrupt"));
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -738,7 +736,7 @@ describe("Codex child backend", () => {
       );
       return Effect.scoped(
         Effect.gen(function* () {
-          const running = yield* (yield* CodexChildBackend).launch(request());
+          const running = yield* (yield* ChildBackend).launch(request());
           const [events, result] = yield* Effect.all([
             Stream.runCollect(running.events),
             running.result,
@@ -771,7 +769,7 @@ describe("Codex child backend", () => {
           assert.include(reconnects[1], '"retries":2');
         }).pipe(
           Effect.provide(
-            codexChildBackendLayer.pipe(
+            codexChildLayer.pipe(
               Layer.provideMerge(server),
               Layer.provideMerge(Logger.layer([logger])),
             ),
@@ -802,12 +800,12 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        yield* (yield* CodexChildBackend).launch(request(undefined, undefined, host));
+        yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
         assert.deepStrictEqual(
           clients.map((client) => client.host),
           [host],
         );
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -853,7 +851,7 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(request());
         const [events, result] = yield* Effect.all([
           Stream.runCollect(running.events),
@@ -861,7 +859,7 @@ describe("Codex child backend", () => {
         ]);
         assert.strictEqual(result.message, "The fix is done.");
         assert.strictEqual(events.filter((event) => event._tag === "TextOutput").length, 3);
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -903,7 +901,7 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(request());
         const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
         const report = events.find((event) => event._tag === "SessionTokensUpdated");
@@ -921,7 +919,7 @@ describe("Codex child backend", () => {
             }),
           ),
         );
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -956,7 +954,7 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(request());
         const [events, result] = yield* Effect.all([
           Stream.runCollect(running.events),
@@ -967,7 +965,7 @@ describe("Codex child backend", () => {
           events.map((event) => event._tag),
           ["SessionStarted", "PoolRateLimitsUpdated", "TextOutput", "SessionFinished"],
         );
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -992,13 +990,13 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(request());
         const events = yield* Stream.runCollect(running.events);
         const finished = events.find((event) => event._tag === "ToolFinished");
         assert(finished !== undefined && finished._tag === "ToolFinished");
         assert.strictEqual(finished.isError, true);
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -1043,13 +1041,13 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const running = yield* (yield* CodexChildBackend).launch(request());
+        const running = yield* (yield* ChildBackend).launch(request());
         assert.deepStrictEqual(running.session.pool, Option.some("apiKeys"));
         assert.deepStrictEqual(running.session.endpoint, Option.some("openai"));
         const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
         assert(events.some((event) => event._tag === "SessionTokensUpdated"));
         for (const event of events) assert.strictEqual(sessionPool(event.session), "apiKeys");
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -1068,7 +1066,7 @@ describe("Codex child backend", () => {
         );
         return Effect.scoped(
           Effect.gen(function* () {
-            const backend = yield* CodexChildBackend;
+            const backend = yield* ChildBackend;
             const error = yield* Effect.flip(backend.launch(request()));
             const matchesError = Schema.is(PoolUnavailableError)(error);
             assert(matchesError);
@@ -1076,7 +1074,7 @@ describe("Codex child backend", () => {
             assert(
               !calls.some(({ method }) => method === "thread/start" || method === "turn/start"),
             );
-          }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
         );
       },
     );
@@ -1123,7 +1121,7 @@ describe("Codex child backend", () => {
       });
       return Effect.scoped(
         Effect.gen(function* () {
-          const running = yield* (yield* CodexChildBackend).launch(request());
+          const running = yield* (yield* ChildBackend).launch(request());
           const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
           assert.deepStrictEqual(
             events
@@ -1131,7 +1129,7 @@ describe("Codex child backend", () => {
               .map(({ login }) => Option.getOrNull(login)),
             [PoolLogin.make("first@example.com"), PoolLogin.make("second@example.com")],
           );
-        }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
       );
     },
   );
@@ -1149,7 +1147,7 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(request());
         const error = yield* Effect.flip(running.result);
         const matchesError = Schema.is(PoolUnavailableError)(error);
@@ -1166,7 +1164,7 @@ describe("Codex child backend", () => {
         const matchesStreamError = Schema.is(PoolUnavailableError)(streamError);
         assert(matchesStreamError);
         assert(!events.some((event) => event._tag === "PoolRateLimitsUpdated"));
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -1216,7 +1214,7 @@ describe("Codex child backend", () => {
         });
         return Effect.scoped(
           Effect.gen(function* () {
-            const backend = yield* CodexChildBackend;
+            const backend = yield* ChildBackend;
             const running = yield* backend.launch(throughGateway);
             const [events, result] = yield* Effect.all([
               Stream.runCollect(running.events),
@@ -1242,7 +1240,7 @@ describe("Codex child backend", () => {
               Option.some(codexHome),
               "the session is saved in the Attempt's Codex home",
             );
-          }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
         );
       },
     );
@@ -1253,12 +1251,12 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const error = yield* Effect.flip(backend.launch(request("gpt-never-existed")));
         const matchesError = Schema.is(UnknownModelError)(error);
         assert(matchesError);
         assert.strictEqual(error.harness, "codex");
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -1278,13 +1276,13 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const error = yield* Effect.flip(backend.launch(request("gpt-5.6-terra", "max")));
         const matchesError = Schema.is(UnsupportedEffortError)(error);
         assert(matchesError);
         assert.strictEqual(error.effort, "max");
         assert.strictEqual(error.model, "gpt-5.6-terra");
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 
@@ -1306,13 +1304,13 @@ describe("Codex child backend", () => {
     );
     return Effect.scoped(
       Effect.gen(function* () {
-        const backend = yield* CodexChildBackend;
+        const backend = yield* ChildBackend;
         const running = yield* backend.launch(request());
         const error = yield* Effect.flip(running.result);
         const matchesError = Schema.is(AgentResultError)(error);
         assert(matchesError);
         assert.strictEqual(error.message, "the agent could not finish");
-      }).pipe(Effect.provide(codexChildBackendLayer.pipe(Layer.provideMerge(server)))),
+      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server)))),
     );
   });
 });

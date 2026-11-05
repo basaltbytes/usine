@@ -2,13 +2,23 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeSdk, claudeChildLayer } from "@usine/agents/claude";
-import { ChildBackend, ChildRequest, WorkingDirectory } from "@usine/agents/runtime";
+import { ChildBackend, ChildRequest, HostLoginLock, WorkingDirectory } from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { MachineId, WorkerName } from "@usine/core/worker";
-import { type Cause, Effect, Fiber, Layer, Option, Queue, type Schema, Stream } from "effect";
-import { claudeLoginLockLayer } from "../src/executor.ts";
+import {
+  type Cause,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  type Schema,
+  Stream,
+} from "effect";
+import { hostLoginLockLayer } from "../src/executor.ts";
 
 /** The checkout of `attempt` on its machine of the provisioned Worker. */
 const checkout = (attempt: string) => `/home/usine/.usine/workers/provisioned/attempts/${attempt}`;
@@ -94,7 +104,7 @@ describe("Claude login lock", () => {
         }).pipe(
           Effect.provide(
             claudeChildLayer.pipe(
-              Layer.provide(claudeLoginLockLayer),
+              Layer.provide(hostLoginLockLayer),
               Layer.provide(NodeServices.layer),
               Layer.provideMerge(sdk),
             ),
@@ -104,3 +114,29 @@ describe("Claude login lock", () => {
       }),
   );
 });
+
+it.effect("keeps different harness logins independent on the same worker and machine", () =>
+  Effect.gen(function* () {
+    const logins = yield* HostLoginLock;
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const worker = WorkerName.make("worker-1");
+    const machine = Option.some(MachineId.make("52341896"));
+    const first = yield* logins
+      .withLock(
+        Harness.make("claude"),
+        worker,
+        machine,
+      )(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))))
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    const other = yield* logins.withLock(
+      Harness.make("codex"),
+      worker,
+      machine,
+    )(Effect.succeed("ready"));
+    assert.strictEqual(other, "ready");
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(first);
+  }).pipe(Effect.provide(hostLoginLockLayer)),
+);
