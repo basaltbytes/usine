@@ -1,7 +1,7 @@
 import { catalog, type HarnessCredential, type HarnessDescriptor } from "@usine/agents/harness";
 import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
-import type { GatewayCredentialKind, GatewayLlmProvider, WorkerName } from "@usine/core/worker";
+import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
 import type { CommandResult } from "../../child-command.ts";
 import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts";
@@ -56,17 +56,23 @@ const warnOfUnreportedCredential = (worker: WorkerName, gateway: MachineGateway)
 
 /** Each provider's display name and the Gateway variables that set its credential. */
 const PROVIDER_CREDENTIALS = {
-  anthropic: {
+  "anthropic-messages": {
     label: "Anthropic",
     variables: "ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN",
   },
-  openai: { label: "OpenAI", variables: "OPENAI_API_KEY or USINE_GATEWAY_CHATGPT_AUTH_FILE" },
+  "openai-responses": {
+    label: "OpenAI",
+    variables: "OPENAI_API_KEY or USINE_GATEWAY_CHATGPT_AUTH_FILE",
+  },
 } as const satisfies Record<
-  GatewayLlmProvider,
+  GatewayLlmProtocol,
   { readonly label: string; readonly variables: string }
 >;
 
-const NO_CREDENTIALS: GatewayCredentials = { anthropic: Option.none(), openai: Option.none() };
+const NO_CREDENTIALS: GatewayCredentials = {
+  "anthropic-messages": Option.none(),
+  "openai-responses": Option.none(),
+};
 
 /**
  * Reads the Gateway's credential kind for each provider in the Worker's `llmProviders` and
@@ -92,10 +98,10 @@ const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentia
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
   if (Option.isNone(reported)) {
-    if (listed.includes("openai"))
+    if (listed.includes("openai-responses"))
       return yield* gatewayGap(
         worker,
-        `The gateway of SSH worker "${worker}" doesn't report its LLM credentials, so Codex can't use its OpenAI credential. Upgrade @usine/gateway on the gateway, or remove openai from llm_providers.`,
+        `The gateway of SSH worker "${worker}" doesn't report its LLM credentials, so Codex can't use its OpenAI credential. Upgrade @usine/gateway on the gateway, or remove openai-responses from llm_providers.`,
         new Error("the gateway answered 404 for GET /v1/providers"),
       );
     yield* warnOfUnreportedCredential(worker, gateway);
@@ -103,7 +109,7 @@ const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentia
     return NO_CREDENTIALS;
   }
   const { providers } = reported.value;
-  const kindOf = (provider: GatewayLlmProvider) =>
+  const kindOf = (provider: GatewayLlmProtocol) =>
     Option.fromNullishOr(providers.find((held) => held.provider === provider)?.credential);
   const missing = listed.find((provider) => Option.isNone(kindOf(provider)));
   if (missing !== undefined)
@@ -115,8 +121,12 @@ const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentia
       ),
     );
   const credentials: GatewayCredentials = {
-    anthropic: listed.includes("anthropic") ? kindOf("anthropic") : Option.none(),
-    openai: listed.includes("openai") ? kindOf("openai") : Option.none(),
+    "anthropic-messages": listed.includes("anthropic-messages")
+      ? kindOf("anthropic-messages")
+      : Option.none(),
+    "openai-responses": listed.includes("openai-responses")
+      ? kindOf("openai-responses")
+      : Option.none(),
   };
   yield* Ref.set(gateway.credentials, credentials);
   return credentials;
@@ -139,7 +149,7 @@ export const gatewayCredentialFor = (
 ): Effect.Effect<Option.Option<GatewayCredentialKind>> =>
   Effect.map(Ref.get(gateway.credentials), (credentials) =>
     Option.flatMap(catalog.get(harness), (descriptor) =>
-      Option.flatMap(descriptor.worker.credential, ({ provider }) => credentials[provider]),
+      Option.flatMap(descriptor.worker.credential, ({ protocol }) => credentials[protocol]),
     ),
   );
 
@@ -175,8 +185,14 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
     adminPort: settings.adminPort,
     forwardPort: open.url.port,
     llmProviders: settings.llmProviders.join(","),
-    anthropic: credentialMode(credentials.anthropic, settings.llmProviders.includes("anthropic")),
-    openai: credentialMode(credentials.openai, settings.llmProviders.includes("openai")),
+    "anthropic-messages": credentialMode(
+      credentials["anthropic-messages"],
+      settings.llmProviders.includes("anthropic-messages"),
+    ),
+    "openai-responses": credentialMode(
+      credentials["openai-responses"],
+      settings.llmProviders.includes("openai-responses"),
+    ),
     attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });
 });
@@ -199,7 +215,7 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
     domain: settings.domain,
     llmProviders: settings.llmProviders,
     ghConfigDirectory: machine.workerDirectory,
-    codexHome: machine.workerDirectory,
+    homes: {},
     callerToken: PROBE_TOKEN,
   });
   const received = yield* commands.run("preflight", sendingShell(machine.shell, sent), "sh", [
@@ -313,7 +329,7 @@ export const gatewayHarnessProbe = (
     const hosts: ReadonlyArray<string> = keyed ? [credential.apiHost] : credential.hosts;
     const uses = keyed ? "an API key" : "its login";
     const alternative = keyed
-      ? `, or add ${credential.provider} to the worker's llm_providers with the key on the gateway`
+      ? `, or add ${credential.protocol} to the worker's llm_providers with the key on the gateway`
       : "";
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
     const result = yield* commands.inspect("preflight", shell, "sh", [
@@ -378,7 +394,7 @@ export const gatewayHarnessProbe = (
       {
         onNone: () => probe(brain, login),
         onSome: ({ descriptor, credential }) =>
-          gateway.settings.llmProviders.includes(credential.provider)
+          gateway.settings.llmProviders.includes(credential.protocol)
             ? external(brain, login)
             : loginOnMachine(brain, descriptor, credential, login),
       },

@@ -451,6 +451,9 @@ importers:
       '@cloudflare/sandbox':
         specifier: 1.0.3
         version: 1.0.3
+      '@usine/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@usine/core':
         specifier: workspace:*
         version: link:../core

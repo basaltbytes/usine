@@ -15,7 +15,7 @@ import type {
   GatewayAdminPort,
   GatewayCredentialKind,
   GatewayDomain,
-  GatewayLlmProvider,
+  GatewayLlmProtocol,
   HetznerImage,
   HetznerLabels,
   HetznerLocation,
@@ -46,7 +46,7 @@ export interface SshWorkerGateway {
   /** The admin API bearer token. */
   readonly adminToken: Redacted.Redacted<string>;
   /** The LLM providers the Gateway has credentials for. A harness whose provider isn't listed uses its own login through the forward proxy. */
-  readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
+  readonly llmProviders: ReadonlyArray<GatewayLlmProtocol>;
 }
 
 /**
@@ -209,7 +209,7 @@ export interface MachineGateway {
 
 /** The credential kind the Gateway holds for each provider; see `MachineGateway.credentials`. */
 export type GatewayCredentials = Readonly<
-  Record<GatewayLlmProvider, Option.Option<GatewayCredentialKind>>
+  Record<GatewayLlmProtocol, Option.Option<GatewayCredentialKind>>
 >;
 
 export interface SshMachine extends RemoteMachine {

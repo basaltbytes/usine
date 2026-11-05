@@ -27,7 +27,7 @@ import {
   ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
-  GatewayLlmProvider,
+  GatewayLlmProtocol,
   SshDestination,
   SshIdentityFile,
   SshPort,
@@ -188,7 +188,7 @@ export class GatewayView extends Schema.Class<
   /** The environment-variable name for the gateway admin token, never its value. */
   adminTokenEnv: Schema.NonEmptyString,
   /** The model providers whose credentials the gateway injects. */
-  llmProviders: Schema.Array(GatewayLlmProvider),
+  llmProviders: Schema.Array(GatewayLlmProtocol),
 }) {}
 
 /** The current slot usage of a Worker. */

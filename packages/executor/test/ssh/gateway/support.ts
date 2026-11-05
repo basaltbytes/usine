@@ -2,7 +2,7 @@ import { NodeCrypto } from "@effect/platform-node";
 import {
   GatewayAdminPort,
   GatewayDomain,
-  type GatewayLlmProvider,
+  type GatewayLlmProtocol,
   SshDestination,
   type WorkerName,
 } from "@usine/core/worker";
@@ -59,7 +59,7 @@ const GATEWAY = SshDestination.make("usine-gateway");
  */
 export const gatewayAddress = (
   options: {
-    readonly llmProviders?: ReadonlyArray<GatewayLlmProvider>;
+    readonly llmProviders?: ReadonlyArray<GatewayLlmProtocol>;
     readonly adminToken?: string;
     readonly name?: WorkerName;
     readonly gateway?: SshDestination;
@@ -72,7 +72,7 @@ export const gatewayAddress = (
     destination: options.gateway ?? GATEWAY,
     adminPort: GatewayAdminPort.make(7070),
     adminToken: Redacted.make(options.adminToken ?? ADMIN_TOKEN),
-    llmProviders: options.llmProviders ?? ["anthropic"],
+    llmProviders: options.llmProviders ?? ["anthropic-messages"],
   }),
 });
 
@@ -107,13 +107,13 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
 
 /** The default Gateway LLM providers: an Anthropic API key, matching `gatewayAddress`. */
 const GATEWAY_PROVIDERS: LlmProviders = {
-  anthropic: Option.some(
+  "anthropic-messages": Option.some(
     AnthropicProvider.make({
       upstream: UpstreamBase.make("https://api.anthropic.com"),
       credential: AnthropicApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
     }),
   ),
-  openai: Option.none(),
+  "openai-responses": Option.none(),
 };
 
 /**

@@ -160,3 +160,7 @@ The executor reads credential provider mappings, login file mounts, and login eg
 `Harnesses` pairs each platform-free descriptor with one Node runtime. Registration fails for a descriptor without a runtime, a runtime without a descriptor, or duplicate runtime IDs. Child dispatch selects the runtime by harness ID. Each runtime owns preflight and launch, so gateway, injected-key, and Cloudflare checks use the same binary and version policies as host-login checks. Host-login routes also verify authentication. Claude versions remain unpinned, Codex retains its accepted version list, and Pi remains local-only.
 
 `HostLoginLock` replaces `ClaudeLoginLock` and keys locks by harness, worker, and provisioned machine. Claude’s runtime takes its lock for authentication checks and child startup. Keeping the lock inside the runtime removes the executor’s harness branch while preserving serialization of commands that can refresh the same login. The executor and attempt runtime share one lock service.
+
+## Amendment (2026-11-05, #957): descriptor credential wiring and protocol slots
+
+The executor reads credential environment and configuration-file recipes from harness descriptors for gateway access, provisioner API keys, and Cloudflare outbound handlers. It manages SSH attempt homes by harness ID and attempt ID, preserving the existing Codex path. This restores the executor boundary: harness modules define vendor authentication wiring, and the executor writes files, supplies secrets, and manages their lifetime.

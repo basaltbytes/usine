@@ -41256,8 +41256,8 @@
             "items": {
               "type": "string",
               "enum": [
-                "anthropic",
-                "openai"
+                "anthropic-messages",
+                "openai-responses"
               ]
             }
           }

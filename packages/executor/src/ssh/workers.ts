@@ -183,8 +183,8 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       onSome: (held) => new Set([...held.workers, address.name]),
     });
     const credentials = yield* Ref.make<GatewayCredentials>({
-      anthropic: Option.none(),
-      openai: Option.none(),
+      "anthropic-messages": Option.none(),
+      "openai-responses": Option.none(),
     });
     const warnedOfUnreportedCredential = yield* Ref.make(false);
     return {

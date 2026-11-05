@@ -1,4 +1,4 @@
-import { type GatewayCredentialKind, GatewayLlmProvider } from "@usine/core/worker";
+import { type GatewayCredentialKind, GatewayLlmProtocol } from "@usine/core/worker";
 import { type Brand, Option, Redacted, Schema } from "effect";
 import { Headers } from "effect/http";
 import { UpstreamBase } from "../upstream.ts";
@@ -32,7 +32,7 @@ export class AnthropicSubscriptionToken extends Schema.TaggedClass<
 export const AnthropicCredential = Schema.Union([AnthropicApiKey, AnthropicSubscriptionToken]);
 export type AnthropicCredential = typeof AnthropicCredential.Type;
 
-/** Claude Code's upstream. On the worker, `ANTHROPIC_BASE_URL` is `http://llm.<domain>/anthropic`. */
+/** Claude Code's upstream. On the worker, `ANTHROPIC_BASE_URL` is `http://llm.<domain>/anthropic-messages`. */
 export class AnthropicProvider extends Schema.TaggedClass<
   AnthropicProvider,
   Brand.Brand<"@usine/gateway/llm/llm/AnthropicProvider">
@@ -79,7 +79,7 @@ export type OpenAiCredential = typeof OpenAiCredential.Type;
 
 /**
  * Codex's upstream: an OpenAI-compatible API with an API key, or the ChatGPT backend with a
- * ChatGPT login. On the worker, the `model_provider` `base_url` is `http://llm.<domain>/openai/v1`
+ * ChatGPT login. On the worker, the `model_provider` `base_url` is `http://llm.<domain>/openai-responses/v1`
  * in both cases.
  */
 export class OpenAiProvider extends Schema.TaggedClass<
@@ -95,17 +95,17 @@ export class OpenAiProvider extends Schema.TaggedClass<
 /** The LLM upstreams the gateway forwards to. Requests for a provider without a credential are refused. */
 export interface LlmProviders {
   /** The configured Anthropic upstream and credential, or `None` to refuse Anthropic requests. */
-  readonly anthropic: Option.Option<AnthropicProvider>;
+  readonly "anthropic-messages": Option.Option<AnthropicProvider>;
   /** The configured OpenAI or ChatGPT upstream and credential, or `None` to refuse OpenAI requests. */
-  readonly openai: Option.Option<OpenAiProvider>;
+  readonly "openai-responses": Option.Option<OpenAiProvider>;
 }
 
 /** A provider with its credential. */
 export type LlmProvider = AnthropicProvider | OpenAiProvider;
 
 /** The `llm.<domain>` path prefixes that select a provider. */
-export const LlmProviderName = GatewayLlmProvider;
-export type LlmProviderName = GatewayLlmProvider;
+export const LlmProviderName = GatewayLlmProtocol;
+export type LlmProviderName = GatewayLlmProtocol;
 
 const isProviderName = Schema.is(LlmProviderName);
 
@@ -115,9 +115,9 @@ export interface LlmTarget {
   readonly rest: string;
 }
 
-/** Returns the provider from the first path segment; for example, `/anthropic/v1/messages` is Anthropic's `/v1/messages`. */
+/** Returns the provider from the first path segment; for example, `/anthropic-messages/v1/messages` is Anthropic's `/v1/messages`. */
 export const llmTarget = (pathname: string): Option.Option<LlmTarget> => {
-  const match = /^\/([a-z]+)(\/.*)?$/u.exec(pathname);
+  const match = /^\/([a-z-]+)(\/.*)?$/u.exec(pathname);
   const provider = match?.[1];
   if (match === null || provider === undefined || !isProviderName(provider)) return Option.none();
   return Option.some({ provider, rest: match[2] ?? "" });
@@ -139,22 +139,22 @@ export const credentialKind = (provider: LlmProvider): GatewayCredentialKind => 
 export const configuredProvider = (
   providers: LlmProviders,
   name: LlmProviderName,
-): Option.Option<LlmProvider> => (name === "anthropic" ? providers.anthropic : providers.openai);
+): Option.Option<LlmProvider> => providers[name];
 
 /**
- * The routes each provider serves after its prefix: those Claude Code and Codex call. Each
+ * The allowed API routes for each wire protocol. Each
  * pattern matches whole plain segments, so a percent-encoded separator or a dot segment never
  * matches, and other parts of the provider's API, such as files or organization administration,
  * can't be reached with the gateway's credential.
  */
 const LLM_ROUTES = {
-  anthropic: [
+  "anthropic-messages": [
     /^\/v1\/messages$/u,
     /^\/v1\/messages\/count_tokens$/u,
     /^\/v1\/models$/u,
     /^\/v1\/models\/[A-Za-z0-9][A-Za-z0-9._-]*$/u,
   ],
-  openai: [/^\/v1\/responses$/u, /^\/v1\/responses\/compact$/u, /^\/v1\/models$/u],
+  "openai-responses": [/^\/v1\/responses$/u, /^\/v1\/responses\/compact$/u, /^\/v1\/models$/u],
 } as const satisfies Record<LlmProviderName, ReadonlyArray<RegExp>>;
 
 /**
@@ -164,7 +164,10 @@ const LLM_ROUTES = {
  * `/v1/responses` is the backend's `/responses`.
  */
 export const llmRoute = (provider: LlmProvider, rest: string): Option.Option<string> => {
-  const routes = provider._tag === "AnthropicProvider" ? LLM_ROUTES.anthropic : LLM_ROUTES.openai;
+  const routes =
+    provider._tag === "AnthropicProvider"
+      ? LLM_ROUTES["anthropic-messages"]
+      : LLM_ROUTES["openai-responses"];
   if (!routes.some((route) => route.test(rest))) return Option.none();
   return Option.some(provider.credential._tag === "ChatGptLogin" ? rest.slice("/v1".length) : rest);
 };

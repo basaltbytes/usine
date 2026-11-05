@@ -89,15 +89,21 @@ Fields belong to `gateway` on an SSH worker.
 | `destination` | SSH destination | required | Gateway host for forwarding the admin API. |
 | `admin_port` | integer, 1–65535 | `7070` | Admin API port on the gateway's loopback interface. |
 | `admin_token_env` | environment variable name | required | Orchestrator variable containing the gateway admin token. |
-| `llm_providers` | unique list of `anthropic` or `openai` | `[]` | Providers whose credentials the gateway injects. |
+| `llm_providers` | unique list of `anthropic-messages` or `openai-responses` | `[]` | Wire protocols whose credentials the gateway injects. |
 
 ```yaml
 gateway:
   domain: gw.internal
   destination: usine-gateway
   admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-  llm_providers: [anthropic, openai]
+  llm_providers: [anthropic-messages, openai-responses]
 ```
+
+Gateway slots use wire protocols independently of the harness. `anthropic-messages` serves the Anthropic Messages API; `openai-responses` serves the OpenAI Responses API with an API key or a ChatGPT login. Their base paths are `/anthropic-messages` and `/openai-responses/v1` on `llm.<domain>`.
+
+When upgrading a gateway and its orchestrator, replace `anthropic` with `anthropic-messages` and `openai` with `openai-responses` in `gateway.llm_providers`. Upgrade both together. Imports and saved configurations with the previous IDs decode to the protocol IDs; exports write the protocol IDs. Gateway credential environment-variable names stay the same. Provisioner `api_keys` and Cloudflare provider records use `anthropic` and `openai`.
+
+Each harness descriptor defines its credential environment and configuration files. The executor creates and mounts a separate writable home for a harness that requires one, then removes it when the attempt ends. Codex uses `<root>/workers/<worker>/codex/<attempt>` for both gateway credentials and provisioner API keys. Startup cleanup preserves homes with a live hold or an existing checkout.
 
 The gateway stores the real installation token; the attempt receives a caller token. Listed model providers need no worker login. A provider using an API key counts under API keys on the run page; subscription credentials count under the matching plan. A harness without gateway injection uses its worker login through the forward proxy. See [Configure a gateway](/guides/configure-a-gateway/).
 

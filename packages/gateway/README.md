@@ -1,10 +1,12 @@
 # @usine/gateway
 
+Credential slots and admin provider summaries use wire-protocol IDs: `anthropic-messages` and `openai-responses`. Workers select them in `gateway.llm_providers` and call `/anthropic-messages` or `/openai-responses/v1`. Upgrade the gateway and orchestrator together and replace the previous `anthropic` and `openai` gateway slot IDs. Credential environment-variable names stay the same.
+
 The service on the gateway host in front of usine's worker VMs ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md), [#223](https://github.com/basaltbytes/usine/issues/223)). Worker VMs have no public address, GitHub token, API key, or subscription login. They reach GitHub through the gateway, which adds the credential. They reach an LLM provider the same way if the gateway has that provider's credential: an API key, a Claude subscription token, or a ChatGPT login. Otherwise they use the harness's own login through the gateway's forward proxy, which allows only allowlisted hosts: package registries and the harness login hosts. [Workers and the gateway](https://github.com/basaltbytes/usine/blob/main/docs/architecture/workers-and-gateway.mdx) describes the deployment.
 
 The gateway serves:
 
-- **A reverse proxy** for workers on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git`, release downloads, and the GitHub REST and GraphQL API under `/api/`, as GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token that the executor attached for that worker and repo; see [GitHub paths](#github-paths). `llm.<domain>` serves the Anthropic API under `/anthropic`, and under `/openai` an OpenAI-compatible API or, with a [ChatGPT login](#chatgpt-login), the ChatGPT backend that Codex uses, with the gateway's credential. Other hosts are refused; the forward proxy serves the allowlisted ones.
+- **A reverse proxy** for workers on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git`, release downloads, and the GitHub REST and GraphQL API under `/api/`, as GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token that the executor attached for that worker and repo; see [GitHub paths](#github-paths). `llm.<domain>` serves the Anthropic API under `/anthropic-messages`, and under `/openai-responses` an OpenAI-compatible API or, with a [ChatGPT login](#chatgpt-login), the ChatGPT backend that Codex uses, with the gateway's credential. Other hosts are refused; the forward proxy serves the allowlisted ones.
 - **A forward proxy** for `HTTPS_PROXY` and `HTTP_PROXY`: `CONNECT` on port 443 for HTTPS and absolute-form requests for plain HTTP mirrors, to allowlisted hosts only. A tunnel opens only if the client's TLS ClientHello names the CONNECT host. A ClientHello naming another host or none, an encrypted ClientHello, or non-TLS bytes end the tunnel (`server-name-mismatch`, `server-name-missing`, `not-tls`). It resolves each name itself and refuses private, loopback, and link-local addresses. Before a plain HTTP request leaves, it removes `X-Usine-Gateway-Token` and any `Authorization` or `x-api-key` value that is a caller token, and leaves other credentials alone.
 - **An admin API** for the executor: attach, renew, detach, and list a worker's repo credentials, and list the [LLM providers](#llm-providers) it has credentials for. It requires the admin token as a bearer token. The gateway command persists encrypted attachments across restarts. A [reload](#reload) keeps them.
 
@@ -117,7 +119,7 @@ The gateway checks the followed request like any other. An attachment learns the
 `GET /v1/providers` lists the providers the gateway has a credential for, with each credential's kind, never the credential:
 
 ```json
-{"providers": [{"provider": "anthropic", "credential": "api-key"}]}
+{"providers": [{"provider": "anthropic-messages", "credential": "api-key"}]}
 ```
 
 `credential` is `api-key` for `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, and `subscription` for `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` and `USINE_GATEWAY_CHATGPT_AUTH_FILE`. Providers without a credential are absent. The list follows a [reload](#reload). The executor reads it when it checks a worker whose `llm_providers` lists a provider, so usage counts Claude Code and Codex children on the gateway's API key in the API keys pool, and on a subscription in the Claude or ChatGPT plan pool ([ADR 0013](../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)). Gateways released before this endpoint answer 404.
@@ -130,8 +132,8 @@ The gateway checks the followed request like any other. An attachment learns the
 | --- | --- |
 | git | remote `http://git.<domain>/OWNER/REPO.git`; `GIT_CONFIG_KEY_0=http.http://git.<domain>/.extraHeader`, `GIT_CONFIG_VALUE_0="X-Usine-Gateway-Token: <caller token>"`, and `url.http://git.<domain>/.insteadOf` for `https://github.com/` and `https://git.<domain>/` |
 | gh | `GH_HOST=git.<domain>`, `GH_ENTERPRISE_TOKEN=<caller token>`, `GH_TOKEN=<caller token>`; gh's config sets `http_unix_socket: /run/usine-gateway/http.sock`, which `systemd-socket-proxyd` forwards to the gateway, because gh speaks only HTTPS to a custom host but plain HTTP over a socket |
-| Claude Code | `ANTHROPIC_BASE_URL=http://llm.<domain>/anthropic`, `ANTHROPIC_AUTH_TOKEN=<caller token>` |
-| Codex | `CODEX_HOME=<root>/workers/<worker>/codex/<attempt>`, whose `config.toml` sets `model_provider = "usine-gateway"` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key = "USINE_GATEWAY_TOKEN"`, `wire_api = "responses"`, and `requires_openai_auth = false`; `USINE_GATEWAY_TOKEN=<caller token>` |
+| Claude Code | `ANTHROPIC_BASE_URL=http://llm.<domain>/anthropic-messages`, `ANTHROPIC_AUTH_TOKEN=<caller token>` |
+| Codex | `CODEX_HOME=<root>/workers/<worker>/codex/<attempt>`, whose `config.toml` sets `model_provider = "usine-gateway"` with `base_url = "http://llm.<domain>/openai-responses/v1"`, `env_key = "USINE_GATEWAY_TOKEN"`, `wire_api = "responses"`, and `requires_openai_auth = false`; `USINE_GATEWAY_TOKEN=<caller token>` |
 | package managers, harness logins | `HTTPS_PROXY` and `HTTP_PROXY` set to `http://<gateway>:3128`, `NO_PROXY=<domain>` |
 
 Codex with this `model_provider` sends its caller token as a bearer token, needs no login, and calls only `POST <base_url>/responses` over HTTP with server-sent events, since a custom provider uses neither the Responses WebSocket nor the remote model list. The same configuration works whether the gateway holds an API key or a ChatGPT login.
@@ -159,8 +161,8 @@ Each provider serves only the routes its harness calls, whatever the credential,
 
 | Prefix | Routes | Harness |
 | --- | --- | --- |
-| `/anthropic` | `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`, `/v1/models/MODEL` | Claude Code |
-| `/openai` | `/v1/responses`, `/v1/responses/compact`, `/v1/models` | Codex |
+| `/anthropic-messages` | `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`, `/v1/models/MODEL` | Claude Code |
+| `/openai-responses` | `/v1/responses`, `/v1/responses/compact`, `/v1/models` | Codex |
 
 The query string passes unchanged, such as Claude Code's `?beta=true`.
 
@@ -170,7 +172,7 @@ A `claude setup-token` token is valid for one year and has no refresh token, so 
 
 ## ChatGPT login
 
-With `USINE_GATEWAY_CHATGPT_AUTH_FILE`, the gateway serves Codex's [LLM routes](#llm-routes) under `/openai` on `llm.<domain>` from the ChatGPT backend, which has them without `/v1`: Codex's `/openai/v1/responses` goes to `https://chatgpt.com/backend-api/codex/responses`. The gateway replaces the caller token with `Authorization: Bearer <access token>`, sets `ChatGPT-Account-ID` to the login's account, and passes Codex's other headers, such as `originator` and `session-id`, and the streamed body unchanged.
+With `USINE_GATEWAY_CHATGPT_AUTH_FILE`, the gateway serves Codex's [LLM routes](#llm-routes) under `/openai-responses` on `llm.<domain>` from the ChatGPT backend, which has them without `/v1`: Codex's `/openai-responses/v1/responses` goes to `https://chatgpt.com/backend-api/codex/responses`. The gateway replaces the caller token with `Authorization: Bearer <access token>`, sets `ChatGPT-Account-ID` to the login's account, and passes Codex's other headers, such as `originator` and `session-id`, and the streamed body unchanged.
 
 The file is the `auth.json` that `codex login` writes in `CODEX_HOME`. The gateway reads its `tokens.access_token`, `tokens.refresh_token`, and `tokens.account_id` (or the account in `tokens.id_token`) on first use and on each [reload](#reload), and keeps them in memory. It refreshes the access token as Codex does:
 

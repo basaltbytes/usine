@@ -60,3 +60,5 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 Preflight reaches the admin API and the gateway from the worker. A test attempt receives a caller token and uses `git.gw.internal` and `llm.gw.internal`. Its run page attributes usage to the configured API key or subscription plan.
 
 The executor manages its own admin API forward; omit `LocalForward` from the gateway SSH alias. A private Hetzner worker reaches the gateway only. A Boat worker uses [the Tailscale connection procedure](/guides/connect-boat-to-a-gateway/). A long-lived worker outside the private network uses [worker-level tailnet settings](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
+
+Gateway slots use wire protocols. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic Messages API and `openai-responses` for the OpenAI Responses API or a ChatGPT login. Upgrade the gateway and orchestrator together; credential environment-variable names stay the same. See the [worker reference](/reference/configuration/workers/#gateway).

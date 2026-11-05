@@ -86,7 +86,7 @@ it.live(
           domain,
           llmProviders: [],
           ghConfigDirectory: directory,
-          codexHome: join(directory, "codex"),
+          homes: { codex: join(directory, "codex") },
           callerToken: Redacted.make(caller),
         });
         const env = {

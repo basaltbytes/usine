@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { reclaimOnceFor } from "../../remote/reclaim.ts";
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
@@ -15,7 +16,7 @@ import {
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { RemoteAccess } from "../../remote/machine.ts";
 import { renewableCredential } from "../../renewable-credential.ts";
-import { attemptCodexHome, type CodexHomes } from "../codex-homes.ts";
+import { attemptHomeIn, type AttemptHomes } from "../attempt-homes.ts";
 import type { MachineGateway, SshMachine } from "../model.ts";
 import {
   GH_GATEWAY_SOCKET_DIRECTORY,
@@ -55,23 +56,27 @@ export const writeMachineFiles = (
 
 /**
  * Returns the directory of gh's configuration on a Worker behind a Gateway, and the Attempt's
- * Codex home. Neither contains a token.
+ * harness homes. These directories contain no token.
  */
 const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
   ghConfigDirectory: `${machine.workerDirectory}/gh`,
-  codexHome: attemptCodexHome(machine, attemptId),
+  homes: Object.fromEntries(
+    catalog.descriptors.map(({ id }) => [
+      id,
+      attemptHomeIn(machine.workerDirectory, attemptId, id),
+    ]),
+  ),
 });
 
 /**
  * Grants each Attempt repository access through the Gateway without a token on the machine
  * (ADR 0027). Attaches the token, renews it before expiry, re-stores it every two minutes, and
- * detaches it when the scope closes. If the Gateway holds the OpenAI credential, gives the
- * Attempt its Codex home through `holdCodexHome`. On first use of a Worker, detaches attachments
+ * detaches it when the scope closes. Allocates the homes required by registered gateway wiring through `holdAttemptHome`. On first use of a Worker, detaches attachments
  * left by an earlier process.
  */
 export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFor")(function* (
   commands: RemoteCommands,
-  holdCodexHome: CodexHomes["hold"],
+  holdAttemptHome: AttemptHomes["hold"],
   onDetachFailure: (machine: SshMachine) => Effect.Effect<void>,
 ) {
   const provider = yield* CredentialProvider;
@@ -151,8 +156,15 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
     yield* Effect.annotateCurrentSpan(fields);
     const directories = configDirectories(machine, attemptId);
-    const codex = settings.llmProviders.includes("openai");
-    if (codex) yield* holdCodexHome(machine, attemptId);
+    const homes = yield* Effect.forEach(
+      catalog.descriptors.filter(({ worker }) =>
+        Option.exists(
+          worker.credential,
+          ({ protocol, home }) => settings.llmProviders.includes(protocol) && Option.isSome(home),
+        ),
+      ),
+      (descriptor) => holdAttemptHome(machine, attemptId, descriptor),
+    );
     yield* writeMachineFiles(
       commands,
       operation,
@@ -300,7 +312,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       secrets: sent,
       apiKeyHarnesses: new Set(),
       readOnlyPaths: [directories.ghConfigDirectory, GH_GATEWAY_SOCKET_DIRECTORY],
-      writablePaths: codex ? [directories.codexHome] : [],
+      writablePaths: homes,
       environment: exported,
       gitEnvironment: exported,
       refresh: credential.refresh(),

@@ -107,13 +107,13 @@ const fakeTailnet = () => {
 };
 
 const providers = {
-  anthropic: Option.some(
+  "anthropic-messages": Option.some(
     AnthropicProvider.make({
       upstream: UpstreamBase.make("https://api.anthropic.com"),
       credential: AnthropicSubscriptionToken.make({ token: Redacted.make("sk-ant-oat01-test") }),
     }),
   ),
-  openai: Option.some(
+  "openai-responses": Option.some(
     OpenAiProvider.make({
       upstream: UpstreamBase.make("https://api.openai.com"),
       credential: ChatGptLogin.make({
@@ -125,7 +125,7 @@ const providers = {
 };
 
 const address: SshWorkerAddress = {
-  ...gatewayAddress({ llmProviders: ["anthropic", "openai"] }),
+  ...gatewayAddress({ llmProviders: ["anthropic-messages", "openai-responses"] }),
   port: Option.none(),
   identityFile: Option.some(SshIdentityFile.make("/keys/boat")),
   machine: {
