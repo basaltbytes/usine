@@ -51,6 +51,71 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     Config.withDefault(`${home}/.codex`),
     Effect.orDie,
   );
+  const path = yield* Config.String("PATH").pipe(
+    Config.withDefault("/usr/local/bin:/usr/bin:/bin"),
+    Effect.orDie,
+  );
+  const claudeCommand = Effect.fn("ProviderTargets.claudeCommand")(function* (
+    action: "status" | "logout",
+  ) {
+    yield* Effect.annotateCurrentSpan({ target: "local", provider: "anthropic", action });
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const child = yield* spawner.spawn(
+          ChildProcess.make(
+            "claude",
+            [
+              "--setting-sources",
+              "user",
+              "auth",
+              action,
+              ...(action === "status" ? ["--json"] : []),
+            ],
+            {
+              env: { HOME: home, PATH: path, CLAUDE_CONFIG_DIR: claudeHome },
+              extendEnv: false,
+              stdin: "ignore",
+              stderr: "ignore",
+              stdout: action === "status" ? "pipe" : "ignore",
+            },
+          ),
+        );
+        const output = yield* Stream.mkString(Stream.decodeText(child.stdout));
+        const exitCode = yield* child.exitCode;
+        const exit = Number(exitCode);
+        if (exit !== 0 && !(action === "status" && exit === 1))
+          return yield* failed(
+            "Claude authentication command failed. Check its native credential store.",
+          );
+        return output;
+      }),
+    ).pipe(
+      Effect.timeout("30 seconds"),
+      Effect.mapError(() =>
+        failed(
+          "Could not check or clear the local Claude login. Check Claude Code and its native credential store.",
+        ),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning("Local Claude authentication command failed", {
+          action,
+          message: error.message,
+        }),
+      ),
+    );
+  });
+  const claudeStatus = Effect.gen(function* () {
+    const output = yield* claudeCommand("status");
+    return yield* Schema.decodeEffect(
+      Schema.fromJsonString(
+        Schema.Struct({
+          loggedIn: Schema.Boolean,
+          authMethod: Schema.String,
+          apiProvider: Schema.String,
+        }),
+      ),
+    )(output).pipe(Effect.mapError(() => failed("Claude returned an unrecognized login status.")));
+  });
   const claudeFile = `${claudeHome}/settings.json`;
   const codexFile = `${codexHome}/auth.json`;
   const read = (file: string) =>
@@ -147,8 +212,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     }),
   );
   const localStatus = Effect.gen(function* () {
-    const settings = yield* read(claudeFile);
-    const claude = yield* environment(settings);
+    const claude = yield* claudeStatus;
     const nativeClaude = yield* read(`${claudeHome}/.credentials.json`);
     const claudeLogin = Schema.decodeUnknownOption(
       Schema.Struct({
@@ -174,16 +238,16 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       {
         provider: "anthropic" as const,
         credential:
-          claude.CLAUDE_CODE_OAUTH_TOKEN !== undefined
-            ? ("subscription" as const)
-            : claude.ANTHROPIC_API_KEY !== undefined
+          !claude.loggedIn || claude.apiProvider !== "firstParty"
+            ? null
+            : claude.authMethod === "api_key"
               ? ("api-key" as const)
-              : Option.isSome(claudeLogin)
+              : ["claude.ai", "oauth_token"].includes(claude.authMethod)
                 ? ("subscription" as const)
                 : null,
         expiresAt:
-          claude.CLAUDE_CODE_OAUTH_TOKEN === undefined &&
-          claude.ANTHROPIC_API_KEY === undefined &&
+          claude.loggedIn &&
+          claude.authMethod === "claude.ai" &&
           Option.isSome(claudeLogin) &&
           claudeLogin.value.expiresAt !== undefined
             ? Option.getOrNull(
@@ -364,6 +428,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       } else if (provider === "openai")
         yield* fs.remove(codexFile, { force: true }).pipe(Effect.mapError(localFailure));
       else {
+        yield* claudeCommand("logout");
         const settings = yield* read(claudeFile);
         const configured = yield* environment(settings);
         const env = { ...configured };
@@ -373,6 +438,11 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         yield* fs
           .remove(`${claudeHome}/.credentials.json`, { force: true })
           .pipe(Effect.mapError(localFailure));
+        const status = yield* claudeStatus;
+        if (status.loggedIn)
+          return yield* failed(
+            "Claude is still signed in. Clear its native credential store and retry disconnect.",
+          );
       }
       yield* Effect.logInfo("Provider disconnected", { target, provider });
     }),
