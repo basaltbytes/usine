@@ -11,8 +11,8 @@ export const ProviderCredential = Schema.Union([
 export type ProviderCredential = typeof ProviderCredential.Type;
 export const credentialProvider = (credential: ProviderCredential): LlmProviderName =>
   credential.kind === "claude-subscription" || credential.kind === "anthropic-api-key"
-    ? "anthropic"
-    : "openai";
+    ? "anthropic-messages"
+    : "openai-responses";
 
 export class ProviderCredentialError extends Schema.TaggedError<
   ProviderCredentialError,
@@ -33,7 +33,7 @@ const ProviderUnavailable = Schema.Struct({ provider: LlmProviderName, error: Sc
 export const LoginProvider = Schema.Literals(["claude", "chatgpt"]);
 export type LoginProvider = typeof LoginProvider.Type;
 export const loginLlmProvider = (provider: LoginProvider): LlmProviderName =>
-  provider === "claude" ? "anthropic" : "openai";
+  provider === "claude" ? "anthropic-messages" : "openai-responses";
 export const ProviderLoginState = Schema.Union([
   Schema.Struct({ status: Schema.Literal("starting") }),
   Schema.Struct({

@@ -80,7 +80,7 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
       const targets = Context.get(context, ProviderTargets);
       const credential = Effect.map(targets.get("local"), ({ providers }) => {
         assert.notInclude(jsonKey(providers), "fixture-native-secret");
-        const claude = providers.find(({ provider }) => provider === "anthropic");
+        const claude = providers.find(({ provider }) => provider === "anthropic-messages");
         return claude !== undefined && "credential" in claude ? claude.credential : claude?.error;
       });
       const nativeCredential = yield* credential;
@@ -97,7 +97,7 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
         `${directory}/.credentials.json`,
         '{"claudeAiOauth":{"accessToken":"fixture-old-file-secret"}}',
       );
-      yield* targets.disconnect("local", "anthropic");
+      yield* targets.disconnect("local", "anthropic-messages");
       const nativeExists = yield* fs.exists(keychain);
       const fileExists = yield* fs.exists(`${directory}/.credentials.json`);
       const disconnectedCredential = yield* credential;
@@ -110,13 +110,13 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
       yield* fs.writeFileString(keychain, "fixture-native-secret");
       logout = "fail";
       assert.equal(
-        (yield* targets.disconnect("local", "anthropic").pipe(Effect.flip))._tag,
+        (yield* targets.disconnect("local", "anthropic-messages").pipe(Effect.flip))._tag,
         "ProviderCredentialError",
       );
       const failedCredential = yield* credential;
       assert.equal(failedCredential, "subscription");
       logout = "retain";
-      const retained = yield* targets.disconnect("local", "anthropic").pipe(Effect.flip);
+      const retained = yield* targets.disconnect("local", "anthropic-messages").pipe(Effect.flip);
       assert.include(retained.message, "still signed in");
       const retainedCredential = yield* credential;
       assert.equal(retainedCredential, "subscription");

@@ -472,8 +472,8 @@ describe("SSH Worker with Docker", () => {
     () => {
       const machine = dockerMachine();
       const gateway = fakeGateway(machine, {
-        anthropic: Option.none(),
-        openai: Option.some(
+        "anthropic-messages": Option.none(),
+        "openai-responses": Option.some(
           OpenAiProvider.make({
             upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
             credential: ChatGptLogin.make({
@@ -521,7 +521,7 @@ describe("SSH Worker with Docker", () => {
         Effect.scoped,
         Effect.provide(
           gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: ["openai"] }),
+            address: gatewayAddress({ llmProviders: ["openai-responses"] }),
           }),
         ),
       );

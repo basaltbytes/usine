@@ -1,3 +1,4 @@
+import type { HarnessCatalog } from "@usine/agents/harness";
 import type { SshCommand } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import { safeSegment } from "@usine/core/repository";
@@ -10,7 +11,7 @@ import {
 } from "@usine/core/worker";
 import { type Brand, Effect, FileSystem, Option, Path, Schema } from "effect";
 import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
-import { codexHomeIn } from "./codex-homes.ts";
+import { attemptHomeIn } from "./attempt-homes.ts";
 import type { SshWorkerAddress } from "./model.ts";
 import { sshCommandFor, workerDirectoryOf } from "./workers.ts";
 
@@ -30,11 +31,12 @@ const SshWorkerRecordJson = Schema.fromJsonString(SshWorkerRecord);
 
 /**
  * Records how to reach each long-lived SSH Worker's machine, one file per Worker in the local
- * `directory`, so that `discard` can remove the Codex homes of a Worker's Attempts after
+ * `directory`, so that `discard` can remove the harness homes of a Worker's Attempts after
  * `usine.yaml` stops declaring it. `ssh` is the local SSH command and the options placed before
  * each Worker's port and key, `DEFAULT_SSH` if omitted.
  */
 export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(function* (
+  catalog: HarnessCatalog,
   directory: string,
   ssh: SshCommand = DEFAULT_SSH,
 ) {
@@ -79,7 +81,7 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning(
-          "Could not record how to reach the SSH Worker's machine; discarding its leftovers after usine.yaml stops declaring it leaves the Codex homes of its Attempts",
+          "Could not record how to reach the SSH Worker's machine; discarding its leftovers after usine.yaml stops declaring it leaves the harness homes of its Attempts",
           { worker, host: destination, file, message: error.message },
         ),
       ),
@@ -92,7 +94,7 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
     return yield* Effect.gen(function* () {
       if (!(yield* fs.exists(file))) {
         yield* Effect.logInfo(
-          "No machine is recorded for the SSH Worker, so the Codex homes of its discarded Attempts, if any, stay on it",
+          "No machine is recorded for the SSH Worker, so the harness homes of its discarded Attempts, if any, stay on it",
           { worker, file },
         );
         return Option.none<SshWorkerRecord>();
@@ -103,7 +105,7 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning(
-          "Could not read the SSH Worker's record, so the Codex homes of its discarded Attempts stay on it",
+          "Could not read the SSH Worker's record, so the harness homes of its discarded Attempts stay on it",
           { worker, file, message: error.message },
         ).pipe(Effect.as(Option.none<SshWorkerRecord>())),
       ),
@@ -111,11 +113,11 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
   });
 
   /**
-   * Removes the Codex homes of `attempts` on `worker`'s machine, which the Worker's record gives.
+   * Removes the harness homes of `attempts` on `worker`'s machine, which the Worker's record gives.
    * Removes nothing if `worker` has no record, such as a provisioned Worker. Never fails; logs
    * what it couldn't remove.
    */
-  const discard = Effect.fn("SshExecutor.discardCodexHomes")(function* (
+  const discard = Effect.fn("SshExecutor.discardAttemptHomes")(function* (
     worker: WorkerName,
     attempts: ReadonlyArray<AttemptId>,
   ) {
@@ -125,28 +127,32 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
     if (Option.isNone(record)) return;
     const { destination } = record.value;
     const workerDirectory = workerDirectoryOf(record.value);
-    const codexHomes = attempts.map((attemptId) => codexHomeIn(workerDirectory, attemptId));
+    const attemptHomes = attempts.flatMap((attemptId) =>
+      catalog.descriptors
+        .filter(({ worker }) => Option.exists(worker.credential, ({ home }) => Option.isSome(home)))
+        .map(({ id }) => attemptHomeIn(workerDirectory, attemptId, id)),
+    );
     const fields = {
       worker,
       host: destination,
-      directory: `${workerDirectory}/codex`,
+      directory: workerDirectory,
       attempts: attempts.length,
     };
     yield* commands
       .run("cleanup", commands.shellFor(sshCommandFor(ssh, record.value), destination), "rm", [
         "-rf",
-        ...codexHomes,
+        ...attemptHomes,
       ])
       .pipe(
         Effect.tap(() =>
           Effect.logInfo(
-            "Removed the Codex homes of the Attempts whose leftovers were discarded",
+            "Removed the harness homes of the Attempts whose leftovers were discarded",
             fields,
           ),
         ),
         Effect.catch((error) =>
           Effect.logWarning(
-            "Could not remove the Codex homes of the Attempts whose leftovers were discarded; remove them from the Worker yourself",
+            "Could not remove the harness homes of the Attempts whose leftovers were discarded; remove them from the Worker yourself",
             { ...fields, message: error.message },
           ),
         ),

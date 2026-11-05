@@ -58,7 +58,10 @@ const restartValues = ({ domain, adminToken, callerKey, listeners }: RestartSett
 });
 
 /** Returns each credential variable with its value, or `undefined` if unset. */
-const credentialValues = ({ anthropic, openai }: LlmProviders) => {
+const credentialValues = ({
+  "anthropic-messages": anthropic,
+  "openai-responses": openai,
+}: LlmProviders) => {
   const anthropicCredential = Option.getOrUndefined(
     Option.map(anthropic, (provider) => provider.credential),
   );
@@ -101,7 +104,10 @@ const changedUpstreams = (before: LlmProviders, after: LlmProviders): ReadonlyAr
             : Option.none(),
       ),
     );
-  return [...changed(before.anthropic, after.anthropic), ...changed(before.openai, after.openai)];
+  return [
+    ...changed(before["anthropic-messages"], after["anthropic-messages"]),
+    ...changed(before["openai-responses"], after["openai-responses"]),
+  ];
 };
 
 /** Returns the names of the variables whose values differ, never the values. */
@@ -168,7 +174,9 @@ const nextProviders = llmProviders.pipe(
  * replaces the one in memory. An unreadable file keeps the login in memory.
  */
 const reloadChatGptLogin = (logins: ChatGptLogins["Service"], providers: LlmProviders) => {
-  const login = Option.getOrUndefined(Option.map(providers.openai, ({ credential }) => credential));
+  const login = Option.getOrUndefined(
+    Option.map(providers["openai-responses"], ({ credential }) => credential),
+  );
   if (login?._tag !== "ChatGptLogin") return Effect.void;
   return logins.reload(login).pipe(
     Effect.catchTag("ChatGptAuthFileError", ({ message }) =>

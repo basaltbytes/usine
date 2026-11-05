@@ -204,7 +204,7 @@ export const configurationJson = {
         destination: "usine-gateway",
         adminPort: 7070,
         adminTokenEnv: "USINE_GATEWAY_ADMIN_TOKEN",
-        llmProviders: ["anthropic"],
+        llmProviders: ["anthropic-messages"],
       },
       container: {
         image: null,
@@ -267,7 +267,7 @@ export const configurationJson = {
         destination: "usine-gateway",
         adminPort: 7070,
         adminTokenEnv: "USINE_GATEWAY_ADMIN_TOKEN",
-        llmProviders: ["anthropic"],
+        llmProviders: ["anthropic-messages"],
       },
       container: {
         image: null,

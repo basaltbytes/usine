@@ -131,7 +131,10 @@ export class LlmProviderList extends Schema.Class<
   providers: Schema.Array(LlmProviderSummary),
 }) {
   /** Lists configured providers in Anthropic, then OpenAI order, exposing only their credential kinds. */
-  static fromProviders({ anthropic, openai }: LlmProviders): LlmProviderList {
+  static fromProviders({
+    "anthropic-messages": anthropic,
+    "openai-responses": openai,
+  }: LlmProviders): LlmProviderList {
     const listed = (provider: LlmProviderName, configured: Option.Option<LlmProvider>) =>
       Option.toArray(
         Option.map(configured, (held) =>
@@ -139,7 +142,10 @@ export class LlmProviderList extends Schema.Class<
         ),
       );
     return LlmProviderList.make({
-      providers: [...listed("anthropic", anthropic), ...listed("openai", openai)],
+      providers: [
+        ...listed("anthropic-messages", anthropic),
+        ...listed("openai-responses", openai),
+      ],
     });
   }
 }

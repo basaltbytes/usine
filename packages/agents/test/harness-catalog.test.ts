@@ -3,11 +3,15 @@ import { Harness } from "@usine/core/agent/brain";
 import { Option, Schema } from "effect";
 import {
   catalog,
+  CredentialWiring,
+  gatewayTokenVariables,
   HarnessCatalog,
+  HarnessCredential,
   HarnessDescriptor,
   WorkerRequirements,
   workerImageInputs,
 } from "../src/harness/catalog.ts";
+import { codex } from "../src/harness/codex/descriptor.ts";
 import { pi } from "../src/harness/pi/descriptor.ts";
 // Generated image inputs are checked against the source descriptors.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -60,6 +64,48 @@ describe("harness catalog", () => {
     );
   });
 
+  it("rejects credential file recipes without an attempt home and unsupported Cloudflare files", () => {
+    assert(Option.isSome(codex.worker.credential));
+    const credential = codex.worker.credential.value;
+    assert(Option.isNone(HarnessCredential.makeOption({ ...credential, home: Option.none() })));
+    assert(
+      Option.isNone(
+        HarnessCredential.makeOption({ ...credential, cloudflare: credential.gateway }),
+      ),
+    );
+  });
+
+  it("extends gateway token forwarding by registration and deduplicates shared variables", () => {
+    assert(Option.isSome(codex.worker.credential));
+    const original = codex.worker.credential.value;
+    const added = HarnessDescriptor.make({
+      ...codex,
+      id: Harness.make("another-responses-harness"),
+      worker: WorkerRequirements.make({
+        ...codex.worker,
+        credential: Option.some(
+          HarnessCredential.make({
+            ...original,
+            gateway: CredentialWiring.make({
+              ...original.gateway,
+              tokenVariable: "OTHER_GATEWAY_TOKEN",
+            }),
+          }),
+        ),
+      }),
+    });
+    const shared = HarnessDescriptor.make({
+      ...codex,
+      id: Harness.make("shared-responses-harness"),
+    });
+    assert.deepStrictEqual(
+      gatewayTokenVariables(
+        HarnessCatalog.make({ descriptors: [...catalog.descriptors, added, shared] }),
+      ),
+      [...gatewayTokenVariables(catalog), "OTHER_GATEWAY_TOKEN"],
+    );
+  });
+
   it("generates both Dockerfiles, cloud-init, and the published image tag from the descriptors", () => {
     const read = (path: string) =>
       readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
@@ -69,6 +115,11 @@ describe("harness catalog", () => {
       assert.include(dockerfile, `ARG HARNESS_PACKAGES="${inputs.npmPackages.join(" ")}"`);
       assert.match(dockerfile, /^RUN npm install -g .*\$\{HARNESS_PACKAGES\}/mu);
     }
+    const gatewayCloudInit = read("infra/hetzner/gateway/worker-cloud-init.yaml");
+    assert.include(
+      gatewayCloudInit,
+      `AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ${gatewayTokenVariables(catalog).join(" ")}`,
+    );
     const cloudInit = read("infra/hetzner/cloud-init.yaml");
     assert.match(cloudInit, /^\s+npm install -g pnpm@\S+ /mu);
     assert.strictEqual(

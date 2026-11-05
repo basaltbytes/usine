@@ -68,6 +68,10 @@ it.live(
         assert.notInclude(jsonKey(malformed), "private-malformed-auth");
         const state = yield* client.llm.connections();
         assert.deepEqual(
+          state.providers.map(({ provider }) => provider),
+          ["anthropic-messages", "openai-responses"],
+        );
+        assert.deepEqual(
           state.providers.map(({ credential }) => credential),
           ["subscription", "subscription"],
         );
@@ -83,7 +87,7 @@ it.live(
         const persisted = yield* fs.stat(`${directory}/provider-credentials.json`);
         assert.equal(persisted.mode & 0o777, 0o600);
         const current = yield* SettingsInForce.pipe(Effect.provideContext(context));
-        assert.isTrue(Option.isSome((yield* current.current).providers.openai));
+        assert.isTrue(Option.isSome((yield* current.current).providers["openai-responses"]));
         yield* Scope.close(scope, Exit.void);
         const restarted = yield* Layer.build(start());
         const found = yield* Effect.serviceOption(ProviderCredentials).pipe(
@@ -99,15 +103,15 @@ it.live(
           Effect.provideContext(restarted),
           Effect.flatMap((settings) => settings.current),
         );
-        yield* credentials.disconnect("anthropic");
-        yield* credentials.disconnect("openai");
+        yield* credentials.disconnect("anthropic-messages");
+        yield* credentials.disconnect("openai-responses");
         assert.deepEqual(
           (yield* credentials.status).map(({ credential }) => credential),
           [null, null],
         );
         const next = yield* credentials.apply(beforeDisconnect.providers);
-        assert.isTrue(Option.isNone(next.anthropic));
-        assert.isTrue(Option.isNone(next.openai));
+        assert.isTrue(Option.isNone(next["anthropic-messages"]));
+        assert.isTrue(Option.isNone(next["openai-responses"]));
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
 );

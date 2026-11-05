@@ -23,9 +23,14 @@ it.each([
           target: "gateway",
           label: "usine-gateway",
           providers: [
-            { provider: "anthropic", credential: null, expiresAt: null, lastRefresh: null },
             {
-              provider: "openai",
+              provider: "anthropic-messages",
+              credential: null,
+              expiresAt: null,
+              lastRefresh: null,
+            },
+            {
+              provider: "openai-responses",
               credential: "subscription",
               expiresAt: "2027-01-01T00:00:00Z",
               lastRefresh: "2026-11-01T12:00:00Z",
@@ -70,7 +75,7 @@ it.each([
               : {
                   ...target,
                   providers: target.providers.map((provider) =>
-                    provider.provider === "anthropic"
+                    provider.provider === "anthropic-messages"
                       ? { ...provider, credential: "api-key" }
                       : provider,
                   ),
@@ -147,10 +152,10 @@ it("shows a missing harness on its provider and keeps the other provider's contr
         label: "Local harnesses",
         providers: [
           {
-            provider: "anthropic",
+            provider: "anthropic-messages",
             error: "Claude Code not found on PATH. Install it to connect Claude.",
           },
-          { provider: "openai", credential: null, expiresAt: null, lastRefresh: null },
+          { provider: "openai-responses", credential: null, expiresAt: null, lastRefresh: null },
         ],
       },
     ],

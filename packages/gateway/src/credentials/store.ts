@@ -35,8 +35,8 @@ import {
 } from "./model.ts";
 
 const Snapshot = Schema.Struct({
-  anthropic: Schema.optionalKey(Schema.Option(AnthropicProvider)),
-  openai: Schema.optionalKey(Schema.Option(OpenAiProvider)),
+  "anthropic-messages": Schema.optionalKey(Schema.Option(AnthropicProvider)),
+  "openai-responses": Schema.optionalKey(Schema.Option(OpenAiProvider)),
 });
 const SnapshotJson = Schema.fromJsonString(Schema.toCodecJson(Snapshot));
 type Snapshot = typeof Snapshot.Type;
@@ -79,8 +79,8 @@ export class ProviderCredentials extends Context.Service<
         }
         const apply = (providers: LlmProviders) =>
           Effect.succeed({
-            anthropic: snapshot.anthropic ?? providers.anthropic,
-            openai: snapshot.openai ?? providers.openai,
+            "anthropic-messages": snapshot["anthropic-messages"] ?? providers["anthropic-messages"],
+            "openai-responses": snapshot["openai-responses"] ?? providers["openai-responses"],
           });
         const initial = yield* settings.current;
         yield* settings.replace({ ...initial, providers: yield* apply(initial.providers) });
@@ -99,12 +99,12 @@ export class ProviderCredentials extends Context.Service<
               Effect.andThen(fs.rename(temporary, file)),
               Effect.mapError(failed),
             );
-          const previous = snapshot.openai;
+          const previous = snapshot["openai-responses"];
           snapshot = next;
           const current = yield* settings.current;
           yield* settings.replace({ ...current, providers: yield* apply(current.providers) });
           if (
-            provider === "openai" &&
+            provider === "openai-responses" &&
             previous !== undefined &&
             Option.isSome(previous) &&
             previous.value.credential._tag === "ChatGptLogin"
@@ -116,38 +116,40 @@ export class ProviderCredentials extends Context.Service<
           yield* Effect.logInfo("Provider credential updated", {
             provider,
             connected:
-              provider === "anthropic"
-                ? Option.isSome(next.anthropic ?? Option.none())
-                : Option.isSome(next.openai ?? Option.none()),
+              provider === "anthropic-messages"
+                ? Option.isSome(next["anthropic-messages"] ?? Option.none())
+                : Option.isSome(next["openai-responses"] ?? Option.none()),
           });
         }, Effect.uninterruptible);
         return {
           apply,
           status: Effect.gen(function* () {
             const { providers } = yield* settings.current;
-            return yield* Effect.forEach(["anthropic", "openai"] as const, (provider) =>
-              Effect.gen(function* () {
-                const held = configuredProvider(providers, provider);
-                const credential = Option.map(held, (value) => value.credential);
-                let expiresAt: string | null = null;
-                let lastRefresh: string | null = null;
-                if (Option.isSome(credential) && credential.value._tag === "ChatGptLogin") {
-                  const tokens = yield* readAuthFile(credential.value.authFile).pipe(
-                    Effect.provideService(FileSystem.FileSystem, fs),
-                    Effect.mapError(failed),
-                  );
-                  expiresAt = Option.getOrNull(Option.map(tokens.expiresAt, DateTime.formatIso));
-                  lastRefresh = Option.getOrNull(
-                    Option.map(tokens.lastRefresh, DateTime.formatIso),
-                  );
-                }
-                return {
-                  provider,
-                  credential: Option.getOrNull(Option.map(held, credentialKind)),
-                  expiresAt,
-                  lastRefresh,
-                };
-              }),
+            return yield* Effect.forEach(
+              ["anthropic-messages", "openai-responses"] as const,
+              (provider) =>
+                Effect.gen(function* () {
+                  const held = configuredProvider(providers, provider);
+                  const credential = Option.map(held, (value) => value.credential);
+                  let expiresAt: string | null = null;
+                  let lastRefresh: string | null = null;
+                  if (Option.isSome(credential) && credential.value._tag === "ChatGptLogin") {
+                    const tokens = yield* readAuthFile(credential.value.authFile).pipe(
+                      Effect.provideService(FileSystem.FileSystem, fs),
+                      Effect.mapError(failed),
+                    );
+                    expiresAt = Option.getOrNull(Option.map(tokens.expiresAt, DateTime.formatIso));
+                    lastRefresh = Option.getOrNull(
+                      Option.map(tokens.lastRefresh, DateTime.formatIso),
+                    );
+                  }
+                  return {
+                    provider,
+                    credential: Option.getOrNull(Option.map(held, credentialKind)),
+                    expiresAt,
+                    lastRefresh,
+                  };
+                }),
             );
           }).pipe(Effect.withSpan("ProviderCredentials.status")),
           replace: Effect.fn("ProviderCredentials.replace")((credential: ProviderCredential) =>
@@ -155,7 +157,7 @@ export class ProviderCredentials extends Context.Service<
               Effect.gen(function* () {
                 const provider = credentialProvider(credential);
                 yield* Effect.annotateCurrentSpan({ provider, kind: credential.kind });
-                if (provider === "anthropic") {
+                if (provider === "anthropic-messages") {
                   const held = AnthropicProvider.make({
                     upstream: UpstreamBase.make("https://api.anthropic.com"),
                     credential:
@@ -163,7 +165,10 @@ export class ProviderCredentials extends Context.Service<
                         ? AnthropicSubscriptionToken.make({ token: credential.secret })
                         : AnthropicApiKey.make({ key: credential.secret }),
                   });
-                  return yield* save({ ...snapshot, anthropic: Option.some(held) }, provider);
+                  return yield* save(
+                    { ...snapshot, "anthropic-messages": Option.some(held) },
+                    provider,
+                  );
                 }
                 const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
                 let held: OpenAiProvider;
@@ -204,7 +209,7 @@ export class ProviderCredentials extends Context.Service<
                     credential: OpenAiApiKey.make({ key: credential.secret }),
                   });
                 }
-                yield* save({ ...snapshot, openai: Option.some(held) }, provider);
+                yield* save({ ...snapshot, "openai-responses": Option.some(held) }, provider);
               }),
             ),
           ),

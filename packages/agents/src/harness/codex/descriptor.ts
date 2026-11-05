@@ -1,6 +1,7 @@
 import { Harness } from "@usine/core/agent/brain";
 import { Option } from "effect";
 import {
+  CredentialWiring,
   HarnessCredential,
   HarnessDescriptor,
   ResumeCommand,
@@ -27,6 +28,19 @@ const prices = {
   "gpt-5.2": { input: 1.75, cachedInput: 0.175, output: 14 },
 };
 
+const credentialConfig = (id: string, name: string, tokenVariable: string) =>
+  [
+    `model_provider = "${id}"`,
+    "",
+    `[model_providers.${id}]`,
+    `name = "${name}"`,
+    'base_url = "{{baseUrl}}"',
+    `env_key = "${tokenVariable}"`,
+    'wire_api = "responses"',
+    "requires_openai_auth = false",
+    "",
+  ].join("\n");
+
 export const codex = HarnessDescriptor.make({
   id: Harness.make("codex"),
   capabilities: ["resume-session"],
@@ -38,9 +52,36 @@ export const codex = HarnessDescriptor.make({
     credential: Option.some(
       HarnessCredential.make({
         provider: "openai",
+        protocol: "openai-responses",
+        gatewayPath: "openai-responses/v1",
+        home: Option.some("CODEX_HOME"),
+        gateway: CredentialWiring.make({
+          tokenVariable: "USINE_GATEWAY_TOKEN",
+          environment: { CODEX_HOME: "{{home}}" },
+          files: {
+            "config.toml": credentialConfig(
+              "usine-gateway",
+              "usine gateway",
+              "USINE_GATEWAY_TOKEN",
+            ),
+          },
+        }),
+        apiKey: CredentialWiring.make({
+          tokenVariable: "OPENAI_API_KEY",
+          environment: { CODEX_HOME: "{{home}}" },
+          files: {
+            "config.toml": credentialConfig("usine-openai", "OpenAI API key", "OPENAI_API_KEY"),
+          },
+        }),
+        cloudflare: CredentialWiring.make({
+          tokenVariable: "OPENAI_API_KEY",
+          environment: {},
+          files: {},
+        }),
         label: "OpenAI",
         hosts: ["chatgpt.com", "auth.openai.com"],
         apiHost: "api.openai.com",
+        apiKeyBaseUrl: "https://api.openai.com/v1",
       }),
     ),
   }),

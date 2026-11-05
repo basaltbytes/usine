@@ -59,7 +59,7 @@ it.live(
         const settings = GatewaySettings.of({
           domain: GatewayDomain.make("gw.test"),
           github: GITHUB_ORIGINS,
-          providers: { anthropic: Option.none(), openai: Option.none() },
+          providers: { "anthropic-messages": Option.none(), "openai-responses": Option.none() },
           adminToken: AdminToken.make(Redacted.make("test-admin-token-private-0123456789")),
           callerKey: CallerKey.make(Redacted.make("test-caller-key-private-0123456789")),
           egress: EgressAllowlist.make({ rules: [] }),
@@ -236,15 +236,18 @@ ${["missing-token", "unreachable", "outdated"]
         if (Option.isSome(snapshot.instance)) {
           const worker = snapshot.instance.value.config.workers[0];
           assert(worker?.kind === "ssh" && Option.isSome(worker.gateway));
-          assert.deepEqual(worker.gateway.value.llmProviders, ["anthropic"]);
+          assert.deepEqual(worker.gateway.value.llmProviders, ["anthropic-messages"]);
         }
         const inForce = Context.get(gateway, SettingsInForce);
         const saved = yield* inForce.current;
-        assert(Option.isSome(saved.providers.anthropic));
-        assert(saved.providers.anthropic.value.credential._tag === "AnthropicApiKey");
-        assert.equal(Redacted.value(saved.providers.anthropic.value.credential.key), secret);
+        assert(Option.isSome(saved.providers["anthropic-messages"]));
+        assert(saved.providers["anthropic-messages"].value.credential._tag === "AnthropicApiKey");
+        assert.equal(
+          Redacted.value(saved.providers["anthropic-messages"].value.credential.key),
+          secret,
+        );
         assert.notInclude(jsonKey(connected), secret);
-        yield* targets.disconnect("test-gateway", "anthropic").pipe(
+        yield* targets.disconnect("test-gateway", "anthropic-messages").pipe(
           Effect.provideService(
             ConfigProvider.ConfigProvider,
             ConfigProvider.fromUnknown({
@@ -351,9 +354,9 @@ ${["missing-token", "unreachable", "outdated"]
           secret: Redacted.make("fixture-api-key"),
         });
         assert.equal((yield* verifyLocalClaude)._tag, "HarnessReady");
-        yield* local.disconnect("local", "anthropic");
+        yield* local.disconnect("local", "anthropic-messages");
         assert.equal((yield* verifyLocalClaude)._tag, "HarnessUnavailableError");
-        yield* local.disconnect("local", "openai");
+        yield* local.disconnect("local", "openai-responses");
         const empty = yield* local.list;
         assert.deepEqual(
           empty[0] !== undefined && "providers" in empty[0]
@@ -410,14 +413,14 @@ it.live("manages ChatGPT on a local host without Claude Code", () =>
         assert(local !== undefined && "providers" in local);
         const [claude, chatgpt] = local.providers;
         assert(claude !== undefined && "error" in claude);
-        assert.equal(claude.provider, "anthropic");
+        assert.equal(claude.provider, "anthropic-messages");
         assert.include(claude.error, "Claude Code not found on PATH");
         assert(chatgpt !== undefined && "credential" in chatgpt);
         return chatgpt;
       });
       const initial = yield* providers;
       assert.deepEqual(initial, {
-        provider: "openai",
+        provider: "openai-responses",
         credential: null,
         expiresAt: null,
         lastRefresh: null,

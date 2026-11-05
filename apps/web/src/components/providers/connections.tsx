@@ -34,7 +34,8 @@ export const ProviderConnections = () => {
                 <ErrorAlert message={destination.error} />
               ) : (
                 destination.providers.map((connection) => {
-                  const provider = connection.provider === "anthropic" ? "claude" : "chatgpt";
+                  const provider =
+                    connection.provider === "anthropic-messages" ? "claude" : "chatgpt";
                   return "error" in connection ? (
                     <ProviderUnavailableRow
                       key={provider}

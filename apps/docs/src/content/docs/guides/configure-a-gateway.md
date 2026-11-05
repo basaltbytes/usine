@@ -63,7 +63,7 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 
    Each gateway reports its connection state separately. A gateway that cannot report its state shows an error beside its destination; healthy gateways keep their connection controls. A CLI command with `--target` checks the selected gateway.
 
-   Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. No provider credential requires a manual SSH transfer or service reload.
+   Add `--target usine-gateway` when the instance has several gateways. Add `--api-key` for masked API-key entry. usine transfers completed credentials through the gateway admin API over SSH, saves them with mode `0600`, and updates the workers’ `llm_providers` in a configuration revision. Claude selects `anthropic-messages`; ChatGPT selects `openai-responses`. No provider credential requires a manual SSH transfer or service reload.
 
    Settings shows each credential kind, reported expiry, and last refresh. **Replace** starts a separate login and keeps the current credential until authorization succeeds. **Disconnect** removes the managed credential and worker routing. `usine logout claude` and `usine logout chatgpt` perform the same actions.
 
@@ -72,6 +72,8 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 Preflight reaches the admin API and the gateway from the worker. A test attempt receives a caller token and uses `git.gw.internal` and `llm.gw.internal`. Its run page attributes usage to the configured API key or subscription plan.
 
 The executor manages its own admin API forward; omit `LocalForward` from the gateway SSH alias. A private Hetzner worker reaches the gateway only. A Boat worker uses [the Tailscale connection procedure](/guides/connect-boat-to-a-gateway/). A long-lived worker outside the private network uses [worker-level tailnet settings](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
+
+Gateway slots use wire protocols. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic Messages API and `openai-responses` for the OpenAI Responses API or a ChatGPT login. Upgrade the gateway first, then the orchestrator. For one release, the gateway accepts the previous `/anthropic` and `/openai` prefixes and logs a deprecation warning so running attempts can finish. A gateway without credential reporting fails preflight with an instruction to upgrade `@usine/gateway`. Credential environment-variable names stay the same. See the [worker reference](/reference/configuration/workers/#gateway).
 
 ## Manual credential configuration
 

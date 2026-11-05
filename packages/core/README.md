@@ -1,5 +1,7 @@
 # @usine/core
 
+`GatewayLlmProtocol` identifies gateway credential slots by wire protocol: `anthropic-messages` and `openai-responses`. `GatewayLlmProvider` identifies API-key providers (`anthropic` and `openai`).
+
 Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step, and attempt types for every other block, plus shared instance, repo, worker, and agent values.
 
 0.x APIs change without notice. Supply the peer dependency `effect` at the pinned version.

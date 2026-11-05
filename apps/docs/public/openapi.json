@@ -36700,8 +36700,8 @@
                                         "provider": {
                                           "type": "string",
                                           "enum": [
-                                            "anthropic",
-                                            "openai"
+                                            "anthropic-messages",
+                                            "openai-responses"
                                           ]
                                         },
                                         "credential": {
@@ -36753,8 +36753,8 @@
                                         "provider": {
                                           "type": "string",
                                           "enum": [
-                                            "anthropic",
-                                            "openai"
+                                            "anthropic-messages",
+                                            "openai-responses"
                                           ]
                                         },
                                         "error": {
@@ -43524,8 +43524,8 @@
             "items": {
               "type": "string",
               "enum": [
-                "anthropic",
-                "openai"
+                "anthropic-messages",
+                "openai-responses"
               ]
             }
           }

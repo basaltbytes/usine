@@ -214,7 +214,7 @@ const swap = (providers: LlmProviders) =>
       PATH: environmentPATH1 ?? "/usr/bin:/bin",
       HOME: home,
       CLAUDE_CONFIG_DIR: join(home, ".claude"),
-      ANTHROPIC_BASE_URL: "http://llm.gw.test/anthropic",
+      ANTHROPIC_BASE_URL: "http://llm.gw.test/anthropic-messages",
       CLAUDE_CODE_OAUTH_TOKEN: placeholder,
       // The base URL is plain HTTP through the reverse proxy; anything else goes to the egress proxy, which logs it.
       HTTP_PROXY: `http://${proxy.host}:${proxy.port}`,
@@ -234,7 +234,7 @@ const swap = (providers: LlmProviders) =>
 
 const subscription = (upstream: string, token: string): LlmProviders => ({
   ...NO_PROVIDERS,
-  anthropic: Option.some(
+  "anthropic-messages": Option.some(
     AnthropicProvider.make({
       upstream: UpstreamBase.make(upstream),
       credential: AnthropicSubscriptionToken.make({ token: secret(token) }),

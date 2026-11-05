@@ -248,7 +248,7 @@ describe("the usine-gateway command", () => {
                 {
                   host: "127.0.0.1",
                   port: started.ports.proxy,
-                  path: "/openai/v1/responses",
+                  path: "/openai-responses/v1/responses",
                   method: "POST",
                   headers: {
                     host: "llm.gw.test",
