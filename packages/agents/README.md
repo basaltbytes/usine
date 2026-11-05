@@ -6,7 +6,7 @@ The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Co
 
 The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the parent in `@usine/durable`.
 
-`/harness` exports the platform-free `catalog` and descriptor schemas. Each harness defines its display label, worker installation and accepted versions, login files and hosts, credential provider, token price table, and terminal resume command. `catalog.harness` validates registered IDs; `catalog.get` reads a descriptor. Importing this subpath loads no vendor SDK or Node adapter.
+`/harness` exports the platform-free `catalog` and descriptor schemas. Each harness declares its supported session capabilities, including `resume-session`, and defines its display label, worker installation and accepted versions, login files and hosts, credential provider, token price table, and terminal resume command. `catalog.harness` validates registered IDs; `catalog.get` reads a descriptor. Importing this subpath loads no vendor SDK or Node adapter.
 
 `admitBrain(catalog, role, brain, context)` checks capabilities for a credential route and placement without IO. Roles are `coordinator`, `coding-agent`, and `supervisor`. The coordinator requires `durable-coordination`; Pi on the orchestrator provides it. Coding agents run on workers. Supervisors run on the orchestrator through gateway credentials and require saved-session resume. Refusals include the role, missing capability or placement, and adapter reason. Each descriptor declares supported capabilities and reasons for absent capabilities per route, including `plan-windows` for Claude Code and Codex subscription routes.
 
@@ -113,6 +113,10 @@ Agents share the installation's GitHub App identity. The instructions require co
 ## Resume a harness session
 
 Claude children save sessions, and Codex threads aren't ephemeral. `SessionStarted.harnessSession` and launch logs (`harnessSessionId`, `sessionId`, `cwd`) give the id and directory. While the worktree and session files exist, run `claude --resume <id>` or `codex resume <id>` there, on the same worker and account. A Codex child whose environment sets `CODEX_HOME` saves its sessions there, and `HarnessSession.home` and the launch log's `home` record that directory: run `CODEX_HOME=<home> codex resume <id>`. An attempt behind a gateway gets its own `CODEX_HOME`, and its model credential isn't in your shell.
+
+Pi children save conversations in `<checkout>/.usine/pi/sessions`. Their `SessionStarted.harnessSession` records the Pi ID, checkout as `cwd`, and session directory as `home`. Keep the checkout and this directory to continue the conversation after the process exits. From `/pi`, build `piRuntime` with `PiSdk` and call `runtime.resume(request, saved.id)` in a scope. Set `request.cwd` to the saved checkout and `request.prompt` to the continuation message; await `RunningSession.result` before closing the scope. Resume uses the same tools, authentication checks, events, and operator controls as launch. An unknown ID fails with `SessionOperationError` instead of starting a new conversation. Preflight uses in-memory sessions.
+
+The durable parent's `subagent` call still ends as interrupted after an orchestrator restart. Saved-session resume is an explicit Pi runtime operation.
 
 ## Preflight
 

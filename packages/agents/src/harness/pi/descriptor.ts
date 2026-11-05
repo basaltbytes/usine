@@ -36,16 +36,20 @@ export const pi = HarnessDescriptor.make({
     CapabilityProfile.make({
       placements: ["local"],
       credentials: ["host-login"],
-      supported: ["usine-tools", "steer", "interrupt", "token-usage", "cost-usd", "model-check"],
+      supported: [
+        "resume-session",
+        "usine-tools",
+        "steer",
+        "interrupt",
+        "token-usage",
+        "cost-usd",
+        "model-check",
+      ],
       lacking: [
         Lacking.make({
           capability: "durable-coordination",
           reason:
-            "Pi children use in-memory sessions; only the orchestrator coordinator uses pi-durable",
-        }),
-        Lacking.make({
-          capability: "resume-session",
-          reason: "Pi children use in-memory sessions",
+            "Pi children persist conversations without a durable journal of usine tool intents and results",
         }),
         Lacking.make({
           capability: "plan-windows",

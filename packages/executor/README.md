@@ -268,7 +268,7 @@ const executorLayer = layer({
   workers: [
     {
       name: WorkerName.make("eu-one"),
-      machine: { _tag: "Fixed", destination: SshDestination.make("usine@203.0.113.7") },
+      machine: { _tag: "Fixed", tailnet: Option.none(), destination: SshDestination.make("usine@203.0.113.7") },
       identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
       port: Option.none(),
       root: WorkerRoot.make("/home/usine/.usine"),
@@ -327,6 +327,8 @@ const executorLayer = layer({
 ```
 
 Boat workers can use gateway subscription credentials over Tailscale. Set `snapshot` and `tailnet` on their provisioner. Preflight checks the saved snapshot, OAuth key creation, and the gateway address. After SSH readiness, the executor joins with a single-use ephemeral key on stdin and configures gateway names in the host and container. Boat uses its own SSH endpoint and direct internet access for downloads. Cleanup logs out before sandbox deletion; orphan reconciliation and ephemeral expiry cover interrupted cleanup. Build snapshots with `infra/boat/build-snapshot.sh`; see the [setup guide](https://docs.usine.dev/guides/add-a-provisioned-worker/#gateway-subscriptions-over-tailscale).
+
+Long-lived SSH machines can set `machine.tailnet` to `Option.some({ gatewayAddress })` when already joined to Tailscale. Preflight configures gateway host entries, sshd environment acceptance, and gh's HTTP socket through passwordless sudo, then verifies gateway access. These workers use direct internet egress and container host entries like Boat; cleanup preserves their tailnet identity. See the [home-worker guide](https://docs.usine.dev/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
 Worker liveness notices report the first unanswered SSH probe and the third consecutive unanswered probe, with `unansweredProbes` and `lastAnsweredAt`. A new attempt on a silent worker receives the current count. Recovery emits `WorkerResponsive`; connectivity loss leaves attempts running.
 

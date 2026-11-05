@@ -70,6 +70,8 @@ Pi parents and children record ChatGPT usage under `chatgptPlan`, including toke
 
 Claude Code subscription sessions report allowance usage under `claudePlan`, including usage outside usine. The five-hour allowance appears as the primary window, and the latest reported seven-day allowance appears as the secondary window, including model-specific allowances. **Needs attention** warns when a reported window reaches 80% usage and has a future reset time. Later reports update only the reported window and preserve the other window across children and attempts. Claude plan reports apply to worker subscription logins and gateway subscription credentials; API-key sessions do not update Claude plan windows. A report without utilization leaves the recorded windows unchanged, and an omitted reset time remains unknown.
 
+Pi children save their conversations in `.usine/pi/sessions` under the attempt checkout. The transcript records the saved session ID and directory. Keep both the checkout and session files to continue a conversation after its process exits. The Pi runtime's `resume(request, savedId)` operation starts a continuation with the request's prompt in that checkout; a missing ID fails instead of starting a new conversation. An orchestrator restart still interrupts an active `subagent` call.
+
 Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, and Pi ignores project-local configuration. Repository agent instructions still apply.
 
 ## Preflight

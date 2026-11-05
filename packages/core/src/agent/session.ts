@@ -98,7 +98,8 @@ export class HarnessSession extends Schema.Class<
   cwd: Schema.NonEmptyString,
   /**
    * The directory the harness saved the conversation in, if the Attempt set one in place of the
-   * harness's default: Codex's `CODEX_HOME`. `None` for the default or an older record.
+   * harness's default: Codex's `CODEX_HOME` or Pi's session directory. `None` for the default
+   * or an older record.
    */
   home: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<string>())),

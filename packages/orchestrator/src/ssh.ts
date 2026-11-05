@@ -78,7 +78,11 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
     if (Option.isNone(worker.provisioner)) {
       if (Option.isNone(worker.destination))
         return yield* Effect.die(new Error(`SSH worker "${worker.name}" has no destination`));
-      return { _tag: "Fixed", destination: worker.destination.value } satisfies SshWorkerMachine;
+      return {
+        _tag: "Fixed",
+        destination: worker.destination.value,
+        tailnet: worker.tailnet,
+      } satisfies SshWorkerMachine;
     }
     const settings = worker.provisioner.value;
     const token = yield* secretFrom(

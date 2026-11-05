@@ -36,9 +36,14 @@ The runtime includes the stored rendered loop task unchanged in every child's in
 
 The durable runtime records the exact child prompt on `SessionStarted.prompt`, alongside saved harness session metadata. The run page displays it in the attempt details, including when the launch is outside the loaded transcript page. Older transcripts omit the prompt.
 
-
 ## Amendment (2026-11-05, #953): role admission
 
 Harness descriptors declare capabilities for each credential route and placement. One `admitBrain` policy checks configuration, worker preflight, coordinator start, and child launch. The coordinator requires `durable-coordination`; Pi on the orchestrator provides it through pi-durable. Claude Code and Codex resume conversations without a journal of usine tool intents and results, so their descriptors refuse that role with a reason. The supervisor role runs on the orchestrator through gateway credentials, which keeps subscription credentials on the gateway.
 
 This replaces harness-specific placement refusals with role requirements. `parent_model` and `parent_effort` remain the parent settings because only Pi provides durable coordination. Startup validates every rostered agent's resolved parent model, effort, and credential before opening durable storage. Each attempt repeats that check to detect changed credentials.
+
+## Amendment (2026-11-05, #959): saved Pi child conversations
+
+Pi children persist conversations in a session directory under each attempt checkout and expose an explicit resume operation by saved Pi ID. This makes a child conversation available after its process exits, while keeping the files with the attempt that owns them. `SessionStarted.harnessSession` records the ID and directory, and the Pi descriptor declares `resume-session`. Preflight probes remain in memory because they have no conversation to continue.
+
+The October restart rule for the durable `subagent` call still applies: an in-flight call ends as interrupted after an orchestrator restart. Persisting a Pi conversation and resuming it through the Pi runtime does not replay that call. Durable child reattachment is tracked in #976.

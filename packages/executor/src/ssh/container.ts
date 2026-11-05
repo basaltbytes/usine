@@ -2,7 +2,7 @@ import { prepareAttemptImage } from "./image.ts";
 import { reclaimOnceFor } from "../remote/reclaim.ts";
 import { detectRuntime, verifyPodmanLimits } from "./runtime.ts";
 import { type ContainerRuntime, runtimeOptions } from "../remote/runtime.ts";
-import { boatTailnetOf } from "./model.ts";
+import { tailnetOf } from "./model.ts";
 import { SSH_FAILURE } from "@usine/agents/child-host";
 import { catalog, workerImageInputs } from "@usine/agents/harness";
 import type { Harness } from "@usine/core/agent/brain";
@@ -198,7 +198,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     const image = imageFor(machine);
     yield* Effect.annotateCurrentSpan({ worker, image, slots });
     const limits = yield* limitsFor(machine, slots);
-    const hosts = Option.match(Option.all([boatTailnetOf(machine.address), machine.gateway]), {
+    const hosts = Option.match(Option.all([tailnetOf(machine.address), machine.gateway]), {
       onNone: () => ({}),
       onSome: ([tailnet, gateway]) => ({
         [`git.${gateway.settings.domain}`]: tailnet.gatewayAddress,
