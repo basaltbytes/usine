@@ -36,7 +36,7 @@ import { UpgradeRecord } from "@usine/core/upgrade";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { authFixture, localSecret } from "../auth/fixture.ts";
-import { assert, expect, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 
 const helper = readFileSync(new URL("../../src/upgrade/helper.sh", import.meta.url), "utf8");
 
@@ -439,348 +439,413 @@ ${helper}`,
   }
 };
 
-const slowCli = { timeout: 30_000 };
+const hasUpgradeTools =
+  spawnSync(
+    "bash",
+    [
+      "-c",
+      'for executable in stat df find sort; do "$executable" --version >/dev/null 2>&1 || exit 1; done; command -v timeout >/dev/null && command -v flock >/dev/null',
+    ],
+    { stdio: "ignore", timeout: 5_000 },
+  ).status === 0;
 
-it.each(["retention", "external-retention"] as const)(
-  "keeps the newest backups after four successful upgrades: %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
+describe.skipIf(!hasUpgradeTools)("upgrade helper (requires GNU tools and flock)", () => {
+  const slowCli = { timeout: 30_000 };
+
+  it.each(["retention", "external-retention"] as const)(
+    "keeps the newest backups after four successful upgrades: %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.record.status).toBe("good");
+      expect([...result.retained].sort()).toEqual(
+        result.created.slice(scenario === "retention" ? -3 : -2).sort(),
+      );
+      expect(result.operatorFiles).toBe(true);
+      expect(result.notes).toBe(true);
+      expect(result.snapshot?.mode).toBe(0o600);
+    },
+  );
+
+  it.each([
+    "low-space",
+    "external-low-space",
+    "external-instance-low-space",
+    "invalid-retention",
+  ] as const)(
+    "records a failure without stopping or replacing the server: %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
+      expect(result.record.reason).toContain(
+        scenario === "invalid-retention" ? "BACKUP_KEEP" : "space",
+      );
+      if (scenario !== "invalid-retention") {
+        expect(result.output).toContain(`required_bytes=${result.databaseBytes * 2}`);
+      }
+      if (scenario === "low-space") expect(result.record.reason).toContain(".usine/upgrade");
+      if (scenario === "external-low-space") {
+        expect(result.record.reason).toContain('external backup "folder"');
+      }
+      if (scenario === "external-instance-low-space") {
+        expect(result.record.reason).toContain(".usine/upgrade");
+      }
+      expect(result.retained).toEqual([]);
+      expect(result.running).toBe("@usine/server@1.0.0");
+      expect(result.commands).not.toContain("stop");
+      expect(result.commands).not.toContain("install");
+      expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+      expect(result.durable).toEqual([{ value: "before" }]);
+    },
+  );
+
+  it("records a healthy upgrade when an old backup cannot be removed", slowCli, () => {
+    const result = run("failed-prune");
+    expect(result.failed).toBe(false);
     expect(result.record.status).toBe("good");
-    expect([...result.retained].sort()).toEqual(
-      result.created.slice(scenario === "retention" ? -3 : -2).sort(),
-    );
-    expect(result.operatorFiles).toBe(true);
-    expect(result.notes).toBe(true);
-    expect(result.snapshot?.mode).toBe(0o600);
-  },
-);
+    expect(result.running).toBe("@usine/server@2.0.0");
+    expect(result.retained).toHaveLength(4);
+    expect(result.retained).toContain(result.current);
+    expect(result.output).toContain("status=failed; check the upgrade service output");
+  });
 
-it.each([
-  "low-space",
-  "external-low-space",
-  "external-instance-low-space",
-  "invalid-retention",
-] as const)(
-  "records a failure without stopping or replacing the server: %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
+  it("retains every backup when an upgrade rolls back", slowCli, () => {
+    const result = run("failed-retention");
+    expect(result.record.status).toBe("rolled-back");
+    expect(result.retained).toHaveLength(4);
+    expect(result.retained).toContain(result.current);
+  });
+
+  it("keeps the current backup even when older backups have future timestamps", slowCli, () => {
+    const result = run("clock-skew-retention");
+    expect(result.record.status).toBe("good");
+    expect(result.retained).toHaveLength(3);
+    expect(result.retained).toContain(result.current);
+    expect(result.retained.some((path) => path.endsWith("backup.old00000"))).toBe(false);
+  });
+
+  it.each(["migrated-api", "migrated-external", "migrated-no-durable"] as const)(
+    "restores the previous stores before its API answers after %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.migrated).toBe(true);
+      expect(result.failed, result.output).toBe(false);
+      expect(result.record.status).toBe("rolled-back");
+      expect(result.running).toBe("@usine/server@1.0.0");
+      expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+      expect(result.durable).toEqual(
+        scenario === "migrated-no-durable" ? [] : [{ value: "before" }],
+      );
+      expect(result.snapshot).toEqual({
+        mode: 0o600,
+        configuration: [{ kind: "settings", value: "before" }],
+      });
+    },
+  );
+
+  it.each([
+    "migrated-startup-exit",
+    "migrated-startup-signal",
+    "migrated-startup-deadline",
+  ] as const)(
+    "restores the package and both databases when the version answers but readiness fails: %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.failed, result.output).toBe(false);
+      expect(result.migrated).toBe(true);
+      assert(result.record.status === "rolled-back");
+      expect(result.record.failureStage).toBe("health-check");
+      expect(result.running).toBe("@usine/server@1.0.0");
+      expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+      expect(result.durable).toEqual([{ value: "before" }]);
+      expect(result.output).toContain(
+        scenario === "migrated-startup-deadline"
+          ? "reason=deadline-exceeded"
+          : "reason=service-stopped",
+      );
+      if (scenario === "migrated-startup-deadline") {
+        expect(result.record.reason).toBe(
+          "The new server did not become ready within three minutes.",
+        );
+        const elapsed = Number(
+          result.output.match(/reason=deadline-exceeded elapsed_seconds=(\d+)/u)?.[1],
+        );
+        expect(elapsed).toBeGreaterThanOrEqual(180);
+        expect(elapsed).toBeLessThan(183);
+      } else {
+        expect(result.record.reason).toBe(
+          scenario === "migrated-startup-signal"
+            ? "The server service stopped during its health check (state=failed, signal=15)."
+            : "The server service stopped during its health check (state=failed, exit status=1).",
+        );
+      }
+    },
+  );
+
+  it("records a start failure separately from a readiness deadline", slowCli, () => {
+    const result = run("migrated-startup-failure");
+    expect(result.failed, result.output).toBe(false);
+    assert(result.record.status === "rolled-back");
+    expect(result.record.failureStage).toBe("health-check");
+    expect(result.record.reason).toContain("could not be started (systemctl exit status=1)");
+    expect(result.running).toBe("@usine/server@1.0.0");
+  });
+
+  it("waits for recovery after the target version answers before recording good", slowCli, () => {
+    const result = run("migrated-startup-wait");
+    expect(result.failed, result.output).toBe(false);
+    expect(result.record.status).toBe("good");
+    expect(result.commands).toContain("sleep 3");
+    expect(result.configuration).toContainEqual({ kind: "binding", value: "new" });
+    expect(result.durable).toEqual([{ value: "new", migrated: null }]);
+  });
+
+  it("keeps migrated data and a private backup after a successful upgrade", slowCli, () => {
+    const result = run("migrated-good");
+    expect(result.failed, result.output).toBe(false);
+    expect(result.record.status).toBe("good");
+    expect(result.configuration).toContainEqual({ kind: "binding", value: "new" });
+    expect(result.durable).toEqual([{ value: "new", migrated: null }]);
+    expect(result.snapshot?.configuration).toEqual([{ kind: "settings", value: "before" }]);
+  });
+
+  it("leaves the running version untouched when a database backup fails", slowCli, () => {
+    const result = run("bad-backup");
     expect(result.failed).toBe(true);
     assert(result.record.status === "failed");
-    expect(result.record.reason).toContain(
-      scenario === "invalid-retention" ? "BACKUP_KEEP" : "space",
-    );
-    if (scenario !== "invalid-retention") {
-      expect(result.output).toContain(`required_bytes=${result.databaseBytes * 2}`);
-    }
-    if (scenario === "low-space") expect(result.record.reason).toContain(".usine/upgrade");
-    if (scenario === "external-low-space") {
-      expect(result.record.reason).toContain('external backup "folder"');
-    }
-    if (scenario === "external-instance-low-space") {
-      expect(result.record.reason).toContain(".usine/upgrade");
-    }
-    expect(result.retained).toEqual([]);
+    expect(result.record.reason).toContain("back up");
     expect(result.running).toBe("@usine/server@1.0.0");
     expect(result.commands).not.toContain("stop");
     expect(result.commands).not.toContain("install");
-    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
-    expect(result.durable).toEqual([{ value: "before" }]);
-  },
-);
+  });
 
-it("records a healthy upgrade when an old backup cannot be removed", slowCli, () => {
-  const result = run("failed-prune");
-  expect(result.failed).toBe(false);
-  expect(result.record.status).toBe("good");
-  expect(result.running).toBe("@usine/server@2.0.0");
-  expect(result.retained).toHaveLength(4);
-  expect(result.retained).toContain(result.current);
-  expect(result.output).toContain("status=failed; check the upgrade service output");
-});
+  it.each(["missing-backup", "missing-durable-backup"] as const)(
+    "leaves the service stopped with a database recovery error after %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
+      expect(result.record.reason).toContain("restore the databases");
+      expect(result.running).toBe("");
+    },
+  );
 
-it("retains every backup when an upgrade rolls back", slowCli, () => {
-  const result = run("failed-retention");
-  expect(result.record.status).toBe("rolled-back");
-  expect(result.retained).toHaveLength(4);
-  expect(result.retained).toContain(result.current);
-});
-
-it("keeps the current backup even when older backups have future timestamps", slowCli, () => {
-  const result = run("clock-skew-retention");
-  expect(result.record.status).toBe("good");
-  expect(result.retained).toHaveLength(3);
-  expect(result.retained).toContain(result.current);
-  expect(result.retained.some((path) => path.endsWith("backup.old00000"))).toBe(false);
-});
-
-it.each(["migrated-api", "migrated-external", "migrated-no-durable"] as const)(
-  "restores the previous stores before its API answers after %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
-    expect(result.migrated).toBe(true);
+  it("waits for 180 elapsed seconds when health requests fail immediately", slowCli, () => {
+    const result = run("bad-api");
     expect(result.failed, result.output).toBe(false);
-    expect(result.record.status).toBe("rolled-back");
-    expect(result.running).toBe("@usine/server@1.0.0");
-    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
-    expect(result.durable).toEqual(scenario === "migrated-no-durable" ? [] : [{ value: "before" }]);
-    expect(result.snapshot).toEqual({
-      mode: 0o600,
-      configuration: [{ kind: "settings", value: "before" }],
-    });
-  },
-);
-
-it.each(["migrated-startup-exit", "migrated-startup-signal", "migrated-startup-deadline"] as const)(
-  "restores the package and both databases when the version answers but readiness fails: %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
-    expect(result.failed, result.output).toBe(false);
-    expect(result.migrated).toBe(true);
-    assert(result.record.status === "rolled-back");
-    expect(result.record.failureStage).toBe("health-check");
-    expect(result.running).toBe("@usine/server@1.0.0");
-    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
-    expect(result.durable).toEqual([{ value: "before" }]);
-    expect(result.output).toContain(
-      scenario === "migrated-startup-deadline"
-        ? "reason=deadline-exceeded"
-        : "reason=service-stopped",
+    const elapsed = Number(
+      result.output.match(/reason=deadline-exceeded elapsed_seconds=(\d+)/u)?.[1],
     );
-    if (scenario === "migrated-startup-deadline") {
+    expect(elapsed).toBeGreaterThanOrEqual(180);
+    expect(elapsed).toBeLessThan(183);
+    const retryDelays = (result.commands.match(/^sleep \d+$/gmu) ?? []).map((line) =>
+      Number(line.slice(6)),
+    );
+    expect(retryDelays.reduce((total, delay) => total + delay, 0)).toBeGreaterThan(160);
+  });
+
+  it(
+    "marks a version good only after startup recovery finishes, using the original npm prefix",
+    slowCli,
+    () => {
+      const result = run("good");
+      expect(result.failed).toBe(false);
+      expect(result.record.status).toBe("good");
+      expect(result.commands).toContain(
+        `install --global --prefix ${result.prefix} @usine/server@2.0.0`,
+      );
+      expect(result.commands).not.toContain("@usine/server@1.0.0");
+    },
+  );
+
+  it.each(["bad-api", "bad-install"] as const)(
+    "reinstalls and starts the previous version after %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.failed).toBe(false);
+      assert(result.record.status === "rolled-back");
+      expect(result.record.reason).not.toBe("");
+      expect(result.record.failureStage).toBe(
+        scenario === "bad-install" ? "install" : "health-check",
+      );
+      expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(1);
+      expect(result.commands).not.toContain("sleep 60");
+      expect(result.commands).toContain("@usine/server@1.0.0");
+      expect(result.running).toBe("@usine/server@1.0.0");
+    },
+  );
+
+  it(
+    "records a failed rollback and leaves the previous version in the recovery record",
+    slowCli,
+    () => {
+      const result = run("bad-rollback");
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
+      expect(result.record.previous).toBe("1.0.0");
+      expect(result.record.reason).not.toContain("reinstall the previous version");
+      expect(result.running).toBe("");
+    },
+  );
+
+  it(
+    "restarts the unchanged previous version after a failed target install without reinstalling",
+    slowCli,
+    () => {
+      const result = run("unchanged-install");
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
+      expect(result.record.reason).toBe("The package could not be installed.");
+      expect(result.running).toBe("@usine/server@1.0.0");
+      expect(result.commands).not.toContain("@usine/server@1.0.0");
+    },
+  );
+
+  it(
+    "starts the previous version when the rollback install fails with that version on disk",
+    slowCli,
+    () => {
+      const result = run("previous-rollback");
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
       expect(result.record.reason).toBe(
         "The new server did not become ready within three minutes.",
       );
-      const elapsed = Number(
-        result.output.match(/reason=deadline-exceeded elapsed_seconds=(\d+)/u)?.[1],
-      );
-      expect(elapsed).toBeGreaterThanOrEqual(180);
-      expect(elapsed).toBeLessThan(183);
-    } else {
-      expect(result.record.reason).toBe(
-        scenario === "migrated-startup-signal"
-          ? "The server service stopped during its health check (state=failed, signal=15)."
-          : "The server service stopped during its health check (state=failed, exit status=1).",
-      );
-    }
-  },
-);
-
-it("records a start failure separately from a readiness deadline", slowCli, () => {
-  const result = run("migrated-startup-failure");
-  expect(result.failed, result.output).toBe(false);
-  assert(result.record.status === "rolled-back");
-  expect(result.record.failureStage).toBe("health-check");
-  expect(result.record.reason).toContain("could not be started (systemctl exit status=1)");
-  expect(result.running).toBe("@usine/server@1.0.0");
-});
-
-it("waits for recovery after the target version answers before recording good", slowCli, () => {
-  const result = run("migrated-startup-wait");
-  expect(result.failed, result.output).toBe(false);
-  expect(result.record.status).toBe("good");
-  expect(result.commands).toContain("sleep 3");
-  expect(result.configuration).toContainEqual({ kind: "binding", value: "new" });
-  expect(result.durable).toEqual([{ value: "new", migrated: null }]);
-});
-
-it("keeps migrated data and a private backup after a successful upgrade", slowCli, () => {
-  const result = run("migrated-good");
-  expect(result.failed, result.output).toBe(false);
-  expect(result.record.status).toBe("good");
-  expect(result.configuration).toContainEqual({ kind: "binding", value: "new" });
-  expect(result.durable).toEqual([{ value: "new", migrated: null }]);
-  expect(result.snapshot?.configuration).toEqual([{ kind: "settings", value: "before" }]);
-});
-
-it("leaves the running version untouched when a database backup fails", slowCli, () => {
-  const result = run("bad-backup");
-  expect(result.failed).toBe(true);
-  assert(result.record.status === "failed");
-  expect(result.record.reason).toContain("back up");
-  expect(result.running).toBe("@usine/server@1.0.0");
-  expect(result.commands).not.toContain("stop");
-  expect(result.commands).not.toContain("install");
-});
-
-it.each(["missing-backup", "missing-durable-backup"] as const)(
-  "leaves the service stopped with a database recovery error after %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
-    expect(result.failed).toBe(true);
-    assert(result.record.status === "failed");
-    expect(result.record.reason).toContain("restore the databases");
-    expect(result.running).toBe("");
-  },
-);
-
-it("waits for 180 elapsed seconds when health requests fail immediately", slowCli, () => {
-  const result = run("bad-api");
-  expect(result.failed, result.output).toBe(false);
-  const elapsed = Number(
-    result.output.match(/reason=deadline-exceeded elapsed_seconds=(\d+)/u)?.[1],
+      expect(result.commands).toContain("@usine/server@1.0.0");
+      expect(result.running).toBe("@usine/server@1.0.0");
+    },
   );
-  expect(elapsed).toBeGreaterThanOrEqual(180);
-  expect(elapsed).toBeLessThan(183);
-  const retryDelays = (result.commands.match(/^sleep \d+$/gmu) ?? []).map((line) =>
-    Number(line.slice(6)),
+
+  it(
+    "reports recovery failure when the unchanged previous version fails its health check",
+    slowCli,
+    () => {
+      const result = run("unchanged-unhealthy");
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
+      expect(result.record.reason).toBe("Rollback failed. Check the upgrade service output.");
+      expect(result.running).toBe("");
+    },
   );
-  expect(retryDelays.reduce((total, delay) => total + delay, 0)).toBeGreaterThan(160);
+
+  it.each(["missing-rollback", "invalid-rollback", "other-rollback"] as const)(
+    "requests a manual reinstall when neither known version can be identified after %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
+      expect(result.record.reason).toContain("reinstall the previous version");
+      expect(result.running).toBe("");
+    },
+  );
+
+  it("does not replace packages when systemd cannot stop the server", slowCli, () => {
+    const result = run("bad-stop");
+    expect(result.failed).toBe(true);
+    expect(result.commands).not.toContain("install");
+  });
+
+  it.each(["exit-term", "exit-kill"] as const)(
+    "finishes upgrades and rollback when the server disappears before %s",
+    slowCli,
+    (shutdown) => {
+      const upgraded = run("good", shutdown);
+      expect(upgraded.failed).toBe(false);
+      expect(upgraded.record.status).toBe("good");
+      const recovered = run("bad-api", shutdown);
+      expect(recovered.failed).toBe(false);
+      expect(recovered.record.status).toBe("rolled-back");
+      expect(recovered.commands).toContain("@usine/server@1.0.0");
+    },
+  );
+
+  it("does not install after failed signals when the unit remains deactivating", slowCli, () => {
+    const result = run("good", "stuck");
+    expect(result.failed).toBe(true);
+    expect(result.record.status).toBe("failed");
+    expect(result.commands).not.toContain("install");
+  });
+
+  it.each(["transient-target", "transient-404"] as const)(
+    "installs after delayed registry propagation for %s without rollback",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.failed).toBe(false);
+      expect(result.record.status).toBe("good");
+      expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
+      expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
+      expect(result.commands).not.toContain("@usine/server@1.0.0");
+    },
+  );
+
+  it.each(["missing-target", "missing-404"] as const)(
+    "restarts the unchanged previous version after exhausting registry retries for %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario);
+      expect(result.failed).toBe(true);
+      assert(result.record.status === "failed");
+      expect(result.record.reason).toBe("The package could not be installed.");
+      expect(result.running).toBe("@usine/server@1.0.0");
+      expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
+      expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
+      expect(result.commands).not.toContain("@usine/server@1.0.0");
+    },
+  );
+
+  it.each([
+    "good",
+    "bad-install",
+    "migrated-api",
+    "migrated-startup-exit",
+    "migrated-startup-signal",
+    "migrated-startup-failure",
+    "bad-stop",
+  ] as const)(
+    "runs launchd upgrade and recovery through the independent helper: %s",
+    slowCli,
+    (scenario) => {
+      const result = run(scenario, "normal", "launchd");
+      expect(result.commands).toContain("launchctl bootout gui/501/dev.usine");
+      if (scenario === "bad-stop") {
+        expect(result.failed).toBe(true);
+        expect(result.record.status).toBe("failed");
+        expect(result.commands).not.toContain("install --global");
+        return;
+      }
+      expect(result.failed, result.output).toBe(false);
+      expect(result.commands).toContain("launchctl bootstrap");
+      expect(result.commands).toContain("launchctl kickstart");
+      expect(result.commands).not.toContain("show --property=ExecMain");
+      if (scenario === "migrated-startup-exit" || scenario === "migrated-startup-signal") {
+        assert(result.record.status === "rolled-back");
+        expect(result.record.reason).toBe(
+          scenario === "migrated-startup-signal"
+            ? "The server service stopped during its health check (state=inactive, signal=Terminated: 15)."
+            : "The server service stopped during its health check (state=inactive, exit status=1).",
+        );
+      }
+      if (scenario === "migrated-startup-failure") {
+        assert(result.record.status === "rolled-back");
+        expect(result.record.reason).toContain("could not be started (launchctl exit status=1)");
+      }
+      expect(result.record.status).toBe(scenario === "good" ? "good" : "rolled-back");
+      expect(result.running).toBe(
+        scenario === "good" ? "@usine/server@2.0.0" : "@usine/server@1.0.0",
+      );
+      expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
+      expect(result.durable).toEqual([{ value: "before" }]);
+    },
+  );
 });
-
-it(
-  "marks a version good only after startup recovery finishes, using the original npm prefix",
-  slowCli,
-  () => {
-    const result = run("good");
-    expect(result.failed).toBe(false);
-    expect(result.record.status).toBe("good");
-    expect(result.commands).toContain(
-      `install --global --prefix ${result.prefix} @usine/server@2.0.0`,
-    );
-    expect(result.commands).not.toContain("@usine/server@1.0.0");
-  },
-);
-
-it.each(["bad-api", "bad-install"] as const)(
-  "reinstalls and starts the previous version after %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
-    expect(result.failed).toBe(false);
-    assert(result.record.status === "rolled-back");
-    expect(result.record.reason).not.toBe("");
-    expect(result.record.failureStage).toBe(
-      scenario === "bad-install" ? "install" : "health-check",
-    );
-    expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(1);
-    expect(result.commands).not.toContain("sleep 60");
-    expect(result.commands).toContain("@usine/server@1.0.0");
-    expect(result.running).toBe("@usine/server@1.0.0");
-  },
-);
-
-it(
-  "records a failed rollback and leaves the previous version in the recovery record",
-  slowCli,
-  () => {
-    const result = run("bad-rollback");
-    expect(result.failed).toBe(true);
-    assert(result.record.status === "failed");
-    expect(result.record.previous).toBe("1.0.0");
-    expect(result.record.reason).not.toContain("reinstall the previous version");
-    expect(result.running).toBe("");
-  },
-);
-
-it(
-  "restarts the unchanged previous version after a failed target install without reinstalling",
-  slowCli,
-  () => {
-    const result = run("unchanged-install");
-    expect(result.failed).toBe(true);
-    assert(result.record.status === "failed");
-    expect(result.record.reason).toBe("The package could not be installed.");
-    expect(result.running).toBe("@usine/server@1.0.0");
-    expect(result.commands).not.toContain("@usine/server@1.0.0");
-  },
-);
-
-it(
-  "starts the previous version when the rollback install fails with that version on disk",
-  slowCli,
-  () => {
-    const result = run("previous-rollback");
-    expect(result.failed).toBe(true);
-    assert(result.record.status === "failed");
-    expect(result.record.reason).toBe("The new server did not become ready within three minutes.");
-    expect(result.commands).toContain("@usine/server@1.0.0");
-    expect(result.running).toBe("@usine/server@1.0.0");
-  },
-);
-
-it(
-  "reports recovery failure when the unchanged previous version fails its health check",
-  slowCli,
-  () => {
-    const result = run("unchanged-unhealthy");
-    expect(result.failed).toBe(true);
-    assert(result.record.status === "failed");
-    expect(result.record.reason).toBe("Rollback failed. Check the upgrade service output.");
-    expect(result.running).toBe("");
-  },
-);
-
-it.each(["missing-rollback", "invalid-rollback", "other-rollback"] as const)(
-  "requests a manual reinstall when neither known version can be identified after %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
-    expect(result.failed).toBe(true);
-    assert(result.record.status === "failed");
-    expect(result.record.reason).toContain("reinstall the previous version");
-    expect(result.running).toBe("");
-  },
-);
-
-it("does not replace packages when systemd cannot stop the server", slowCli, () => {
-  const result = run("bad-stop");
-  expect(result.failed).toBe(true);
-  expect(result.commands).not.toContain("install");
-});
-
-it.each(["exit-term", "exit-kill"] as const)(
-  "finishes upgrades and rollback when the server disappears before %s",
-  slowCli,
-  (shutdown) => {
-    const upgraded = run("good", shutdown);
-    expect(upgraded.failed).toBe(false);
-    expect(upgraded.record.status).toBe("good");
-    const recovered = run("bad-api", shutdown);
-    expect(recovered.failed).toBe(false);
-    expect(recovered.record.status).toBe("rolled-back");
-    expect(recovered.commands).toContain("@usine/server@1.0.0");
-  },
-);
-
-it("does not install after failed signals when the unit remains deactivating", slowCli, () => {
-  const result = run("good", "stuck");
-  expect(result.failed).toBe(true);
-  expect(result.record.status).toBe("failed");
-  expect(result.commands).not.toContain("install");
-});
-
-it.each(["transient-target", "transient-404"] as const)(
-  "installs after delayed registry propagation for %s without rollback",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
-    expect(result.failed).toBe(false);
-    expect(result.record.status).toBe("good");
-    expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
-    expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
-    expect(result.commands).not.toContain("@usine/server@1.0.0");
-  },
-);
-
-it.each(["missing-target", "missing-404"] as const)(
-  "restarts the unchanged previous version after exhausting registry retries for %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario);
-    expect(result.failed).toBe(true);
-    assert(result.record.status === "failed");
-    expect(result.record.reason).toBe("The package could not be installed.");
-    expect(result.running).toBe("@usine/server@1.0.0");
-    expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
-    expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
-    expect(result.commands).not.toContain("@usine/server@1.0.0");
-  },
-);
 
 it.live.each(["legacy", "current"])("supports %s upgrade health checks", (generation) =>
   Effect.gen(function* () {
@@ -869,49 +934,4 @@ healthy 1.0.0 version
       rmSync(root, { recursive: true, force: true });
     }
   }),
-);
-
-it.each([
-  "good",
-  "bad-install",
-  "migrated-api",
-  "migrated-startup-exit",
-  "migrated-startup-signal",
-  "migrated-startup-failure",
-  "bad-stop",
-] as const)(
-  "runs launchd upgrade and recovery through the independent helper: %s",
-  slowCli,
-  (scenario) => {
-    const result = run(scenario, "normal", "launchd");
-    expect(result.commands).toContain("launchctl bootout gui/501/dev.usine");
-    if (scenario === "bad-stop") {
-      expect(result.failed).toBe(true);
-      expect(result.record.status).toBe("failed");
-      expect(result.commands).not.toContain("install --global");
-      return;
-    }
-    expect(result.failed, result.output).toBe(false);
-    expect(result.commands).toContain("launchctl bootstrap");
-    expect(result.commands).toContain("launchctl kickstart");
-    expect(result.commands).not.toContain("show --property=ExecMain");
-    if (scenario === "migrated-startup-exit" || scenario === "migrated-startup-signal") {
-      assert(result.record.status === "rolled-back");
-      expect(result.record.reason).toBe(
-        scenario === "migrated-startup-signal"
-          ? "The server service stopped during its health check (state=inactive, signal=Terminated: 15)."
-          : "The server service stopped during its health check (state=inactive, exit status=1).",
-      );
-    }
-    if (scenario === "migrated-startup-failure") {
-      assert(result.record.status === "rolled-back");
-      expect(result.record.reason).toContain("could not be started (launchctl exit status=1)");
-    }
-    expect(result.record.status).toBe(scenario === "good" ? "good" : "rolled-back");
-    expect(result.running).toBe(
-      scenario === "good" ? "@usine/server@2.0.0" : "@usine/server@1.0.0",
-    );
-    expect(result.configuration).toEqual([{ kind: "settings", value: "before" }]);
-    expect(result.durable).toEqual([{ value: "before" }]);
-  },
 );
