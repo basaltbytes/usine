@@ -7,6 +7,7 @@ import { WorkerName } from "@usine/core/worker";
 import { DurableHarnessError } from "@usine/durable/harness";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
+import { GatewayModelError } from "@usine/executor/gateway";
 import { assert, describe, it } from "vitest";
 import { failureMessage } from "../src/failure-message.ts";
 
@@ -125,6 +126,17 @@ describe("CLI failure messages", () => {
         }),
       ),
       "usine up did not start: durable storage error: could not resume the durable tasks (SQLITE_IOERR: disk I/O error). Check .usine/durable.sqlite and its folder, then run usine up again.",
+    );
+  });
+
+  it("reports missing coordinator credentials as a gateway startup refusal", () => {
+    assert.strictEqual(
+      failureMessage(
+        GatewayModelError.make({
+          message: 'Gateway credential unavailable for provider "openai-codex".',
+        }),
+      ),
+      'usine up did not start: Gateway credential unavailable for provider "openai-codex". Check the gateway connection and provider credentials, then run usine up again.',
     );
   });
 });

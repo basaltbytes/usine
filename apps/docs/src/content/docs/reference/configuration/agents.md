@@ -35,9 +35,9 @@ Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 
 Every attempt has a Pi parent in the orchestrator. Its `subagent` tool starts child sessions on the worker using the agent's harness, model, and effort. Children cannot create nested children. The [child-session budget](/reference/configuration/settings/#instance-settings) counts all child starts over the attempt's lifetime.
 
-Parent model selection uses the agent override, instance default, Pi's configured default, then the first Pi model with a credential. Parent effort uses the agent override, instance default, then child effort. Pi reads configuration from `~/.pi/agent` or `PI_CODING_AGENT_DIR` for the Unix user running the orchestrator. An `openai-codex` model requires a ChatGPT login there; other providers require API keys.
+Parent model selection uses the agent override, instance default, Pi's configured default, then the first Pi model with a credential. Parent effort uses the agent override, instance default, then child effort. Pi reads model defaults from `~/.pi/agent` or `PI_CODING_AGENT_DIR` for the Unix user running the orchestrator. With a gateway, the parent uses the first gateway declared by the SSH workers and needs no local provider login. Use `openai-codex/<model>` for its ChatGPT login, or `openai/<model>` and `anthropic/<model>` for its API keys. Without a gateway, an `openai-codex` model requires a local ChatGPT login; other providers require local API keys.
 
-An unavailable model, unsupported effort, or missing parent credential fails the attempt with `AgentFailure`. Startup preflight checks child harnesses; parent model resolution happens when the attempt starts.
+An unavailable model, unsupported effort, or missing parent credential fails the attempt with `AgentFailure`. Startup preflight checks child harnesses and the gateway route and credentials for configured parent providers. Parent model and effort resolution happens when the attempt starts.
 
 ## Harness requirements
 

@@ -3,7 +3,7 @@ title: Configure a gateway
 description: Proxy SSH workers’ GitHub and model credentials through a gateway.
 ---
 
-Set up a gateway that keeps real GitHub and model credentials off private SSH workers.
+Set up a gateway that keeps real GitHub and model credentials off private SSH workers. The attempt coordinator also uses the gateway's model credentials, so the orchestrator host needs no provider login.
 
 ## Prerequisites
 
@@ -74,6 +74,16 @@ Preflight reaches the admin API and the gateway from the worker. A test attempt 
 The executor manages its own admin API forward; omit `LocalForward` from the gateway SSH alias. A private Hetzner worker reaches the gateway only. A Boat worker uses [the Tailscale connection procedure](/guides/connect-boat-to-a-gateway/). A long-lived worker outside the private network uses [worker-level tailnet settings](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
 Gateway slots use wire protocols. In the SSH worker’s `gateway.llm_providers`, use `anthropic-messages` for the Anthropic Messages API and `openai-responses` for the OpenAI Responses API or a ChatGPT login. Upgrade the gateway first, then the orchestrator. For one release, the gateway accepts the previous `/anthropic` and `/openai` prefixes and logs a deprecation warning so running attempts can finish. A gateway without credential reporting fails preflight with an instruction to upgrade `@usine/gateway`. Credential environment-variable names stay the same. See the [worker reference](/reference/configuration/workers/#gateway).
+
+## Coordinator credentials
+
+The Pi coordinator runs on the orchestrator host and sends model requests through an SSH forward with a caller token. The gateway replaces that token with its provider credential. usine renews the coordinator's attachment every two minutes and removes it when the runtime stops.
+
+Set `settings.parent_model` or the agent's `parent_model` to `openai-codex/<model>` for the gateway's ChatGPT login, `openai/<model>` for its OpenAI API key, or `anthropic/<model>` for its Anthropic API key. The coordinator uses the first gateway declared by the instance's SSH workers. With several gateways, connect the coordinator's provider on that gateway. Restart usine after changing which gateway appears first.
+
+Startup preflight checks the model proxy and the gateway credentials for configured coordinator providers, and reports a missing credential by provider. Without an explicit coordinator model, the gateway must have at least one supported credential. Launch checks the credential again. Coordinator usage remains in `apiKeys` or `chatgptPlan`, according to the gateway credential.
+
+An instance without a gateway uses Pi's local login and model configuration. Pi can use the gateway's Anthropic API keys; Claude subscription credentials require Claude Code. See [agent configuration](/reference/configuration/agents/#parent-selection).
 
 ## Manual credential configuration
 

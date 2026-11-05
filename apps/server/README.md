@@ -273,6 +273,8 @@ Run `pnpm --filter @usine/server check` after building dependencies to check Typ
 
 Provider connections are available in setup and Configuration > Settings. `usine login claude` and `usine login chatgpt` authorize subscription logins; `--api-key` reads a masked API key. `usine logout <provider>` disconnects them. Run these commands from the instance folder while the server runs. The server sends completed logins to configured gateways over their authenticated admin APIs, or writes the local harness credential files when no gateway is configured.
 
+With a gateway configured, the coordinator also uses the gateway's provider credentials. Startup checks its connection and configured coordinator providers before resuming attempts. A failed check names the gateway or missing provider; the orchestrator host needs no provider login. Without a gateway, the coordinator uses its local Pi login.
+
 ## Step outputs
 
 Attempts can return typed JSON documents from `.usine/outputs/`. The runtime database stores gzip bodies separately from run snapshots, while run evidence and `usine export-run` include output refs. See [agent step outputs](https://docs.usine.dev/reference/configuration/agents/#step-outputs) for the format and limits.

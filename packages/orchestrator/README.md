@@ -12,6 +12,10 @@ Operator usage reads use each session's recorded billing pool. Older sessions wi
 
 Operator usage reads use each harness descriptor’s token price table when the session reports a token breakdown without its own USD cost. The configuration capabilities API includes harness display labels and saved-session resume commands from the same catalog.
 
+## Coordinator credentials
+
+`runtimeLayer` connects the coordinator to the first gateway declared by the SSH workers. Startup checks the model proxy and configured parent providers before durable tasks resume. The coordinator uses the gateway's credentials with a caller token, and the orchestrator host needs no provider login. Usage follows the gateway credential into `apiKeys` or `chatgptPlan`. Instances without a gateway retain Pi's local login. Restart after changing the selected gateway.
+
 ## Conditional approval
 
 Loop approval accepts `required`, `none`, or a boolean CEL condition over the event
