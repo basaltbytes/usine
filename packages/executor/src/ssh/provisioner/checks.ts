@@ -1,8 +1,8 @@
+import { type HarnessCatalog, type HarnessCredential } from "@usine/agents/harness";
 import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import type { RemoteCommands } from "../../remote/commands.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import type { GatewayLlmProvider } from "@usine/core/worker";
 import { Array as Arr, DateTime, Effect, Option, Duration } from "effect";
 import {
   MachineCheck,
@@ -20,32 +20,33 @@ import type { SshWorkerEntry } from "../workers.ts";
  * the Gateway nor in the provisioner's `api_keys`.
  */
 export const harnessCredentialGap = (
+  catalog: HarnessCatalog,
   entry: SshWorkerEntry,
   brains: ReadonlyArray<BrainSpec>,
 ): Option.Option<WorkerCapabilityError> => {
   const worker = entry.address.name;
   const noGateway = "A subscription login needs a gateway, which this worker doesn't have.";
-  const missing = (label: string, provider: GatewayLlmProvider, login: string) => {
+  const missing = (label: string, { provider, protocol }: HarnessCredential) => {
     const head = `${label} on provisioned worker "${worker}" has no credential, because provisioned machines have no stored login.`;
     return Option.isSome(entry.gateway)
-      ? `${head} Add ${provider} to the gateway's llm_providers, with ${login} or an API key on the gateway, or set provisioner.api_keys.${provider}.`
+      ? `${head} Add ${protocol} to the gateway's llm_providers, with a subscription credential or an API key on the gateway, or set provisioner.api_keys.${provider}.`
       : `${head} Set provisioner.api_keys.${provider}. ${noGateway}`;
   };
   for (const harness of Arr.dedupe(brains.map((brain) => brain.harness))) {
-    if (gatewayHolds(entry.gateway, harness) || Option.isSome(provisionedApiKey(entry, harness)))
+    if (
+      gatewayHolds(catalog, entry.gateway, harness) ||
+      Option.isSome(provisionedApiKey(catalog, entry, harness))
+    )
       continue;
-    const message = (() => {
-      switch (harness) {
-        case "claude":
-          return missing("Claude Code", "anthropic", "a subscription token");
-        case "codex":
-          return missing("Codex", "openai", "a ChatGPT login");
-        case "pi":
-          return `Pi children run only on local workers, not on provisioned worker "${worker}".`;
-        default:
-          return `No provisioned worker credential for harness "${harness}".`;
-      }
-    })();
+    const message = Option.match(catalog.get(harness), {
+      onNone: () => `No provisioned worker credential for harness "${harness}".`,
+      onSome: ({ label, worker: requirements }) =>
+        Option.match(requirements.credential, {
+          onNone: () =>
+            `${label} on provisioned worker "${worker}" has no credential route for an API key or gateway.`,
+          onSome: (credential) => missing(label, credential),
+        }),
+    });
     return Option.some(
       WorkerCapabilityError.make({
         worker,

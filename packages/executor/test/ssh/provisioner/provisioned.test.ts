@@ -13,7 +13,7 @@ import {
   ContainerLimits,
   ContainerMemoryMib,
   ContainerPids,
-  type GatewayLlmProvider,
+  type GatewayLlmProtocol,
 } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
@@ -78,7 +78,7 @@ const CODEX_HOME = `${ROOT}/workers/eu-one/codex/remote-run_execute_1`;
 
 /** A Gateway with a Claude subscription token and a ChatGPT login. */
 const SUBSCRIPTION_PROVIDERS = {
-  anthropic: Option.some(
+  "anthropic-messages": Option.some(
     AnthropicProvider.make({
       upstream: UpstreamBase.make("https://api.anthropic.com"),
       credential: AnthropicSubscriptionToken.make({
@@ -86,7 +86,7 @@ const SUBSCRIPTION_PROVIDERS = {
       }),
     }),
   ),
-  openai: Option.some(
+  "openai-responses": Option.some(
     OpenAiProvider.make({
       upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
       credential: ChatGptLogin.make({
@@ -110,7 +110,7 @@ const createdHostKey = (providers: ReturnType<typeof fakeProviders>): string | u
 
 /** Returns a provisioned Hetzner Worker behind a Gateway with `llmProviders`. */
 const gatewayHetznerAddress = (
-  llmProviders: ReadonlyArray<GatewayLlmProvider>,
+  llmProviders: ReadonlyArray<GatewayLlmProtocol>,
   apiKeys: { readonly openai?: string } = {},
 ): SshWorkerAddress => ({
   ...gatewayAddress({ llmProviders }),
@@ -215,7 +215,7 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         assert.isString(given.host.sshEnvironment.USINE_GATEWAY_TOKEN);
         assert.include(
           machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "",
-          'base_url = "http://llm.gw.test/openai/v1"',
+          'base_url = "http://llm.gw.test/openai-responses/v1"',
         );
         const currentGatewayCredential = yield* given.gatewayCredential;
         assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
@@ -227,7 +227,7 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
             machine,
             providers,
             gateway,
-            gatewayHetznerAddress(["anthropic", "openai"]),
+            gatewayHetznerAddress(["anthropic-messages", "openai-responses"]),
             parent,
           ),
         ),
@@ -248,14 +248,19 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         }).pipe(
           Effect.scoped,
           Effect.provide(
-            gatewayRuntimeOf(machine, providers, gateway, gatewayHetznerAddress(["anthropic"])),
+            gatewayRuntimeOf(
+              machine,
+              providers,
+              gateway,
+              gatewayHetznerAddress(["anthropic-messages"]),
+            ),
           ),
         );
         assert(refused._tag === "WorkerCapabilityError");
         assert.strictEqual(refused.capability, "harness-login");
         assert.include(
           refused.message,
-          "Add openai to the gateway's llm_providers, with a ChatGPT login or an API key on the gateway, or set provisioner.api_keys.openai.",
+          "Add openai-responses to the gateway's llm_providers, with a subscription credential or an API key on the gateway, or set provisioner.api_keys.openai.",
         );
 
         machine.state.refusedHosts.add("api.openai.com");
@@ -273,13 +278,13 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
               machine,
               providers,
               gateway,
-              gatewayHetznerAddress(["anthropic"], { openai: OPENAI_KEY }),
+              gatewayHetznerAddress(["anthropic-messages"], { openai: OPENAI_KEY }),
             ),
           ),
         );
         assert.include(
           blocked.message,
-          "Codex uses an API key on SSH worker \"eu-one\", and the gateway's forward proxy blocks api.openai.com. Add api.openai.com to the gateway's egress allowlist, or add openai to the worker's llm_providers with the key on the gateway.",
+          "Codex uses an API key on SSH worker \"eu-one\", and the gateway's forward proxy blocks api.openai.com. Add api.openai.com to the gateway's egress allowlist, or add openai-responses to the worker's llm_providers with the key on the gateway.",
         );
         assert.strictEqual(providers.hetzner.servers.size, 0, "the unusable machine was deleted");
       });
@@ -822,7 +827,7 @@ describe("Provisioned SSH Worker", () => {
             1,
           )
           .pipe(Effect.flip);
-        assert.include(pi.message, "Pi children run only on local workers");
+        assert.include(pi.message, 'Pi on provisioned worker "eu-one" has no credential route');
 
         providers.hetzner.token = "rotated";
         const token = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);

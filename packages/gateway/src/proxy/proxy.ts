@@ -341,6 +341,12 @@ export class GatewayProxy extends Context.Service<
             "unsupported-path",
             `The gateway serves /anthropic and /openai on ${hosts.llm}, not ${target.pathname}.`,
           );
+        if (destination.value.legacy)
+          yield* Effect.logWarning("Deprecated LLM path prefix; update the attempt configuration", {
+            worker: claims.worker,
+            repository: claims.repository,
+            provider: destination.value.provider,
+          });
         const { providers } = yield* inForce.current;
         const provider = configuredProvider(providers, destination.value.provider);
         if (Option.isNone(provider))
@@ -354,7 +360,7 @@ export class GatewayProxy extends Context.Service<
           return yield* refusedCaller(
             claims,
             "unsupported-path",
-            `The gateway serves only the routes Claude Code and Codex call on ${hosts.llm}, such as /anthropic/v1/messages and /openai/v1/responses, not ${target.pathname}.`,
+            `The gateway serves only the configured wire-protocol routes on ${hosts.llm}, such as /anthropic-messages/v1/messages and /openai-responses/v1/responses, not ${target.pathname}.`,
           );
         const incoming = withoutCallerCredentials(endToEndHeaders(request.headers));
         const { credential } = provider.value;

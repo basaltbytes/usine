@@ -1,5 +1,7 @@
 # @usine/cloudflare
 
+The sandbox environment reads provider credential variables from the registered harness descriptors. Outbound handlers replace the placeholder credential with the provider API key; sandbox environment variables contain no provider secrets.
+
 The Cloudflare Worker that runs each usine Attempt in its own sandbox, for `cloudflare` Workers in `usine.yaml` ([#551](https://github.com/basaltbytes/usine/issues/551)). You deploy it to your Cloudflare account; usine's executor calls it over HTTPS with a Cloudflare Access service token.
 
 Each sandbox is a Durable Object that owns one container, started from an image in the Worker's configuration with the [Durable Object Container API](https://developers.cloudflare.com/containers/api/durable-object-container/) and the [Sandbox SDK 1.0](https://developers.cloudflare.com/sandbox/). The container has no internet access. Its requests for GitHub, the LLM providers, and the allowlisted hosts go to outbound handlers in the Worker, which hold the Attempt's credentials, so the container never receives them:

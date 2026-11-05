@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@cloudflare/sandbox": "1.0.3",
+    "@usine/agents": "workspace:*",
     "@usine/core": "workspace:*"
   },
   "devDependencies": {

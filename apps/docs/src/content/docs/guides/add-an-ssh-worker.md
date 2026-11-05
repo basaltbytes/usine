@@ -103,7 +103,7 @@ Use an always-on Linux VM in OrbStack or Lima for a Mac worker. On Apple Silicon
      domain: gw.internal
      destination: usine-gateway
      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-     llm_providers: [anthropic, openai]
+     llm_providers: [anthropic-messages, openai-responses]
    tailnet:
      gateway_address: 100.64.0.2
    ```

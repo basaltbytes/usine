@@ -1,9 +1,10 @@
+import type { HarnessCatalog } from "@usine/agents/harness";
 import type { GatewayDomain } from "@usine/core/worker";
 import { Effect } from "effect";
 import { WorkerCapabilityError } from "../../executor.ts";
 import type { RemoteCommands } from "../../remote/commands.ts";
 import type { SshMachine, SshTailnet } from "../model.ts";
-import { GATEWAY_SENT_VARIABLES } from "./environment.ts";
+import { gatewaySentVariables } from "./environment.ts";
 
 const CONFIGURE = String.raw`
 set -eu
@@ -49,6 +50,7 @@ fi
 `.trim();
 
 export const configureTailnetGateway = Effect.fn("SshExecutor.configureTailnetGateway")(function* (
+  catalog: HarnessCatalog,
   commands: RemoteCommands,
   operation: "preflight" | "prepare",
   machine: SshMachine,
@@ -72,7 +74,7 @@ export const configureTailnetGateway = Effect.fn("SshExecutor.configureTailnetGa
       "sh",
       tailnet.gatewayAddress,
       domain,
-      GATEWAY_SENT_VARIABLES.join(" "),
+      gatewaySentVariables(catalog).join(" "),
     ])
     .pipe(
       Effect.mapError((cause) =>

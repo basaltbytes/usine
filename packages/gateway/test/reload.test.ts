@@ -230,7 +230,7 @@ const askAnthropic = (token: string) =>
           host: proxy.host,
           port: proxy.port,
           method: "POST",
-          path: "/anthropic/v1/messages",
+          path: "/anthropic-messages/v1/messages",
           headers: { host: "llm.gw.test", "x-api-key": token, "content-type": "application/json" },
         },
         (response) => {
@@ -354,7 +354,9 @@ describe("reloading the gateway", () => {
       withGateway(["registry.npmjs.org"], (files) =>
         Effect.gen(function* () {
           const providers = yield* reportedProviders;
-          assert.deepStrictEqual(providers, [{ provider: "anthropic", credential: "api-key" }]);
+          assert.deepStrictEqual(providers, [
+            { provider: "anthropic-messages", credential: "api-key" },
+          ]);
 
           yield* files.write("secrets.env", [
             ...secretsLines(FIRST_KEY).filter((line) => !line.startsWith("ANTHROPIC_API_KEY=")),
@@ -364,7 +366,7 @@ describe("reloading the gateway", () => {
 
           const currentProviders = yield* reportedProviders;
           assert.deepStrictEqual(currentProviders, [
-            { provider: "anthropic", credential: "subscription" },
+            { provider: "anthropic-messages", credential: "subscription" },
           ]);
           assert.notInclude(lines.join("\n"), SUBSCRIPTION_TOKEN);
         }),
@@ -386,8 +388,8 @@ describe("reloading the gateway", () => {
           ]);
           yield* reload;
           const withKey = [
-            { provider: "anthropic", credential: "api-key" },
-            { provider: "openai", credential: "api-key" },
+            { provider: "anthropic-messages", credential: "api-key" },
+            { provider: "openai-responses", credential: "api-key" },
           ];
           const providers = yield* reportedProviders;
           assert.deepStrictEqual(providers, withKey);
@@ -417,8 +419,8 @@ describe("reloading the gateway", () => {
           yield* reload;
           const updatedProviders = yield* reportedProviders;
           assert.deepStrictEqual(updatedProviders, [
-            { provider: "anthropic", credential: "api-key" },
-            { provider: "openai", credential: "subscription" },
+            { provider: "anthropic-messages", credential: "api-key" },
+            { provider: "openai-responses", credential: "subscription" },
           ]);
           yield* logged("Loaded the ChatGPT login", files.path("auth.json"));
           assert.include(

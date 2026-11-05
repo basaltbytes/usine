@@ -1,4 +1,9 @@
-import { WorkerName } from "@usine/core/worker";
+import {
+  GatewayCredentialKind,
+  GatewayLlmProtocol,
+  GatewayLlmProvider,
+  WorkerName,
+} from "@usine/core/worker";
 import {
   type AttachRequest,
   type Attached,
@@ -6,11 +11,22 @@ import {
   type AttachmentList,
   type Detached,
   GatewayAdminApi,
-  type LlmProviderList,
+  LlmProviderList,
+  LlmProviderSummary,
+  AdminAuthorization,
 } from "@usine/gateway/admin";
-import { type Brand, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
+import {
+  type Brand,
+  DateTime,
+  Effect,
+  Option,
+  type Redacted,
+  Result,
+  Schema,
+  SchemaGetter,
+} from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
-import { HttpApiClient } from "effect/http-api";
+import { HttpApi, HttpApiGroup, HttpApiEndpoint, HttpApiClient } from "effect/http-api";
 import type { SshWorkerGateway } from "../model.ts";
 import { type GatewayForward, GatewayForwardClosed, type OpenForward } from "./forward.ts";
 
@@ -117,10 +133,42 @@ const sinceFields = (failure: { readonly _tag: string }) => {
   return {};
 };
 
+const ReportedProtocol = Schema.Union([GatewayLlmProvider, GatewayLlmProtocol]).pipe(
+  Schema.decodeTo(GatewayLlmProtocol, {
+    decode: SchemaGetter.transform((value) =>
+      value === "anthropic"
+        ? "anthropic-messages"
+        : value === "openai"
+          ? "openai-responses"
+          : value,
+    ),
+    encode: SchemaGetter.transform((value) => value),
+  }),
+);
+
+const CompatibleProvidersApi = HttpApi.make("CompatibleProvidersApi").add(
+  HttpApiGroup.make("llm")
+    .add(
+      HttpApiEndpoint.get("providers", "/v1/providers", {
+        success: Schema.Struct({
+          providers: Schema.Array(
+            Schema.Struct({ provider: ReportedProtocol, credential: GatewayCredentialKind }),
+          ),
+        }),
+      }),
+    )
+    .middleware(AdminAuthorization),
+);
+
 const adminClientAt = (url: URL, adminToken: Redacted.Redacted<string>) =>
-  HttpApiClient.make(GatewayAdminApi, {
-    baseUrl: url,
-    transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(adminToken)),
+  Effect.gen(function* () {
+    const options = {
+      baseUrl: url,
+      transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(adminToken)),
+    };
+    const client = yield* HttpApiClient.make(GatewayAdminApi, options);
+    const compatible = yield* HttpApiClient.make(CompatibleProvidersApi, options);
+    return { ...client, llm: compatible.llm };
   });
 
 type AdminClient = Effect.Success<ReturnType<typeof adminClientAt>>;
@@ -204,7 +252,13 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
     list: bounded("list")((client) => client.attachments.list()),
     providers: bounded("providers")((client) =>
       client.llm.providers().pipe(
-        Effect.asSome,
+        Effect.map((reported) =>
+          Option.some(
+            LlmProviderList.make({
+              providers: reported.providers.map((provider) => LlmProviderSummary.make(provider)),
+            }),
+          ),
+        ),
         Effect.catchIf(unknownRoute, () => Effect.succeedNone),
       ),
     ),

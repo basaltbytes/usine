@@ -1,41 +1,26 @@
-import { catalog } from "@usine/agents/harness";
-import { Harness } from "@usine/core/agent/brain";
+import { type HarnessCatalog } from "@usine/agents/harness";
+import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { Effect, Option, Redacted } from "effect";
 import type { ExecutorOperation } from "../executor.ts";
 import { type RemoteCommands, sendingShell } from "../remote/commands.ts";
 import type { RemoteAccess } from "../remote/machine.ts";
-import type { CodexHomes } from "./codex-homes.ts";
+import type { AttemptHomes } from "./attempt-homes.ts";
 import { writeMachineFiles } from "./gateway/attachments.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress } from "./model.ts";
 
-/** The variable with the OpenAI API key that Codex's `model_provider` reads (`env_key`). */
-const OPENAI_KEY_VARIABLE = "OPENAI_API_KEY";
-
-/**
- * Codex's `config.toml` for an OpenAI API key in `OPENAI_API_KEY`: a `model_provider` that
- * sends the Responses API to `api.openai.com` and needs no login. The file contains no key.
- */
-const CODEX_API_KEY_CONFIG = [
-  'model_provider = "usine-openai"',
-  "",
-  "[model_providers.usine-openai]",
-  'name = "OpenAI API key"',
-  'base_url = "https://api.openai.com/v1"',
-  `env_key = "${OPENAI_KEY_VARIABLE}"`,
-  'wire_api = "responses"',
-  "requires_openai_auth = false",
-  "",
-].join("\n");
-
 /** Returns whether the Gateway holds a credential for `harness`'s provider. */
-export const gatewayHolds = (gateway: Option.Option<MachineGateway>, harness: Harness): boolean =>
+export const gatewayHolds = (
+  catalog: HarnessCatalog,
+  gateway: Option.Option<MachineGateway>,
+  harness: Harness,
+): boolean =>
   Option.exists(gateway, ({ settings }) =>
     Option.exists(
       Option.flatMap(catalog.get(harness), (descriptor) =>
-        Option.map(descriptor.worker.credential, ({ provider }) => provider),
+        Option.map(descriptor.worker.credential, ({ protocol }) => protocol),
       ),
-      (provider) => settings.llmProviders.includes(provider),
+      (protocol) => settings.llmProviders.includes(protocol),
     ),
   );
 
@@ -45,11 +30,13 @@ export const gatewayHolds = (gateway: Option.Option<MachineGateway>, harness: Ha
  * credential.
  */
 export const provisionedApiKey = (
+  catalog: HarnessCatalog,
   worker: { readonly address: SshWorkerAddress; readonly gateway: Option.Option<MachineGateway> },
   harness: Harness,
 ): Option.Option<Redacted.Redacted<string>> => {
   const { machine } = worker.address;
-  if (machine._tag !== "Provisioned" || gatewayHolds(worker.gateway, harness)) return Option.none();
+  if (machine._tag !== "Provisioned" || gatewayHolds(catalog, worker.gateway, harness))
+    return Option.none();
   return Option.flatMap(
     Option.flatMap(catalog.get(harness), (descriptor) =>
       Option.map(descriptor.worker.credential, ({ provider }) => provider),
@@ -58,37 +45,52 @@ export const provisionedApiKey = (
   );
 };
 
-/**
- * Returns `access` with the provisioner's API keys among the Attempt's secrets. With an OpenAI
- * key, also writes the Attempt's Codex home, which `holdCodexHome` gives it, with
- * `CODEX_API_KEY_CONFIG`.
- */
+/** Adds provisioner API keys and writes each registered harness's attempt configuration. */
 export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
+  catalog: HarnessCatalog,
   commands: RemoteCommands,
-  holdCodexHome: CodexHomes["hold"],
+  holdAttemptHome: AttemptHomes["hold"],
   machine: SshMachine,
   attemptId: AttemptId,
   access: RemoteAccess,
   operation: ExecutorOperation,
 ) {
-  const anthropic = provisionedApiKey(machine, Harness.make("claude"));
-  const openai = provisionedApiKey(machine, Harness.make("codex"));
-  const secrets = Object.fromEntries([
-    ...Option.toArray(Option.map(anthropic, (key) => ["ANTHROPIC_API_KEY", key] as const)),
-    ...Option.toArray(Option.map(openai, (key) => [OPENAI_KEY_VARIABLE, key] as const)),
-  ]);
-  if (Object.keys(secrets).length === 0) return access;
-  const codexHome = yield* Effect.transposeOption(
-    Option.map(openai, () =>
-      holdCodexHome(machine, attemptId).pipe(
-        Effect.tap((home) =>
-          writeMachineFiles(commands, operation, machine.shell, [
-            [`${home}/config.toml`, CODEX_API_KEY_CONFIG],
-          ]),
-        ),
-      ),
+  yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name });
+  const keyed = catalog.descriptors.flatMap((descriptor) =>
+    Option.toArray(provisionedApiKey(catalog, machine, descriptor.id)).flatMap((key) =>
+      Option.toArray(descriptor.worker.credential).map((credential) => ({
+        descriptor,
+        credential,
+        key,
+      })),
     ),
   );
+  if (keyed.length === 0) {
+    yield* Effect.logDebug("No attempt API keys to inject", {
+      attemptId,
+      worker: machine.address.name,
+    });
+    return access;
+  }
+  const wirings = yield* Effect.forEach(keyed, ({ descriptor, credential }) =>
+    Effect.gen(function* () {
+      const homes = yield* Effect.forEach(Option.toArray(credential.home), () =>
+        holdAttemptHome(machine, attemptId, descriptor),
+      );
+      const wiring = credential.apiKey.render(credential.apiKeyBaseUrl, homes[0] ?? "");
+      if (wiring.files.length > 0)
+        yield* writeMachineFiles(commands, operation, machine.shell, wiring.files);
+      return { wiring, homes };
+    }),
+  );
+  const secrets = Object.fromEntries(
+    keyed.map(({ credential, key }) => [credential.apiKey.tokenVariable, key]),
+  );
+  yield* Effect.logInfo("Prepared attempt API-key wiring", {
+    attemptId,
+    worker: machine.address.name,
+    harnesses: keyed.map(({ descriptor }) => descriptor.id),
+  });
   const values = Object.values(secrets).map(Redacted.value);
   return {
     ...access,
@@ -98,14 +100,13 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
     secrets: { ...access.secrets, ...secrets },
     apiKeyHarnesses: new Set([
       ...access.apiKeyHarnesses,
-      ...Option.toArray(Option.map(anthropic, () => Harness.make("claude"))),
-      ...Option.toArray(Option.map(openai, () => Harness.make("codex"))),
+      ...keyed.map(({ descriptor }) => descriptor.id),
     ]),
-    writablePaths: [...access.writablePaths, ...Option.toArray(codexHome)],
-    environment: Option.match(codexHome, {
-      onNone: () => access.environment,
-      onSome: (home) => ({ ...access.environment, CODEX_HOME: home }),
-    }),
+    writablePaths: [...access.writablePaths, ...wirings.flatMap(({ homes }) => homes)],
+    environment: {
+      ...access.environment,
+      ...Object.assign({}, ...wirings.map(({ wiring }) => wiring.environment)),
+    },
     scrub: (text: string) =>
       values.reduce(
         (scrubbed, value) => scrubbed.replaceAll(value, "<redacted>"),

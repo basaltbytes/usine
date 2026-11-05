@@ -1,3 +1,4 @@
+import { Harnesses } from "@usine/agents/harness/node";
 import { awaitMachineSsh, machineChecksFor, harnessCredentialGap } from "./checks.ts";
 import { machineReuseFor } from "./reuse.ts";
 import { machineStartsFor } from "./starts.ts";
@@ -111,6 +112,7 @@ const operationError =
 export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachinesFor")(function* (
   options: ProvisionedMachinesOptions,
 ) {
+  const { catalog } = yield* Harnesses;
   const { instance, commands, settings } = options;
   const tailnets = yield* boatTailnetsFor(commands);
   const fs = yield* FileSystem.FileSystem;
@@ -937,7 +939,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     if (Option.isSome(entry.gateway))
       yield* options.verifyGatewayAdmin(worker, entry.gateway.value);
     yield* tailnets.verify(entry.address);
-    const gap = harnessCredentialGap(entry, brains);
+    const gap = harnessCredentialGap(catalog, entry, brains);
     if (Option.isSome(gap)) return yield* gap.value;
     yield* Effect.logInfo(
       "Provisioned SSH Worker preflight verified; its next due machine check verifies the harnesses",

@@ -161,6 +161,10 @@ The executor reads credential provider mappings, login file mounts, and login eg
 
 `HostLoginLock` replaces `ClaudeLoginLock` and keys locks by harness, worker, and provisioned machine. Claude’s runtime takes its lock for authentication checks and child startup. Keeping the lock inside the runtime removes the executor’s harness branch while preserving serialization of commands that can refresh the same login. The executor and attempt runtime share one lock service.
 
+## Amendment (2026-11-05, #957): descriptor credential wiring and protocol slots
+
+The executor reads credential environment and configuration-file recipes from harness descriptors for gateway access, provisioner API keys, and Cloudflare outbound handlers. It manages SSH attempt homes by harness ID and attempt ID, preserving the existing Codex path. This restores the executor boundary: harness modules define vendor authentication wiring, and the executor writes files, supplies secrets, and manages their lifetime.
+
 ## Amendment (2026-11-05, #977): child recovery stops with the attempt channel
 
 An orderly restart detached attempt channels and released worker credentials while harness children still consumed output in the durable harness's scope. Codex interpreted the resulting relay exits as crashes, resumed saved threads over the closing transport, and reported infrastructure failures.

@@ -20,6 +20,7 @@ import {
   ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
+  GatewayLlmProtocol,
   GatewayLlmProvider,
   HetznerImage,
   HetznerLabels,
@@ -33,7 +34,7 @@ import {
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import { type Brand, Effect, Option, Schema } from "effect";
+import { type Brand, Effect, Option, Schema, SchemaGetter } from "effect";
 import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
@@ -111,6 +112,20 @@ const EnvironmentVariableName = Schema.String.check(
   }),
 ).pipe(Schema.brand("EnvironmentVariableName"));
 
+// Decode saved configurations and imports written before protocol slot IDs.
+const GatewayProtocolFromConfig = Schema.Union([GatewayLlmProvider, GatewayLlmProtocol]).pipe(
+  Schema.decodeTo(GatewayLlmProtocol, {
+    decode: SchemaGetter.transform((value) =>
+      value === "anthropic"
+        ? "anthropic-messages"
+        : value === "openai"
+          ? "openai-responses"
+          : value,
+    ),
+    encode: SchemaGetter.transform((value) => value),
+  }),
+);
+
 /**
  * The credential proxy for an SSH worker on a private network (ADR 0027). Credential fields
  * contain orchestrator environment-variable names, not secret values.
@@ -128,7 +143,7 @@ export class WorkerGateway extends Schema.Class<
   /** The orchestrator environment variable containing the gateway admin token. */
   adminTokenEnv: EnvironmentVariableName,
   /** The providers whose credentials the gateway injects; decoding defaults to none. */
-  llmProviders: Schema.Array(GatewayLlmProvider)
+  llmProviders: Schema.Array(GatewayProtocolFromConfig)
     .check(Schema.isUnique())
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}

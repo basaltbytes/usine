@@ -1,3 +1,5 @@
+import { catalog } from "@usine/agents/harness";
+import { Option } from "effect";
 import type { CloudflareLlmProvider } from "@usine/core/worker";
 
 /** The home directory of the image's `usine` user, where every command starts. */
@@ -41,16 +43,6 @@ export type GitHubHost = (typeof GITHUB_HOSTS)[number];
  */
 export const PLACEHOLDER_CREDENTIAL = "usine-placeholder";
 
-/** The variables each provider's harness needs to call its outbound handler. */
-const PROVIDER_ENVIRONMENT = {
-  anthropic: {
-    ANTHROPIC_BASE_URL: `http://${PROVIDER_HOSTS.anthropic.sandbox}`,
-    ANTHROPIC_API_KEY: PLACEHOLDER_CREDENTIAL,
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-  },
-  openai: { OPENAI_API_KEY: PLACEHOLDER_CREDENTIAL },
-} as const satisfies Record<CloudflareLlmProvider, Readonly<Record<string, string>>>;
-
 /**
  * Returns the environment that points the harnesses, git, and gh at the outbound handlers, for
  * a sandbox whose handlers hold keys for `providers`. It contains no secret.
@@ -73,5 +65,12 @@ export const harnessEnvironment = (
       GH_TOKEN: PLACEHOLDER_CREDENTIAL,
       GH_PROMPT_DISABLED: "1",
     },
-    ...providers.map((provider) => PROVIDER_ENVIRONMENT[provider]),
+    ...catalog.descriptors.flatMap(({ worker }) =>
+      Option.toArray(worker.credential)
+        .filter(({ provider }) => providers.includes(provider))
+        .map(({ provider, cloudflare }) => ({
+          ...cloudflare.render(`http://${PROVIDER_HOSTS[provider].sandbox}`, "").environment,
+          [cloudflare.tokenVariable]: PLACEHOLDER_CREDENTIAL,
+        })),
+    ),
   );

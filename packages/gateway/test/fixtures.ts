@@ -49,7 +49,10 @@ export const settingsLayer = (
     ),
   );
 
-export const NO_PROVIDERS: LlmProviders = { anthropic: Option.none(), openai: Option.none() };
+export const NO_PROVIDERS: LlmProviders = {
+  "anthropic-messages": Option.none(),
+  "openai-responses": Option.none(),
+};
 
 /** Returns an unsigned JWT with `claims`, which is all the Gateway reads of a ChatGPT token. */
 export const fakeJwt = (claims: Schema.Json) =>

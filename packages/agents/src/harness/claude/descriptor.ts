@@ -1,6 +1,7 @@
 import { Harness } from "@usine/core/agent/brain";
 import { Option } from "effect";
 import {
+  CredentialWiring,
   HarnessCredential,
   HarnessDescriptor,
   ResumeCommand,
@@ -18,9 +19,31 @@ export const claude = HarnessDescriptor.make({
     credential: Option.some(
       HarnessCredential.make({
         provider: "anthropic",
+        protocol: "anthropic-messages",
+        gatewayPath: "anthropic-messages",
+        home: Option.none(),
+        gateway: CredentialWiring.make({
+          tokenVariable: "ANTHROPIC_AUTH_TOKEN",
+          environment: { ANTHROPIC_BASE_URL: "{{baseUrl}}" },
+          files: {},
+        }),
+        apiKey: CredentialWiring.make({
+          tokenVariable: "ANTHROPIC_API_KEY",
+          environment: {},
+          files: {},
+        }),
+        cloudflare: CredentialWiring.make({
+          tokenVariable: "ANTHROPIC_API_KEY",
+          environment: {
+            ANTHROPIC_BASE_URL: "{{baseUrl}}",
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+          },
+          files: {},
+        }),
         label: "Anthropic",
         hosts: ["api.anthropic.com", "platform.claude.com"],
         apiHost: "api.anthropic.com",
+        apiKeyBaseUrl: "https://api.anthropic.com/v1",
       }),
     ),
   }),
