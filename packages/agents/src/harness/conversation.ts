@@ -13,6 +13,9 @@ export type MessageTaken = "read" | "queued";
 interface ConversationOptions {
   readonly session: ChildSession;
   readonly channel: SessionChannel;
+  readonly held: boolean;
+  readonly paused: boolean;
+  readonly idle: Option.Option<string>;
   /**
    * Queues a message during a turn, or starts another turn in an idle session. If it returns
    * `queued`, the harness reports the read later through `read`.
@@ -43,8 +46,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
 ) {
   const { session, channel } = options;
   const mutex = yield* Semaphore.make(1);
-  let held = false;
-  let paused = false;
+  let held = options.held;
+  let paused = options.paused;
   let idle = Option.none<string>();
   let closing = false;
   let resume = yield* Deferred.make<void>();
@@ -93,7 +96,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     if (!paused) yield* deliver(queued.length);
     if (held || paused) {
       idle = Option.some(message);
-      yield* channel.emit(SessionIdle.make({ session }));
+      yield* channel.emit(SessionIdle.make({ session, message: Option.some(message) }));
       yield* Effect.logInfo("Session is idle under operator supervision", {
         sessionId: session.id,
         held,
@@ -157,6 +160,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     });
     return InterventionState.make({ held, paused, queued: taken === "queued" });
   }, mutex.withPermits(1));
+
+  if (Option.isSome(options.idle)) yield* finish(options.idle.value);
+  else if (paused) yield* finish("Session paused before restart");
 
   return {
     finish: (message: string) => mutex.withPermits(1)(finish(message)),

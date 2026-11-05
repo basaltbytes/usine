@@ -8,8 +8,12 @@ import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
+  HarnessSession,
+  HarnessSessionId,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
+  TokenCount,
+  UsdAmount,
   sessionPool,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
@@ -332,6 +336,155 @@ const droppedLaunch = (onDrop: () => void = () => {}) => {
 };
 
 describe("Claude child backend", () => {
+  it.effect("continues the saved conversation supplied by a restarted durable call", () => {
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-claude"),
+      cwd: request().cwd,
+      home: Option.some("/worker/attempt/claude"),
+    });
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (_input, options) => {
+        assert.strictEqual(options.resume, saved.id);
+        assert.strictEqual(options.env?.CLAUDE_CONFIG_DIR, "/worker/attempt/claude");
+        return scripted(
+          [
+            {
+              type: "result",
+              subtype: "success",
+              result: "Continued.",
+              modelUsage: {
+                model: {
+                  inputTokens: 400,
+                  outputTokens: 100,
+                  cacheCreationInputTokens: 0,
+                  costUSD: 0.125,
+                },
+              },
+            },
+          ],
+          undefined,
+          saved.id,
+        );
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...request(),
+            resume: Option.some(saved),
+            usage: Option.some({
+              totalTokens: TokenCount.make(1000),
+              costUsd: Option.some(UsdAmount.make(0.25)),
+            }),
+          }),
+        );
+        const events = yield* Effect.forkChild(Stream.runCollect(running.events));
+        assert.strictEqual((yield* running.result).message, "Continued.");
+        const transcript = yield* Fiber.join(events);
+        const started = transcript.find((event) => event._tag === "SessionStarted");
+        assert(started !== undefined);
+        assert.deepStrictEqual(started.harnessSession, Option.some(saved));
+        const usage = transcript.filter((event) => event._tag === "SessionTokensUpdated").at(-1);
+        assert(usage !== undefined);
+        assert.strictEqual(usage.totalTokens, 1500);
+        assert.deepStrictEqual(usage.costUsd, Option.some(0.375));
+      }),
+    ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+  });
+
+  for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
+    it.effect(`restores a ${supervision} Claude child without starting a turn`, () =>
+      Effect.gen(function* () {
+        const output = yield* Queue.make<Schema.Json, Cause.Done>();
+        const received = yield* Queue.make<string>();
+        const context = yield* Effect.context<never>();
+        const saved = HarnessSession.make({
+          id: HarnessSessionId.make("paused-claude"),
+          cwd: request().cwd,
+        });
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: (input) => {
+            Effect.runForkWith(context)(
+              Stream.fromAsyncIterable(input, (cause) =>
+                SessionOperationError.make({
+                  operation: "stream",
+                  sessionId: Option.none(),
+                  message: "Claude test input failed",
+                  cause,
+                }),
+              ).pipe(
+                Stream.runForEach((message) => Queue.offer(received, message.message.content)),
+              ),
+            );
+            return {
+              close: () => {
+                Effect.runForkWith(context)(Queue.end(output));
+              },
+              interrupt: () => Promise.resolve(),
+              usesApiKey: () => Promise.resolve(false),
+              supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
+              [Symbol.asyncIterator]: () =>
+                Stream.toAsyncIterableWith(Stream.fromQueue(output), context)[
+                  Symbol.asyncIterator
+                ](),
+            };
+          },
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({
+              ...request(),
+              resume: Option.some(saved),
+              held: supervision !== "paused",
+              paused: supervision === "paused",
+              idle: supervision === "paused" ? Option.none() : Option.some("Saved final report."),
+            }),
+          );
+          const seen: string[] = [];
+          yield* running.events.pipe(
+            Stream.take(2),
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                seen.push(event._tag);
+              }),
+            ),
+          );
+          assert.deepStrictEqual(seen, ["SessionStarted", "SessionIdle"]);
+          const beforeRelease = yield* Queue.clear(received);
+          assert.deepStrictEqual(beforeRelease, []);
+          if (supervision === "held-idle") {
+            yield* running.intervene(Release.make(), noDelivery);
+            assert.strictEqual((yield* running.result).message, "Saved final report.");
+            const afterRelease = yield* Queue.clear(received);
+            assert.deepStrictEqual(afterRelease, []);
+            return;
+          }
+          if (supervision === "paused") {
+            const state = yield* running.intervene(Release.make(), noDelivery);
+            assert.isTrue(state.paused);
+            const afterRelease = yield* Queue.clear(received);
+            assert.deepStrictEqual(afterRelease, []);
+          }
+          yield* running.intervene(
+            OperatorMessage.make({ message: "Continue with the correction." }),
+            noDelivery,
+          );
+          const guidance = yield* Queue.take(received);
+          assert.strictEqual(guidance, "Continue with the correction.");
+          const additional = yield* Queue.clear(received);
+          assert.deepStrictEqual(additional, []);
+          yield* Queue.offer(output, { type: "system", subtype: "init", session_id: saved.id });
+          yield* Queue.offer(output, { type: "result", subtype: "success", result: "Corrected." });
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* running.result).message, "Corrected.");
+          const remaining = yield* running.events.pipe(Stream.runCollect);
+          assert(!remaining.some((event) => event._tag === "SessionStarted"));
+        }).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+      }).pipe(Effect.scoped),
+    );
+  }
+
   for (const gatewayCredential of [Option.none(), Option.some("subscription" as const)]) {
     it.effect(
       `reports Claude plan windows with ${Option.isSome(gatewayCredential) ? "a gateway subscription" : "the worker login"}`,

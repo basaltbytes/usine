@@ -21,7 +21,12 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
-import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
+import {
+  childPidFile,
+  type ChildHost,
+  LocalProcess,
+  RemoteShell,
+} from "../../../src/child-host/child-host.ts";
 import {
   ChildRequest,
   ChildSessionLifecycle,
@@ -219,6 +224,88 @@ describe("Codex app-server transport", () => {
         }),
     );
   }
+
+  it.effect("stops both retained remote app-servers before replacing the transport", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const attached = yield* Deferred.make<{
+        live: ReadonlyArray<string>;
+        journals: ReadonlyArray<string>;
+      }>();
+      const stopping = yield* Deferred.make<void>();
+      const original = childPidFile(request.cwd, request.session.id);
+      const resumed = childPidFile(
+        request.cwd,
+        AgentSessionId.make(`${request.session.id}-resume`),
+      );
+      const live = new Set([original, resumed]);
+      const journals = new Set([original, resumed]);
+      const spawner = Layer.effect(
+        ChildProcessSpawner.ChildProcessSpawner,
+        Effect.gen(function* () {
+          const base = yield* ChildProcessSpawner.ChildProcessSpawner;
+          return ChildProcessSpawner.make((command) =>
+            Effect.gen(function* () {
+              assert.strictEqual(command._tag, "StandardCommand");
+              if (command._tag !== "StandardCommand") return yield* base.spawn(command);
+              const shell = command.args.at(-1) ?? "";
+              for (const pidFile of [original, resumed]) {
+                for (const mode of ["stop", "remove"]) {
+                  if (!shell.includes(`'${mode}' '${pidFile}' '0'`)) continue;
+                  if (mode === "stop") live.delete(pidFile);
+                  else {
+                    assert.isFalse(
+                      live.has(pidFile),
+                      "a live supervisor must stop before journal removal",
+                    );
+                    journals.delete(pidFile);
+                  }
+
+                  return ChildProcessSpawner.makeHandle({
+                    pid: ChildProcessSpawner.ProcessId(4243),
+                    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+                    isRunning: Effect.succeed(false),
+                    kill: () => Effect.void,
+                    stdin: Sink.drain,
+                    stdout: Stream.empty,
+                    stderr: Stream.empty,
+                    all: Stream.empty,
+                    getInputFd: () => Sink.drain,
+                    getOutputFd: () => Stream.empty,
+                    unref: Effect.succeed(Effect.void),
+                  });
+                }
+              }
+              yield* Deferred.succeed(attached, { live: [...live], journals: [...journals] });
+              return yield* base.spawn(command);
+            }),
+          );
+        }),
+      ).pipe(Layer.provide(spawnerFor(process, { exitOnEof: false })));
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: RemoteShell.make({
+              ssh: { command: "ssh", args: [] },
+              sshEnvironment: {},
+              destination: "worker",
+            }),
+            transport: "replace",
+          });
+          const retained = yield* Deferred.await(attached);
+          yield* Deferred.succeed(stopping, undefined);
+          assert.deepStrictEqual(retained.live, [], "replacement must stop both app-servers");
+          assert.deepStrictEqual(retained.journals, [], "replacement must remove both transports");
+        }),
+      ).pipe(
+        Effect.provide(codexAppServerLive.pipe(Layer.provide(spawner))),
+        Effect.provideService(ChildSessionLifecycle, { isStopping: Deferred.isDone(stopping) }),
+      );
+    }),
+  );
 
   it.effect("sends EOF and keeps every close caller waiting until the process exits", () =>
     Effect.gen(function* () {

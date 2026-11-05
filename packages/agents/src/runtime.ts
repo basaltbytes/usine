@@ -7,6 +7,9 @@ import {
   ChildSession,
   ChildSessionBudget,
   ChildSessionCount,
+  HarnessSession,
+  TokenCount,
+  UsdAmount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { MachineId, WorkerName } from "@usine/core/worker";
@@ -48,6 +51,22 @@ export class ChildRequest extends Schema.Class<
   cwd: WorkingDirectory,
   /** The complete instructions to send as the child's first message. */
   prompt: Schema.NonEmptyString,
+  /** The saved conversation to continue in this checkout instead of starting a new one. */
+  resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
+  ),
+  /** Cumulative usage committed before the orchestrator resumed this child. */
+  usage: Schema.OptionFromOptionalKey(
+    Schema.Struct({ totalTokens: TokenCount, costUsd: Schema.OptionFromNullOr(UsdAmount) }),
+  ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
+  /** Keeps the child addressable after a turn until the operator releases its persisted Hold. */
+  held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /** Waits for operator guidance before starting a turn in a restored paused child. */
+  paused: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /** Restores an idle child's completed report without starting another turn. */
+  idle: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /**
    * The complete environment of the child process and its commands: the worker's allowlisted
    * variables plus the attempt's credential configuration, with nothing inherited from the launching

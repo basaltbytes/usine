@@ -99,12 +99,19 @@ const makeCodexChild = Effect.gen(function* () {
       });
       yield* Effect.logInfo("Launching Codex child session");
       const lifecycle = yield* ChildSessionLifecycle.current;
-      const client: CodexClient = {
+      let client: CodexClient = {
         cwd: request.cwd,
         sessionId: Option.some(request.session.id),
-        environment: request.environment,
+        environment: Option.match(
+          Option.flatMap(request.resume, (saved) => saved.home),
+          {
+            onNone: () => request.environment,
+            onSome: (home) => ({ ...request.environment, CODEX_HOME: home }),
+          },
+        ),
         host: request.host,
       };
+      if (Option.isSome(request.resume)) client = { ...client, transport: "replace" };
       let connection = yield* appServer.open(client);
       yield* initializeCodex(connection);
       let billing = yield* codexChildAccount(
@@ -163,34 +170,69 @@ const makeCodexChild = Effect.gen(function* () {
         });
       }
 
-      const threadParams: ThreadStartParams = {
-        model: requestedModel,
-        allowProviderModelFallback: false,
-        cwd: request.cwd,
-        approvalPolicy: "never",
-        sandbox: "danger-full-access",
-        ephemeral: false,
-        serviceName: "usine",
-      };
-      const encodedThreadStartParams = yield* Schema.encodeEffect(
-        Schema.toCodecJson(ThreadStartParams),
-      )(threadParams).pipe(Effect.orDie);
-      const threadJson = yield* connection.request(
-        "launch",
-        "thread/start",
-        encodedThreadStartParams,
-      );
-      const thread = yield* decodeResponse(
-        ThreadStartResponse,
-        "launch",
-        client,
-        "thread start response",
-        threadJson,
-      );
-      yield* Effect.logDebug("Codex child started a thread", {
-        instructionSources: thread.instructionSources.length,
-        model: thread.model,
-        sessionId: request.session.id,
+      const thread = yield* Option.match(request.resume, {
+        onNone: () =>
+          Effect.gen(function* () {
+            const params: ThreadStartParams = {
+              model: requestedModel,
+              allowProviderModelFallback: false,
+              cwd: request.cwd,
+              approvalPolicy: "never",
+              sandbox: "danger-full-access",
+              ephemeral: false,
+              serviceName: "usine",
+            };
+            const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(ThreadStartParams))(
+              params,
+            ).pipe(Effect.orDie);
+            const response = yield* connection.request("launch", "thread/start", encoded);
+            const started = yield* decodeResponse(
+              ThreadStartResponse,
+              "launch",
+              client,
+              "thread start response",
+              response,
+            );
+            return {
+              id: started.thread.id,
+              model: started.model,
+              endpoint: Option.some(started.modelProvider),
+            };
+          }),
+        onSome: (saved) =>
+          Effect.gen(function* () {
+            const params: ThreadResumeParams = {
+              threadId: saved.id,
+              model: requestedModel,
+              cwd: request.cwd,
+              approvalPolicy: "never",
+              sandbox: "danger-full-access",
+              excludeTurns: false,
+            };
+            const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(ThreadResumeParams))(
+              params,
+            ).pipe(Effect.orDie);
+            const response = yield* connection.request("launch", "thread/resume", encoded);
+            const restored = yield* decodeResponse(
+              ThreadResumeResponse,
+              "launch",
+              client,
+              "thread resume response",
+              response,
+            );
+            if (restored.thread.id !== saved.id)
+              return yield* operationError(
+                "launch",
+                client,
+                "Codex resumed a different thread",
+                restored.thread.id,
+              );
+            yield* Effect.logInfo("Resumed the saved Codex thread", {
+              sessionId: request.session.id,
+              threadId: saved.id,
+            });
+            return { id: saved.id, model: requestedModel, endpoint: request.session.endpoint };
+          }),
       });
       const session = ChildSession.make({
         id: request.session.id,
@@ -203,17 +245,17 @@ const makeCodexChild = Effect.gen(function* () {
         }),
         gatewayCredential: request.session.gatewayCredential,
         pool: Option.some(billing.pool),
-        endpoint: billing.pool === "apiKeys" ? Option.some(thread.modelProvider) : Option.none(),
+        endpoint: billing.pool === "apiKeys" ? thread.endpoint : Option.none(),
       });
       const channel = yield* sessionChannel({
         label: "Codex child session",
         sessionId: session.id,
       });
       const harnessSession = HarnessSession.make({
-        id: thread.thread.id,
+        id: thread.id,
         cwd: request.cwd,
         // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
-        home: Option.fromNullishOr(request.environment.CODEX_HOME).pipe(
+        home: Option.fromNullishOr(client.environment.CODEX_HOME).pipe(
           Option.filter((home) => home.length > 0),
         ),
       });
@@ -230,7 +272,7 @@ const makeCodexChild = Effect.gen(function* () {
         ...Option.match(harnessSession.home, { onNone: () => ({}), onSome: (home) => ({ home }) }),
       });
       const turnParams: TurnStartParams = {
-        threadId: thread.thread.id,
+        threadId: thread.id,
         input: [{ type: "text", text: request.prompt, text_elements: [] }],
         cwd: request.cwd,
         approvalPolicy: "never",
@@ -318,7 +360,7 @@ const makeCodexChild = Effect.gen(function* () {
         const encodedTurnInterruptParams = yield* Schema.encodeEffect(
           Schema.toCodecJson(TurnInterruptParams),
         )({
-          threadId: thread.thread.id,
+          threadId: thread.id,
           turnId,
         }).pipe(Effect.orDie);
         yield* connection.request("interrupt", "turn/interrupt", encodedTurnInterruptParams).pipe(
@@ -349,7 +391,7 @@ const makeCodexChild = Effect.gen(function* () {
         const encodedTurnSteerParams = yield* Schema.encodeEffect(
           Schema.toCodecJson(TurnSteerParams),
         )({
-          threadId: thread.thread.id,
+          threadId: thread.id,
           expectedTurnId: turnId,
           input: [{ type: "text", text: message, text_elements: [] }],
         }).pipe(Effect.orDie);
@@ -359,6 +401,9 @@ const makeCodexChild = Effect.gen(function* () {
       const conversation = yield* sessionConversation({
         session,
         channel,
+        held: request.held,
+        paused: request.paused,
+        idle: request.idle,
         send: steer,
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
         beforeFinish: Effect.suspend(() => connection.close),
@@ -379,7 +424,7 @@ const makeCodexChild = Effect.gen(function* () {
       });
       let resumed = false;
       const resume = Effect.fn("CodexRuntime.resume")(function* (error: AgentSessionError) {
-        yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.thread.id });
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.id });
         if (yield* lifecycle.isStopping) {
           yield* Effect.logInfo("Leaving the Codex child for reattachment", {
             sessionId: session.id,
@@ -396,7 +441,7 @@ const makeCodexChild = Effect.gen(function* () {
         resumed = true;
         yield* Effect.logWarning("Remote Codex app-server stopped; resuming its saved thread", {
           sessionId: session.id,
-          threadId: thread.thread.id,
+          threadId: thread.id,
         });
         connection = yield* appServer.open({
           ...client,
@@ -409,7 +454,7 @@ const makeCodexChild = Effect.gen(function* () {
           request.session.gatewayCredential,
         );
         const params: ThreadResumeParams = {
-          threadId: thread.thread.id,
+          threadId: thread.id,
           model: requestedModel,
           cwd: request.cwd,
           approvalPolicy: "never",
@@ -431,7 +476,7 @@ const makeCodexChild = Effect.gen(function* () {
           "thread resume response",
           response,
         );
-        if (restored.thread.id !== thread.thread.id)
+        if (restored.thread.id !== thread.id)
           return yield* operationError(
             "launch",
             client,
@@ -448,7 +493,7 @@ const makeCodexChild = Effect.gen(function* () {
         if (paused || idle) {
           yield* Effect.logInfo("Restored Codex child waits for operator guidance", {
             sessionId: session.id,
-            threadId: thread.thread.id,
+            threadId: thread.id,
             paused,
             idle,
           });
@@ -461,7 +506,7 @@ const makeCodexChild = Effect.gen(function* () {
         const unread = yield* conversation.unread;
         yield* Effect.logInfo("Restored Codex child starts a turn", {
           sessionId: session.id,
-          threadId: thread.thread.id,
+          threadId: thread.id,
           taskSaved,
           unreadMessages: unread.length,
         });
@@ -475,7 +520,8 @@ const makeCodexChild = Effect.gen(function* () {
         );
         yield* conversation.read(() => unread.length);
       });
-      yield* startTurn(request.prompt).pipe(Effect.catch(resume));
+      if (!request.paused && Option.isNone(request.idle))
+        yield* startTurn(request.prompt).pipe(Effect.catch(resume));
       const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {
@@ -493,7 +539,7 @@ const makeCodexChild = Effect.gen(function* () {
                 session.id,
                 params,
               );
-              if (Option.isSome(usage) && usage.value.threadId === thread.thread.id) {
+              if (Option.isSome(usage) && usage.value.threadId === thread.id) {
                 const total = usage.value.tokenUsage.total;
                 yield* channel.emit(
                   SessionTokensUpdated.make({

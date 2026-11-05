@@ -56,8 +56,8 @@ export interface AttemptGuardSeed {
   readonly tokens: ReadonlyMap<AgentSessionId, number>;
   /** The unsupervised time recorded by earlier guards, excluding time the orchestrator was stopped. */
   readonly unsupervised: Duration.Duration;
-  /** Whether the parent was on Hold at the restart. A parent's Hold persists across restarts; a child's doesn't. */
-  readonly parentHeld: boolean;
+  /** The parent and child Hold keys that survived the restart. */
+  readonly holds: ReadonlySet<string>;
   /** The ceilings whose warning steer is already in the transcript. */
   readonly warned: ReadonlySet<RunawayCeiling>;
 }
@@ -155,7 +155,7 @@ export const guardSeed = (
     const sent = warnedCeiling(envelope);
     if (Option.isSome(sent)) warned.add(sent.value);
   }
-  return { tokens, unsupervised, parentHeld: holds.has("parent"), warned };
+  return { tokens, unsupervised, holds, warned };
 };
 
 /**
@@ -217,7 +217,7 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   seed: AttemptGuardSeed,
 ) {
   const ended = new Set<string>();
-  const holds = new Set<string>(seed.parentHeld ? ["parent"] : []);
+  const holds = new Set(seed.holds);
   /** Signals `watch` when supervision changes; one pending signal is enough. */
   const changed = yield* Queue.sliding<void>(1);
   /** Whether `watch` has started; nothing is counted before. */

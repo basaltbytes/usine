@@ -40,6 +40,7 @@ export const admitBrain = (
   role: Role,
   brain: BrainSpec,
   context: AdmissionContext,
+  capabilities: ReadonlyArray<Capability> = [],
 ): Result.Result<AdmittedBrain, BrainRefused> => {
   const missing: Array<Lacking> = [];
   const descriptor = catalog.get(brain.harness);
@@ -90,7 +91,9 @@ export const admitBrain = (
       } else {
         missing.push(
           ...profile.lacking.filter((gap) =>
-            requirements[role].some((required) => required === gap.capability),
+            [...requirements[role], ...capabilities].some(
+              (required) => required === gap.capability,
+            ),
           ),
         );
       }

@@ -2,17 +2,22 @@ import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts"
 import { claude } from "../../src/harness/claude/descriptor.ts";
 import { Harnesses, type HarnessRuntime, ProbeTarget } from "../../src/harness/node.ts";
 import { checkedPreflight } from "../../src/harness/runtime.ts";
-import { CapabilityProfile } from "../../src/harness/capability.ts";
+import { CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
 import { HarnessReady } from "@usine/core/agent/capability";
 import { catalog } from "../../src/harness/catalog.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  ChildSession,
+  HarnessSession,
+  HarnessSessionId,
+} from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { preflight } from "../../src/preflight/preflight.ts";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Array as Arr, Effect, Layer, Option, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
   type ChildBackendService,
@@ -70,6 +75,56 @@ const runtimes = extended.ids.map((id): HarnessRuntime => ({
 }));
 
 describe("harness runtime registration", () => {
+  it.effect("refuses saved-session launch when its credential route lacks resume-session", () => {
+    const descriptor = HarnessDescriptor.make({
+      ...claude,
+      capabilities: Arr.map(claude.capabilities, (profile) =>
+        CapabilityProfile.make({
+          ...profile,
+          supported: profile.supported.filter((capability) => capability !== "resume-session"),
+          lacking: [
+            ...profile.lacking,
+            Lacking.make({ capability: "resume-session", reason: "No saved-session recovery" }),
+          ],
+        }),
+      ),
+    });
+    const source = HarnessCatalog.make({ descriptors: [descriptor] });
+    const original = request(claude.id);
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const dispatcher = yield* ChildBackend;
+        assert.strictEqual((yield* (yield* dispatcher.launch(original)).result).message, claude.id);
+        const failure = yield* dispatcher
+          .launch(
+            ChildRequest.make({
+              ...original,
+              resume: Option.some(
+                HarnessSession.make({ id: HarnessSessionId.make("saved"), cwd: original.cwd }),
+              ),
+            }),
+          )
+          .pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "AgentResultError");
+        assert.include(failure.message, "resume-session");
+      }),
+    ).pipe(
+      Effect.provide(
+        childDispatcherLayer.pipe(
+          Layer.provide(
+            Harnesses.layerFrom(source, [
+              {
+                id: claude.id,
+                ...backend(claude.id),
+                preflight: checkedPreflight(() => Effect.void),
+              },
+            ]),
+          ),
+        ),
+      ),
+    );
+  });
+
   it.effect(
     "dispatches launch and preflight to every registered harness, including an added descriptor",
     () =>

@@ -43,6 +43,9 @@ const conversation = (session: ChildSession) =>
     const controls = yield* sessionConversation({
       session,
       channel,
+      held: false,
+      paused: false,
+      idle: Option.none(),
       // A message to a running turn waits for the harness's next boundary.
       send: (message, activity) =>
         Effect.sync(() => {

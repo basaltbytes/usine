@@ -46,6 +46,7 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
       "coding-agent",
       request.session.brain,
       childAdmissionContext(catalog, request),
+      Option.isSome(request.resume) ? ["resume-session"] : [],
     ),
   ).pipe(
     Effect.tapError((error) =>

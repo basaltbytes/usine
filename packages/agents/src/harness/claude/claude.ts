@@ -15,7 +15,6 @@ import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
   ChildSession,
   HarnessSession,
-  HarnessSessionId,
   ProviderRecovered,
   ProviderRetries,
   ProviderRetrying,
@@ -151,12 +150,22 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
     // Replaces the subprocess environment instead of extending this process's.
-    env: { ...request.environment },
+    env: Option.match(
+      Option.flatMap(request.resume, (saved) => saved.home),
+      {
+        onNone: () => ({ ...request.environment }),
+        onSome: (home) => ({ ...request.environment, CLAUDE_CONFIG_DIR: home }),
+      },
+    ),
     model: request.session.brain.model,
     // The Worker-provisioned binary that the readiness checks inspect.
     pathToClaudeCodeExecutable: "claude",
     permissionMode: "bypassPermissions",
     persistSession: true,
+    ...Option.match(request.resume, {
+      onNone: () => ({}),
+      onSome: (saved) => ({ resume: saved.id }),
+    }),
     // The worktree is untrusted, so its project and local settings (hooks, env) are not loaded into
     // a child that has the App credential; only the Worker user's settings apply.
     settingSources: ["user"],
@@ -526,8 +535,15 @@ const makeClaudeChild = Effect.gen(function* () {
         },
       };
       const lifecycle = yield* ChildSessionLifecycle.current;
+      if (Option.isSome(request.resume) && request.host._tag === "RemoteShell")
+        yield* stopRemote(request, request.host);
       // The launch that runs the session; a resume replaces it.
-      let current = yield* launchWithRetries(request, options, [request.prompt], scope);
+      let current = yield* launchWithRetries(
+        request,
+        options,
+        request.paused || Option.isSome(request.idle) ? [] : [request.prompt],
+        scope,
+      );
 
       const usesApiKey = Option.isNone(request.session.gatewayCredential)
         ? yield* Effect.tryPromise({
@@ -551,9 +567,14 @@ const makeClaudeChild = Effect.gen(function* () {
       channel.onTerminal(() => {
         current.input.end();
       });
+      if (request.paused || Option.isSome(request.idle))
+        yield* channel.emit(SessionStarted.make({ session, harnessSession: request.resume }));
       const conversation = yield* sessionConversation({
         session,
         channel,
+        held: request.held,
+        paused: request.paused,
+        idle: request.idle,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
         send: (message, activity) =>
           Effect.try({
@@ -566,17 +587,17 @@ const makeClaudeChild = Effect.gen(function* () {
       });
       boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
-      const usage = claudeSessionMeter();
+      const usage = claudeSessionMeter(Option.getOrUndefined(request.usage));
       const readRateLimits = claudeRateLimits(session);
       // The latest session ID from Claude, which a resume loads.
-      let harnessSessionId = Option.none<HarnessSessionId>();
+      let harnessSessionId = Option.map(request.resume, (saved) => saved.id);
       // Resumes since Claude last sent a message.
       let resumes = 0;
       let backgroundTasks: ReadonlyArray<string> = [];
       let reportsSessionState = false;
       let completedTurn = Option.none<string>();
       // Claude sends `init` with one session ID before each turn; the first is the launch record.
-      const launched = yield* Ref.make(false);
+      const launched = yield* Ref.make(request.paused || Option.isSome(request.idle));
       // API retries reported in the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
@@ -678,6 +699,9 @@ const makeClaudeChild = Effect.gen(function* () {
             const harnessSession = HarnessSession.make({
               id: init.value.session_id,
               cwd: request.cwd,
+              home: Option.fromNullishOr(options.env?.CLAUDE_CONFIG_DIR).pipe(
+                Option.filter((home) => home.length > 0),
+              ),
             });
             yield* channel.emit(
               SessionStarted.make({

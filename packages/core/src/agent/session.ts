@@ -182,6 +182,10 @@ export class SessionIdle extends Schema.TaggedClass<
 >("Agent/SessionIdle")("SessionIdle", {
   /** The supervised session that finished a turn and accepts operator input. */
   session: AgentSession,
+  /** The completed report to return if the operator releases this session without another turn. */
+  message: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
 }) {}
 
 /** A live session that started another user turn in the same conversation. */

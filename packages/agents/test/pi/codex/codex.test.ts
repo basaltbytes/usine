@@ -4,6 +4,8 @@ import { Harness, BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
+  HarnessSession,
+  HarnessSessionId,
   PoolLogin,
   TokenBreakdown,
   sessionPool,
@@ -140,6 +142,145 @@ const successfulResponses = (
   }) satisfies Readonly<Record<string, Schema.Json>>;
 
 describe("Codex child backend", () => {
+  it.effect("resumes the recorded thread and CODEX_HOME after a durable restart", () => {
+    const saved = HarnessSession.make({
+      id: HarnessSessionId.make("saved-codex"),
+      cwd: request().cwd,
+      home: Option.some("/worker/attempt/codex"),
+    });
+    const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+    const clients: Array<CodexClient> = [];
+    const server = connectionLayer(
+      {
+        ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        "thread/resume": { thread: { id: saved.id, turns: [] } },
+      },
+      [
+        {
+          method: "item/completed",
+          params: {
+            threadId: saved.id,
+            turnId: "turn-1",
+            item: { type: "agentMessage", id: "report", text: "Continued." },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ],
+      calls,
+      Effect.void,
+      clients,
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), resume: Option.some(saved) }),
+        );
+        const events = yield* Effect.forkChild(Stream.runCollect(running.events));
+        assert.strictEqual((yield* running.result).message, "Continued.");
+        const transcript = yield* Fiber.join(events);
+        const started = transcript.find((event) => event._tag === "SessionStarted");
+        assert(started !== undefined);
+        assert.deepStrictEqual(started.harnessSession, Option.some(saved));
+        assert.strictEqual(clients[0]?.environment.CODEX_HOME, "/worker/attempt/codex");
+        assert.strictEqual(clients[0]?.transport, "replace");
+        assert(!calls.some(({ method }) => method === "thread/start"));
+        assert.include(
+          jsonKey(calls.find(({ method }) => method === "thread/resume")?.params),
+          saved.id,
+        );
+      }),
+    ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+  });
+
+  for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
+    it.effect(`restores a ${supervision} Codex child without starting a turn`, () =>
+      Effect.gen(function* () {
+        const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+        const calls: string[] = [];
+        const saved = HarnessSession.make({
+          id: HarnessSessionId.make("paused-codex"),
+          cwd: request().cwd,
+        });
+        const responses = new Map(
+          Object.entries({
+            ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+            "thread/resume": { thread: { id: saved.id, turns: [] } },
+          }),
+        );
+        const server = Layer.succeed(CodexAppServer)({
+          open: () =>
+            Effect.succeed({
+              notifications: Stream.fromQueue(notifications),
+              notify: () => Effect.void,
+              close: Queue.end(notifications).pipe(Effect.asVoid),
+              request: (_operation, method, params) =>
+                Effect.sync(() => {
+                  calls.push(method);
+                  if (method === "turn/start")
+                    assert.include(jsonKey(params), "Continue with the correction.");
+                  const response = responses.get(method);
+                  assert(response !== undefined);
+                  return response;
+                }),
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({
+              ...request(),
+              resume: Option.some(saved),
+              held: supervision !== "paused",
+              paused: supervision === "paused",
+              idle: supervision === "paused" ? Option.none() : Option.some("Saved final report."),
+            }),
+          );
+          const seen = yield* running.events.pipe(Stream.take(2), Stream.runCollect);
+          assert.deepStrictEqual(
+            seen.map((event) => event._tag),
+            ["SessionStarted", "SessionIdle"],
+          );
+          assert.notInclude(calls, "turn/start");
+          if (supervision === "held-idle") {
+            yield* running.intervene(Release.make(), noDelivery);
+            assert.strictEqual((yield* running.result).message, "Saved final report.");
+            assert.notInclude(calls, "turn/start");
+            return;
+          }
+          if (supervision === "paused") {
+            const state = yield* running.intervene(Release.make(), noDelivery);
+            assert.isTrue(state.paused);
+            assert.notInclude(calls, "turn/start");
+          }
+          yield* running.intervene(
+            OperatorMessage.make({ message: "Continue with the correction." }),
+            noDelivery,
+          );
+          assert.lengthOf(
+            calls.filter((method) => method === "turn/start"),
+            1,
+          );
+          yield* Queue.offer(notifications, {
+            method: "item/completed",
+            params: {
+              threadId: saved.id,
+              turnId: "turn-1",
+              item: { type: "agentMessage", id: "report", text: "Corrected." },
+            },
+          });
+          yield* Queue.offer(notifications, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-1", status: "completed", error: null } },
+          });
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* running.result).message, "Corrected.");
+        }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+      }).pipe(Effect.scoped),
+    );
+  }
+
   it.effect(
     "pauses without closing Codex and resumes a held conversation on its existing thread",
     () =>

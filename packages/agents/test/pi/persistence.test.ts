@@ -94,7 +94,7 @@ it.live(
           },
         }),
       );
-      const run = (cwd: string, id?: string) =>
+      const run = (cwd: string, id?: string, mode?: string) =>
         Effect.tryPromise({
           try: () =>
             execute(
@@ -104,6 +104,7 @@ it.live(
                 fileURLToPath(new URL("../fixtures/pi-session.mjs", import.meta.url)),
                 cwd,
                 ...(id === undefined ? [] : [id]),
+                ...(mode === undefined ? [] : [mode]),
               ],
               {
                 env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" },
@@ -132,13 +133,18 @@ it.live(
       assert.include(bodies[1] ?? "", "Remember the code word: cobalt-otter.");
       assert.include(bodies[1] ?? "", "I saved cobalt-otter.");
       assert.include(bodies[1] ?? "", "What code word did I give you?");
+      const continued = yield* run(checkout, first.saved.id, "request").pipe(
+        Effect.flatMap(({ stdout }) => Schema.decodeEffect(FixtureResult)(stdout)),
+      );
+      assert.strictEqual(continued.result, "The code word is cobalt-otter.");
+      assert.deepStrictEqual(continued.saved, first.saved);
       const missing = yield* Effect.flip(run(checkout, "missing-session"));
       assert.include(String(missing.cause), "SessionOperationError");
       const otherCheckout = join(directory, "other-checkout");
       mkdirSync(otherCheckout);
       const isolated = yield* Effect.flip(run(otherCheckout, first.saved.id));
       assert.include(String(isolated.cause), "SessionOperationError");
-      assert.lengthOf(bodies, 2, "missing sessions do not start a fresh conversation");
+      assert.lengthOf(bodies, 3, "missing sessions do not start a fresh conversation");
     }).pipe(Effect.scoped),
   90_000,
 );
