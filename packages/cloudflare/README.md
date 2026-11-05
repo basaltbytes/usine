@@ -99,7 +99,7 @@ The Sandbox SDK 1.0 needs the `durable_object` scheduling policy, which rejects 
 
 ## Develop
 
-`pnpm test` runs unit tests in Node: the routes and streams against fake ports, and the process file scripts with the local `sh`. The Durable Object's container calls need Cloudflare's container runtime, so no test runs the Worker itself.
+`pnpm test` runs unit tests in Node: the routes and streams against fake ports, and the process file scripts with the local `sh`. The process file tests run only on Linux because the container scripts require GNU `tee`, `/proc`, and `setsid`. Other platforms skip that suite. The Durable Object's container calls need Cloudflare's container runtime, so no test runs the Worker itself.
 
 ## Schema contracts
 
