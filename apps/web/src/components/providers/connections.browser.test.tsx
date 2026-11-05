@@ -133,6 +133,7 @@ it.each([
       host.remove();
       client.clear();
       globalThis.fetch = originalFetch;
+      await commands.reducedMotion(false);
     }
   },
 );
