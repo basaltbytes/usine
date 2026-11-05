@@ -9,7 +9,7 @@ import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ReleaseVersion } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
-import { DateTime, Effect, Option, Ref } from "effect";
+import { DateTime, Effect, Option, Ref, Result } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { assert, expect, it } from "@effect/vitest";
 import { Port } from "../../src/cli.ts";
@@ -70,7 +70,7 @@ it.live.each(["npm", "curl", "timeout", "flock"])(
           const upgrades = yield* makeUpgrades({
             running: "1.0.0",
             settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
-            platform,
+            platform: Result.succeed(platform.value),
             drain: () => Ref.set(drained, true),
             resume: Effect.void,
           });
@@ -133,7 +133,7 @@ esac`,
           const upgrades = yield* makeUpgrades({
             running: "1.0.0",
             settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "propose" }),
-            platform: Option.some({
+            platform: Result.succeed({
               ...platform.value,
               launch: () => Ref.set(launched, true),
             }),
