@@ -14,6 +14,7 @@ import { ErrorAlert } from "~/components/error-alert";
 import { Acknowledged, authRequest } from "~/lib/auth";
 import { rejectionMessage } from "~/lib/api";
 import { providersQuery } from "~/lib/providers/queries";
+import { timestampLabel } from "~/lib/strings";
 import {
   cancelLogin,
   cancelled,
@@ -147,9 +148,25 @@ export const ProviderConnectionRow = ({
       {connection.credential === "subscription" && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <dt>{expires}</dt>
-          <dd>{connection.expiresAt ?? unknownTime}</dd>
+          <dd>
+            {connection.expiresAt === null ? (
+              unknownTime
+            ) : (
+              <time dateTime={connection.expiresAt} className="font-mono tabular-nums">
+                {timestampLabel(connection.expiresAt)}
+              </time>
+            )}
+          </dd>
           <dt>{lastRefresh}</dt>
-          <dd>{connection.lastRefresh ?? unknownTime}</dd>
+          <dd>
+            {connection.lastRefresh === null ? (
+              unknownTime
+            ) : (
+              <time dateTime={connection.lastRefresh} className="font-mono tabular-nums">
+                {timestampLabel(connection.lastRefresh)}
+              </time>
+            )}
+          </dd>
         </dl>
       )}
       {state?.status === "starting" && (

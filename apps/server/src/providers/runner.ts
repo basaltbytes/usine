@@ -114,7 +114,15 @@ export const providerLoginRunnerLayer = Layer.effect(
                   ["-q", "-c", "stty cols 1000; claude setup-token", "/dev/null"],
                   options,
                 );
-        const processHandle = yield* spawner.spawn(command).pipe(Effect.mapError(failure));
+        const processHandle = yield* spawner.spawn(command).pipe(
+          Effect.mapError((error) =>
+            provider === "chatgpt" && error.reason._tag === "NotFound"
+              ? ProviderCredentialError.make({
+                  message: "Codex not found on PATH. Install it to connect ChatGPT.",
+                })
+              : failure(),
+          ),
+        );
         let output = "";
         const collect = Stream.merge(processHandle.stdout, processHandle.stderr).pipe(
           Stream.decodeText(),

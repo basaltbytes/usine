@@ -108,10 +108,12 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         TimeoutError: () => unreachableClaude(),
       }),
       Effect.tapError((error) =>
-        Effect.logWarning("Local Claude authentication command failed", {
-          action,
-          message: error.message,
-        }),
+        action === "status"
+          ? Effect.void
+          : Effect.logWarning("Local Claude authentication command failed", {
+              action,
+              message: error.message,
+            }),
       ),
     );
   });
@@ -254,6 +256,31 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     };
   });
   const codexConnection = Effect.gen(function* () {
+    const exit = yield* spawner
+      .exitCode(
+        ChildProcess.make("codex", ["--version"], {
+          env: { HOME: home, PATH: path, CODEX_HOME: codexHome },
+          extendEnv: false,
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+        }),
+      )
+      .pipe(
+        Effect.timeout("30 seconds"),
+        Effect.catchTags({
+          PlatformError: (error) =>
+            failed(
+              error.reason._tag === "NotFound"
+                ? "Codex not found on PATH. Install it to connect ChatGPT."
+                : "Could not run Codex. Check its installation and try again.",
+            ),
+          TimeoutError: () =>
+            failed("Codex did not respond. Check its installation and try again."),
+        }),
+      );
+    if (Number(exit) !== 0)
+      return yield* failed("Could not run Codex. Check its installation and try again.");
     const codex = yield* read(codexFile);
     const tokenFields = Schema.decodeUnknownOption(
       Schema.Struct({
@@ -281,16 +308,29 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       lastRefresh: Option.isSome(tokenFields) ? (tokenFields.value.last_refresh ?? null) : null,
     };
   });
+  const statusErrors = new Map<string, string>();
   const isolated = <A>(
     provider: "anthropic-messages" | "openai-responses",
     connection: Effect.Effect<A, ProviderCredentialError>,
   ) =>
     connection.pipe(
+      Effect.tap(() =>
+        Effect.gen(function* () {
+          if (statusErrors.delete(provider))
+            yield* Effect.logInfo("Local provider status available", { provider });
+        }),
+      ),
       Effect.catchTag("ProviderCredentialError", (error) =>
-        Effect.logWarning("Local provider status unavailable", {
-          provider,
-          message: error.message,
-        }).pipe(Effect.as({ provider, error: error.message })),
+        Effect.gen(function* () {
+          if (statusErrors.get(provider) !== error.message) {
+            statusErrors.set(provider, error.message);
+            yield* Effect.logInfo("Local provider status unavailable", {
+              provider,
+              message: error.message,
+            });
+          }
+          return { provider, error: error.message };
+        }),
       ),
     );
   const localStatus = Effect.all(

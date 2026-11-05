@@ -23,6 +23,7 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
       let logout = "clear";
       const transport = ChildProcessSpawner.make((command) => {
         assert(command._tag === "StandardCommand");
+        if (command.command !== "claude") return native.spawn(command);
         assert.equal(command.command, "claude");
         assert.deepEqual(command.options.env, {
           HOME: home,
