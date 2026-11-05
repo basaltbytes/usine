@@ -100,6 +100,8 @@ Should egress use HTTP CONNECT or a SOCKS proxy? Both fit the gateway.
 
 `reportedOutcome` reads markers as `AgentBlockedError` and `AgentQuestionError`, and `reportText` writes them. A parent's blocker becomes a non-retryable `BlockedFailure` and its question a non-retryable `QuestionFailure`: the run fails, its loop suppresses the item, and the run waits for the operator. A child's harness failure (`AgentResultError`) goes to the parent as a `[usine:failed]` report that `reportedOutcome` reads back, so the attempt ends with `AgentFailure` and suppresses nothing: the harness posted nothing.
 
+Claude Code, Codex, and Pi children log blocker and question reports at Info with `kind` (`blocked` or `question`), `message`, and `sessionId`. Harness and infrastructure failures log at Error. The log level does not change the typed outcome returned to the parent.
+
 A child's report returns to the parent's `subagent` call as text opening with its marker, to return verbatim. The parent keeps the first: a later ordinary answer fails with it, and the paraphrase stays in the transcript. Successful siblings don't clear it. Held children can take guidance and replace their answer before release. A marker without details still fails.
 
 Model ids stay opaque until the harness checks its registry. Task failures use `AgentResultError`. `toAttemptFailure` maps `SessionOperationError` (SDK, process, and protocol failures) to a retryable infrastructure failure; `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.

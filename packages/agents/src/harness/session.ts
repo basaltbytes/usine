@@ -68,11 +68,19 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const fail = Effect.fn("SessionChannel.fail")(function* (error: AgentSessionError) {
     yield* Effect.annotateCurrentSpan({ sessionId: options.sessionId });
     if (yield* Ref.getAndSet(terminal, true)) return;
-    yield* Effect.logError(`${options.label} failed`, {
-      errorTag: error._tag,
-      message: error.message,
-      sessionId: options.sessionId,
-    });
+    if (error._tag === "AgentBlockedError" || error._tag === "AgentQuestionError") {
+      yield* Effect.logInfo(`${options.label} returned a reserved report`, {
+        kind: error._tag === "AgentBlockedError" ? "blocked" : "question",
+        message: error.message,
+        sessionId: options.sessionId,
+      });
+    } else {
+      yield* Effect.logError(`${options.label} failed`, {
+        errorTag: error._tag,
+        message: error.message,
+        sessionId: options.sessionId,
+      });
+    }
     yield* Deferred.fail(result, error);
     yield* Queue.fail(events, error);
     yield* runCleanups;
