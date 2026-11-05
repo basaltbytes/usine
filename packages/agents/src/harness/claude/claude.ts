@@ -13,7 +13,6 @@ import {
 import { spawn } from "node:child_process";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
-  type BillingPool,
   ChildSession,
   HarnessSession,
   HarnessSessionId,
@@ -47,7 +46,7 @@ import {
   HostLoginLock,
   ChildBackend,
   ChildSessionLifecycle,
-  ChildRequest,
+  type ChildRequest,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
@@ -491,17 +490,7 @@ const makeClaudeChild = Effect.gen(function* () {
   });
 
   const launch: ChildBackend["Service"]["launch"] = Effect.fn("ClaudeRuntime.launch")(
-    function* (input) {
-      const pool: BillingPool = Option.contains(input.session.gatewayCredential, "api-key")
-        ? "apiKeys"
-        : "claudePlan";
-      const request = ChildRequest.make({
-        ...input,
-        session: ChildSession.make({
-          ...input.session,
-          pool: Option.some(pool),
-        }),
-      });
+    function* (request) {
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
         effort: request.session.brain.effort,
@@ -511,7 +500,7 @@ const makeClaudeChild = Effect.gen(function* () {
         sessionId: request.session.id,
         worker: request.worker,
       });
-      yield* Effect.logInfo("Launching Claude child session", { pool });
+      yield* Effect.logInfo("Launching Claude child session");
       const context = yield* Effect.context<never>();
       const scope = yield* Effect.scope;
       let boundary = Effect.void;
@@ -540,15 +529,30 @@ const makeClaudeChild = Effect.gen(function* () {
       // The launch that runs the session; a resume replaces it.
       let current = yield* launchWithRetries(request, options, [request.prompt], scope);
 
+      const usesApiKey = Option.isNone(request.session.gatewayCredential)
+        ? yield* Effect.tryPromise({
+            try: () => current.query.usesApiKey(),
+            catch: (cause) =>
+              operationError("launch", request, "Claude account discovery failed", cause),
+          })
+        : request.session.gatewayCredential.value === "api-key";
+      const session = ChildSession.make({
+        ...request.session,
+        pool: Option.some(usesApiKey ? "apiKeys" : "claudePlan"),
+      });
+      yield* Effect.logInfo("Claude billing pool verified", {
+        sessionId: session.id,
+        pool: usesApiKey ? "apiKeys" : "claudePlan",
+      });
       const channel = yield* sessionChannel({
         label: "Claude child session",
-        sessionId: request.session.id,
+        sessionId: session.id,
       });
       channel.onTerminal(() => {
         current.input.end();
       });
       const conversation = yield* sessionConversation({
-        session: request.session,
+        session,
         channel,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
         send: (message, activity) =>
@@ -563,7 +567,7 @@ const makeClaudeChild = Effect.gen(function* () {
       boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
       const usage = claudeSessionMeter();
-      const readRateLimits = claudeRateLimits(request.session);
+      const readRateLimits = claudeRateLimits(session);
       // The latest session ID from Claude, which a resume loads.
       let harnessSessionId = Option.none<HarnessSessionId>();
       // Resumes since Claude last sent a message.
@@ -580,12 +584,12 @@ const makeClaudeChild = Effect.gen(function* () {
       const reportRetry = Effect.fn("ClaudeRuntime.reportRetry")(function* (
         retry: typeof ClaudeApiRetry.Type,
       ) {
-        yield* Effect.annotateCurrentSpan({ sessionId: request.session.id });
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         retries += 1;
         retrying = true;
         const message = apiRetryMessage(retry);
         yield* Effect.logWarning("Claude child cannot reach its provider and will retry", {
-          sessionId: request.session.id,
+          sessionId: session.id,
           retries,
           message,
           status: retry.error_status,
@@ -593,22 +597,22 @@ const makeClaudeChild = Effect.gen(function* () {
         });
         yield* channel.emit(
           ProviderRetrying.make({
-            session: request.session,
+            session,
             message,
             retries: ProviderRetries.make(retries),
           }),
         );
       });
       const reportRecovery = Effect.fn("ClaudeRuntime.reportRecovery")(function* () {
-        yield* Effect.annotateCurrentSpan({ sessionId: request.session.id });
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         retrying = false;
         yield* Effect.logInfo("Claude child reached its provider again", {
-          sessionId: request.session.id,
+          sessionId: session.id,
           retries,
         });
         yield* channel.emit(
           ProviderRecovered.make({
-            session: request.session,
+            session,
             retries: ProviderRetries.make(retries),
           }),
         );
@@ -623,11 +627,11 @@ const makeClaudeChild = Effect.gen(function* () {
           if (Option.isSome(limits)) yield* channel.emit(limits.value);
           const retry = decodeApiRetry(message);
           if (Option.isSome(retry)) {
-            providerFailure = apiRetryFailure(request.session.id, retry.value);
+            providerFailure = apiRetryFailure(session.id, retry.value);
             return yield* reportRetry(retry.value);
           }
           if (isAssistantMessage(message))
-            providerFailure = assistantFailure(request.session.id, message, providerFailure);
+            providerFailure = assistantFailure(session.id, message, providerFailure);
           if (retrying && isAssistantMessage(message)) yield* reportRecovery();
           if (Schema.is(ClaudeCompletionHeader)(message)) {
             const update = yield* decodeCompletionUpdate(message).pipe(
@@ -647,7 +651,7 @@ const makeClaudeChild = Effect.gen(function* () {
                 .filter((task) => task.ambient !== true)
                 .map((task) => task.task_id);
               yield* Effect.logInfo("Claude background work changed", {
-                sessionId: request.session.id,
+                sessionId: session.id,
                 backgroundTaskIds: backgroundTasks,
               });
             } else {
@@ -661,7 +665,7 @@ const makeClaudeChild = Effect.gen(function* () {
                 if (backgroundTasks.length === 0) yield* conversation.finish(candidate.value);
                 else
                   yield* Effect.logInfo("Claude child is waiting for background work", {
-                    sessionId: request.session.id,
+                    sessionId: session.id,
                     backgroundTaskIds: backgroundTasks,
                   });
               }
@@ -677,23 +681,21 @@ const makeClaudeChild = Effect.gen(function* () {
             });
             yield* channel.emit(
               SessionStarted.make({
-                session: request.session,
+                session,
                 harnessSession: Option.some(harnessSession),
               }),
             );
             yield* Effect.logInfo("Claude child session saved", {
-              sessionId: request.session.id,
-              parentSessionId: request.session.parentId,
+              sessionId: session.id,
+              parentSessionId: session.parentId,
               harnessSessionId: harnessSession.id,
               cwd: harnessSession.cwd,
             });
           }
           const used = usage.read(message);
           if (Option.isSome(used))
-            yield* channel.emit(
-              SessionTokensUpdated.make({ session: request.session, ...used.value }),
-            );
-          for (const event of sessionEventsFrom(message, request.session, tools)) {
+            yield* channel.emit(SessionTokensUpdated.make({ session, ...used.value }));
+          for (const event of sessionEventsFrom(message, session, tools)) {
             yield* channel.emit(event);
           }
           if (!Schema.is(ClaudeResultMessage)(message)) return;
@@ -701,7 +703,7 @@ const makeClaudeChild = Effect.gen(function* () {
           retries = 0;
           retrying = false;
           if (message.subtype !== "success" || message.result === undefined) {
-            yield* channel.fail(resultFailure(request.session.id, message, providerFailure));
+            yield* channel.fail(resultFailure(session.id, message, providerFailure));
             return;
           }
           providerFailure = Option.none();
@@ -711,7 +713,7 @@ const makeClaudeChild = Effect.gen(function* () {
             yield* conversation.read((queued) => queued.length - stillQueued);
           if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
             yield* Effect.logInfo("Claude child has queued user turns", {
-              sessionId: request.session.id,
+              sessionId: session.id,
               queuedTurns: message.queued_turn_count,
             });
             return;
@@ -721,7 +723,7 @@ const makeClaudeChild = Effect.gen(function* () {
             completedTurn = Option.some(answer);
           } else if (backgroundTasks.length > 0) {
             yield* Effect.logInfo("Claude child is waiting for background work", {
-              sessionId: request.session.id,
+              sessionId: session.id,
               backgroundTaskIds: backgroundTasks,
             });
           } else {
@@ -775,12 +777,12 @@ const makeClaudeChild = Effect.gen(function* () {
         error: SessionOperationError,
       ) {
         yield* Effect.annotateCurrentSpan({
-          sessionId: request.session.id,
+          sessionId: session.id,
           worker: request.worker,
         });
         const fields = {
-          sessionId: request.session.id,
-          parentSessionId: request.session.parentId,
+          sessionId: session.id,
+          parentSessionId: session.parentId,
           worker: request.worker,
         };
         const notResumed = (reason: string) =>
@@ -807,7 +809,7 @@ const makeClaudeChild = Effect.gen(function* () {
         for (const [callId, tool] of tools)
           yield* channel.emit(
             ToolFinished.make({
-              session: request.session,
+              session,
               callId,
               tool,
               output: "usine lost its connection to the Worker before this call returned",
@@ -889,7 +891,7 @@ const makeClaudeChild = Effect.gen(function* () {
 
       const steer = Effect.fn("ClaudeRuntime.steer")((message: string) =>
         Effect.logDebug("Steering Claude child session", {
-          sessionId: request.session.id,
+          sessionId: session.id,
         }).pipe(
           Effect.andThen(
             Effect.try({
@@ -900,7 +902,7 @@ const makeClaudeChild = Effect.gen(function* () {
         ),
       );
       const interrupt = Effect.logInfo("Interrupting Claude child session", {
-        sessionId: request.session.id,
+        sessionId: session.id,
       }).pipe(
         Effect.andThen(
           Effect.tryPromise({
@@ -912,7 +914,7 @@ const makeClaudeChild = Effect.gen(function* () {
         Effect.asVoid,
       );
       return {
-        session: request.session,
+        session,
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),

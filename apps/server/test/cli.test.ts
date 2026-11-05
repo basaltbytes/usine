@@ -29,6 +29,35 @@ const noEnvironment = {
 };
 
 describe("usine CLI", () => {
+  it.live("parses provider login and logout independently of server settings", () =>
+    Effect.gen(function* () {
+      const login = yield* parseCli(
+        ["login", "chatgpt", "--api-key", "--target", "gateway"],
+        noEnvironment,
+      );
+      assert(login._tag === "ProviderCommand");
+      assert.equal(login.mode, "api-key");
+      assert.deepEqual(login.target, Option.some("gateway"));
+      const logout = yield* parseCli(["logout", "claude"], noEnvironment);
+      assert(logout._tag === "ProviderCommand");
+      assert.equal(logout.action, "logout");
+      assert.equal(logout.provider, "claude");
+    }),
+  );
+  it.live.each([
+    ["login"],
+    ["login", "unknown"],
+    ["logout", "claude", "--api-key"],
+    ["login", "claude", "--target"],
+    ["login", "claude", "--target", ""],
+    ["login", "claude", "--target", "--api-key"],
+  ])("rejects invalid provider arguments: %j", (args) =>
+    Effect.gen(function* () {
+      const error = yield* parseCli(args, noEnvironment).pipe(Effect.flip);
+      assert.instanceOf(error, CliUsageError);
+    }),
+  );
+
   it.live.each([
     ["config"],
     ["config", "export", ""],

@@ -431,6 +431,8 @@ describe("Codex app-server transport", () => {
         "check_for_update_on_startup=false",
         "-c",
         "analytics.enabled=false",
+        "-c",
+        'cli_auth_credentials_store="file"',
       ]);
     });
   }

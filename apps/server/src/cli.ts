@@ -1,3 +1,4 @@
+import { LoginProvider } from "@usine/gateway/credentials";
 import type { HttpServerError } from "effect/http";
 import { UiOrigin } from "@usine/config/factory";
 import { UpgradeChannel } from "@usine/core/upgrade";
@@ -81,6 +82,9 @@ Options:
   -o, --output <path>          Write the run evidence to this file (default: run-<encoded-runId>.json)
   -h, --help                   Print this help
   -v, --version                Print the installed @usine/server version
+
+  login <claude|chatgpt>       Connect a provider; --api-key reads an API key
+  logout <claude|chatgpt>      Disconnect a provider; --target selects a gateway
 
 Environment:
   USINE_PORT                     Listen on this port if --port is not set
@@ -213,6 +217,16 @@ export class SignInCommand extends Schema.TaggedClass<
   Brand.Brand<"@usine/server/cli/SignInCommand">
 >()("SignInCommand", { action: Schema.Literals(["device", "link"]), origin: UiOrigin }) {}
 
+export class ProviderCommand extends Schema.TaggedClass<
+  ProviderCommand,
+  { readonly brand: unique symbol }
+>()("ProviderCommand", {
+  action: Schema.Literals(["login", "logout"]),
+  provider: LoginProvider,
+  mode: Schema.Literals(["subscription", "api-key"]),
+  target: Schema.Option(Schema.NonEmptyString),
+}) {}
+
 export interface CliEnvironment {
   readonly port: Option.Option<string>;
   readonly origin: Option.Option<string>;
@@ -223,6 +237,7 @@ export interface CliEnvironment {
 export const CliCommand = Schema.Union([
   ConfigCommand,
   SignInCommand,
+  ProviderCommand,
   HelpCommand,
   VersionCommand,
   UpCommand,
@@ -462,6 +477,8 @@ const upgradeCommand = (args: ReadonlyArray<string>) =>
 
 const SUBCOMMANDS: ReadonlySet<string> = new Set([
   "config",
+  "login",
+  "logout",
   "up",
   "status",
   "stop",
@@ -487,6 +504,27 @@ export const parseCli = Effect.fn("Cli.parse")((
     return Effect.succeed(VersionCommand.make());
   }
   switch (command) {
+    case "login":
+    case "logout": {
+      const [provider, ...flags] = rest;
+      if (!Schema.is(LoginProvider)(provider))
+        return Effect.fail(usageError("Choose claude or chatgpt."));
+      let mode: "subscription" | "api-key" = "subscription";
+      let target = Option.none<string>();
+      while (flags.length > 0) {
+        const flag = flags.shift();
+        if (flag === "--api-key" && command === "login") mode = "api-key";
+        else if (
+          flag === "--target" &&
+          flags[0] !== undefined &&
+          flags[0].length > 0 &&
+          !flags[0].startsWith("--")
+        )
+          target = Option.some(flags.shift() ?? "");
+        else return Effect.fail(usageError());
+      }
+      return Effect.succeed(ProviderCommand.make({ action: command, provider, mode, target }));
+    }
     case "sign-in":
     case "sign-in-link":
       if (rest.length > (command === "sign-in" ? 1 : 0)) return Effect.fail(usageError());

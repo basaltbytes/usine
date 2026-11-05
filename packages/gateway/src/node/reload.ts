@@ -1,3 +1,4 @@
+import { ProviderCredentials } from "../credentials/store.ts";
 import {
   Crypto,
   Cause,
@@ -196,6 +197,7 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
       const logins = yield* ChatGptLogins;
       const fileSystem = yield* FileSystem.FileSystem;
       const crypto = yield* Crypto.Crypto;
+      const credentials = yield* Effect.serviceOption(ProviderCredentials);
       const oneAtATime = yield* Semaphore.make(1);
       const { domain, adminToken, callerKey } = started.settings;
       const startedRestartSettings: RestartSettings = {
@@ -213,7 +215,10 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
           const providers = yield* nextProviders;
           const next = {
             egress: Option.getOrElse(allowlist.egress, () => previous.egress),
-            providers: Option.getOrElse(providers, () => previous.providers),
+            providers: yield* Option.match(credentials, {
+              onNone: () => Effect.succeed(Option.getOrElse(providers, () => previous.providers)),
+              onSome: (store) => store.apply(Option.getOrElse(providers, () => previous.providers)),
+            }),
           };
           yield* inForce.replace(next);
           if (Option.isSome(providers)) yield* reloadChatGptLogin(logins, next.providers);

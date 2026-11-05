@@ -1,3 +1,6 @@
+import { ProviderTargets } from "./providers/targets.ts";
+import { ProviderLogins } from "./providers/control.ts";
+import { providerLoginRunnerLayer } from "./providers/runner.ts";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { changeBusLayer } from "@usine/core/changes";
 import { startupListener, type StartupListener } from "./listener.ts";
@@ -87,6 +90,7 @@ import { monitorEventLoop } from "./event-loop.ts";
 const serve = Effect.fnUntraced(function* (options: {
   readonly auth: AuthServices;
   readonly setup: Setup["Service"];
+  readonly providers: ProviderLogins["Service"];
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
   readonly port: Port;
@@ -107,6 +111,7 @@ const serve = Effect.fnUntraced(function* (options: {
       Layer.mergeAll(
         options.catalog ?? Layer.empty,
         Layer.succeed(ServerUpgrades, options.upgrades),
+        Layer.succeed(ProviderLogins, options.providers),
         Layer.succeed(ConfigurationEditor, options.configurationEditor),
       ),
       options.webhooks,
@@ -188,6 +193,16 @@ const start = Effect.fnUntraced(function* (
     ).pipe(Layer.provide(NodeServices.layer), Layer.provide(FetchHttpClient.layer)),
   );
   const setup = Context.get(setupContext, Setup);
+  const providerContext = yield* Layer.build(
+    ProviderLogins.layer.pipe(
+      Layer.provide(
+        ProviderTargets.layer(Effect.map(instances.get, ({ config }) => config.workers)),
+      ),
+      Layer.provide(providerLoginRunnerLayer),
+      Layer.provide(NodeServices.layer),
+    ),
+  );
+  const providers = Context.get(providerContext, ProviderLogins);
   const path = yield* Path.Path;
   const modulePath = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(Effect.orDie);
   const webRoot = path.resolve(path.dirname(modulePath), "web");
@@ -223,6 +238,7 @@ const start = Effect.fnUntraced(function* (
     );
     return yield* serve({
       setup,
+      providers,
       auth,
       backend,
       configurationEditor,
@@ -284,6 +300,7 @@ const start = Effect.fnUntraced(function* (
       running: Effect.raceFirst(
         serve({
           setup,
+          providers,
           auth,
           backend: liveBackendLayer(
             instances,

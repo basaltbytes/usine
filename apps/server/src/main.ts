@@ -39,6 +39,11 @@ const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
       ({ configCommand }) => configCommand(directory, config),
     );
   return yield* Match.valueTags(command, {
+    ProviderCommand: (command) =>
+      Effect.flatMap(
+        Effect.promise(() => import("./providers/cli.ts")),
+        ({ providerCommand }) => providerCommand(directory, command),
+      ),
     SignInCommand: (command) =>
       Effect.flatMap(
         Effect.promise(() => import("./auth/cli.ts")),

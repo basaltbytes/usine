@@ -44,6 +44,38 @@ Lifecycle commands verify that the recorded unit owns the process. They use `sys
 
 Set `USINE_LAUNCHD_SERVICE=gui/<uid>/<label>` in the instance `.env` and install the matching `~/Library/LaunchAgents/<label>.plist`. `up` records the target only when `launchctl print` reports its PID. `stop` uses `bootout`; `restart` uses `bootout`, `bootstrap`, and `kickstart`. `up --detach` starts the configured job, loading its plist if needed, and uses its configured arguments. Commands run as the owning user in the login session. `status` uses `print` to verify supervision and reports launchctl failures. A failed start unloads a job waiting to retry. See [macOS deployment](/guides/host-usine-on-macos/) for both jobs, login requirements, and log paths.
 
+## usine login and usine logout
+
+Connect Claude or ChatGPT while `usine up` runs, from the instance folder:
+
+```sh
+usine login claude
+usine login chatgpt
+usine login chatgpt --api-key
+usine logout claude
+usine logout chatgpt --target usine-gateway
+```
+
+Both commands read connection status from the running instance and authenticate with its local `.usine/admin-token`. Run them as the user who started the instance. Subscription login polls until authorization completes; logout disconnects the selected provider immediately.
+
+`--target <SSH destination>` selects one gateway when several are configured. With one gateway, usine selects it automatically. With none, it stores credentials where the local Claude Code and Codex harnesses read them, honoring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+
+Local preflight and attempt children use the same credential directories. If one gateway is unavailable, Settings shows its error while other gateways remain usable. `--target` can select a healthy gateway independently.
+
+Local preflight and children accept subscription credentials and API keys. Claude setup tokens count as subscription credentials. Children report API-key usage in the API keys pool and subscription usage in the matching plan pool.
+
+Without a gateway, usine reads each provider's status separately. If `claude` isn't on the `PATH` of the user running `usine up`, Claude shows as unavailable and `usine login claude` reports the missing command; ChatGPT remains available, as in the Codex-only quickstart.
+
+Local Claude status uses `claude auth status --json`, including macOS Keychain logins. Disconnect runs `claude auth logout`, removes usine's settings overrides and file credentials, and verifies that Claude reports signed out. It clears the native login for the configured Claude directory, including an older login that a replacement credential overrides.
+
+Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Connect replaces `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default), and disconnect removes it. Keyring credentials remain available to Codex commands run outside usine. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.
+
+Subscription sign-in uses the installed Claude Code `setup-token` command or Codex `login --device-auth` command in a private temporary directory. Claude requires `script` and a code from its authorization page. Codex displays a device code for authorization in another browser. `--api-key` reads a masked key from the terminal. Ctrl+C cancels subscription sign-in. Failed or cancelled authorization preserves the previous login.
+
+Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.
+
+Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values; opaque Claude setup tokens report neither. Pi parent authentication remains a separate Pi login.
+
 ## usine status
 
 | Argument | Type | Default | Description |
