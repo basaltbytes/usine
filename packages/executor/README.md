@@ -6,6 +6,8 @@ Worker execution for [usine](https://github.com/basaltbytes/usine). The platform
 
 Harness credential providers, login mounts, and login egress hosts come from the platform-free `@usine/agents/harness` catalog. Worker preflight and credential preparation use the same descriptor data. Credential preparation records which harnesses receive provisioned API keys. Child adapters resolve and record the billing pool from the injected credential kind.
 
+Worker preflight checks each coding-agent brain with the shared `admitBrain` policy before probing binaries or credentials. Pi's descriptor permits local children; remote and sandbox refusals include the role, missing placement, and adapter reason.
+
 ## Attempt lifetime
 
 Call `Executor.prepare(request)` inside `Effect.scoped`, then `prepared.launch(io)` once. The `PreparedAttempt` owns the checkout and repo access. Its `workspace`, an `AttemptWorkspace` with the worker, run spec, and worktree path, serializes without credentials or live handles.

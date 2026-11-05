@@ -5,7 +5,7 @@ import { strict as assert } from "node:assert";
 import { once } from "node:events";
 // The standalone SDK fixture writes its bootstrap files synchronously before opening the harness.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 // The Node server adapter requires native HTTP server and connection types.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http";
@@ -15,7 +15,8 @@ import { connect } from "node:net";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
+import { ModelId } from "@usine/core/agent/brain";
 import { EnvHttpProxyAgent, fetch as undiciFetch, getGlobalDispatcher } from "undici";
 import { DurableHarness } from "../../src/harness.ts";
 import { harnessLayer } from "../../src/live.ts";
@@ -106,6 +107,25 @@ const openHarness = () =>
 
 try {
   assert.strictEqual(getGlobalDispatcher(), initialDispatcher);
+  if (scenario === "unknown-parent") {
+    await assert.rejects(
+      Effect.runPromise(
+        Effect.void.pipe(
+          Effect.provide(
+            harnessLayer(directory, [
+              {
+                parentModel: Option.some(ModelId.make("missing/parent-model")),
+                parentEffort: "high",
+              },
+            ]),
+          ),
+          Effect.scoped,
+        ),
+      ),
+      /Pi has no model "missing\/parent-model"/u,
+    );
+    assert.strictEqual(existsSync(join(directory, ".usine/durable.sqlite")), false);
+  }
   await openHarness();
   const dispatcher = getGlobalDispatcher();
   assert.notStrictEqual(dispatcher, initialDispatcher);

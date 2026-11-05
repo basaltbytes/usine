@@ -37,7 +37,9 @@ Every attempt has a Pi parent in the orchestrator. Its `subagent` tool starts ch
 
 Parent model selection uses the agent override, instance default, Pi's configured default, then the first Pi model with a credential. Parent effort uses the agent override, instance default, then child effort. Pi reads configuration from `~/.pi/agent` or `PI_CODING_AGENT_DIR` for the Unix user running the orchestrator. An `openai-codex` model requires a ChatGPT login there; other providers require API keys.
 
-An unavailable model, unsupported effort, or missing parent credential fails the attempt with `AgentFailure`. Startup preflight checks child harnesses; parent model resolution happens when the attempt starts.
+Startup validates the resolved parent model, effort, and credential for every rostered agent before resuming attempts. An unavailable model, unsupported effort, or missing credential stops startup with a diagnostic. Each attempt checks its parent again before creating the conversation, so a later credential change can fail the attempt with `AgentFailure`.
+
+The parent uses the coordinator role, which requires durable coordination: committed tool intents and results that continue after an orchestrator restart. Pi provides that capability. The `parent_model` and `parent_effort` settings continue to select its brain.
 
 ## Harness requirements
 
@@ -72,7 +74,9 @@ Children run without approval prompts. Claude Code ignores project settings, Cod
 
 ## Preflight
 
-Preflight checks tools and credentials; it does not install harnesses. Startup checks each rostered child brain on every worker. A changed roster is checked before the running configuration accepts it. Each attempt also checks its selected agent. Failures identify the worker, capability, and remediation.
+Configuration import and saved edits check every coding-agent brain against each configured worker. A refusal identifies the agent, worker, role, missing capability or placement, and the harness adapter's reason. For example, a Pi agent on an SSH worker lacks the `container` placement because Pi runs its tools in the orchestrator process. Use a local worker for Pi children or select a harness that supports the configured workers.
+
+Preflight checks the same role requirements before tools and credentials; it does not install harnesses. Startup checks each rostered child brain on every worker. A changed roster is checked before the running configuration accepts it. Each attempt also checks its selected agent. Failures identify the worker, capability, and remediation.
 
 For local and SSH subscription workers, Claude Code must report a first-party subscription login, and Codex must report a ChatGPT login. Gateway-injected and attempt API-key credentials use the same harness binary and version checks, with authentication supplied by their credential route. Claude Code accepts any installed version; Codex requires a supported version. Claude Code's host-login checks and child startup share a lock for the same worker login. Pi requires a local worker and an API key for the selected provider or an `openai-codex` ChatGPT login. Use [Run worker preflight](/guides/run-worker-preflight/) after fixing the machine.
 

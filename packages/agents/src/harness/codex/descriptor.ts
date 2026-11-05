@@ -1,5 +1,6 @@
 import { Harness } from "@usine/core/agent/brain";
 import { Option } from "effect";
+import { CapabilityProfile, Lacking } from "../capability.ts";
 import {
   HarnessCredential,
   HarnessDescriptor,
@@ -43,6 +44,63 @@ export const codex = HarnessDescriptor.make({
       }),
     ),
   }),
+  capabilities: [
+    CapabilityProfile.make({
+      placements: ["orchestrator", "local", "ssh", "container", "sandbox"],
+      credentials: ["host-login", "gateway-subscription"],
+      supported: [
+        "resume-session",
+        "usine-tools",
+        "steer",
+        "interrupt",
+        "token-usage",
+        "model-check",
+        "plan-windows",
+      ],
+      lacking: [
+        Lacking.make({
+          capability: "durable-coordination",
+          reason:
+            "Codex resumes conversations without a durable journal of usine tool intents and results",
+        }),
+        Lacking.make({
+          capability: "cost-usd",
+          reason: "Codex reports tokens; usine estimates USD from a price table",
+        }),
+      ],
+    }),
+    CapabilityProfile.make({
+      placements: ["orchestrator", "local", "ssh", "container", "sandbox"],
+      credentials: ["gateway", "gateway-api-key", "api-key"],
+      supported: [
+        "resume-session",
+        "usine-tools",
+        "steer",
+        "interrupt",
+        "token-usage",
+        "model-check",
+      ],
+      lacking: [
+        Lacking.make({
+          capability: "durable-coordination",
+          reason:
+            "Codex resumes conversations without a durable journal of usine tool intents and results",
+        }),
+        Lacking.make({
+          capability: "cost-usd",
+          reason: "Codex reports tokens; usine estimates USD from a price table",
+        }),
+        Lacking.make({
+          capability: "plan-windows",
+          reason:
+            "API keys and unreported gateway credentials have no verified subscription rate windows",
+        }),
+      ],
+    }),
+  ],
+  placementReason: "The harness requires a process host",
+  credentialReason:
+    "The harness requires its own login or a provider credential on the gateway or attempt",
   prices: Option.some(prices),
   handoff: ResumeCommand.make({
     command: "codex resume --",

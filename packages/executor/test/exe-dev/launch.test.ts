@@ -919,7 +919,7 @@ describe("exe.dev launch", () => {
         )
         .pipe(Effect.flip);
       assert(error._tag === "WorkerCapabilityError");
-      assert.strictEqual(error.message, "Pi children run only on local workers");
+      assert.include(error.message, "pi cannot run as coding-agent at ssh: lacks ssh");
     }).pipe(Effect.provide(runtime(ssh.layer)));
   });
 });

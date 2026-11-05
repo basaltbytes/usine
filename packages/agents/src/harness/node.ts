@@ -8,6 +8,8 @@ import { piSdkLive } from "./pi/sdk.ts";
 import { piRuntime } from "./pi/pi.ts";
 import { Harnesses } from "./registry.ts";
 
+export { admitChild, childAdmissionContext, hostPlacement } from "./launch.ts";
+
 export { Harnesses, HarnessRegistrationError, UnknownHarnessError } from "./registry.ts";
 export { type HarnessRuntime, ProbeTarget } from "./runtime.ts";
 

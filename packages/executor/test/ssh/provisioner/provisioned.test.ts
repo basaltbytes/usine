@@ -822,7 +822,7 @@ describe("Provisioned SSH Worker", () => {
             1,
           )
           .pipe(Effect.flip);
-        assert.include(pi.message, "Pi children run only on local workers");
+        assert.include(pi.message, "pi cannot run as coding-agent at container: lacks container");
 
         providers.hetzner.token = "rotated";
         const token = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);

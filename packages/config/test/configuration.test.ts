@@ -1,3 +1,4 @@
+import { AgentFile } from "../src/agent.ts";
 import { Harness } from "@usine/core/agent/brain";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
@@ -116,6 +117,51 @@ const initialize = Effect.gen(function* () {
 });
 
 describe("configuration domain without layers", () => {
+  it.effect("refuses a Pi coding agent on an SSH worker before storing configuration", () =>
+    Effect.gen(function* () {
+      const instance = yield* fixture;
+      const entities = configurationEntities(
+        LoadedInstance.make({
+          ...instance,
+          agents: instance.agents.map((file) =>
+            AgentFile.make({ ...file, harness: Harness.make("pi") }),
+          ),
+        }),
+      ).map((entity) =>
+        entity.key.kind === "worker"
+          ? ConfigurationEntity.make({
+              ...entity,
+              value: {
+                name: entity.key.identifier,
+                kind: "ssh",
+                destination: "worker.example",
+                root: "/srv/usine",
+              },
+            })
+          : entity,
+      );
+      const result = yield* commit(
+        parser,
+        Configuration.empty,
+        zero,
+        configurationDiff([], entities),
+        metadata,
+      ).pipe(Effect.result);
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ConfigurationInvalid");
+        if (result.failure._tag === "ConfigurationInvalid") {
+          expect(result.failure.problems).toHaveLength(2);
+          for (const problem of result.failure.problems) {
+            expect(problem.file).toBe("agents/developer.md");
+            expect(problem.message).toContain("coding-agent at container: lacks container");
+            expect(problem.message).toContain("Pi runs its tools in the orchestrator process");
+          }
+        }
+      }
+    }),
+  );
+
   it.effect("omits unchanged entities when adding or removing an entity before them", () =>
     Effect.gen(function* () {
       const fixtureInstance = yield* fixture;

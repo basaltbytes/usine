@@ -6,6 +6,9 @@ import {
 } from "@usine/core/agent/capability";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema } from "effect";
+import { admitBrain, AdmissionContext } from "./admission.ts";
+import { catalog } from "./catalog.ts";
+import { hostPlacement } from "./launch.ts";
 import { ChildHost } from "../child-host/child-host.ts";
 import { type ChildBackendService, SessionOperationError } from "../runtime.ts";
 
@@ -50,6 +53,26 @@ export const checkedPreflight = <R>(
         credential: target.credential,
         ...Option.match(target.machine, { onNone: () => ({}), onSome: (machine) => ({ machine }) }),
       });
+      yield* Effect.fromResult(
+        admitBrain(
+          catalog,
+          "coding-agent",
+          brain,
+          AdmissionContext.make({
+            placement:
+              target.credential === "sandbox-api-key" ? "sandbox" : hostPlacement(target.host),
+            credential: target.credential === "sandbox-api-key" ? "api-key" : target.credential,
+          }),
+        ),
+      ).pipe(
+        Effect.mapError((error) =>
+          HarnessUnavailableError.make({
+            harness: error.harness,
+            capability: "binary",
+            message: error.message,
+          }),
+        ),
+      );
       yield* check(brain, target);
       yield* Effect.logInfo("Worker harness verified", {
         harness: brain.harness,

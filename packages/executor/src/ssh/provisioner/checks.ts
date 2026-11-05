@@ -1,9 +1,10 @@
+import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
 import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import type { RemoteCommands } from "../../remote/commands.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { GatewayLlmProvider } from "@usine/core/worker";
-import { Array as Arr, DateTime, Effect, Option, Duration } from "effect";
+import { Array as Arr, DateTime, Effect, Option, Duration, Result } from "effect";
 import {
   MachineCheck,
   WorkerCapabilityError,
@@ -31,7 +32,26 @@ export const harnessCredentialGap = (
       ? `${head} Add ${provider} to the gateway's llm_providers, with ${login} or an API key on the gateway, or set provisioner.api_keys.${provider}.`
       : `${head} Set provisioner.api_keys.${provider}. ${noGateway}`;
   };
-  for (const harness of Arr.dedupe(brains.map((brain) => brain.harness))) {
+  for (const brain of Arr.dedupe(brains)) {
+    const harness = brain.harness;
+    const admitted = admitBrain(
+      catalog,
+      "coding-agent",
+      brain,
+      AdmissionContext.make({
+        placement: "container",
+        credential: gatewayHolds(entry.gateway, harness) ? "gateway" : "api-key",
+      }),
+    );
+    if (Result.isFailure(admitted))
+      return Option.some(
+        WorkerCapabilityError.make({
+          worker,
+          capability: "toolchain",
+          message: admitted.failure.message,
+          cause: admitted.failure,
+        }),
+      );
     if (gatewayHolds(entry.gateway, harness) || Option.isSome(provisionedApiKey(entry, harness)))
       continue;
     const message = (() => {
@@ -40,8 +60,6 @@ export const harnessCredentialGap = (
           return missing("Claude Code", "anthropic", "a subscription token");
         case "codex":
           return missing("Codex", "openai", "a ChatGPT login");
-        case "pi":
-          return `Pi children run only on local workers, not on provisioned worker "${worker}".`;
         default:
           return `No provisioned worker credential for harness "${harness}".`;
       }

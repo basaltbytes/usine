@@ -2,6 +2,7 @@ import { Harness } from "@usine/core/agent/brain";
 import { type TokenBreakdown, UsdAmount } from "@usine/core/agent/session";
 import { GatewayLlmProvider } from "@usine/core/worker";
 import { type Brand, Option, Record, Schema } from "effect";
+import { CapabilityProfile } from "./capability.ts";
 
 /** The terminal command for a saved harness session. */
 export class ResumeCommand extends Schema.Class<
@@ -69,6 +70,21 @@ export class HarnessDescriptor extends Schema.Class<
 >("@usine/agents/HarnessDescriptor")({
   ...HarnessPresentation.fields,
   worker: WorkerRequirements,
+  capabilities: Schema.NonEmptyArray(CapabilityProfile).check(
+    Schema.makeFilter(
+      (profiles) => {
+        const routes = profiles.flatMap(({ placements, credentials }) =>
+          placements.flatMap((placement) =>
+            credentials.map((credential) => `${placement}:${credential}`),
+          ),
+        );
+        return new Set(routes).size === routes.length;
+      },
+      { message: "Expected one capability profile per placement and credential route" },
+    ),
+  ),
+  placementReason: Schema.NonEmptyString,
+  credentialReason: Schema.NonEmptyString,
   /** None when the harness supplies its own prices. */
   prices: Schema.Option(Schema.Record(Schema.String, TokenRates)),
 }) {

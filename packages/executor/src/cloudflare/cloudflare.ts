@@ -1,5 +1,5 @@
 import type { SshCommand } from "@usine/agents/child-host";
-import { catalog } from "@usine/agents/harness";
+import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
 import { Harnesses } from "@usine/agents/harness/node";
 import {
   ApiKeyCredential,
@@ -33,6 +33,7 @@ import {
   Option,
   Redacted,
   Ref,
+  Result,
   Schema,
   Scope,
 } from "effect";
@@ -112,8 +113,23 @@ const operationError =
 const brainGap = (
   address: CloudflareWorkerAddress,
   brain: BrainSpec,
-): Option.Option<WorkerCapabilityError> =>
-  Option.match(
+): Option.Option<WorkerCapabilityError> => {
+  const admitted = admitBrain(
+    catalog,
+    "coding-agent",
+    brain,
+    AdmissionContext.make({ placement: "sandbox", credential: "api-key" }),
+  );
+  if (Result.isFailure(admitted))
+    return Option.some(
+      WorkerCapabilityError.make({
+        worker: address.name,
+        capability: "toolchain",
+        message: admitted.failure.message,
+        cause: admitted.failure,
+      }),
+    );
+  return Option.match(
     Option.flatMap(catalog.get(brain.harness), (descriptor) =>
       Option.map(descriptor.worker.credential, (credential) => ({ descriptor, credential })),
     ),
@@ -123,7 +139,7 @@ const brainGap = (
           WorkerCapabilityError.make({
             worker: address.name,
             capability: "toolchain",
-            message: `Cloudflare worker "${address.name}" can't run Pi children, which run only on local workers`,
+            message: `No worker credential descriptor for harness "${brain.harness}"`,
             cause: new Error(`unsupported harness ${brain.harness}`),
           }),
         ),
@@ -140,6 +156,7 @@ const brainGap = (
             ),
     },
   );
+};
 
 /** Returns the sandbox credentials of a running Attempt: `github` and every provider key of `address`. */
 const credentialsFor = (

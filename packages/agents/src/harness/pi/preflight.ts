@@ -1,5 +1,4 @@
-import { BrainSpec, Harness } from "@usine/core/agent/brain";
-import { HarnessUnavailableError } from "@usine/core/agent/capability";
+import { BrainSpec } from "@usine/core/agent/brain";
 import { Effect, Option } from "effect";
 import { homedir } from "node:os";
 import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
@@ -7,18 +6,12 @@ import { SessionOperationError } from "../../runtime.ts";
 import { PiSdk, usePiStart } from "./sdk.ts";
 
 const check = Effect.fn("PiRuntime.check")(function* (brain: BrainSpec, target: ProbeTarget) {
-  const { host, environment } = target;
+  const { environment } = target;
   yield* Effect.annotateCurrentSpan({
     harness: brain.harness,
     model: brain.model,
     worker: target.worker,
   });
-  if (host._tag === "RemoteShell")
-    return yield* HarnessUnavailableError.make({
-      harness: Harness.make("pi"),
-      capability: "binary",
-      message: "Pi children run only on local workers",
-    });
   // Pi runs from the SDK installed with this process, not from a CLI binary.
   const sdk = yield* PiSdk;
   yield* usePiStart(

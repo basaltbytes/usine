@@ -10,6 +10,8 @@ Operator usage reads use each session's recorded billing pool. Older sessions wi
 
 Operator usage reads use each harness descriptor’s token price table when the session reports a token breakdown without its own USD cost. The configuration capabilities API includes harness display labels and saved-session resume commands from the same catalog.
 
+Startup resolves each rostered agent's parent model and effort from agent overrides and instance settings, then validates the coordinator's model, effort, and credentials before durable attempts resume. A refused parent stops startup with its diagnostic.
+
 ## Conditional approval
 
 Loop approval accepts `required`, `none`, or a boolean CEL condition over the event

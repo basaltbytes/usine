@@ -8,7 +8,7 @@ Stores versioned configuration and imports and exports the files of a [usine](ht
 
 `updateYaml` and `updateFrontmatter` change one path in the YAML tree and keep comments, key order, and the Markdown body. Files use snake_case keys (`poll_interval`, `max_concurrent_attempts`); decoded types use camelCase (`pollInterval`, `maxConcurrentAttempts`). The schema does the rename, so edits keep snake_case.
 
-Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster.
+Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster. Configuration import and edits also check each coding-agent brain against every configured worker through `admitBrain`. Unsupported placements or credential routes reject the configuration with the agent, worker, role, and adapter reason.
 
 ## Labels and lanes
 

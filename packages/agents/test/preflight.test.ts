@@ -638,7 +638,7 @@ describe("worker harness readiness", () => {
       const error = yield* verifyHarness(brain(Harness.make("pi")), remote, {}).pipe(Effect.flip);
       const matchesError = Schema.is(HarnessUnavailableError)(error);
       assert(matchesError);
-      assert.strictEqual(error.message, "Pi children run only on local workers");
+      assert.include(error.message, "pi cannot run as coding-agent at ssh: lacks ssh");
     }).pipe(
       Effect.provide(
         commands({}).pipe(

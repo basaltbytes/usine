@@ -35,3 +35,10 @@ Every child and its commands get exactly the attempt's environment, because the 
 The runtime includes the stored rendered loop task unchanged in every child's initial prompt. This includes edit-and-retry amendments. The parent's `subagent.task` argument supplies supplemental context or a focused assignment within that task; conflicting parent context does not replace the task's instructions.
 
 The durable runtime records the exact child prompt on `SessionStarted.prompt`, alongside saved harness session metadata. The run page displays it in the attempt details, including when the launch is outside the loaded transcript page. Older transcripts omit the prompt.
+
+
+## Amendment (2026-11-05, #953): role admission
+
+Harness descriptors declare capabilities for each credential route and placement. One `admitBrain` policy checks configuration, worker preflight, coordinator start, and child launch. The coordinator requires `durable-coordination`; Pi on the orchestrator provides it through pi-durable. Claude Code and Codex resume conversations without a journal of usine tool intents and results, so their descriptors refuse that role with a reason. The supervisor role runs on the orchestrator through gateway credentials, which keeps subscription credentials on the gateway.
+
+This replaces harness-specific placement refusals with role requirements. `parent_model` and `parent_effort` remain the parent settings because only Pi provides durable coordination. Startup validates every rostered agent's resolved parent model, effort, and credential before opening durable storage. Each attempt repeats that check to detect changed credentials.
