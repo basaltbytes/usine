@@ -1,3 +1,9 @@
+import {
+  harvestedAttemptChanges,
+  taskPullRequestState,
+  TaskAttemptChangesView,
+  TaskPullRequestState,
+} from "./task-changes.ts";
 import { LoopName } from "@usine/core/loop";
 import { boardRepositories } from "@usine/config/project";
 import { LaneName } from "@usine/config/board";
@@ -57,6 +63,11 @@ export class TaskItemView extends Schema.Class<
   labels: Schema.Array(GitHubLabelName),
   /** Whether the Item is an open pull request whose branch conflicts with its base. */
   conflicting: Schema.Boolean,
+  /** Latest polled PR state; null for issues and older task responses. */
+  pullRequest: Schema.NullOr(TaskPullRequestState).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
 }) {}
 
 /**
@@ -138,6 +149,11 @@ export class TaskView extends Schema.Class<
   ),
   /** The harvested comments and reviews of those Runs, newest Run first, and newest first within a Run. */
   comments: Schema.Array(TaskCommentView),
+  /** Recorded attempt commit ranges, including runs outside the first history page. */
+  attemptChanges: Schema.Array(TaskAttemptChangesView).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
 }) {}
 
 /**
@@ -251,6 +267,7 @@ const makeTaskReader = Effect.gen(function* () {
       (item) => projectedItem(item).pipe(Effect.result),
     );
     const details = new Map<ItemKey, TaskItemView>();
+    const storedByKey = new Map(stored.map((item) => [item.itemKey, item]));
     for (const result of projected) {
       if (Result.isFailure(result)) {
         yield* Effect.logError("Task Item could not be projected; the other Items are shown", {
@@ -270,6 +287,16 @@ const makeTaskReader = Effect.gen(function* () {
         labels,
         conflicting,
       } = result.success;
+      const storedItem = storedByKey.get(itemKey);
+      const pullRequest =
+        kind === "pr" && storedItem !== undefined
+          ? taskPullRequestState(storedItem.payload)
+          : Option.none();
+      if (kind === "pr" && Option.isNone(pullRequest))
+        yield* Effect.logWarning(
+          "Pull request changes unavailable without a valid projected base and head",
+          { repository: managed.name, itemKey },
+        );
       details.set(
         itemKey,
         TaskItemView.make({
@@ -281,6 +308,7 @@ const makeTaskReader = Effect.gen(function* () {
           state,
           labels,
           conflicting,
+          pullRequest: Option.getOrNull(pullRequest),
         }),
       );
     }
@@ -315,6 +343,7 @@ const makeTaskReader = Effect.gen(function* () {
         .map((summary) => runView(summary, paused, access, waits))
         .sort((a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id)),
       comments,
+      attemptChanges: detailRuns.flatMap(harvestedAttemptChanges),
     });
     yield* Effect.logDebug("Read a Task", {
       repository: managed.name,

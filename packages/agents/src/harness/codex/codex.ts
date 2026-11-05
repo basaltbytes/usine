@@ -1,3 +1,4 @@
+import { checkContinuation, checkContinuationHome, environmentHome } from "../continuation.ts";
 import { codexPreflight } from "./preflight.ts";
 import { codex } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
@@ -52,6 +53,7 @@ import {
 import {
   type AgentSessionError,
   ChildBackend,
+  type ChildRequest,
   ChildSessionLifecycle,
   type RunningSession,
   UnknownModelError,
@@ -99,20 +101,16 @@ const makeCodexChild = Effect.gen(function* () {
       });
       yield* Effect.logInfo("Launching Codex child session");
       const lifecycle = yield* ChildSessionLifecycle.current;
+      const { home, defaultHome } = environmentHome(request.environment, "CODEX_HOME", ".codex");
       let client: CodexClient = {
         cwd: request.cwd,
         sessionId: Option.some(request.session.id),
-        environment: Option.match(
-          Option.flatMap(request.resume, (saved) => saved.home),
-          {
-            onNone: () => request.environment,
-            onSome: (home) => ({ ...request.environment, CODEX_HOME: home }),
-          },
-        ),
+        environment: request.environment,
         host: request.host,
       };
       if (Option.isSome(request.resume)) client = { ...client, transport: "replace" };
       let connection = yield* appServer.open(client);
+      yield* checkContinuationHome(request, home, defaultHome);
       yield* initializeCodex(connection);
       let billing = yield* codexChildAccount(
         connection,
@@ -227,11 +225,22 @@ const makeCodexChild = Effect.gen(function* () {
                 "Codex resumed a different thread",
                 restored.thread.id,
               );
+            if (Option.isSome(saved.modelProvider))
+              yield* checkContinuation(
+                request,
+                "model_provider",
+                saved.modelProvider,
+                Option.some(restored.modelProvider),
+              );
             yield* Effect.logInfo("Resumed the saved Codex thread", {
               sessionId: request.session.id,
               threadId: saved.id,
             });
-            return { id: saved.id, model: requestedModel, endpoint: request.session.endpoint };
+            return {
+              id: saved.id,
+              model: requestedModel,
+              endpoint: Option.some(restored.modelProvider),
+            };
           }),
       });
       const session = ChildSession.make({
@@ -254,10 +263,9 @@ const makeCodexChild = Effect.gen(function* () {
       const harnessSession = HarnessSession.make({
         id: thread.id,
         cwd: request.cwd,
+        modelProvider: thread.endpoint,
         // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
-        home: Option.fromNullishOr(client.environment.CODEX_HOME).pipe(
-          Option.filter((home) => home.length > 0),
-        ),
+        home,
       });
       yield* channel.emit(
         SessionStarted.make({ session, harnessSession: Option.some(harnessSession) }),
@@ -772,7 +780,22 @@ const makeCodexChild = Effect.gen(function* () {
       } satisfies RunningSession;
     },
   );
-  return ChildBackend.of({ launch });
+  const stop = Effect.fn("CodexRuntime.stop")((request: ChildRequest) =>
+    request.host._tag === "RemoteShell"
+      ? Effect.scoped(
+          appServer
+            .open({
+              cwd: request.cwd,
+              sessionId: Option.some(request.session.id),
+              environment: request.environment,
+              host: request.host,
+              transport: "replace",
+            })
+            .pipe(Effect.flatMap((connection) => connection.close)),
+        )
+      : Effect.void,
+  );
+  return ChildBackend.of({ launch, stop });
 });
 
 /** Provides `ChildBackend` for local or remote children. Requires `CodexAppServer`; validates the model and authentication before starting the task. */
@@ -784,5 +807,10 @@ export { codexConfigArgs } from "./app-server.ts";
 export const codexRuntime = Effect.gen(function* () {
   const child = yield* makeCodexChild;
   const preflight = yield* codexPreflight;
-  return { id: codex.id, preflight, launch: child.launch } satisfies HarnessRuntime;
+  return {
+    id: codex.id,
+    preflight,
+    launch: child.launch,
+    stop: child.stop,
+  } satisfies HarnessRuntime;
 });

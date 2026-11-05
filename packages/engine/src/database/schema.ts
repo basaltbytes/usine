@@ -277,6 +277,7 @@ export const attempts = snakeCase.table(
     parentModel: text().$type<ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
+    resultJson: text({ mode: "json" }).$type<unknown>(),
     /** The time the outcome was recorded; `null` while running and for older Attempts. */
     endedAt: text(),
     salvageJson: text({ mode: "json" }).$type<unknown>(),

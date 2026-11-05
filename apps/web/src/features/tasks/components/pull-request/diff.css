@@ -1,0 +1,21 @@
+.task-diff.balade-viewer {
+  --balade-color-background: var(--background);
+  --balade-color-foreground: var(--foreground);
+  --balade-color-card: var(--background);
+  --balade-color-muted: var(--muted);
+  --balade-color-muted-foreground: var(--muted-foreground);
+  --balade-color-border: var(--border);
+  --balade-color-border-soft: var(--border);
+  --balade-color-primary: var(--primary);
+  --balade-color-primary-foreground: var(--primary-foreground);
+  --balade-color-secondary: var(--secondary);
+  --balade-color-secondary-foreground: var(--secondary-foreground);
+  --balade-color-accent: var(--accent);
+  --balade-color-ring: var(--ring);
+  --balade-color-destructive: var(--destructive);
+  --balade-color-added: var(--run-succeeded);
+  --balade-color-removed: var(--destructive);
+  --balade-font-sans: var(--font-sans);
+  --balade-font-mono: var(--font-mono);
+  min-width: 0;
+}

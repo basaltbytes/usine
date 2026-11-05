@@ -220,12 +220,18 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
     if (pr.head.sha === head)
       facts.set(
         pr.number,
-        PullRequest.make({ number: pr.number, url: pr.url, head: Option.some(head) }),
+        PullRequest.make({
+          number: pr.number,
+          url: pr.url,
+          base: Option.some(spec.baseCommit),
+          head: Option.some(head),
+        }),
       );
   }
   yield* Effect.logInfo("Collected Attempt pull request results", {
     attemptId: spec.attemptId,
     head,
+    base: spec.baseCommit,
     pullRequests: [...facts.keys()],
   });
   return [...facts.values()];

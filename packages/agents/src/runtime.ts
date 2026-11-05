@@ -252,9 +252,20 @@ export class SessionOperationError extends Schema.TaggedError<
   cause: Schema.Defect(),
 }) {}
 
+/** A saved conversation cannot continue under the current harness configuration. */
+export class ContinuationMismatchError extends Schema.TaggedError<
+  ContinuationMismatchError,
+  Brand.Brand<"@usine/agents/runtime/ContinuationMismatchError">
+>("@usine/agents/ContinuationMismatchError")("ContinuationMismatchError", {
+  sessionId: AgentSessionId,
+  field: Schema.Literals(["harness", "home", "model_provider", "cwd"]),
+  message: Schema.NonEmptyString,
+}) {}
+
 /** Any error that stops a session from starting, continuing, or finishing; the error type determines whether a retry needs the operator. */
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
+  ContinuationMismatchError,
   PoolUnavailableError,
   UnsupportedEffortError,
   AgentResultError,
@@ -347,6 +358,7 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
     SessionOperationError: (operation) =>
       InfraFailure.make({ message: operation.message, cause: operation.cause }),
     UnknownModelError: ({ message }) => AgentFailure.make({ message }),
+    ContinuationMismatchError: ({ message }) => AgentFailure.make({ message }),
     PoolUnavailableError: ({ message }) => AgentFailure.make({ message }),
     UnsupportedEffortError: ({ message }) => AgentFailure.make({ message }),
     AgentResultError: ({ message }) => AgentFailure.make({ message }),
@@ -388,6 +400,8 @@ export type OnDelivery = (
 
 /** A backend that launches child sessions for tasks delegated by an attempt's parent. */
 export interface ChildBackendService {
+  /** Stops a retained child without resuming its conversation or starting a turn. */
+  readonly stop: (request: ChildRequest) => Effect.Effect<void, AgentSessionError>;
   /** Starts the child described by `request` in the calling scope and returns its controls; await `result` separately before closing the scope. */
   readonly launch: (
     request: ChildRequest,

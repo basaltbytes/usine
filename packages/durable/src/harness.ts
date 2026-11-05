@@ -467,7 +467,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
 
   return DurableHarness.of({
     models: options.models,
-    credentials: options.credentials ?? { _tag: "HostLogin" },
+    credentials: options.credentials ?? { route: "host-login" },
     defaultModel: options.defaultModel,
     install: (extension) =>
       Effect.sync(() => registry.install(extension)).pipe(

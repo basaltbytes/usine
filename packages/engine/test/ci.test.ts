@@ -34,6 +34,7 @@ const pushed = StepResult.make({
     PullRequest.make({
       number: 815,
       url: new URL("https://github.com/basaltbytes/usine/pull/815"),
+      base: Option.some(CommitSha.make("0".repeat(40))),
       head: Option.some(head),
     }),
   ],
@@ -114,23 +115,98 @@ it.live(
     ),
 );
 
-it.live("a newer head cancels its CI wait and rejects a late green result", () =>
+it.live.each([
+  CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
+  CiFailed.make({ message: "CI failed without an available fix loop" }),
+])("CI settlement preserves the result's producing attempt after $_tag", (resolution) =>
   withInstance((directory) =>
     Effect.gen(function* () {
-      const worker = yield* slottedExecutor([Effect.succeed(pushed)]);
+      const worker = yield* slottedExecutor([Effect.succeed(pushed), Effect.never]);
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const accepted = yield* engine.submit(required());
         assert(accepted._tag === "Claimed");
-        yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "AwaitingCi");
-        yield* engine.settleCi(
+        const waiting = yield* waitFor(
+          engine,
           accepted.runId,
-          head,
-          CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
+          ({ run }) => run.state._tag === "AwaitingCi",
         );
+        assert.deepStrictEqual(
+          Option.flatMap(waiting.step.result, ({ attemptId }) => attemptId),
+          Option.fromNullishOr(waiting.attempts[0]?.id),
+        );
+        yield* engine.settleCi(accepted.runId, head, resolution);
         yield* engine.settleCi(accepted.runId, head, CiPassed.make());
-        assert.strictEqual((yield* engine.inspect(accepted.runId)).run.state._tag, "Canceled");
+        const settled = yield* engine.inspect(accepted.runId);
+        assert.strictEqual(
+          settled.run.state._tag,
+          resolution._tag === "CiSuperseded" ? "Canceled" : "Failed",
+        );
+        assert.deepStrictEqual(settled.step.result, waiting.step.result);
+        if (resolution._tag === "CiFailed") {
+          yield* engine.retry(accepted.runId);
+          const retrying = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ attempts }) => attempts.length === 2,
+          );
+          assert.deepStrictEqual(retrying.step.result, waiting.step.result);
+          yield* engine.cancel(accepted.runId);
+        }
       }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
+    }),
+  ),
+);
+
+it.live("a successful retry preserves both attempts' harvested ranges across restart", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const nextHead = CommitSha.make("b".repeat(40));
+      const next = StepResult.make({
+        message: "Retry pushed a fix",
+        facts: [
+          PullRequest.make({
+            number: 815,
+            url: new URL("https://github.com/basaltbytes/usine/pull/815"),
+            base: Option.some(head),
+            head: Option.some(nextHead),
+          }),
+        ],
+      });
+      const worker = yield* slottedExecutor([Effect.succeed(pushed), Effect.succeed(next)]);
+      const runtime = engineLayer(directory, worker.executor);
+      const runId = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(required());
+          assert(accepted._tag === "Claimed");
+          const waiting = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "AwaitingCi",
+          );
+          yield* engine.settleCi(accepted.runId, head, CiFailed.make({ message: "CI failed" }));
+          yield* engine.retry(accepted.runId);
+          yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "AwaitingCi");
+          yield* engine.settleCi(accepted.runId, nextHead, CiPassed.make());
+          const completed = yield* engine.inspect(accepted.runId);
+          assert.strictEqual(completed.run.state._tag, "Succeeded");
+          assert.strictEqual(completed.attempts.length, 2);
+          assert.deepStrictEqual(completed.attempts[0]?.result, waiting.step.result);
+          assert.deepStrictEqual(completed.attempts[1]?.result, completed.step.result);
+          return accepted.runId;
+        }).pipe(Effect.provide(runtime)),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const restored = yield* engine.inspect(runId);
+          assert.deepStrictEqual(
+            restored.attempts.map((attempt) => Option.map(attempt.result, ({ facts }) => facts)),
+            [Option.some(pushed.facts), Option.some(next.facts)],
+          );
+        }).pipe(Effect.provide(runtime)),
+      );
     }),
   ),
 );

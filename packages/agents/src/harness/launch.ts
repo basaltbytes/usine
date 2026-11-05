@@ -40,15 +40,25 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
     worker: request.worker,
     harness: request.session.brain.harness,
   });
+  const context = childAdmissionContext(catalog, request);
   return yield* Effect.fromResult(
     admitBrain(
       catalog,
       "coding-agent",
       request.session.brain,
-      childAdmissionContext(catalog, request),
+      context,
       Option.isSome(request.resume) ? ["resume-session"] : [],
     ),
   ).pipe(
+    Effect.tap(() =>
+      Effect.logInfo("Child credential route admitted", {
+        sessionId: request.session.id,
+        harness: request.session.brain.harness,
+        credentialRoute: context.credential,
+        placement: context.placement,
+        resume: Option.isSome(request.resume),
+      }),
+    ),
     Effect.tapError((error) =>
       Effect.logWarning("Child brain refused", {
         role: error.role,

@@ -88,7 +88,7 @@ export class RunEvidence extends Schema.Class<
 export class AttemptSummary extends Schema.Class<
   AttemptSummary,
   Brand.Brand<"@usine/engine/run-reader/model/AttemptSummary">
->("@usine/engine/AttemptSummary")(Struct.omit(Attempt.fields, ["task", "comments"])) {}
+>("@usine/engine/AttemptSummary")(Struct.omit(Attempt.fields, ["task", "comments", "result"])) {}
 
 /** The Run view used in operator Run lists. */
 export class RunSummary extends Schema.Class<

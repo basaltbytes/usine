@@ -93,10 +93,7 @@ export const restartReplays = (mode: "record" | "replay"): void => {
               const homeVariable = provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
               const tokenVariable = provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
               const gatewayToken = request.environment.USINE_GATEWAY_TOKEN;
-              const changedEnvironment = {
-                ...request.environment,
-                [homeVariable]: `${fixture.cwd}/unused-home`,
-              };
+              const changedEnvironment = { ...request.environment };
               if (scenario === "credential-changed") {
                 assert(
                   gatewayToken !== undefined,

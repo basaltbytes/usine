@@ -66,7 +66,7 @@ const checkAuthentication = Effect.fn("ParentModel.authentication")(function* (
   sessionId: Option.Option<AgentSessionId>,
 ) {
   yield* Effect.annotateCurrentSpan({ provider });
-  return yield* credentials._tag === "Gateway"
+  return yield* credentials.route === "gateway"
     ? credentials
         .authentication(provider)
         .pipe(
@@ -123,7 +123,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
       launchError(sessionId, "Can't list the models that have a configured credential", cause),
   });
   let first = available[0];
-  if (credentials._tag === "Gateway") {
+  if (credentials.route === "gateway") {
     first = undefined;
     for (const provider of new Set(available.map((model) => model.provider))) {
       const authentication = yield* checkAuthentication(parents, provider, sessionId);
@@ -174,7 +174,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       }),
       AdmissionContext.make({
         placement: "orchestrator",
-        credential: credentials._tag === "HostLogin" ? "host-login" : "gateway",
+        credential: credentials.route,
       }),
     ),
   ).pipe(
@@ -216,7 +216,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       model,
       pool: required,
       message:
-        credentials._tag === "HostLogin"
+        credentials.route === "host-login"
           ? `Pi parent model "${model}" requires a credential from the ${required} pool`
           : `Gateway credential unavailable for provider "${selected.provider}" (coordinator model "${model}", pool ${required})`,
     });

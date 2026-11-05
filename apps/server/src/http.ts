@@ -1,3 +1,4 @@
+import { GitHubFiles } from "@usine/github/files";
 import { providerRoutes } from "./providers/http.ts";
 import type { ProviderLogins } from "./providers/control.ts";
 import { catalog, harnessPresentations } from "@usine/agents/harness";
@@ -286,6 +287,35 @@ const handlers = HttpApiBuilder.group(
           }),
         ),
       )
+      .handle("pullRequestFiles", ({ params, query }) =>
+        requireProjectRepository(params.project, params.repository).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const files = yield* Effect.serviceOption(GitHubFiles);
+              if (Option.isNone(files))
+                return yield* OperatorHttpError.make({
+                  error: "BackendUnavailableError",
+                  message:
+                    "Pull request changes are unavailable. Check the GitHub App credentials.",
+                });
+              return yield* files.value.read(params.repository, params.item, query).pipe(
+                Effect.tapError((error) =>
+                  Effect.logWarning("Pull request files could not be read", {
+                    repository: params.repository,
+                    item: params.item,
+                    errorTag: error._tag,
+                  }),
+                ),
+                Effect.mapError((error) =>
+                  error._tag === "InvalidGitHubResponseError"
+                    ? OperatorHttpError.make({ error: error._tag, message: error.detail })
+                    : operatorFailure(error),
+                ),
+              );
+            }),
+          ),
+        ),
+      )
       .handle("projectTask", ({ params, query }) =>
         requireProjectRepository(params.project, query.repository).pipe(
           Effect.andThen(fromBackend((backend) => backend.task(query.repository, params.item))),
@@ -570,7 +600,14 @@ export const serverLayer = (
   port: Port,
   auth: AuthServices,
   services:
-    | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling | ProviderLogins>
+    | Layer.Layer<
+        | ServerUpgrades
+        | ConfigurationEditor
+        | GitHubApp
+        | GitHubPolling
+        | GitHubFiles
+        | ProviderLogins
+      >
     | Layer.Layer<never> = Layer.empty,
   webhooks: Layer.Layer<never, never, HttpRouter.HttpRouter> = Layer.empty,
   setup?: Setup["Service"],

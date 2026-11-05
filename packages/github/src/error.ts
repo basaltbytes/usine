@@ -22,6 +22,7 @@ export const GitHubOperation = Schema.Literals([
   "read-bot-account",
   "read-app",
   "read-ci-checks",
+  "read-pull-request-files",
   "update-item-labels",
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;

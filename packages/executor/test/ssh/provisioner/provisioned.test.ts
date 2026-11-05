@@ -848,7 +848,10 @@ describe("Provisioned SSH Worker", () => {
           _tag: "Provisioned",
           provisioner: hetznerSettings({
             network: Option.none(),
-            apiKeys: { anthropic: Option.none(), openai: Option.some(Redacted.make(OPENAI_KEY)) },
+            apiKeys: {
+              anthropic: Option.some(Redacted.make(KEY)),
+              openai: Option.some(Redacted.make(OPENAI_KEY)),
+            },
           }),
         },
       };
@@ -874,6 +877,7 @@ describe("Provisioned SSH Worker", () => {
         assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
         assert.strictEqual(given.host.sshEnvironment.OPENAI_API_KEY, OPENAI_KEY);
+        assert.notProperty(given.host.sshEnvironment, "ANTHROPIC_API_KEY");
         const config = machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "";
         assert.include(config, 'base_url = "https://api.openai.com/v1"');
         assert.include(config, 'env_key = "OPENAI_API_KEY"');

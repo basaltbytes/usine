@@ -70,6 +70,7 @@ export interface RemoteGrant<M extends RemoteMachine> {
     permissions: LoopPermissions,
     machine: M,
     operation: ExecutorOperation,
+    harness: Option.Option<Harness>,
   ) => Effect.Effect<RemoteAccess, ExecutorError, Scope.Scope>;
 }
 

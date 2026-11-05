@@ -160,6 +160,10 @@ describe("harvesting an Attempt's facts", () => {
         facts.flatMap((fact) => (fact._tag === "PullRequest" ? Option.toArray(fact.head) : [])),
         [HEAD],
       );
+      assert.deepStrictEqual(
+        facts.flatMap((fact) => (fact._tag === "PullRequest" ? Option.toArray(fact.base) : [])),
+        [BASE],
+      );
       assert.deepStrictEqual(warnings, []);
     }),
   );

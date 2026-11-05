@@ -4,6 +4,8 @@ The foreground CLI for a local [usine](https://github.com/basaltbytes/usine) fac
 
 The overview and desk API responses contain run and attempt summaries. Read run or task detail for prompts and result text. The board loads the saved task from run detail when **Run again** is clicked.
 
+Saved harness session records include the home location and optional Codex `modelProvider` ID used to validate continuation. A moved home or changed provider ID refuses the resume before another turn starts.
+
 The run reader matches GitHub changes to each attempt's worker identity, including exe.dev's integration bot. Board moves retain their operator attribution.
 
 Create an instance folder and run its pinned installation:
@@ -282,3 +284,5 @@ Local provider status checks report missing Claude Code and Codex commands separ
 ## Step outputs
 
 Attempts can return typed JSON documents from `.usine/outputs/`. The runtime database stores gzip bodies separately from run snapshots, while run evidence and `usine export-run` include output refs. See [agent step outputs](https://docs.usine.dev/reference/configuration/agents/#step-outputs) for the format and limits.
+
+The task page's **Changes** disclosure reads `GET /api/projects/:project/pull-requests/:repository/:item/files`, with the repository encoded as one path segment. The typed query selects a PR head, a base/head range, or an attempt's first commit and pushed head. Project read access and repository membership are checked before cached or GitHub reads. The response reports missing patches, truncated patches, and file-list limits.
