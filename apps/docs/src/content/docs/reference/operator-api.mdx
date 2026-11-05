@@ -43,6 +43,14 @@ Read `GET /api/runs/:runId` for the run's task, result message, each attempt's t
 
 Session records in transcripts and usage responses include an optional `pool` resolved at launch and an optional `endpoint` provider name for API-key models. Usage reads the recorded pool; older records without it use the historical harness and model rule. Endpoint names exclude URLs and credentials.
 
+## Pull request changes
+
+The task page lists **Changes** beneath each pull request. Open the disclosure and use **Compare** to select the whole PR or an attempt with recorded commits. Files are collapsed initially, show added and removed counts, and mark test and generated files. The latest polled CI checks and review decision appear beside the diff. Open a file to read the patch without leaving usine.
+
+`GET /api/projects/:project/pull-requests/:repository/:item/files` requires read access to the project. Encode the repository (`owner/name`) as one path segment. The query's `_tag` selects `PullRequestFiles` with `head`, `CommitRangeFiles` with `base` and `head`, or `AttemptFiles` with `first` and `head`. All commits are full SHAs. Attempt comparisons start at the first recorded commit's first parent. Task detail provides those commit selections in `attemptChanges`, including runs beyond the first history page.
+
+Responses contain the resolved `base`, `head`, `files`, and `filesTruncated`. Each file has paths, status, counts, test and generated marks, and either a text patch with a truncation flag or an omitted patch. GitHub omits patches for some binary and large files. PR lists are limited to 3,000 files and comparisons to 300; a limited list is marked explicitly. Successful reads are cached on the server by commit selection and in the browser without automatic refetch. Task live updates supply new PR heads.
+
 ## Operations
 
 <OperatorApiReference />

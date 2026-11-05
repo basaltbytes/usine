@@ -1,3 +1,13 @@
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { LoopName } from "@usine/core/loop";
+import { RunId } from "@usine/core/run";
+import { CommitSha } from "@usine/core/repository";
+import { ChangedFile, FileChanges } from "@usine/github/files";
+import {
+  TaskAttemptChangesView,
+  TaskItemView,
+  TaskPullRequestState,
+} from "@usine/orchestrator/operator";
 import { administratorPermissions } from "@usine/core/access";
 import { PermissionsContext, sessionQuery } from "~/lib/permissions";
 import { ItemNumber } from "@usine/core/item";
@@ -10,7 +20,7 @@ import {
   ReadyOverview,
   TaskView,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Array as EffectArray, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -36,6 +46,85 @@ let taskUnavailable: boolean;
 let taskDelay: Promise<void> | undefined;
 let taskRequests: Array<string>;
 let overview: FactoryOverview;
+let fileRequests: Array<string>;
+let fileFailure: boolean;
+let emptyFiles: boolean;
+const prHead = CommitSha.make("a".repeat(40));
+const attemptHead = CommitSha.make("c".repeat(40));
+const attemptId = AttemptId.make("attempt-changes");
+const changesOf = (head: CommitSha) =>
+  FileChanges.make({
+    base: CommitSha.make("b".repeat(40)),
+    head,
+    filesTruncated: head === attemptHead,
+    files: emptyFiles
+      ? []
+      : [
+          ChangedFile.make({
+            path: "src/reader.ts",
+            oldPath: "src/old-reader.ts",
+            status: "renamed",
+            additions: 1,
+            deletions: 1,
+            patch: {
+              kind: "text",
+              text:
+                head === attemptHead
+                  ? "@@ -1 +1 @@\n-before\n+attempt change"
+                  : "@@ -1 +1 @@\n-before\n+whole PR change",
+              truncated: head === attemptHead,
+            },
+            test: false,
+            generated: false,
+          }),
+          ChangedFile.make({
+            path: "test/reader.test.ts",
+            oldPath: null,
+            status: "added",
+            additions: 1,
+            deletions: 0,
+            patch: { kind: "text", text: "@@ -0,0 +1 @@\n+test", truncated: false },
+            test: true,
+            generated: false,
+          }),
+          ChangedFile.make({
+            path: "pnpm-lock.yaml",
+            oldPath: null,
+            status: "modified",
+            additions: 0,
+            deletions: 0,
+            patch: { kind: "omitted" },
+            test: false,
+            generated: true,
+          }),
+        ],
+  });
+const taskWithChanges = () => {
+  const task = fullTask();
+  return TaskView.make({
+    ...task,
+    items: EffectArray.map(task.items, (item) =>
+      TaskItemView.make({
+        ...item,
+        pullRequest:
+          item.kind === "pr"
+            ? TaskPullRequestState.make({ head: prHead, checks: "SUCCESS", review: "APPROVED" })
+            : null,
+      }),
+    ),
+    attemptChanges: [
+      TaskAttemptChangesView.make({
+        runId: RunId.make("run-dev"),
+        attemptId,
+        number: AttemptNumber.make(1),
+        loop: LoopName.make("start-dev"),
+        pullRequest: ItemNumber.make(42),
+        first: CommitSha.make("d".repeat(40)),
+        head: attemptHead,
+      }),
+    ],
+  });
+};
 
 const json = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "application/json" } });
@@ -47,6 +136,16 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     globalThis.location.href,
   );
   const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+  if (url.pathname.endsWith("/files")) {
+    fileRequests.push(url.toString());
+    if (fileFailure)
+      return json(
+        JSON.stringify({ error: "GitHubApiError", message: "GitHub is unavailable" }),
+        502,
+      );
+    const head = CommitSha.make(url.searchParams.get("head") ?? prHead);
+    return json(JSON.stringify(Schema.encodeSync(FileChanges)(changesOf(head))));
+  }
   if (url.pathname === "/api/overview")
     return json(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)));
   if (/^\/api\/projects\/[^/]+$/u.test(url.pathname)) {
@@ -128,7 +227,11 @@ const menuItems = async () => {
 };
 
 beforeEach(() => {
+  document.documentElement.classList.add("dark");
   sent = [];
+  fileRequests = [];
+  fileFailure = false;
+  emptyFiles = false;
   taskUnavailable = false;
   taskDelay = undefined;
   taskRequests = [];
@@ -145,6 +248,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  document.documentElement.classList.remove("dark");
   flushSync(() => root.unmount());
   queryClient.clear();
   host.remove();
@@ -293,13 +397,13 @@ it("lists the pull requests with their state and the comments the Runs posted", 
     )
     .toBeInTheDocument();
   await expect
-    .element(pullRequests.getByRole("row").nth(1))
+    .element(pullRequests.getByRole("row").nth(2))
     .toMatchTextContent("Conflicts with base");
   await expect
     .element(
       pullRequests
         .getByRole("row")
-        .nth(1)
+        .nth(2)
         .getByRole("img", { name: "Pull request #42, open", exact: true }),
     )
     .toBeInTheDocument();
@@ -400,4 +504,95 @@ it("rejects an invalid task number before requesting it", async () => {
   await mount("not-a-number");
   await expect.element(page.getByText("Task not found", { exact: true })).toBeVisible();
   expect(taskRequests).toEqual([]);
+});
+
+it("shows whole-PR and attempt changes in place and reuses the immutable query", async () => {
+  tasks.set("40", taskWithChanges());
+  await mount(40);
+  expect(fileRequests).toHaveLength(0);
+  const pullRequests = page.getByRole("region", { name: /^Pull requests/u });
+  await pullRequests.getByText("Changes", { exact: true }).nth(1).click();
+  const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
+  await expect.element(changes.getByText("Checks: passed")).toBeVisible();
+  await expect.element(changes.getByText("Review: approved")).toBeVisible();
+  await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
+  await expect
+    .element(changes.getByText("whole PR change", { exact: false }))
+    .not.toBeInTheDocument();
+  await changes.getByRole("button", { name: /src\/reader.ts/u }).click();
+  await expect.element(changes.getByText("whole PR change", { exact: false })).toBeVisible();
+  expect(fileRequests).toHaveLength(1);
+  await page.screenshot({
+    path: "../../../node_modules/.cache/vitest/screenshots/usine-932-desktop.png",
+  });
+  await changes.getByRole("combobox", { name: "Compare" }).selectOptions(attemptId);
+  await expect
+    .element(changes.getByText("GitHub limited this file list.", { exact: false }))
+    .toBeVisible();
+  await changes.getByRole("button", { name: /src\/reader.ts/u }).click();
+  await expect.element(changes.getByText("attempt change", { exact: false })).toBeVisible();
+  expect(fileRequests).toHaveLength(2);
+  await changes.getByRole("combobox", { name: "Compare" }).selectOptions("whole");
+  await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
+  expect(fileRequests).toHaveLength(2);
+  await pullRequests.getByText("Changes", { exact: true }).nth(1).click();
+  await pullRequests.getByText("Changes", { exact: true }).nth(1).click();
+  await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
+  expect(fileRequests).toHaveLength(2);
+  const changed = TaskView.make({
+    ...taskWithChanges(),
+    items: EffectArray.map(taskWithChanges().items, (item) =>
+      TaskItemView.make({
+        ...item,
+        pullRequest:
+          item.pullRequest === null
+            ? null
+            : TaskPullRequestState.make({
+                ...item.pullRequest,
+                head: CommitSha.make("e".repeat(40)),
+              }),
+      }),
+    ),
+  });
+  tasks.set("40", changed);
+  queryClient.setQueryData(taskQuery(taskRepository, ItemNumber.make(40)).queryKey, changed);
+  await expect.poll(() => fileRequests.length).toBe(3);
+  expect(fileRequests[2]).toContain("head=" + "e".repeat(40));
+});
+
+it("shows file marks and patch availability on a phone without widening the task page", async () => {
+  tasks.set("40", taskWithChanges());
+  await mount(40, 390);
+  await page
+    .getByRole("region", { name: /^Pull requests/u })
+    .getByText("Changes", { exact: true })
+    .nth(1)
+    .click();
+  const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
+  await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
+  await expect.element(changes.getByText("test", { exact: true })).toBeVisible();
+  await expect.element(changes.getByText("generated", { exact: true })).toBeVisible();
+  await changes.getByRole("button", { name: /pnpm-lock.yaml/u }).click();
+  await expect.element(changes.getByText("No diff available for this file.")).toBeVisible();
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  await page.screenshot({
+    path: "../../../node_modules/.cache/vitest/screenshots/usine-932-mobile.png",
+  });
+});
+
+it("keeps errors local with retry and shows an empty commit comparison", async () => {
+  tasks.set("40", taskWithChanges());
+  fileFailure = true;
+  await mount(40);
+  await page
+    .getByRole("region", { name: /^Pull requests/u })
+    .getByText("Changes", { exact: true })
+    .nth(1)
+    .click();
+  const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
+  await expect.element(changes.getByText("Could not load changes", { exact: true })).toBeVisible();
+  fileFailure = false;
+  emptyFiles = true;
+  await changes.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect.element(changes.getByText("No files changed in this comparison")).toBeVisible();
 });

@@ -440,3 +440,5 @@ Run `pnpm --filter @usine/orchestrator check` after building dependencies to che
 ## Step outputs
 
 Worker compositions share the engine's `StepOutputStore` with the runtime database. Custom database layers provide both `RunDatabase` and `StepOutputStore`, allowing recovered completions to store documents before attempt success. Operator run projections continue to use output refs from the stored step result.
+
+Task detail includes each PR's latest projected head, aggregate CI state, and review decision. `attemptChanges` contains the first recorded commit and pushed head for attempts with harvested PR commits, including runs outside the first history page. The operator API exposes these comparisons through the project-scoped `pullRequestFiles` endpoint.

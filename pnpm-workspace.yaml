@@ -57,6 +57,9 @@ minimumReleaseAgeExclude:
   - "@earendil-works/pi-codemode@1.2.0"
   - "@earendil-works/pi-mcp@1.2.0"
   - "@earendil-works/pi-durable@1.2.0"
+  - '@balade/core@0.19.0'
+  - '@balade/viewer@0.19.0'
+  - balade@0.19.0
 
 patchedDependencies:
   lucode-starlight@1.0.0: patches/lucode-starlight@1.0.0.patch

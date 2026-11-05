@@ -13,12 +13,12 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
-import { Comment, PullRequest, StepResult } from "@usine/core/step/result";
+import { Comment, Commit, PullRequest, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
   ItemContentHash,
@@ -141,7 +141,7 @@ const pullRequest = (
       author: { login: "usine-bot" },
       baseRefName: "main",
       headRefName: `fix/${number}`,
-      headRefOid: "410607d",
+      headRefOid: "a".repeat(40),
       additions: 1,
       deletions: 1,
       changedFiles: 1,
@@ -247,6 +247,13 @@ const runs = [
       attempt(
         runId,
         1,
+        "2026-10-02T08:00:00.000Z",
+        Option.some(AttemptFailed.make({ failure: AgentFailure.make({ message: "Retry" }) })),
+        Option.some("2026-10-02T08:05:00.000Z"),
+      ),
+      attempt(
+        runId,
+        2,
         "2026-10-02T09:00:00.000Z",
         succeeded,
         Option.some("2026-10-02T09:20:00.000Z"),
@@ -256,7 +263,13 @@ const runs = [
       StepResult.make({
         message: "Opened the plan.",
         facts: [
-          PullRequest.make({ number: 41, url: new URL(pullUrl(41)) }),
+          Commit.make({ sha: CommitSha.make("b".repeat(40)), summary: "First plan commit" }),
+          Commit.make({ sha: CommitSha.make("a".repeat(40)), summary: "Second plan commit" }),
+          PullRequest.make({
+            number: 41,
+            url: new URL(pullUrl(41)),
+            head: Option.some(CommitSha.make("a".repeat(40))),
+          }),
           Comment.make({
             url: new URL(`https://github.com/${repository}/issues/40#issuecomment-1`),
             kind: "issue-comment",
@@ -478,6 +491,28 @@ describe("Task view", () => {
       const { task, requested } = yield* readTask(40);
       assert.strictEqual(task.number, 40);
       assert.strictEqual(task.title, "Rework the reader");
+      assert.strictEqual(
+        task.items.find(({ number }) => number === 41)?.pullRequest?.head,
+        "a".repeat(40),
+      );
+      assert.deepStrictEqual(
+        task.attemptChanges.map(({ runId, attemptId, pullRequest, first, head }) => ({
+          runId,
+          attemptId,
+          pullRequest,
+          first,
+          head,
+        })),
+        [
+          {
+            runId: "run-plan",
+            attemptId: "run-plan/2",
+            pullRequest: 41,
+            first: "b".repeat(40),
+            head: "a".repeat(40),
+          },
+        ],
+      );
       assert.deepStrictEqual(
         task.items.map(({ kind, number, state, conflicting }) => [
           kind,

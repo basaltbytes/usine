@@ -1,3 +1,6 @@
+import { Fragment } from "react";
+import type { ProjectId } from "@usine/core/project";
+import { PullRequestChanges } from "~/features/tasks/components/pull-request/changes";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import type { TaskView } from "@usine/orchestrator/operator";
 import { FillCell } from "~/components/fill-cell";
@@ -10,9 +13,9 @@ import {
   SectionHeading,
 } from "~/features/tasks/components/section";
 
-type TaskPullRequestsProps = { readonly task: TaskView };
+type TaskPullRequestsProps = { readonly task: TaskView; readonly project: ProjectId | undefined };
 
-export const TaskPullRequests = ({ task }: TaskPullRequestsProps) => {
+export const TaskPullRequests = ({ task, project }: TaskPullRequestsProps) => {
   const pullRequests = task.items.filter(({ kind }) => kind === "pr");
   return (
     <section aria-labelledby="task-pull-requests" className="flex flex-col gap-2">
@@ -26,31 +29,44 @@ export const TaskPullRequests = ({ task }: TaskPullRequestsProps) => {
           <Table aria-labelledby="task-pull-requests">
             <TableBody className="border-t">
               {pullRequests.map((pullRequest) => (
-                <TableRow key={pullRequest.itemKey} className={linkedRow}>
-                  <TableCell className="w-0 py-3">
-                    <ItemMark item={pullRequest} linked={false} />
-                  </TableCell>
-                  <FillCell className="py-3 whitespace-normal">
-                    <a
-                      data-row-link
-                      href={pullRequest.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={`font-medium wrap-anywhere ${rowLink}`}
-                    >
-                      {pullRequest.title}
-                      <ArrowSquareOutIcon
-                        className="ml-1.5 inline size-3.5 text-muted-foreground"
-                        aria-label="Opens on GitHub"
-                      />
-                    </a>
-                  </FillCell>
-                  <TableCell className="py-3 text-right">
-                    {pullRequest.conflicting && (
-                      <span className="text-xs text-destructive">Conflicts with base</span>
-                    )}
-                  </TableCell>
-                </TableRow>
+                <Fragment key={pullRequest.itemKey}>
+                  <TableRow className={linkedRow}>
+                    <TableCell className="w-0 py-3">
+                      <ItemMark item={pullRequest} linked={false} />
+                    </TableCell>
+                    <FillCell className="py-3 whitespace-normal">
+                      <a
+                        data-row-link
+                        href={pullRequest.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`font-medium wrap-anywhere ${rowLink}`}
+                      >
+                        {pullRequest.title}
+                        <ArrowSquareOutIcon
+                          className="ml-1.5 inline size-3.5 text-muted-foreground"
+                          aria-label="Opens on GitHub"
+                        />
+                      </a>
+                    </FillCell>
+                    <TableCell className="py-3 text-right">
+                      {pullRequest.conflicting && (
+                        <span className="text-xs text-destructive">Conflicts with base</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {project !== undefined && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={3} className="max-w-0 pt-0 pb-1">
+                        <PullRequestChanges
+                          project={project}
+                          task={task}
+                          pullRequest={pullRequest}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>

@@ -1,3 +1,4 @@
+import { GitHubFiles } from "@usine/github/files";
 import { ProviderTargets } from "./providers/targets.ts";
 import { ProviderLogins } from "./providers/control.ts";
 import { providerLoginRunnerLayer } from "./providers/runner.ts";
@@ -98,7 +99,7 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly openSetupPage: boolean;
   readonly upgrades: ServerUpgrades["Service"];
   readonly configurationEditor: ConfigurationEditor["Service"];
-  readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling>;
+  readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling | GitHubFiles>;
   readonly webhooks?: Layer.Layer<never, never, HttpRouter.HttpRouter>;
   readonly listener?: StartupListener;
 }) {
@@ -308,9 +309,10 @@ const start = Effect.fnUntraced(function* (
             Context.get(context, OperatorConfiguration),
           ),
           configurationEditor,
-          catalog: Layer.merge(
+          catalog: Layer.mergeAll(
             Layer.succeed(GitHubApp, Context.get(context, GitHubApp)),
             Layer.succeed(GitHubPolling, Context.get(context, GitHubPolling)),
+            Layer.succeed(GitHubFiles, Context.get(context, GitHubFiles)),
           ),
           webRoot,
           port,

@@ -1717,3 +1717,5 @@ export { ConfigurationEditor, type ConfigurationEditorError } from "./configurat
 export { SetupState } from "./setup.ts";
 
 export { TaskIdentityView } from "./overview.ts";
+
+export { TaskPullRequestState, TaskAttemptChangesView } from "./task-changes.ts";
