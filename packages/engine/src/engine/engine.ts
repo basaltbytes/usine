@@ -1,4 +1,4 @@
-import { transcriptMaintenanceLayer } from "../store/transcript/sealer.ts";
+import type { TranscriptCodec } from "../store/transcript/codec.ts";
 import { StepOutputStore } from "../step-outputs/store.ts";
 import type { CiResolution } from "@usine/core/ci";
 import type { CommitSha } from "@usine/core/repository";
@@ -424,7 +424,11 @@ export class RunEngine extends Context.Service<
  * for Run IDs, `StepExecutor` for Workers, and `TriggerCondition` to re-check queued Events.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
-  database: Layer.Layer<RunDatabase | StepOutputStore, DatabaseError, DatabaseRequirements>,
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    DatabaseError,
+    DatabaseRequirements
+  >,
 ): Layer.Layer<
   | AttentionAcknowledgements
   | BoardMoves
@@ -461,7 +465,6 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     ),
   ).pipe(Layer.provide(driver));
   return Layer.mergeAll(
-    transcriptMaintenanceLayer.pipe(Layer.provide(database)),
     runEngine,
     Layer.effect(StepOutputStore, StepOutputStore).pipe(Layer.provide(database)),
     AttentionAcknowledgements.layer.pipe(Layer.provide(database)),

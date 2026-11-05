@@ -25,7 +25,11 @@ import {
   Effect,
   FileSystem,
   Layer,
+  Logger,
   Option,
+  PlatformError,
+  Ref,
+  Schedule,
   Path,
   Schema,
 } from "effect";
@@ -53,6 +57,7 @@ import {
   type TranscriptSequence,
   type TranscriptEntry,
 } from "../../src/transcript.ts";
+import { type AttemptPlan, engineLayer, executorLayer, submission } from "../support.ts";
 import { lifecycleSubmission, testAgent } from "./support.ts";
 
 const at = DateTime.makeUnsafe("2026-10-01T00:00:00Z");
@@ -118,7 +123,7 @@ const withSealing = <A, E>(
       prefix: "usine-sealing-",
     });
     const directory = InstanceDirectory.make(temporary);
-    const database = localSqliteLayer(directory);
+    const database = transcriptSealerLayer.pipe(Layer.provideMerge(localSqliteLayer(directory)));
     return yield* test(directory).pipe(
       Effect.provide(
         Layer.merge(RunReader.layer, RunStore.layer).pipe(Layer.provideMerge(database)),
@@ -260,6 +265,19 @@ describe("SQLite transcript sealing", () => {
           assert.deepStrictEqual(segmentSizes, [500, 500, 11]);
           const sealedEntries = yield* reader.transcript(TranscriptAllQuery.make({ attemptId }));
           assert.deepStrictEqual(sealedEntries, all);
+          const codec = yield* TranscriptCodec;
+          const isolatedEntries = yield* Effect.flatMap(RunReader, (reader) =>
+            reader.transcript(TranscriptAllQuery.make({ attemptId })),
+          ).pipe(
+            Effect.provide(
+              Layer.fresh(RunReader.layer).pipe(
+                Layer.provide(
+                  Layer.merge(RunDatabase.layer(db), Layer.succeed(TranscriptCodec)(codec)),
+                ),
+              ),
+            ),
+          );
+          assert.deepStrictEqual(isolatedEntries, all);
           const sealedSessions = yield* reader.transcript(sessionsQuery);
           assert.deepStrictEqual(sealedSessions, sessions);
           const sealedWorker = yield* reader.transcript(workerQuery);
@@ -452,6 +470,125 @@ describe("SQLite transcript sealing", () => {
       }),
     ),
   );
+
+  it.live("identifies malformed rows, keeps them hot, and skips them on subsequent passes", () =>
+    withSealing(() =>
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const sealer = yield* TranscriptSealer;
+        const sql = yield* SqlClient.SqlClient;
+        const db = yield* RunDatabase;
+        const { runId, attemptId } = yield* start;
+        yield* store.appendTranscript("outbound", envelope(attemptId, 1));
+        yield* end(runId, attemptId);
+        // Simulate a malformed persisted row at the storage boundary.
+        yield* sql`UPDATE usine_attempt_transcripts SET channel_sequence = 1.5 WHERE attempt_id = ${attemptId}`;
+        const warnings: Array<unknown> = [];
+        const logger = Logger.make(({ logLevel, message }) => {
+          if (logLevel === "Warn") warnings.push(message);
+        });
+        yield* Effect.gen(function* () {
+          const error = yield* sealer.sealNext.pipe(Effect.flip);
+          assert.strictEqual(error._tag, "EnginePersistenceError");
+          const healthyRun = RunId.make("healthy-sealing-run");
+          yield* store.recordAndClaim(submission({ number: 2 }), healthyRun);
+          const healthy = yield* store.beginAttempt(
+            healthyRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
+          assert(healthy._tag === "AttemptStarted");
+          yield* store.appendTranscript("outbound", envelope(healthy.execution.attempt.id, 1));
+          yield* end(healthyRun, healthy.execution.attempt.id);
+          yield* sealer.sealNext;
+          yield* sealer.sealNext;
+          const passEnd = yield* sealer.sealNext;
+          const nextPass = yield* sealer.sealNext;
+          assert.isFalse(passEnd);
+          assert.isFalse(nextPass);
+        }).pipe(Effect.provide(Logger.layer([logger])));
+        assert.lengthOf(warnings, 1);
+        const warning = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+          warnings[0],
+        );
+        assert.include(warning, attemptId);
+        assert.include(warning, "channelSequence");
+        assert.include(warning, "after restart");
+        assert.notInclude(warning, "message 1");
+        const hotRows = yield* db.$count(attemptTranscripts).execute();
+        const seals = yield* db.$count(transcriptSeals).execute();
+        assert.strictEqual(hotRows, 1);
+        assert.strictEqual(seals, 1);
+      }),
+    ),
+  );
+
+  it.live("starts transcript maintenance from the local SQLite runtime", () =>
+    withSealing((directory) =>
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const db = yield* RunDatabase;
+        const { runId, attemptId } = yield* start;
+        yield* store.appendTranscript("outbound", envelope(attemptId, 1));
+        yield* end(runId, attemptId);
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+        const seals = yield* Effect.scoped(
+          db
+            .$count(transcriptSeals)
+            .execute()
+            .pipe(
+              Effect.repeat({
+                while: (count) => count === 0,
+                schedule: Schedule.spaced("10 millis"),
+              }),
+              Effect.timeout("5 seconds"),
+              Effect.provide(engineLayer(directory, executorLayer(plans))),
+            ),
+        );
+        assert.strictEqual(seals, 1);
+      }),
+    ),
+  );
+
+  for (const phase of ["file", "directory"] as const)
+    it.live(`reports a ${phase} sync failure before declaring a backup complete`, () =>
+      withSealing((directory) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const destination = `${directory}/sync-failure.sqlite`;
+          const failure = PlatformError.systemError({
+            _tag: "Unknown",
+            module: "FileSystem",
+            method: "sync",
+            pathOrDescriptor: destination,
+            description: "sync unavailable",
+          });
+          const failingFs = FileSystem.make({
+            ...fs,
+            open: (path, options) =>
+              fs.open(path, options).pipe(
+                Effect.map((file) => ({
+                  ...file,
+                  sync: (
+                    phase === "directory" ? path === directory : path.endsWith("/runtime.sqlite")
+                  )
+                    ? Effect.fail(failure)
+                    : file.sync,
+                })),
+              ),
+          });
+          const error = yield* backup(directory, destination).pipe(
+            Effect.provideService(FileSystem.FileSystem, failingFs),
+            Effect.flip,
+          );
+          assert.strictEqual(error._tag, "RuntimeStoreBackupError");
+          assert.strictEqual(error.operation, phase === "file" ? "copy" : "publish");
+          assert.strictEqual(error.reason, "sync unavailable");
+          const published = yield* fs.exists(destination);
+          assert.strictEqual(published, phase === "directory");
+        }),
+      ),
+    );
 
   it.live("rolls back segments and the seal if deleting hot rows fails", () =>
     withSealing(() =>

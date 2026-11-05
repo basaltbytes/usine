@@ -1,5 +1,6 @@
 import { transcriptCodecLayer } from "./transcript-codec.ts";
-import { transcriptSealerLayer } from "../store/transcript/sealer.ts";
+import type { TranscriptCodec } from "../store/transcript/codec.ts";
+import { transcriptMaintenanceLayer, transcriptSealerLayer } from "../store/transcript/sealer.ts";
 import { StepOutputStore } from "../step-outputs/store.ts";
 import { sqliteStepOutputLayer } from "../step-outputs/sqlite.ts";
 import { type SqlError, SqlClient } from "effect/sql";
@@ -149,10 +150,9 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
       return drizzle;
     }).pipe(Effect.mapError((cause) => startupError("initialize local database", cause))),
   );
-  const initialized = Layer.mergeAll(database, sqliteStepOutputLayer, transcriptCodecLayer).pipe(
+  return Layer.mergeAll(database, sqliteStepOutputLayer, transcriptCodecLayer).pipe(
     Layer.provideMerge(sqlClient),
   );
-  return transcriptSealerLayer.pipe(Layer.provideMerge(initialized));
 };
 
 /**
@@ -163,9 +163,10 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
-    instanceDirectory,
-  ),
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    EnginePersistenceError
+  > = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
   | AttentionAcknowledgements
   | BoardMoves
@@ -182,7 +183,16 @@ export const layer = (
   | UnconfirmedStops,
   RunEngineError,
   StepExecutor | TriggerCondition
-> => layerWithDatabase(database).pipe(Layer.provide(NodeServices.layer));
+> =>
+  layerWithDatabase(database).pipe(
+    Layer.merge(
+      transcriptMaintenanceLayer.pipe(
+        Layer.provide(transcriptSealerLayer),
+        Layer.provide(database),
+      ),
+    ),
+    Layer.provide(NodeServices.layer),
+  );
 
 /**
  * Returns the observation services without recovering runs or starting attempts.
@@ -192,9 +202,10 @@ export const layer = (
  */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
-    instanceDirectory,
-  ),
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    EnginePersistenceError
+  > = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
   | AttentionAcknowledgements
   | CycleBudgets
@@ -332,8 +343,12 @@ export const backup = Effect.fn("LocalSqlite.backup")(
         const client = Context.get(backupContext, SqliteClient.SqliteClient);
         // VACUUM INTO copies one consistent snapshot and omits pages freed by transcript sealing.
         yield* client`VACUUM main INTO ${staged}`.pipe(failed("copy"), Effect.uninterruptible);
+        const stagedFile = yield* fileSystem.open(staged, { flag: "r+" }).pipe(failed("copy"));
+        yield* stagedFile.sync.pipe(failed("copy"));
         // A hard link atomically creates the destination without overwriting it.
         yield* fileSystem.link(staged, destination).pipe(failed("publish"));
+        const destinationDirectory = yield* fileSystem.open(directory).pipe(failed("publish"));
+        yield* destinationDirectory.sync.pipe(failed("publish"));
       }),
     );
     const { size } = yield* fileSystem.stat(destination).pipe(failed("copy"));

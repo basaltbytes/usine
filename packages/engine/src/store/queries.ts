@@ -201,8 +201,8 @@ const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
 export const queriesFor = (
   database: RunDatabaseClient,
+  codec: TranscriptCodec["Service"],
   record?: RecordChange,
-  codec: Option.Option<TranscriptCodec["Service"]> = Option.none(),
 ) => {
   const changedRun = (runId: RunId) =>
     Effect.gen(function* () {

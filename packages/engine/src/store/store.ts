@@ -149,8 +149,8 @@ const makeRunStore = Effect.gen(function* () {
   const poolResets = yield* FiberMap.make<string>();
   const transact = changeTransaction(database, bus);
   const crypto = yield* Crypto.Crypto;
-  const codec = yield* Effect.serviceOption(TranscriptCodec);
-  const queries = queriesFor(database, undefined, codec);
+  const codec = yield* TranscriptCodec;
+  const queries = queriesFor(database, codec);
 
   const schedulePoolResets = Effect.fn("RunStore.schedulePoolResets")(function* (
     event: PoolRateLimitsUpdated,
@@ -333,7 +333,7 @@ const makeRunStore = Effect.gen(function* () {
     });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const recorded = yield* tx.recordTriggerEvent(submission);
         const previous = yield* tx.loopItems.sighted(
           recorded.loop,
@@ -394,7 +394,7 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(runId);
         if (current.run.state._tag !== "Pending") return current.run.state;
         const waiting = RunState.awaitApproval(current.run.state);
@@ -513,7 +513,7 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId, worker });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(runId);
         const interruption = InfraFailure.make({
           message: "The orchestrator stopped during the attempt",
@@ -619,7 +619,7 @@ const makeRunStore = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, salvage: salvage._tag });
     yield* transact((transaction, record) =>
-      queriesFor(transaction, record).recordSalvage(attemptId, salvage),
+      queriesFor(transaction, codec, record).recordSalvage(attemptId, salvage),
     );
     yield* Effect.logInfo(
       "Attempt salvage recorded",
@@ -643,7 +643,7 @@ const makeRunStore = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
     yield* transact((transaction, record) =>
-      queriesFor(transaction, record).recordComments(attemptId, comments),
+      queriesFor(transaction, codec, record).recordComments(attemptId, comments),
     );
     yield* Effect.logInfo(
       "Recorded the comments an Attempt posted before it ended without success",
@@ -664,7 +664,7 @@ const makeRunStore = Effect.gen(function* () {
       kills: kills.kills,
     });
     const attempt = yield* transact((transaction, record) =>
-      queriesFor(transaction, record).recordOutOfMemory(attemptId, kills),
+      queriesFor(transaction, codec, record).recordOutOfMemory(attemptId, kills),
     );
     yield* Effect.logInfo("Recorded the processes the kernel killed in the Attempt's container", {
       attemptId,
@@ -716,7 +716,7 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId: attempt.runId, attemptId: attempt.id });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(attempt.runId);
         const [route] = yield* tx.eventRouteByRun(attempt.runId);
         if (route === undefined) return yield* Effect.die("A run has no recorded event");
@@ -743,7 +743,7 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(runId);
         const latest = current.attempts.at(-1);
         if (
@@ -790,7 +790,7 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId, eventId: approval.id, channel: source.channel });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         if (yield* tx.approvalExists(runId)) return false;
         const current = yield* tx.snapshot(runId);
         if (current.run.state._tag !== "Waiting") {
@@ -815,7 +815,7 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(runId);
         const decision = retryRun(current);
         yield* Effect.logInfo("Operator retry decided", {
@@ -880,7 +880,7 @@ const makeRunStore = Effect.gen(function* () {
     const receivedAt = yield* DateTime.now;
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(runId);
         const { loop } = current.run;
         const { itemKey } = current;
@@ -972,7 +972,7 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const current = yield* tx.snapshot(runId);
         const actor = yield* ActingMember;
         const decision = cancelRun(current, actor);
@@ -1010,7 +1010,7 @@ const makeRunStore = Effect.gen(function* () {
   const revoke = Effect.fn("RunStore.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         yield* tx.loopItems.unmatched(loop, itemKey);
         const storedRuns = yield* tx.revokeUnstarted(loop, itemKey);
         for (const row of storedRuns) {
@@ -1038,7 +1038,7 @@ const makeRunStore = Effect.gen(function* () {
   ) {
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         const existing = yield* tx.runForEvent(submission.event.id);
         if (existing[0] !== undefined) {
           yield* Effect.logInfo("Queued Event already opened its Run", {
@@ -1070,7 +1070,7 @@ const makeRunStore = Effect.gen(function* () {
     const receivedAt = yield* DateTime.now;
     const inserted = yield* transact((transaction, record) =>
       Effect.gen(function* () {
-        const tx = queriesFor(transaction, record);
+        const tx = queriesFor(transaction, codec, record);
         if (!(yield* tx.appendTranscript(direction, envelope, receivedAt))) {
           yield* Effect.logDebug("Transcript envelope already recorded; keeping the first copy", {
             attemptId: envelope.attemptId,
@@ -1104,7 +1104,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("read attempt transcript"));
 
   return {
-    ...ciQueries(database, bus),
+    ...ciQueries(database, bus, codec),
     approve,
     appendTranscript,
     beginAttempt,
@@ -1143,7 +1143,7 @@ const makeRunStore = Effect.gen(function* () {
     runAgain,
     snapshot: (runId: RunId) =>
       database
-        .transaction((transaction) => queriesFor(transaction).snapshot(runId))
+        .transaction((transaction) => queriesFor(transaction, codec).snapshot(runId))
         .pipe(persistence("read run")),
     transcript,
   } as const;

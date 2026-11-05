@@ -27,8 +27,8 @@ import { queriesFor } from "../store/queries.ts";
 
 const makeRunReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
-  const codec = yield* Effect.serviceOption(TranscriptCodec);
-  const queries = queriesFor(database, undefined, codec);
+  const codec = yield* TranscriptCodec;
+  const queries = queriesFor(database, codec);
   const snapshot = yield* ReadSnapshot;
 
   const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>

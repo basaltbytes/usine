@@ -3,7 +3,6 @@ import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../../database/database.ts";
 import { attemptTranscripts, transcriptSegments } from "../../database/schema.ts";
-import { EnginePersistenceError } from "../../engine/error.ts";
 import { TranscriptEntry, type TranscriptQuery, TranscriptSequence } from "../../transcript.ts";
 import { decodeTranscriptRows, transcriptEntryFromRow } from "../codec.ts";
 import type { TranscriptCodec } from "./codec.ts";
@@ -76,15 +75,10 @@ const selectEntries = (entries: Array<TranscriptEntry>, query: TranscriptQuery) 
 /** Reads only the segments needed for a page, then merges late hot rows in the same snapshot. */
 export const sealedTranscript = Effect.fn("SqliteTranscript.readSealed")(function* (
   database: RunDatabaseClient,
-  codec: Option.Option<TranscriptCodec["Service"]>,
+  codec: TranscriptCodec["Service"],
   query: TranscriptQuery,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: query.attemptId, query: query._tag });
-  if (Option.isNone(codec))
-    return yield* EnginePersistenceError.make({
-      operation: "read sealed transcript",
-      cause: "The SQLite transcript codec is not provided",
-    });
   const page = query._tag === "TranscriptPageQuery";
   const after = query._tag === "TranscriptTailQuery" ? query.after : undefined;
   const before = page ? Option.getOrUndefined(query.before) : undefined;
@@ -141,7 +135,7 @@ export const sealedTranscript = Effect.fn("SqliteTranscript.readSealed")(functio
       .execute();
     for (const body of bodies) {
       const segment = yield* Schema.decodeEffect(Segment)(body, { onExcessProperty: "error" });
-      const raw = yield* codec.value.decompress(segment.body);
+      const raw = yield* codec.decompress(segment.body);
       const rows = yield* Effect.forEach(raw.trimEnd().split("\n"), (line) =>
         Schema.decodeEffect(StoredRowJson)(line, { onExcessProperty: "error" }),
       );

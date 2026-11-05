@@ -32,7 +32,7 @@ const SealWatermarks = Schema.Struct({
 /** Returns the transcript queries that run on the caller's transaction. */
 export const transcriptQueries = (
   database: RunDatabaseClient,
-  codec: Option.Option<TranscriptCodec["Service"]> = Option.none(),
+  codec: TranscriptCodec["Service"],
 ) => {
   /**
    * Appends an envelope and returns whether it was new. A redelivered envelope with the same
