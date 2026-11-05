@@ -98,10 +98,12 @@ const makeChild = Effect.gen(function* () {
       let canceling = false;
       let closing = false;
       let active = false;
+      let interruption: "none" | "pending" | "resuming" = "none";
       let total = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, cost: 0 };
-      const pause = connection
-        .request("interrupt", "POST", `${path}/interrupt`)
-        .pipe(Effect.asVoid);
+      const pause = Effect.gen(function* () {
+        interruption = active ? "pending" : "none";
+        yield* connection.request("interrupt", "POST", `${path}/interrupt`);
+      });
       const conversation = yield* sessionConversation({
         session,
         channel,
@@ -110,11 +112,14 @@ const makeChild = Effect.gen(function* () {
           const id = `msg_usine_${uuid.replaceAll("-", "")}`;
           if (!active) {
             stopped = yield* Deferred.make<void>();
+          }
+          if (!active || interruption !== "none") {
             lastText = "";
             assistantMessage = undefined;
           }
           if (activity === "running") sent.set(id, message);
           active = true;
+          if (interruption !== "none") interruption = "resuming";
           yield* connection.request("steer", "POST", `${path}/prompt`, {
             id,
             text: message,
@@ -312,6 +317,16 @@ const makeChild = Effect.gen(function* () {
                 );
               case "session.execution.interrupted":
               case "session.execution.succeeded":
+                if (interruption === "resuming" && !canceling) {
+                  interruption = "none";
+                  yield* Deferred.succeed(stopped, undefined);
+                  stopped = yield* Deferred.make<void>();
+                  yield* Effect.logInfo("OpenCode continues guidance after interruption", {
+                    sessionId: session.id,
+                  });
+                  break;
+                }
+                interruption = "none";
                 active = false;
                 yield* Deferred.succeed(stopped, undefined);
                 if (canceling)

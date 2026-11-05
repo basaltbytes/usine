@@ -131,21 +131,31 @@ const makeServer = Effect.gen(function* () {
         permissions: [{ action: "*", resource: "*", effect: "allow" }],
       }).pipe(Effect.orDie);
       const input = yield* Queue.make<Uint8Array, Cause.Done>();
+      yield* Queue.offer(input, new TextEncoder().encode(`${Redacted.value(password)}\n`));
       const handle = yield* spawner
         .spawn(
           hostCommand(
             client.host,
             {
               cwd: "/",
-              command: "opencode",
-              args: ["serve", "--stdio", "--hostname", "127.0.0.1", "--port", "0"],
+              command: "sh",
+              args: [
+                "-c",
+                // stdin crosses SSH and container boundaries without exposing the secret in argv.
+                'IFS= read -r OPENCODE_PASSWORD && export OPENCODE_PASSWORD && export OPENCODE_SERVER_PASSWORD="$OPENCODE_PASSWORD" && exec opencode "$@"',
+                "sh",
+                "serve",
+                "--stdio",
+                "--hostname",
+                "127.0.0.1",
+                "--port",
+                "0",
+              ],
               pidFile: Option.getOrUndefined(
                 Option.map(client.sessionId, (id) => childPidFile(client.cwd, id)),
               ),
               environment: {
                 ...client.environment,
-                OPENCODE_PASSWORD: Redacted.value(password),
-                OPENCODE_SERVER_PASSWORD: Redacted.value(password),
                 OPENCODE_CONFIG_PROJECT_DISABLE: "1",
                 OPENCODE_DISABLE_CLAUDE_CODE: "1",
                 OPENCODE_DISABLE_MODELS_FETCH: "1",

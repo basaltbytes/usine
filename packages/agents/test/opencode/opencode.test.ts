@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, type AgentSessionEvent, ChildSession } from "@usine/core/agent/session";
-import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
+import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { Cause, Effect, Fiber, Layer, Option, Queue, Schema, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
@@ -271,6 +271,40 @@ describe("OpenCode child", () => {
       assert.deepStrictEqual(deliveries, [true]);
     }).pipe(Effect.scoped),
   );
+
+  for (const [name, action] of [
+    ["steering", Steer],
+    ["operator guidance", OperatorMessage],
+  ] as const) {
+    it.effect(`preserves ${name} accepted before interruption cleanup finishes`, () =>
+      Effect.gen(function* () {
+        const test = yield* fixture;
+        const running = yield* test.backend.launch(request());
+        const observed = yield* Queue.make<AgentSessionEvent>();
+        yield* running.events.pipe(
+          Stream.runForEach((event) => Queue.offer(observed, event)),
+          Effect.forkChild,
+        );
+        yield* running.intervene(Interrupt.make(), () => Effect.void);
+        const state = yield* running.intervene(
+          action.make({ message: "Continue with the correction" }),
+          () => Effect.void,
+        );
+        assert.isFalse(state.paused);
+        yield* test.emit("session.execution.interrupted");
+        yield* test.emit("session.text.ended", { assistantMessageID: "msg_2", text: "Updated." });
+        yield* Queue.take(observed).pipe(
+          Effect.repeat({ while: (event) => event._tag !== "TextOutput" }),
+        );
+        assert.isFalse(test.closed());
+        // Release before completion also catches an old terminal event that made the session idle.
+        yield* running.intervene(Release.make(), () => Effect.void);
+        assert.isFalse(test.closed());
+        yield* test.emit("session.execution.succeeded");
+        assert.strictEqual((yield* running.result).message, "Updated.");
+      }).pipe(Effect.scoped),
+    );
+  }
 
   for (const [type, data, tag] of [
     ["permission.asked", { id: "ask_1" }, "AgentResultError"],
