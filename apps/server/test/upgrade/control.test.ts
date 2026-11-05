@@ -6,7 +6,7 @@ import {
   UpgradeRecord,
 } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
-import { Deferred, Effect, Logger, Option, Ref, Schema } from "effect";
+import { Deferred, Effect, Logger, Option, Ref, Result, Schema } from "effect";
 import { expect, it } from "@effect/vitest";
 import { makeUpgrades, UpgradeError, type UpgradePlatform } from "../../src/upgrade/control.ts";
 
@@ -29,6 +29,35 @@ const fixture = Effect.gen(function* () {
   return { drained, launched, requests, result, platform };
 });
 
+it.live.each([
+  "App upgrades are available after GitHub App setup is complete.",
+  "App upgrades require a global npm install managed by systemd.",
+])("rejects unavailable upgrades with the reason: %s", (message) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const drained = yield* Ref.make(false);
+      const upgrades = yield* makeUpgrades({
+        running: previous,
+        settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "automatic" }),
+        platform: Result.fail(UpgradeError.make({ message })),
+        drain: () => Ref.set(drained, true),
+        resume: Effect.void,
+      });
+      yield* upgrades.check();
+      for (const timing of ["idle", "now"] as const) {
+        const error = yield* upgrades
+          .request(UpgradeRequest.make({ timing, version: Option.some(target) }))
+          .pipe(Effect.flip);
+        expect(error.message).toBe(message);
+      }
+      expect((yield* upgrades.status).supported).toBe(false);
+      expect((yield* upgrades.status).phase).toBe("idle");
+      const drainedState = yield* Ref.get(drained);
+      expect(drainedState).toBe(false);
+    }),
+  ),
+);
+
 it.live("checks the selected channel and waits for all admitted attempts before installing", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -37,7 +66,7 @@ it.live("checks the selected channel and waits for all admitted attempts before 
       const upgrades = yield* makeUpgrades({
         running: previous,
         settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "automatic" }),
-        platform: Option.some(f.platform),
+        platform: Result.succeed(f.platform),
         drain: () => Deferred.await(f.drained),
         resume: Effect.void,
       });
@@ -74,7 +103,7 @@ it.live("proposes without draining, and an immediate request bypasses the idle w
       const upgrades = yield* makeUpgrades({
         running: previous,
         settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
-        platform: Option.some(f.platform),
+        platform: Result.succeed(f.platform),
         drain: () => Deferred.await(f.drained),
         resume: Effect.void,
       });
@@ -105,7 +134,7 @@ it.live("does not check when off, downgrade automatically, or retry a health-che
       const upgrades = yield* makeUpgrades({
         running: previous,
         settings: Ref.get(settings),
-        platform: Option.some(f.platform),
+        platform: Result.succeed(f.platform),
         drain: () => Effect.void,
         resume: Effect.void,
       });
@@ -133,7 +162,7 @@ it.live("does not check when off, downgrade automatically, or retry a health-che
       const current = yield* makeUpgrades({
         running: "2.0.0",
         settings: Ref.get(settings),
-        platform: Option.some(f.platform),
+        platform: Result.succeed(f.platform),
         drain: () => Effect.void,
         resume: Effect.void,
       });
@@ -157,7 +186,7 @@ it.live.each(["idle", "now"] as const)(
           settings: Ref.get(channel).pipe(
             Effect.map((upgradeChannel) => ({ upgradeChannel, upgradeMode: "propose" as const })),
           ),
-          platform: Option.some({
+          platform: Result.succeed({
             ...f.platform,
             lookup: (selected) => Effect.succeed(selected === "next" ? target : stable),
           }),
@@ -203,7 +232,7 @@ it.live("rejects an automatic candidate when the channel changes during its look
             upgradeMode: "automatic" as const,
           })),
         ),
-        platform: Option.some({
+        platform: Result.succeed({
           ...f.platform,
           lookup: () => Ref.set(channel, "latest").pipe(Effect.as(target)),
         }),
@@ -235,7 +264,7 @@ it.live.each(["off", "propose"] as const)(
           settings: Ref.get(currentMode).pipe(
             Effect.map((upgradeMode) => ({ upgradeChannel: "next" as const, upgradeMode })),
           ),
-          platform: Option.some({
+          platform: Result.succeed({
             ...f.platform,
             lookup: () => Ref.set(currentMode, mode).pipe(Effect.as(target)),
           }),
@@ -264,7 +293,7 @@ it.live("refuses a missing helper before closing admission", () =>
       const upgrades = yield* makeUpgrades({
         running: previous,
         settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
-        platform: Option.some({
+        platform: Result.succeed({
           ...f.platform,
           preflight: Effect.fail(UpgradeError.make({ message: "Missing helper unit" })),
         }),
@@ -290,7 +319,7 @@ it.live("reports helper failure instead of waiting for a restart that will not h
       const upgrades = yield* makeUpgrades({
         running: previous,
         settings: Effect.succeed({ upgradeChannel: "latest", upgradeMode: "propose" }),
-        platform: Option.some(f.platform),
+        platform: Result.succeed(f.platform),
         drain: () => Effect.void,
         resume: Effect.void,
       });
@@ -327,7 +356,7 @@ it.live.each(["propose", "automatic"] as const)(
         const upgrades = yield* makeUpgrades({
           running: previous,
           settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: mode }),
-          platform: Option.some({
+          platform: Result.succeed({
             ...f.platform,
             checkDependencies: () =>
               Ref.get(ready).pipe(
@@ -399,7 +428,7 @@ it.live("keeps the verified release and install outcome while a newer release is
       const upgrades = yield* makeUpgrades({
         running: previous,
         settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "propose" }),
-        platform: Option.some({
+        platform: Result.succeed({
           ...f.platform,
           lookup: () => Ref.get(candidate),
           checkDependencies: (version) =>
@@ -467,7 +496,7 @@ it.live.each([
         const upgrades = yield* makeUpgrades({
           running: previous,
           settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "automatic" }),
-          platform: Option.some(f.platform),
+          platform: Result.succeed(f.platform),
           drain: () => Effect.void,
           resume: Effect.void,
         });
@@ -493,7 +522,7 @@ it.live(
         const upgrades = yield* makeUpgrades({
           running: previous,
           settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "automatic" }),
-          platform: Option.some(f.platform),
+          platform: Result.succeed(f.platform),
           drain: () => Deferred.await(f.drained),
           resume: Ref.set(resumed, true),
         });
