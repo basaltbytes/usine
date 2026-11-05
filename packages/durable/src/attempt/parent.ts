@@ -1,8 +1,5 @@
-// Pi authentication uses Promise callbacks.
-// @effect-diagnostics asyncFunction:off
-
 import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
-import { getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import {
   piAuthentication,
@@ -22,7 +19,7 @@ import { AgentSessionId, EndpointName, ParentSession } from "@usine/core/agent/s
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
-import type { ParentModelAccess } from "../gateway.ts";
+import type { DurableHarness } from "../harness.ts";
 import type { AttemptRecord } from "./documents.ts";
 
 /** The parent model, validated against the effort and credential. */
@@ -61,12 +58,43 @@ const launchError = (sessionId: Option.Option<AgentSessionId>, message: string, 
     cause,
   });
 
+type ParentModels = Pick<DurableHarness["Service"], "models" | "defaultModel" | "credentials">;
+
+const checkAuthentication = Effect.fn("ParentModel.authentication")(function* (
+  { models, credentials }: ParentModels,
+  provider: string,
+  sessionId: Option.Option<AgentSessionId>,
+) {
+  yield* Effect.annotateCurrentSpan({ provider });
+  return yield* credentials._tag === "Gateway"
+    ? credentials
+        .authentication(provider)
+        .pipe(
+          Effect.mapError((cause) =>
+            launchError(
+              sessionId,
+              `Gateway unreachable for provider "${provider}": ${cause.message}`,
+              cause,
+            ),
+          ),
+        )
+    : Effect.tryPromise({
+        try: (signal) => models.checkAuth(provider, { signal }),
+        catch: (cause) =>
+          launchError(sessionId, "Can't check the parent model's credential", cause),
+      }).pipe(
+        Effect.map((auth) =>
+          piAuthentication(auth, models.getProvider(provider)?.auth.oauth?.isSubscription === true),
+        ),
+      );
+});
+
 const selectModel = Effect.fn("ParentModel.select")(function* (
-  models: Models,
-  defaultModel: Option.Option<ModelRef>,
+  parents: ParentModels,
   spec: ParentBrainOptions,
   sessionId: Option.Option<AgentSessionId> = Option.none(),
 ) {
+  const { models, defaultModel, credentials } = parents;
   if (Option.isSome(spec.parentModel)) {
     const named = spec.parentModel.value;
     const found = Option.flatMap(Option.fromNullishOr(splitPiModel(named)), (ref) =>
@@ -94,7 +122,16 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
     catch: (cause) =>
       launchError(sessionId, "Can't list the models that have a configured credential", cause),
   });
-  const first = available[0];
+  let first = available[0];
+  if (credentials._tag === "Gateway") {
+    first = undefined;
+    for (const provider of new Set(available.map((model) => model.provider))) {
+      const authentication = yield* checkAuthentication(parents, provider, sessionId);
+      if (resolvePiPool(provider, authentication) === undefined) continue;
+      first = available.find((model) => model.provider === provider);
+      break;
+    }
+  }
   if (first === undefined) {
     const model = ModelId.make("unknown");
     yield* Effect.logError("Pi parent has no model with a configured credential");
@@ -114,18 +151,17 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
  * pool.
  */
 export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
-  models: Models,
-  defaultModel: Option.Option<ModelRef>,
+  parents: ParentModels,
   spec: ParentBrainOptions,
   sessionId: Option.Option<AgentSessionId> = Option.none(),
-  gatewayAuthentication?: ParentModelAccess["authentication"],
 ) {
   yield* Effect.annotateCurrentSpan({
     sessionId: Option.getOrUndefined(sessionId),
     parentEffort: spec.parentEffort,
     parentModel: Option.getOrUndefined(spec.parentModel),
   });
-  const selected = yield* selectModel(models, defaultModel, spec, sessionId);
+  const { credentials } = parents;
+  const selected = yield* selectModel(parents, spec, sessionId);
   const model = ModelId.make(`${selected.provider}/${selected.id}`);
   yield* Effect.fromResult(
     admitBrain(
@@ -138,7 +174,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       }),
       AdmissionContext.make({
         placement: "orchestrator",
-        credential: gatewayAuthentication === undefined ? "host-login" : "gateway",
+        credential: credentials._tag === "HostLogin" ? "host-login" : "gateway",
       }),
     ),
   ).pipe(
@@ -165,16 +201,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
     });
   }
-  const authentication = yield* Effect.tryPromise({
-    try: async (signal) =>
-      gatewayAuthentication === undefined
-        ? piAuthentication(
-            await models.checkAuth(selected.provider, { signal }),
-            models.getProvider(selected.provider)?.auth.oauth?.isSubscription === true,
-          )
-        : gatewayAuthentication(selected.provider, signal),
-    catch: (cause) => launchError(sessionId, "Can't check the parent model's credential", cause),
-  });
+  const authentication = yield* checkAuthentication(parents, selected.provider, sessionId);
   const required = requiredPiPool(selected.provider);
   const pool = resolvePiPool(selected.provider, authentication);
   if (pool === undefined) {
@@ -189,7 +216,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       model,
       pool: required,
       message:
-        gatewayAuthentication === undefined
+        credentials._tag === "HostLogin"
           ? `Pi parent model "${model}" requires a credential from the ${required} pool`
           : `Gateway credential unavailable for provider "${selected.provider}" (coordinator model "${model}", pool ${required})`,
     });

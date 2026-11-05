@@ -8,22 +8,20 @@ import { Effect, Option, Result } from "effect";
 /** Checks resolved coordinator brains without writing configuration or opening durable storage. */
 export const parentAdmissionProblems: (
   loaded: LoadedInstance,
-  parents: Pick<DurableHarness["Service"], "models" | "defaultModel" | "parentAuthentication">,
+  parents: Pick<DurableHarness["Service"], "models" | "defaultModel" | "credentials">,
 ) => Effect.Effect<Array<ConfigFileError>> = Effect.fn("Configuration.admitParents")(function* (
   loaded: LoadedInstance,
-  parents: Pick<DurableHarness["Service"], "models" | "defaultModel" | "parentAuthentication">,
+  parents: Pick<DurableHarness["Service"], "models" | "defaultModel" | "credentials">,
 ) {
   const problems: Array<ConfigFileError> = [];
   for (const { name, agent } of loaded.agents) {
     const admitted = yield* resolveParent(
-      parents.models,
-      parents.defaultModel,
+      parents,
       {
         parentModel: resolveParentModel(agent, loaded.config.settings.parentModel),
         parentEffort: resolveParentEffort(agent, loaded.config.settings.parentEffort),
       },
       Option.none(),
-      parents.parentAuthentication,
     ).pipe(
       Effect.result,
       Effect.withSpan("Configuration.admitParent", { attributes: { agent: name } }),

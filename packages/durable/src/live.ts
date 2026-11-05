@@ -42,7 +42,11 @@ export const loadParentModels = Effect.fn("ParentModels.load")(function* (
         modelId,
       })),
   );
-  return { models, defaultModel, parentAuthentication: access?.authentication };
+  return {
+    models,
+    defaultModel,
+    credentials: access?.credentials ?? { _tag: "HostLogin" as const },
+  };
 });
 
 const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
@@ -66,7 +70,7 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
       ),
     ),
     models,
-    parentAuthentication: access?.authentication,
+    credentials: access?.credentials ?? { _tag: "HostLogin" as const },
     defaultModel,
   } satisfies DurableHarnessOptions;
 });

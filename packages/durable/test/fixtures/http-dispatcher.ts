@@ -99,12 +99,12 @@ writeFileSync(
 
 const access =
   scenario === "gateway"
-    ? gatewayModelAccess({
-        credential: async () => "subscription",
-        request: async () => {
-          throw new Error("model requests are not used by this fixture");
-        },
-      })
+    ? await Effect.runPromise(
+        gatewayModelAccess({
+          credential: () => Effect.succeedSome("subscription"),
+          request: () => Effect.die("model requests are not used by this fixture"),
+        }),
+      )
     : undefined;
 
 const openHarness = () =>
@@ -114,14 +114,12 @@ const openHarness = () =>
       if (access !== undefined) {
         assert.strictEqual(harness.models, access.models);
         const resolved = yield* resolveParent(
-          harness.models,
-          harness.defaultModel,
+          harness,
           {
             parentModel: Option.some(ModelId.make("openai-codex/gpt-5.6-sol")),
             parentEffort: "high",
           },
           Option.none(),
-          harness.parentAuthentication,
         );
         assert.strictEqual(resolved.pool, "chatgptPlan");
       }
@@ -138,7 +136,7 @@ try {
       Effect.runPromise(
         Effect.gen(function* () {
           const parents = yield* loadParentModels(directory);
-          yield* resolveParent(parents.models, parents.defaultModel, {
+          yield* resolveParent(parents, {
             parentModel: Option.some(ModelId.make("missing/parent-model")),
             parentEffort: "high",
           });

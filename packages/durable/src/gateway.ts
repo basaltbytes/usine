@@ -16,31 +16,43 @@ import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messag
 import { type PiAuthentication } from "@usine/agents/pi/authentication";
 import type { GatewayCredentialKind, GatewayLlmProtocol } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Option, Schema, Stream } from "effect";
 import { Sse } from "effect/encoding";
+
+/** A provider credential check or model request that failed without exposing credentials. */
+export class ParentCredentialError extends Schema.TaggedError<
+  ParentCredentialError,
+  { readonly brand: unique symbol }
+>("@usine/durable/ParentCredentialError")("ParentCredentialError", {
+  message: Schema.NonEmptyString,
+}) {}
+
+export type ParentCredentials =
+  | { readonly _tag: "HostLogin" }
+  | {
+      readonly _tag: "Gateway";
+      readonly authentication: (
+        provider: string,
+      ) => Effect.Effect<PiAuthentication | undefined, ParentCredentialError>;
+    };
 
 /** Model and credential access used by the durable coordinator. */
 export interface ParentModelAccess {
   readonly models: Models;
-  /** Checks the upstream credential, independently of the caller token used for transport. */
-  readonly authentication: (
-    provider: string,
-    signal: AbortSignal,
-  ) => Promise<PiAuthentication | undefined>;
+  readonly credentials: ParentCredentials;
 }
 
 /** A gateway transport with no provider credential on the orchestrator. */
 export interface GatewayModelTransport {
   readonly credential: (
     protocol: GatewayLlmProtocol,
-    signal?: AbortSignal,
-  ) => Promise<GatewayCredentialKind | undefined>;
+  ) => Effect.Effect<Option.Option<GatewayCredentialKind>, ParentCredentialError>;
   readonly request: (
     protocol: GatewayLlmProtocol,
     body: string,
     headers: Readonly<Record<string, string>>,
     signal?: AbortSignal,
-  ) => Promise<Response>;
+  ) => Effect.Effect<Response, ParentCredentialError>;
 }
 
 const Payload = Schema.Record(Schema.String, Schema.Unknown);
@@ -67,6 +79,7 @@ const codexResponse = (response: Response): Response => {
                   }
                 : event,
             ),
+            Effect.catchTag("SchemaError", () => Effect.succeed(event)),
           ),
     ),
     Stream.map(Sse.encoder.write),
@@ -81,7 +94,13 @@ const codexResponse = (response: Response): Response => {
 };
 
 /** Builds Pi providers that only send model requests through the gateway transport. */
-export const gatewayModelAccess = (transport: GatewayModelTransport): ParentModelAccess => {
+export const gatewayModelAccess: (
+  transport: GatewayModelTransport,
+) => Effect.Effect<ParentModelAccess> = Effect.fn("GatewayModelAccess.make")(function* (
+  transport: GatewayModelTransport,
+) {
+  const context = yield* Effect.context<never>();
+  const run = Effect.runPromiseWith(context);
   const models = createModels();
   const protocolFor = (provider: string): GatewayLlmProtocol | undefined =>
     provider === "anthropic"
@@ -89,18 +108,20 @@ export const gatewayModelAccess = (transport: GatewayModelTransport): ParentMode
       : provider === "openai" || provider === "openai-codex"
         ? "openai-responses"
         : undefined;
-  const authentication = async (
+  const authentication = Effect.fn("GatewayModelAccess.authentication")(function* (
     provider: string,
-    signal: AbortSignal,
-  ): Promise<PiAuthentication | undefined> => {
+  ) {
+    yield* Effect.annotateCurrentSpan({ provider });
     const protocol = protocolFor(provider);
     if (protocol === undefined) return undefined;
-    const credential = await transport.credential(protocol, signal);
-    if (credential === "api-key") return { _tag: "ApiKey" };
+    const credential = yield* transport
+      .credential(protocol)
+      .pipe(Effect.map(Option.getOrUndefined));
+    if (credential === "api-key") return { _tag: "ApiKey" } as const;
     if (credential === "subscription" && provider === "openai-codex")
-      return { _tag: "OAuth", subscription: true };
+      return { _tag: "OAuth", subscription: true } as const;
     return undefined;
-  };
+  });
   for (const provider of [anthropicProvider(), openaiProvider(), openaiCodexProvider()]) {
     const protocol = protocolFor(provider.id);
     if (protocol === undefined) continue;
@@ -111,27 +132,46 @@ export const gatewayModelAccess = (transport: GatewayModelTransport): ParentMode
         ...options,
         fetch: async (input, init) => {
           const request = new Request(input, init);
-          const response = await transport.request(
-            protocol,
-            await request.text(),
-            Object.fromEntries(request.headers),
-            request.signal,
+          const response = await run(
+            transport.request(
+              protocol,
+              await request.text(),
+              Object.fromEntries(request.headers),
+              request.signal,
+            ),
+            { signal: request.signal },
           );
           return provider.id === "openai-codex" ? codexResponse(response) : response;
         },
       };
       if (provider.id === "openai-codex") {
-        prepared.onPayload = async (payload) => ({
-          ...(await Schema.decodeUnknownPromise(Payload)(payload)),
-          instructions:
-            context.messages[0]?.role === "system"
-              ? getSystemMessageText(context.messages[0])
-              : "You are a helpful assistant.",
-          max_output_tokens: undefined,
-          temperature: undefined,
-          prompt_cache_retention: undefined,
-          prompt_cache_options: undefined,
-        });
+        prepared.onPayload = async (payload) => {
+          const decoded = await Schema.decodeUnknownPromise(Payload)(payload);
+          const input = decoded.input;
+          const leading = Array.isArray(input) ? input[0] : undefined;
+          const systemItem = Schema.decodeUnknownOption(
+            Schema.Struct({
+              role: Schema.Literals(["system", "developer"]),
+            }),
+          )(leading);
+          return {
+            ...decoded,
+            input:
+              context.messages[0]?.role === "system" &&
+              Option.isSome(systemItem) &&
+              Array.isArray(input)
+                ? input.slice(1)
+                : input,
+            instructions:
+              context.messages[0]?.role === "system"
+                ? getSystemMessageText(context.messages[0])
+                : "You are a helpful assistant.",
+            max_output_tokens: undefined,
+            temperature: undefined,
+            prompt_cache_retention: undefined,
+            prompt_cache_options: undefined,
+          };
+        };
       }
       return prepared;
     };
@@ -156,10 +196,7 @@ export const gatewayModelAccess = (transport: GatewayModelTransport): ParentMode
         auth: {
           apiKey: {
             name: "Gateway caller token",
-            resolve: async ({ signal }) =>
-              (await authentication(provider.id, signal)) === undefined
-                ? undefined
-                : { auth: { apiKey: "gateway-caller", baseUrl } },
+            resolve: () => Promise.resolve({ auth: { apiKey: "gateway-caller", baseUrl } }),
           },
         },
         api: {
@@ -171,5 +208,5 @@ export const gatewayModelAccess = (transport: GatewayModelTransport): ParentMode
       }),
     );
   }
-  return { models, authentication };
-};
+  return { models, credentials: { _tag: "Gateway", authentication } } satisfies ParentModelAccess;
+});

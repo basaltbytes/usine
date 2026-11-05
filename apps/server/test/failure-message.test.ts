@@ -7,7 +7,6 @@ import { WorkerName } from "@usine/core/worker";
 import { DurableHarnessError } from "@usine/durable/harness";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
-import { GatewayModelError } from "@usine/executor/gateway";
 import { assert, describe, it } from "vitest";
 import { failureMessage } from "../src/failure-message.ts";
 
@@ -129,14 +128,23 @@ describe("CLI failure messages", () => {
     );
   });
 
-  it("reports missing coordinator credentials as a gateway startup refusal", () => {
-    assert.strictEqual(
-      failureMessage(
-        GatewayModelError.make({
-          message: 'Gateway credential unavailable for provider "openai-codex".',
-        }),
-      ),
-      'usine up did not start: Gateway credential unavailable for provider "openai-codex". Check the gateway connection and provider credentials, then run usine up again.',
+  it("reports a gateway probe failure during configuration validation without startup wording", () => {
+    const message = failureMessage(
+      ConfigurationInvalid.make({
+        problems: [
+          ConfigFileError.make({
+            file: InstancePath.make("agents/developer.md"),
+            stage: "schema",
+            expression: Option.none(),
+            message:
+              'Agent "developer" cannot run as coordinator: Gateway unreachable for provider "openai-codex": The model proxy on gateway usine-gateway did not answer within 30 seconds.',
+          }),
+        ],
+      }),
     );
+    assert.include(message, 'Gateway unreachable for provider "openai-codex"');
+    assert.include(message, "did not answer within 30 seconds");
+    assert.notInclude(message, "usine up did not start");
+    assert.include(message, "no revision was written");
   });
 });

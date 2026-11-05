@@ -3,7 +3,7 @@ import { GatewayAdminPort } from "@usine/core/worker";
 import type { RepositoryName } from "@usine/core/repository";
 import { AnonymousCredential } from "@usine/gateway";
 import { AttachRequest } from "@usine/gateway/admin";
-import { Context, DateTime, Effect, Option, Schema, Stream } from "effect";
+import { Context, DateTime, Effect, Option, Schema, Semaphore, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import { DEFAULT_SSH, remoteCommandsFor } from "../../remote/commands.ts";
@@ -58,7 +58,15 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
       .get(new URL("/openai-responses/v1/models", opened.url), {
         headers: { host: `llm.${gateway.domain}` },
       })
-      .pipe(Effect.timeout("30 seconds"));
+      .pipe(
+        Effect.timeoutOrElse({
+          duration: "30 seconds",
+          orElse: () =>
+            GatewayModelError.make({
+              message: `The model proxy on gateway ${gateway.destination} did not answer within 30 seconds.`,
+            }),
+        }),
+      );
     if (
       probe.status !== 401 ||
       probe.headers["x-usine-gateway-refusal"] !== "missing-caller-token"
@@ -77,6 +85,7 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
         expiresAt: DateTime.add(now, { hours: 1 }),
       }),
     );
+    const turn = yield* Semaphore.make(1);
     const attached = yield* Effect.acquireRelease(
       Effect.flatMap(requestFor, admin.attach),
       ({ attachment }) =>
@@ -91,12 +100,15 @@ export const gatewayModelRouteFor = Effect.fn("GatewayModelRoute.open")(
             ),
           ),
           Effect.ignore,
+          turn.withPermits(1),
         ),
     );
     yield* Effect.forever(
       Effect.sleep("2 minutes").pipe(
         Effect.andThen(
-          Effect.flatMap(requestFor, (request) => admin.renew(attached.attachment.id, request)),
+          Effect.flatMap(requestFor, (request) =>
+            admin.renew(attached.attachment.id, request),
+          ).pipe(turn.withPermits(1), Effect.uninterruptible),
         ),
         Effect.tapError((error) =>
           Effect.logWarning("Could not renew the orchestrator model route; will retry", {

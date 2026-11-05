@@ -180,11 +180,9 @@ export const attemptTask = (
       sessionId: parentSessionId(spec.attemptId),
     });
     const resolved = yield* resolveParent(
-      runtime.models,
-      services.defaultModel,
+      services.parents,
       spec,
       Option.some(parentSessionId(spec.attemptId)),
-      services.parentAuthentication,
     ).pipe(Effect.result);
     if (Result.isFailure(resolved)) {
       yield* Effect.logError("Pi parent could not start", {

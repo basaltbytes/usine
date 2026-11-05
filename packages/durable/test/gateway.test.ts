@@ -77,12 +77,13 @@ it.live.each([
       const database = yield* temporaryDatabase;
       const sent: Array<{ protocol: string; body: string }> = [];
       let current: GatewayCredentialKind | undefined = credential;
-      const access = gatewayModelAccess({
-        credential: async () => current,
-        request: async (protocol, body) => {
-          sent.push({ protocol, body });
-          return response(terminal);
-        },
+      const access = yield* gatewayModelAccess({
+        credential: () => Effect.succeed(Option.fromUndefinedOr(current)),
+        request: (protocol, body) =>
+          Effect.sync(() => {
+            sent.push({ protocol, body });
+            return response(terminal);
+          }),
       });
       const model = ModelId.make("openai-codex/gpt-5.6-sol");
       const original = attemptRequest(`gateway-${credential}`);
@@ -93,7 +94,7 @@ it.live.each([
       const pool = credential === "subscription" ? "chatgptPlan" : "apiKeys";
       const harness = harnessLayer({
         models: access.models,
-        parentAuthentication: access.authentication,
+        credentials: access.credentials,
         defaultModel: Option.none(),
         openStorage: Effect.tryPromise({
           try: () => openNodeSqliteStorage(database),
@@ -106,22 +107,18 @@ it.live.each([
         const report = yield* runtime.execute(request, recording.sink);
         assert.strictEqual(report.message, "Finished through the gateway.");
         const selected = yield* resolveParent(
-          access.models,
-          Option.none(),
+          { ...access, defaultModel: Option.none() },
           request.spec,
           Option.none(),
-          access.authentication,
         );
         assert.strictEqual(selected.pool, pool);
         const durable = yield* DurableHarness;
-        assert.strictEqual(durable.parentAuthentication, access.authentication);
+        assert.strictEqual(durable.credentials, access.credentials);
         current = undefined;
         const missing = yield* resolveParent(
-          access.models,
-          Option.none(),
+          { ...access, defaultModel: Option.none() },
           request.spec,
           Option.none(),
-          access.authentication,
         ).pipe(Effect.flip);
         assert.include(
           missing.message,
@@ -139,12 +136,14 @@ it.live.each([
           Schema.Struct({
             store: Schema.Boolean,
             instructions: Schema.String,
+            input: Schema.Array(Schema.Unknown),
             max_output_tokens: Schema.optionalKey(Schema.Finite),
           }),
         ),
       )(sent[0]?.body);
       assert.strictEqual(body.store, false);
-      assert.isString(body.instructions);
+      assert.isNotEmpty(body.instructions);
+      assert.notInclude(jsonKey(body.input), body.instructions);
       assert.isUndefined(body.max_output_tokens);
       const usage = recording
         .outbound()
@@ -165,13 +164,14 @@ it.effect(
   "refuses subscription credentials for API-key providers and never reads ambient logins",
   () =>
     Effect.gen(function* () {
-      const access = gatewayModelAccess({
-        credential: async () => "subscription",
-        request: async () => response(),
+      const access = yield* gatewayModelAccess({
+        credential: () => Effect.succeedSome("subscription"),
+        request: () => Effect.sync(() => response()),
       });
-      const signal = yield* Effect.abortSignal;
+      assert.strictEqual(access.credentials._tag, "Gateway");
+      if (access.credentials._tag !== "Gateway") return;
       for (const provider of ["anthropic", "openai", "google"]) {
-        const authentication = yield* Effect.promise(() => access.authentication(provider, signal));
+        const authentication = yield* access.credentials.authentication(provider);
         assert.isUndefined(authentication);
       }
       assert.isUndefined(access.models.getProvider("google"));
@@ -180,20 +180,101 @@ it.effect(
 
 it.effect("startup reports a missing gateway credential by coordinator provider", () =>
   Effect.gen(function* () {
-    const access = gatewayModelAccess({
-      credential: async () => undefined,
-      request: async () => response(),
+    const access = yield* gatewayModelAccess({
+      credential: () => Effect.succeedNone,
+      request: () => Effect.sync(() => response()),
     });
     const failure = yield* resolveParent(
-      access.models,
-      Option.none(),
+      { ...access, defaultModel: Option.none() },
       {
         parentModel: Option.some(ModelId.make("openai-codex/gpt-5.6-sol")),
         parentEffort: "high",
       },
       Option.none(),
-      access.authentication,
     ).pipe(Effect.flip);
     assert.include(failure.message, 'Gateway credential unavailable for provider "openai-codex"');
+  }),
+);
+
+it.live("streams without an admin credential lookup and lifts only the initial system prompt", () =>
+  Effect.gen(function* () {
+    const sent: Array<string> = [];
+    const access = yield* gatewayModelAccess({
+      credential: () => Effect.die("streaming must not query the admin API"),
+      request: (_protocol, body) =>
+        Effect.sync(() => {
+          sent.push(body);
+          return response("response.done");
+        }),
+    });
+    const model = access.models.getModel("openai-codex", "gpt-5.6-sol");
+    assert(model !== undefined);
+    const answer = yield* Effect.promise(() =>
+      access.models.completeSimple(model, {
+        messages: [
+          { role: "system", content: "Initial coordinator instructions", timestamp: 1 },
+          { role: "user", content: "Hello", timestamp: 2 },
+          { role: "system", content: "Later instruction update", timestamp: 3 },
+        ],
+      }),
+    );
+    assert.strictEqual(answer.stopReason, "stop");
+    const payload = yield* Schema.decodeUnknownEffect(
+      Schema.fromJsonString(
+        Schema.Struct({
+          instructions: Schema.String,
+          input: Schema.Array(Schema.Unknown),
+        }),
+      ),
+    )(sent[0]);
+    assert.strictEqual(payload.instructions, "Initial coordinator instructions");
+    assert.notInclude(jsonKey(payload.input), payload.instructions);
+    assert.include(jsonKey(payload.input), "Later instruction update");
+    assert.include(jsonKey(payload.input), "Hello");
+  }),
+);
+
+it.live("passes non-JSON Codex data to the SDK's malformed-event error", () =>
+  Effect.gen(function* () {
+    const access = yield* gatewayModelAccess({
+      credential: () => Effect.succeedSome("subscription"),
+      request: () =>
+        Effect.sync(
+          () =>
+            new Response("data: not-json\n\n", {
+              headers: { "content-type": "text/event-stream" },
+            }),
+        ),
+    });
+    const model = access.models.getModel("openai-codex", "gpt-5.6-sol");
+    assert(model !== undefined);
+    const answer = yield* Effect.promise(() =>
+      access.models.completeSimple(model, {
+        messages: [{ role: "user", content: "Hello", timestamp: 1 }],
+      }),
+    );
+    assert.strictEqual(answer.stopReason, "error");
+    assert.include(answer.errorMessage ?? "", "malformed server-sent event JSON");
+  }),
+);
+
+it.effect("selects a gateway-authenticated provider when no parent model is configured", () =>
+  Effect.gen(function* () {
+    const access = yield* gatewayModelAccess({
+      credential: (protocol) =>
+        Effect.succeed(
+          protocol === "openai-responses" ? Option.some("subscription") : Option.none(),
+        ),
+      request: () => Effect.die("selection must not send model requests"),
+    });
+    const selected = yield* resolveParent(
+      { ...access, defaultModel: Option.none() },
+      {
+        parentModel: Option.none(),
+        parentEffort: "high",
+      },
+    );
+    assert.strictEqual(selected.ref.provider, "openai-codex");
+    assert.strictEqual(selected.pool, "chatgptPlan");
   }),
 );

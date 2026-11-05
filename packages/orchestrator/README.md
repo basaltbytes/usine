@@ -16,7 +16,7 @@ Startup resolves each rostered agent's parent model and effort from agent overri
 
 ## Coordinator credentials
 
-`runtimeLayer` connects the coordinator to the first gateway declared by the SSH workers. Startup checks the model proxy before durable tasks resume and validates each agent's parent using the gateway's credentials. The orchestrator host needs no provider login. Usage follows the gateway credential into `apiKeys` or `chatgptPlan`. Instances without a gateway retain Pi's local login. Restart after changing the selected gateway. `/parent-models` exports `parentModels` to open the same scoped gateway access for CLI configuration validation.
+`runtimeLayer` connects the coordinator to the first gateway declared by the SSH workers. Startup admission checks the model proxy and validates each agent's parent using the gateway's credentials. A gateway connection or setup failure quarantines affected agents while the server remains available. Failed openings release their resources and retry on admission or launch after a five-second cache expires. The orchestrator host needs no provider login. Usage follows the gateway credential into `apiKeys` or `chatgptPlan`. Instances without a gateway retain Pi's local login. Restart after changing the selected gateway. `/parent-models` exports `parentModels` to open the same scoped gateway access for CLI configuration validation.
 
 ## Conditional approval
 
