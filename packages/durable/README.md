@@ -53,7 +53,7 @@ The task doesn't store the host or environment. It stores the run spec, worker, 
 
 Every child receives the stored rendered loop task unchanged. The parent supplies supplemental context through `subagent.task`. The child's `SessionStarted.prompt` records its exact initial prompt for the run page, including its persona, task, parent context, and completion instructions. Older transcripts leave this field absent.
 
-Children aren't resumed after a restart: the tool call ends as interrupted with the output committed so far, and the parent model decides next.
+The `subagent` tool commits the child's saved session ID, harness, session directory, worker, and partial output before relaying them. After a restart, it waits for the executor's host and environment, then continues the saved conversation in the same checkout and transcript. Recovery keeps the child ID and child-session budget slot. Launch admission requires `resume-session` for the worker's placement and credential route. If the saved conversation is missing, the original worker, machine, or checkout is unavailable, admission refuses resume, or recovery fails, the parent receives an interrupted tool result with the committed output.
 
 After a restart, admitting another delegation clears a previous process's stored child infrastructure failure. The replacement child's report determines the attempt outcome. The previous failure remains in the transcript. If the parent finishes without another delegation, the stored infrastructure failure still fails the attempt. Infrastructure failures recorded in the current process retain their precedence and trigger the existing automatic retry.
 
@@ -106,6 +106,8 @@ const attempts = layer({
 Push refusals recorded as `GitHubPushFailure` retain their diagnostic when serialized as a failed task outcome.
 
 A child's provider capacity refusal remains `ProviderCapacityFailure` when the parent relays `[usine:provider-capacity]` or ends without relaying the child's report. The saved child report retains the classification across a restart. Direct Pi parent capacity errors also preserve the provider's message for the engine's delayed retry. The testing stub's `fail` method classifies message-only harness failures in the same way.
+
+Live restart contracts for Claude Code, Codex, and Pi run with `pnpm --filter @usine/durable test:integration`. Set `USINE_CLAUDE_INTEGRATION_MODEL`, `USINE_CODEX_INTEGRATION_MODEL`, and `USINE_PI_INTEGRATION_MODEL` and supply each harness's credentials. For gateway-authenticated children, set the matching `USINE_<HARNESS>_INTEGRATION_GATEWAY_CREDENTIAL` to `api-key` or `subscription`. Claude Code and Codex run locally and through the SSH shim; Pi runs locally. Each contract stops an active attempt, rebuilds the durable runtime on the same SQLite database, and checks that the saved child returns its final report.
 
 ## Test storage
 

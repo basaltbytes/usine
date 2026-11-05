@@ -46,7 +46,8 @@
   "scripts": {
     "build": "tsc -b",
     "check": "effect-tsgo tsc -p tsconfig.check.json",
-    "test": "vitest run"
+    "test": "vitest run --exclude 'test/integration/**'",
+    "test:integration": "vitest run test/integration/restart.test.ts"
   },
   "dependencies": {
     "@earendil-works/chord": "1.4.0",
