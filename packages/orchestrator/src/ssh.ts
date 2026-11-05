@@ -1,6 +1,6 @@
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { workerConnectionsFor } from "./connections.ts";
-import type { RunDatabase } from "@usine/engine/database";
+import type { RunDatabase, TranscriptCodec } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import type { SshWorker, UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
@@ -300,9 +300,10 @@ export const layer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: SshExecutorOptions,
-  database: Layer.Layer<RunDatabase | StepOutputStore, EnginePersistenceError> = localSqliteLayer(
-    instanceDirectory,
-  ),
+  database: Layer.Layer<
+    RunDatabase | StepOutputStore | TranscriptCodec,
+    EnginePersistenceError
+  > = localSqliteLayer(instanceDirectory),
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {

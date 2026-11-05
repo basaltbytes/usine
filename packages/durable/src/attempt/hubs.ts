@@ -55,6 +55,8 @@ export interface AttemptHub {
   readonly routing: Semaphore.Semaphore;
   /** The live children by session ID. */
   readonly children: Map<AgentSessionId, RunningSession>;
+  /** Child delegations admitted in this process, including children that have finished. */
+  readonly childSpawns: Set<string>;
   /**
    * The sequence numbers of operator inputs queued by children in this process and not yet reported
    * read or unread. An input missing from this set was queued by a previous process.
@@ -174,6 +176,7 @@ export const attemptHubs = Effect.gen(function* () {
           emission,
           routing,
           children: new Map(),
+          childSpawns: new Set(),
           childInputs: new Set(),
           parent: Option.none(),
           channel: Option.none(),
