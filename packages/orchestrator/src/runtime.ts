@@ -36,6 +36,7 @@ import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { triggerConditionLayer } from "./trigger-condition.ts";
 import { workerEngineLayer } from "./worker-engine.ts";
+import { parentModels } from "./parent-models.ts";
 import { WorkerStatus } from "./worker-status.ts";
 
 /**
@@ -92,7 +93,13 @@ export const runtimeLayer = (
   );
   // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
   // executor's preflight and the Attempts' Claude children.
-  const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
+  const attemptRuntime = Layer.unwrap(
+    Effect.gen(function* () {
+      const startup = yield* (yield* CurrentInstance).get;
+      const access = yield* parentModels(startup, instanceId);
+      return durableAttemptRuntimeLayer(instanceDirectory, access);
+    }),
+  ).pipe(
     (runtime) => parentAdmissionLayer.pipe(Layer.provideMerge(runtime)),
     Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),

@@ -1,5 +1,6 @@
 import type { Context as ChordContext } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
+import type { ParentCredentials } from "./gateway.ts";
 import type { Models } from "@earendil-works/pi-ai";
 import {
   type CommitPublication,
@@ -80,6 +81,7 @@ export interface DurableHarnessOptions {
   readonly openStorage: Effect.Effect<Storage, DurableHarnessError>;
   /** The pi-ai model access for generation and parent model resolution. */
   readonly models: Models;
+  readonly credentials?: ParentCredentials;
   /**
    * The parent model for Attempts that name none. If `None`, the first model with a configured
    * credential is used.
@@ -96,6 +98,7 @@ export class DurableHarness extends Context.Service<
   DurableHarness,
   {
     readonly models: Models;
+    readonly credentials: ParentCredentials;
     readonly defaultModel: Option.Option<ModelRef>;
     /**
      * Installs or replaces an extension. Conversations that select it use the new code from their
@@ -464,6 +467,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
 
   return DurableHarness.of({
     models: options.models,
+    credentials: options.credentials ?? { _tag: "HostLogin" },
     defaultModel: options.defaultModel,
     install: (extension) =>
       Effect.sync(() => registry.install(extension)).pipe(

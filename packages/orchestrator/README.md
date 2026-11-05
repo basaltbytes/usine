@@ -14,6 +14,10 @@ Operator usage reads use each harness descriptor’s token price table when the 
 
 Startup resolves each rostered agent's parent model and effort from agent overrides and instance settings, then validates the coordinator's model, effort, and credentials before the engine starts. A refused parent quarantines its agent and dependent loops, which appear in Needs attention. Other agents and the operator UI remain available. Configuration reloads and saved edits repeat validation before storing or applying a revision; a refusal preserves the running configuration. A corrected reload restores quarantined agents and loops. `/parent-admission` exports `parentAdmissionProblems` for hosts that validate configuration writes without opening durable storage.
 
+## Coordinator credentials
+
+`runtimeLayer` connects the coordinator to the first gateway declared by the SSH workers. Startup admission checks the model proxy and validates each agent's parent using the gateway's credentials. A gateway connection or setup failure quarantines affected agents while the server remains available. Failed openings release their resources and retry on admission or launch after a five-second cache expires. The orchestrator host needs no provider login. Usage follows the gateway credential into `apiKeys` or `chatgptPlan`. Instances without a gateway retain Pi's local login. Restart after changing the selected gateway. `/parent-models` exports `parentModels` to open the same scoped gateway access for CLI configuration validation.
+
 ## Conditional approval
 
 Loop approval accepts `required`, `none`, or a boolean CEL condition over the event

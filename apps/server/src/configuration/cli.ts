@@ -1,4 +1,6 @@
 import { loadParentModels } from "@usine/durable/live";
+import { parentModels } from "@usine/orchestrator/parent-models";
+import type { LoadedInstance } from "@usine/config/instance";
 import { parentAdmissionProblems } from "@usine/orchestrator/parent-admission";
 import { localActor } from "@usine/core/operator";
 import {
@@ -21,11 +23,12 @@ import {
   parseConfigurationEntity,
 } from "@usine/config/folder-codec";
 import { ConfigParser } from "@usine/config/parser";
-import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceId, InstanceDirectory } from "@usine/core/instance";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
 import {
   Array as EffectArray,
   Config,
+  Crypto,
   Console,
   DateTime,
   Effect,
@@ -43,12 +46,18 @@ export const runConfigCommand = Effect.fn("Cli.config")(
     const path = yield* Path.Path;
     const store = yield* ConfigurationStore;
     const folder = yield* ConfigurationFolder;
+    const admitParents = Effect.fn("Cli.config.admitParents")(function* (loaded: LoadedInstance) {
+      const uuid = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+      const instanceId = InstanceId.make(uuid);
+      const access = yield* parentModels(loaded, instanceId);
+      const parents = yield* loadParentModels(directory, access);
+      return yield* parentAdmissionProblems(loaded, parents);
+    }, Effect.scoped);
     if (command._tag === "ConfigImportCommand") {
       const current = yield* store.read;
       if (Option.isNone(current.instance)) {
         const imported = yield* folder.load(InstanceDirectory.make(path.resolve(command.folder)));
-        const parents = yield* loadParentModels(directory);
-        const problems = yield* parentAdmissionProblems(imported, parents);
+        const problems = yield* admitParents(imported);
         if (EffectArray.isArrayNonEmpty(problems))
           return yield* ConfigurationInvalid.make({ problems });
         const revision = yield* store.commit({
@@ -92,11 +101,7 @@ export const runConfigCommand = Effect.fn("Cli.config")(
           { actor, message, time: yield* DateTime.now },
         );
         if (Option.isSome(candidate.configuration.instance)) {
-          const parents = yield* loadParentModels(directory);
-          const problems = yield* parentAdmissionProblems(
-            candidate.configuration.instance.value,
-            parents,
-          );
+          const problems = yield* admitParents(candidate.configuration.instance.value);
           if (EffectArray.isArrayNonEmpty(problems))
             return yield* ConfigurationInvalid.make({ problems });
         }

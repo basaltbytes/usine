@@ -180,8 +180,7 @@ export const attemptTask = (
       sessionId: parentSessionId(spec.attemptId),
     });
     const resolved = yield* resolveParent(
-      runtime.models,
-      services.defaultModel,
+      services.parents,
       spec,
       Option.some(parentSessionId(spec.attemptId)),
     ).pipe(Effect.result);

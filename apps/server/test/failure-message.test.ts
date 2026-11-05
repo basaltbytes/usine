@@ -127,4 +127,24 @@ describe("CLI failure messages", () => {
       "usine up did not start: durable storage error: could not resume the durable tasks (SQLITE_IOERR: disk I/O error). Check .usine/durable.sqlite and its folder, then run usine up again.",
     );
   });
+
+  it("reports a gateway probe failure during configuration validation without startup wording", () => {
+    const message = failureMessage(
+      ConfigurationInvalid.make({
+        problems: [
+          ConfigFileError.make({
+            file: InstancePath.make("agents/developer.md"),
+            stage: "schema",
+            expression: Option.none(),
+            message:
+              'Agent "developer" cannot run as coordinator: Gateway unreachable for provider "openai-codex": The model proxy on gateway usine-gateway did not answer within 30 seconds.',
+          }),
+        ],
+      }),
+    );
+    assert.include(message, 'Gateway unreachable for provider "openai-codex"');
+    assert.include(message, "did not answer within 30 seconds");
+    assert.notInclude(message, "usine up did not start");
+    assert.include(message, "no revision was written");
+  });
 });

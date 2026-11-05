@@ -14,11 +14,13 @@ import {
   layer as durableHarnessLayer,
 } from "./harness.ts";
 import { durableStoragePath } from "./storage-path.ts";
+import type { ParentModelAccess } from "./gateway.ts";
 import { configureHarnessHttp } from "./http-dispatcher.ts";
 
 /** Loads the orchestrator's Pi models and credentials without opening durable storage. */
 export const loadParentModels = Effect.fn("ParentModels.load")(function* (
   instanceDirectory: InstanceDirectory,
+  access?: ParentModelAccess,
 ) {
   yield* Effect.annotateCurrentSpan({ directory: instanceDirectory });
   // Only the Pi user's global settings: the instance folder's own `.pi/` is not trusted.
@@ -26,10 +28,12 @@ export const loadParentModels = Effect.fn("ParentModels.load")(function* (
     projectTrusted: false,
   });
   yield* configureHarnessHttp(settings.getGlobalSettings().httpProxy);
-  const models = yield* Effect.tryPromise({
-    try: (signal) => ModelRuntime.create({ signal }),
-    catch: (cause) => durableError("load the Pi model runtime", cause),
-  });
+  const models =
+    access?.models ??
+    (yield* Effect.tryPromise({
+      try: (signal) => ModelRuntime.create({ signal }),
+      catch: (cause) => durableError("load the Pi model runtime", cause),
+    }));
   const defaultModel = Option.flatMap(
     Option.fromNullishOr(settings.getDefaultProvider()),
     (provider) =>
@@ -38,17 +42,22 @@ export const loadParentModels = Effect.fn("ParentModels.load")(function* (
         modelId,
       })),
   );
-  return { models, defaultModel };
+  return {
+    models,
+    defaultModel,
+    credentials: access?.credentials ?? { _tag: "HostLogin" as const },
+  };
 });
 
 const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
   instanceDirectory: InstanceDirectory,
+  access?: ParentModelAccess,
 ) {
   yield* Effect.annotateCurrentSpan({ directory: instanceDirectory });
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const file = durableStoragePath(path, instanceDirectory);
-  const { models, defaultModel } = yield* loadParentModels(instanceDirectory);
+  const { models, defaultModel } = yield* loadParentModels(instanceDirectory, access);
   yield* Effect.logInfo("Durable harness storage", { file });
   return {
     openStorage: fileSystem.makeDirectory(path.dirname(file), { recursive: true }).pipe(
@@ -61,6 +70,7 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
       ),
     ),
     models,
+    credentials: access?.credentials ?? { _tag: "HostLogin" as const },
     defaultModel,
   } satisfies DurableHarnessOptions;
 });
@@ -69,8 +79,8 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
  * Provides the durable harness on `.usine/durable.sqlite` with Pi's configured models and
  * credentials.
  */
-export const harnessLayer = (instanceDirectory: InstanceDirectory) =>
-  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory), durableHarnessLayer)).pipe(
+export const harnessLayer = (instanceDirectory: InstanceDirectory, access?: ParentModelAccess) =>
+  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory, access), durableHarnessLayer)).pipe(
     Layer.provide(NodeServices.layer),
   );
 
@@ -81,8 +91,8 @@ export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = ch
  * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every
  * unfinished Attempt.
  */
-export const layer = (instanceDirectory: InstanceDirectory) =>
+export const layer = (instanceDirectory: InstanceDirectory, access?: ParentModelAccess) =>
   attemptRuntimeLayer.pipe(
-    Layer.provideMerge(harnessLayer(instanceDirectory)),
+    Layer.provideMerge(harnessLayer(instanceDirectory, access)),
     Layer.provide(childBackendLayer),
   );
