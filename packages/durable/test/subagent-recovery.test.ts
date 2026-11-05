@@ -1,6 +1,7 @@
 // Durable storage transactions use Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { assert, it } from "@effect/vitest";
+import { NodeFileSystem } from "@effect/platform-node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { ChildBackend, SessionOperationError } from "@usine/agents/runtime";
 import {
@@ -17,7 +18,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { BlockedFailure, InfraFailure } from "@usine/core/attempt/failure";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
-import { Context, Deferred, Effect, Fiber, Layer, Option, Result } from "effect";
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Result } from "effect";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc } from "../src/attempt/documents.ts";
@@ -53,15 +54,24 @@ for (const [recovery, blocker] of [
   ["machine-gone", null],
   ["checkout-gone", null],
   ["resume-fails", null],
+  ["home-gone-fallback", null],
 ] as const) {
   it.live(`recovers a durable child call after restart (${recovery})`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
+      const fs = yield* FileSystem.FileSystem;
+      const home =
+        recovery === "home-gone-fallback" ? `${database}.home` : "/workspace/usine/.usine/sessions";
+      if (recovery === "home-gone-fallback") {
+        yield* fs.makeDirectory(home);
+        yield* fs.writeFileString(`${home}/session.jsonl`, "saved-child\n");
+      }
       const harnessChanged =
         recovery === "harness-changed" || recovery === "harness-changed-stop-fails";
       const replaces =
         recovery === "resume-crashes-then-replacement" ||
-        recovery === "worker-gone-then-replacement";
+        recovery === "worker-gone-then-replacement" ||
+        recovery === "home-gone-fallback";
       const failsRecovery = [
         "missing-session",
         "invalid-session",
@@ -71,6 +81,7 @@ for (const [recovery, blocker] of [
         "machine-gone",
         "checkout-gone",
         "resume-fails",
+        "home-gone-fallback",
         "resume-fails-after-infra",
         "resume-crashes-then-replacement",
         "worker-gone-then-replacement",
@@ -84,7 +95,7 @@ for (const [recovery, blocker] of [
       const saved = HarnessSession.make({
         id: HarnessSessionId.make("saved-child"),
         cwd: request.cwd,
-        home: Option.some("/workspace/usine/.usine/sessions"),
+        home: Option.some(home),
       });
       const checkpoint = (text: string) =>
         Effect.gen(function* () {
@@ -214,6 +225,7 @@ for (const [recovery, blocker] of [
           }),
         );
       const first = yield* stop([delegate("Continue the task")], "Half way there.");
+      if (recovery === "home-gone-fallback") yield* fs.remove(home, { recursive: true });
       if (recovery === "resume-twice") {
         const second = yield* stop([], "Still working.");
         assert.strictEqual(second.session.id, first.session.id);
@@ -226,6 +238,20 @@ for (const [recovery, blocker] of [
               const backend = Context.get(services, ChildBackend);
               return Context.add(services, ChildBackend, {
                 ...backend,
+                launch: (request) =>
+                  recovery === "home-gone-fallback" && Option.isSome(request.resume)
+                    ? fs.readFileString(`${home}/session.jsonl`).pipe(
+                        Effect.mapError((cause) =>
+                          SessionOperationError.make({
+                            operation: "launch",
+                            sessionId: Option.some(request.session.id),
+                            message: "Saved session unavailable after home removal",
+                            cause,
+                          }),
+                        ),
+                        Effect.andThen(backend.launch(request)),
+                      )
+                    : backend.launch(request),
                 stop: (request) =>
                   backend.stop(request).pipe(
                     Effect.andThen(
@@ -322,6 +348,7 @@ for (const [recovery, blocker] of [
               "worker-gone-then-replacement",
               "machine-gone",
               "checkout-gone",
+              "home-gone-fallback",
             ].includes(recovery)
           ) {
             const child = yield* Context.get(services, StubChildren).next;
@@ -465,6 +492,6 @@ for (const [recovery, blocker] of [
       if (recovery === "invalid-session")
         assert.include(jsonKey(result.output), "the saved conversation no longer decodes");
       assertAdmitted(request.spec.attemptId, recording.outbound());
-    }).pipe(Effect.scoped, Effect.timeout("20 seconds")),
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer), Effect.timeout("20 seconds")),
   );
 }

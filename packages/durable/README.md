@@ -114,6 +114,8 @@ Live restart contracts for Claude Code, Codex, and Pi run with `pnpm --filter @u
 
 Recorded Claude Code and Codex restart scenarios run in `pnpm --filter @usine/durable test` and CI. They replace only the child transport, keep the real adapters and durable `subagent` tool, and rebuild `AttemptRuntime` on the same SQLite file during an active command. The credential-change case resolves the current gateway credential kind on resume and checks the resulting session pool. See the [agents recording commands](../agents/README.md#transport-replay-tests) to refresh the fixtures.
 
+The `home-gone-fallback` child recovery case deletes a test directory between runtimes and reports the missing file through a stub child backend. It covers only the replacement fallback: the failed resume returns as interrupted, and the parent can delegate a replacement using another child-session slot. It does not exercise executor home removal or a real harness.
+
 ## Test storage
 
 Durable storage fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts).

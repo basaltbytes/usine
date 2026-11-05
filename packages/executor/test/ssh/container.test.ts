@@ -512,7 +512,9 @@ describe("SSH Worker with Docker", () => {
         const containerGone = lines.findIndex((line) =>
           line.startsWith(`exec 'docker' 'rm' '--force' '--volumes' '${CONTAINER}'`),
         );
-        const homeGone = lines.findIndex((line) => line === `exec 'rm' '-rf' '${codexHome}'`);
+        const homeGone = lines.findIndex(
+          (line) => line.includes('rm -rf "$1"') && line.includes(codexHome),
+        );
         assert(
           homeGone > containerGone && containerGone >= 0,
           "the Codex home outlives the container",

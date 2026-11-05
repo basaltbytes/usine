@@ -1158,7 +1158,9 @@ describe("SSH Worker behind a Gateway", () => {
         const currentGatewayCredential = yield* given.gatewayCredential;
         assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
         assert(
-          machine.state.calls.some(({ line }) => line === `exec 'rm' '-rf' '${codexHome}'`),
+          machine.state.calls.some(
+            ({ line }) => line.includes('rm -rf "$1"') && line.includes(codexHome),
+          ),
           "cleanup removes the Attempt's Codex home",
         );
       }).pipe(

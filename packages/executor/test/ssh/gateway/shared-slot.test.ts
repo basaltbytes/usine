@@ -80,7 +80,9 @@ it.effect(
         assert.notInclude(text, token);
       for (const { command } of machine.state.calls)
         assert.notInclude(command.args.join(" "), token);
-      assert(machine.state.calls.some(({ line }) => line === `exec 'rm' '-rf' '${home}'`));
+      assert(
+        machine.state.calls.some(({ line }) => line.includes('rm -rf "$1"') && line.includes(home)),
+      );
     }).pipe(
       Effect.provide(
         Layer.merge(
