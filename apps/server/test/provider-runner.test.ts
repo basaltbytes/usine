@@ -72,6 +72,15 @@ printf '%s\\n' 'sk-ant-oat01-private-subscription-token'
           );
         }),
       );
+      const rejected = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const login = yield* runner.start("claude");
+          yield* login.prompt;
+          yield* login.submit(Redacted.make("wrong-code"));
+          return yield* login.result.pipe(Effect.flip, Effect.timeout("5 seconds"));
+        }),
+      );
+      assert.equal(rejected._tag, "ProviderCredentialError");
     }),
   ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
 );

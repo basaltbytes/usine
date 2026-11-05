@@ -36,6 +36,16 @@ const failure = () =>
   ProviderCredentialError.make({
     message: "Provider sign-in failed. Check that the pinned harness is installed and try again.",
   });
+// macOS script rejects a socket as stdin, so cat feeds it through a pipe and stops when script exits.
+const darwinClaudeLogin = [
+  `sh -c 'echo $$ > "$0"; exec cat' "$1" 2>/dev/null | {`,
+  '  script -q /dev/null sh -c "stty cols 1000; exec claude setup-token"',
+  "  status=$?",
+  '  while [ ! -s "$1" ]; do sleep 0.1; done',
+  '  kill "$(cat "$1")"',
+  '  exit "$status"',
+  "}",
+].join("\n");
 const ansi = /\x1b\[[0-?]*[ -/]*[@-~]/gu;
 export const loginPrompt = (
   provider: LoginProvider,
@@ -93,13 +103,17 @@ export const providerLoginRunnerLayer = Layer.effect(
                 ["-c", 'cli_auth_credentials_store="file"', "login", "--device-auth"],
                 options,
               )
-            : ChildProcess.make(
-                "script",
-                process.platform === "darwin"
-                  ? ["-q", "/dev/null", "sh", "-c", "stty cols 1000; exec claude setup-token"]
-                  : ["-q", "-c", "stty cols 1000; claude setup-token", "/dev/null"],
-                options,
-              );
+            : process.platform === "darwin"
+              ? ChildProcess.make(
+                  "sh",
+                  ["-c", darwinClaudeLogin, "sh", `${directory}/input.pid`],
+                  options,
+                )
+              : ChildProcess.make(
+                  "script",
+                  ["-q", "-c", "stty cols 1000; claude setup-token", "/dev/null"],
+                  options,
+                );
         const processHandle = yield* spawner.spawn(command).pipe(Effect.mapError(failure));
         let output = "";
         const collect = Stream.merge(processHandle.stdout, processHandle.stderr).pipe(
