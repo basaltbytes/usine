@@ -53,7 +53,7 @@
       "port": "process:1/stdout",
       "payload": {
         "stderr": {
-          "base64": "\u001b[2m2026-11-05T19:28:27.723176Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\n"
+          "base64": "\u001b[2m2026-11-05T20:28:18.227538Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\n"
         },
         "offset": 238
       }
@@ -63,9 +63,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"id\":1,\"result\":{\"userAgent\":\"usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)\",\"codexHome\":\"$CODEX_HOME\",\"platformFamily\":\"unix\",\"platformOs\":\"linux\"}}\n"
+          "base64": "{\"id\":1,\"result\":{\"userAgent\":\"usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)\",\"codexHome\":\"$CODEX_HOME\",\"platformFamily\":\"unix\",\"platformOs\":\"linux\"}}\n{\"method\":\"configWarning\",\"params\":{\"summary\":\"Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\",\"details\":null},\"emittedAtMs\":1793910498230}\n"
         },
-        "offset": 592
+        "offset": 816
       }
     },
     {
@@ -73,19 +73,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"configWarning\",\"params\":{\"summary\":\"Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\",\"details\":null},\"emittedAtMs\":1793906907729}\n"
+          "base64": "{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"box-node-0919a621003b614c\",\"installationId\":\"f67aa2f0-e943-4efc-9011-12dc7a06f80f\",\"environmentId\":null},\"emittedAtMs\":1793910498230}\n"
         },
-        "offset": 842
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:1/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"usine-worker-1\",\"installationId\":\"c29e70b3-22c3-4081-a4a1-04748493899f\",\"environmentId\":null},\"emittedAtMs\":1793906907729}\n"
-        },
-        "offset": 1136
+        "offset": 1122
       }
     },
     {
@@ -113,7 +103,7 @@
         "stdout": {
           "base64": "{\"id\":2,\"result\":{\"data\":[{\"id\":\"gpt-6.1-sol\",\"model\":\"gpt-6.1-sol\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":{\"message\":\"Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.\"},\"displayName\":\"GPT-6.1-Sol\",\"description\":\"Latest workhorse model for coding and everyday work.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"2x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":true},{\"id\":\"gpt-6-astra\",\"model\":\"gpt-6-astra\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"GPT-6-Astra\",\"description\":\"Frontier intelligence for the most demanding work.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"2x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-6-sol\",\"model\":\"gpt-6-sol\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"GPT-6-Sol\",\"description\":\"Previous generation workhorse model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed\"}],\"defaultServiceTier\":\"priority\",\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-6-luna\",\"model\":\"gpt-6-luna\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"GPT-6-Luna\",\"description\":\"Fast and affordable model for easier tasks.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed\"}],\"defaultServiceTier\":\"priority\",\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.6-sol\",\"model\":\"gpt-5.6-sol\",\"upgrade\":\"gpt-6-sol\",\"upgradeInfo\":{\"model\":\"gpt-6-sol\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Sol\\n\\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.6-Sol\",\"description\":\"Older generation workhorse model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.6-terra\",\"model\":\"gpt-5.6-terra\",\"upgrade\":\"gpt-6-sol\",\"upgradeInfo\":{\"model\":\"gpt-6-sol\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Sol\\n\\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.6-Terra\",\"description\":\"Older balanced model for straightforward work.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.6-luna\",\"model\":\"gpt-5.6-luna\",\"upgrade\":\"gpt-6-luna\",\"upgradeInfo\":{\"model\":\"gpt-6-luna\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Luna\\n\\nOur latest Luna is significantly more efficient, so your usage limits go even further. Reach for it for any job that doesn't require frontier intelligence.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.6-Luna\",\"description\":\"Older fast and efficient model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v1\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-daybreak-blue-latest\",\"model\":\"gpt-daybreak-blue-latest\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"Daybreak Blue\",\"description\":\"Latest frontier agentic coding model for broad defensive cybersecurity work.\",\"modelSpecialty\":\"cyber\",\"hidden\":true,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"low\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[],\"serviceTiers\":[],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-daybreak-red-latest\",\"model\":\"gpt-daybreak-red-latest\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"Daybreak Red\",\"description\":\"Cyber-permissive variant of our latest frontier agentic coding model for advanced, authorized cybersecurity research.\",\"modelSpecialty\":\"cyber\",\"hidden\":true,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"},{\"reasoningEffort\":\"ultra\",\"description\":\"Maximum reasoning with automatic task delegation\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v2\",\"additionalSpeedTiers\":[],\"serviceTiers\":[],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"gpt-5.5\",\"model\":\"gpt-5.5\",\"upgrade\":\"gpt-6-sol\",\"upgradeInfo\":{\"model\":\"gpt-6-sol\",\"upgradeCopy\":null,\"modelLink\":null,\"migrationMarkdown\":\"Meet GPT-6 Sol\\n\\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\\n\",\"retirementAt\":null},\"availabilityNux\":null,\"displayName\":\"GPT-5.5\",\"description\":\"Legacy coding model.\",\"modelSpecialty\":null,\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":null,\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false},{\"id\":\"codex-auto-review\",\"model\":\"codex-auto-review\",\"upgrade\":null,\"upgradeInfo\":null,\"availabilityNux\":null,\"displayName\":\"Codex Auto Review\",\"description\":\"Automatic approval review model for Codex.\",\"modelSpecialty\":null,\"hidden\":true,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast responses with lighter reasoning\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balances speed and reasoning depth for everyday tasks\"},{\"reasoningEffort\":\"high\",\"description\":\"Greater reasoning depth for complex problems\"},{\"reasoningEffort\":\"xhigh\",\"description\":\"Extra high reasoning depth for complex problems\"},{\"reasoningEffort\":\"max\",\"description\":\"Maximum reasoning depth for the hardest problems\"}],\"defaultReasoningEffort\":\"medium\",\"inputModalities\":[\"text\",\"image\"],\"supportsPersonality\":false,\"multiAgentVersion\":\"v1\",\"additionalSpeedTiers\":[\"fast\"],\"serviceTiers\":[{\"id\":\"priority\",\"name\":\"Fast\",\"description\":\"1.5x speed, increased usage\"}],\"defaultServiceTier\":null,\"availableAccessPrograms\":null,\"isDefault\":false}],\"nextCursor\":null}}\n"
         },
-        "offset": 18582
+        "offset": 18568
       }
     },
     {
@@ -131,9 +121,19 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"id\":3,\"result\":{\"thread\":{\"id\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793906907,\"updatedAt\":1793906907,\"recencyAt\":1793906907,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-27-01a1ad2f-1a85-7973-b81a-14328e40df66.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]},\"model\":\"gpt-5.6-terra\",\"modelProvider\":\"usine-gateway\",\"serviceTier\":null,\"disabledPluginIds\":[],\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"],\"instructionSources\":[],\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"dangerFullAccess\"},\"activePermissionProfile\":null,\"reasoningEffort\":null,\"multiAgentMode\":\"explicitRequestOnly\"}}\n{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793906907,\"updatedAt\":1793906907,\"recencyAt\":1793906907,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-27-01a1ad2f-1a85-7973-b81a-14328e40df66.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]}},\"emittedAtMs\":1793906907805}\n"
+          "base64": "{\"id\":3,\"result\":{\"thread\":{\"id\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793910498,\"updatedAt\":1793910498,\"recencyAt\":1793910498,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T20-28-18-01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]},\"model\":\"gpt-5.6-terra\",\"modelProvider\":\"usine-gateway\",\"serviceTier\":null,\"disabledPluginIds\":[],\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"],\"instructionSources\":[],\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"dangerFullAccess\"},\"activePermissionProfile\":null,\"reasoningEffort\":null,\"multiAgentMode\":\"explicitRequestOnly\"}}\n"
         },
-        "offset": 21948
+        "offset": 20478
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793910498,\"updatedAt\":1793910498,\"recencyAt\":1793910498,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T20-28-18-01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[]}},\"emittedAtMs\":1793910498284}\n"
+        },
+        "offset": 21932
       }
     },
     {
@@ -142,7 +142,7 @@
       "payload": {
         "sequence": 5,
         "data": {
-          "base64": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"input\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
+          "base64": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"input\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
         }
       }
     },
@@ -151,9 +151,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"rootTurnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":null,\"completedAt\":null,\"durationMs\":null}}}\n"
+          "base64": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"rootTurnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":null,\"completedAt\":null,\"durationMs\":null}}}\n"
         },
-        "offset": 22294
+        "offset": 22278
       }
     },
     {
@@ -161,9 +161,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"active\",\"activeFlags\":[]}},\"emittedAtMs\":1793906907854}\n"
+          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"status\":{\"type\":\"active\",\"activeFlags\":[]}},\"emittedAtMs\":1793910498310}\n{\"method\":\"turn/started\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turn\":{\"id\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"rootTurnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":1793910498,\"completedAt\":null,\"durationMs\":null}},\"emittedAtMs\":1793910498310}\n"
         },
-        "offset": 22532
+        "offset": 22984
       }
     },
     {
@@ -171,9 +171,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turn\":{\"id\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"rootTurnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":1793906907,\"completedAt\":null,\"durationMs\":null}},\"emittedAtMs\":1793906907854}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad65-e40c-79c1-a235-ee33385f5dd9\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"startedAtMs\":1793910498316},\"emittedAtMs\":1793910498316}\n"
         },
-        "offset": 23014
+        "offset": 23682
       }
     },
     {
@@ -181,9 +181,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-1ae0-73c0-8073-1f33c3194282\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"startedAtMs\":1793906907874},\"emittedAtMs\":1793906907874}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad65-e40c-79c1-a235-ee33385f5dd9\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"completedAtMs\":1793910498316},\"emittedAtMs\":1793910498318}\n"
         },
-        "offset": 23712
+        "offset": 24384
       }
     },
     {
@@ -191,9 +191,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-1ae0-73c0-8073-1f33c3194282\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"completedAtMs\":1793906907874},\"emittedAtMs\":1793906907885}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_0915f9152e767ed9016aece6e5d5c487d2ba426426bbebb8c0\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"startedAtMs\":1793910501881},\"emittedAtMs\":1793910501881}\n"
         },
-        "offset": 24414
+        "offset": 24806
       }
     },
     {
@@ -201,9 +201,9 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8de6cfc87d298f235661f50e534\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"startedAtMs\":1793906910455},\"emittedAtMs\":1793906910455}\n"
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_0915f9152e767ed9016aece6e5d5c487d2ba426426bbebb8c0\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"completedAtMs\":1793910502063},\"emittedAtMs\":1793910502064}\n"
         },
-        "offset": 24836
+        "offset": 25236
       }
     },
     {
@@ -211,30 +211,172 @@
       "port": "process:1/stdout",
       "payload": {
         "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8de6cfc87d298f235661f50e534\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"completedAtMs\":1793906910836},\"emittedAtMs\":1793906910840}\n"
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-becf4e7f-5968-424e-bcfb-f7f60c02052e\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"57078\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":null,\"durationMs\":null},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"startedAtMs\":1793910502915},\"emittedAtMs\":1793910502916}\n"
         },
-        "offset": 25266
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:1/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-d98af463-d4e5-4a21-bb01-128459395a24\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40206\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":null,\"durationMs\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"startedAtMs\":1793906912229},\"emittedAtMs\":1793906912232}\n"
-        },
-        "offset": 26052
+        "offset": 26022
       }
     },
     { "type": "expect_outbound", "port": "scenario", "payload": { "method": "drop" } },
-    {
-      "type": "emit_inbound",
-      "port": "process:1/stdout",
-      "payload": { "exitCode": 0, "offset": 26067 }
-    },
+    { "type": "runtime_exit", "port": "process:1/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:1/exit", "code": 255, "error": null },
     {
       "type": "expect_outbound",
       "port": "process:2",
+      "payload": {
+        "command": "$SSH_SHIM",
+        "args": [
+          "recorded-worker",
+          "--",
+          "cd '/' && export HOME='$HOME' PATH='$PATH' CODEX_HOME='$CODEX_HOME' ANTHROPIC_BASE_URL='$ANTHROPIC_BASE_URL' ANTHROPIC_AUTH_TOKEN='$USINE_GATEWAY_TOKEN' USINE_GATEWAY_TOKEN='$USINE_GATEWAY_TOKEN' && exec 'node' '-e' '\nconst fs = require('\"'\"'node:fs'\"'\"');\nconst path = require('\"'\"'node:path'\"'\"');\nconst os = require('\"'\"'node:os'\"'\"');\nconst crypto = require('\"'\"'node:crypto'\"'\"');\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\nconst input = path.join(root, '\"'\"'input'\"'\"');\nconst output = path.join(root, '\"'\"'output'\"'\"');\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\n'\"'\"');\nif (mode === '\"'\"'stop'\"'\"') {\n  const stop = async () => {\n    if (!fs.existsSync(pidFile)) return;\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\n    const signal = name => {\n      try { process.kill(target, name); return true; }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\n    };\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\n      for (let n = 0; signal(0); n++) {\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\n        await new Promise(resolve => setTimeout(resolve, 25));\n      }\n    }\n    fs.rmSync(pidFile, { force: true });\n  };\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\n} else if (mode === '\"'\"'remove'\"'\"') {\n  if (fs.existsSync(pidFile)) {\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\n  }\n  fs.rmSync(pidFile, { force: true });\n  fs.rmSync(root, { recursive: true, force: true });\n} else if (mode === '\"'\"'supervise'\"'\"') {\n  // The detached supervisor leads the process group, including Codex and its commands.\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\n  let exited = false;\n  const stop = () => {\n    child.stdin.end();\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\n  };\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'close'\"'\"', code => {\n    exited = true;\n    append({ exitCode: code === null ? 1 : code });\n    clearInterval(timer);\n  });\n  let offset = 0;\n  let buffered = '\"'\"''\"'\"';\n  let sequence = 0;\n  const timer = setInterval(() => {\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset);\n    fs.closeSync(fd);\n    offset += length;\n    buffered += data.subarray(0, length).toString();\n    let end;\n    while ((end = buffered.indexOf('\"'\"'\\n'\"'\"')) >= 0) {\n      const frame = JSON.parse(buffered.slice(0, end));\n      buffered = buffered.slice(end + 1);\n      if (frame.sequence <= sequence) continue;\n      sequence = frame.sequence;\n      if (frame.eof) child.stdin.end();\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\n    }\n  }, 25);\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\n} else {\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\n  try {\n    fs.mkdirSync(root, { mode: 0o700 });\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', \"\\nconst fs = require('\"'\"'node:fs'\"'\"');\\nconst path = require('\"'\"'node:path'\"'\"');\\nconst os = require('\"'\"'node:os'\"'\"');\\nconst crypto = require('\"'\"'node:crypto'\"'\"');\\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\\nconst input = path.join(root, '\"'\"'input'\"'\"');\\nconst output = path.join(root, '\"'\"'output'\"'\"');\\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\\\n'\"'\"');\\nif (mode === '\"'\"'stop'\"'\"') {\\n  const stop = async () => {\\n    if (!fs.existsSync(pidFile)) return;\\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\\n    const signal = name => {\\n      try { process.kill(target, name); return true; }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\\n    };\\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\\n      for (let n = 0; signal(0); n++) {\\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\\n        await new Promise(resolve => setTimeout(resolve, 25));\\n      }\\n    }\\n    fs.rmSync(pidFile, { force: true });\\n  };\\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\\n} else if (mode === '\"'\"'remove'\"'\"') {\\n  if (fs.existsSync(pidFile)) {\\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\\n  }\\n  fs.rmSync(pidFile, { force: true });\\n  fs.rmSync(root, { recursive: true, force: true });\\n} else if (mode === '\"'\"'supervise'\"'\"') {\\n  // The detached supervisor leads the process group, including Codex and its commands.\\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\\n  let exited = false;\\n  const stop = () => {\\n    child.stdin.end();\\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\\n  };\\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'close'\"'\"', code => {\\n    exited = true;\\n    append({ exitCode: code === null ? 1 : code });\\n    clearInterval(timer);\\n  });\\n  let offset = 0;\\n  let buffered = '\"'\"''\"'\"';\\n  let sequence = 0;\\n  const timer = setInterval(() => {\\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset);\\n    fs.closeSync(fd);\\n    offset += length;\\n    buffered += data.subarray(0, length).toString();\\n    let end;\\n    while ((end = buffered.indexOf('\"'\"'\\\\n'\"'\"')) >= 0) {\\n      const frame = JSON.parse(buffered.slice(0, end));\\n      buffered = buffered.slice(end + 1);\\n      if (frame.sequence <= sequence) continue;\\n      sequence = frame.sequence;\\n      if (frame.eof) child.stdin.end();\\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\\n    }\\n  }, 25);\\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\\n} else {\\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\\n  try {\\n    fs.mkdirSync(root, { mode: 0o700 });\\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', null /* supervisor source */, '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\\n    });\\n    supervisor.unref();\\n  } catch (error) {\\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\\n  }\\n  let offset = Number(cursor);\\n  let pending = Buffer.alloc(0);\\n  let ending = false;\\n  let waits = 0;\\n  let announced = false;\\n  const timer = setInterval(() => {\\n    if (!fs.existsSync(ready)) {\\n      if (++waits > 400) process.exit(1);\\n      return;\\n    }\\n    if (!announced) {\\n      announced = true;\\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\\\n'\"'\"');\\n    }\\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\\n    fs.closeSync(fd);\\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\\n    let end;\\n    while ((end = pending.indexOf(10)) >= 0) {\\n      const frame = JSON.parse(pending.subarray(0, end).toString());\\n      offset += end + 1;\\n      pending = pending.subarray(end + 1);\\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\\\n'\"'\"');\\n      if (frame.exitCode !== undefined) ending = true;\\n    }\\n    if (ending) {\\n      clearInterval(timer);\\n      process.stdin.destroy();\\n      process.exitCode = 0;\\n    } else {\\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\\n    }\\n  }, 25);\\n  let incoming = Buffer.alloc(0);\\n  process.stdin.on('\"'\"'data'\"'\"', data => {\\n    incoming = Buffer.concat([incoming, data]);\\n    const end = incoming.lastIndexOf(10);\\n    if (end < 0) return;\\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\\n    incoming = incoming.subarray(end + 1);\\n  });\\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\\n}\\n\", '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\n    });\n    supervisor.unref();\n  } catch (error) {\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\n  }\n  let offset = Number(cursor);\n  let pending = Buffer.alloc(0);\n  let ending = false;\n  let waits = 0;\n  let announced = false;\n  const timer = setInterval(() => {\n    if (!fs.existsSync(ready)) {\n      if (++waits > 400) process.exit(1);\n      return;\n    }\n    if (!announced) {\n      announced = true;\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\n'\"'\"');\n    }\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\n    fs.closeSync(fd);\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\n    let end;\n    while ((end = pending.indexOf(10)) >= 0) {\n      const frame = JSON.parse(pending.subarray(0, end).toString());\n      offset += end + 1;\n      pending = pending.subarray(end + 1);\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\n'\"'\"');\n      if (frame.exitCode !== undefined) ending = true;\n    }\n    if (ending) {\n      clearInterval(timer);\n      process.stdin.destroy();\n      process.exitCode = 0;\n    } else {\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\n    }\n  }, 25);\n  let incoming = Buffer.alloc(0);\n  process.stdin.on('\"'\"'data'\"'\"', data => {\n    incoming = Buffer.concat([incoming, data]);\n    const end = incoming.lastIndexOf(10);\n    if (end < 0) return;\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\n    incoming = incoming.subarray(end + 1);\n  });\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\n}\n' 'attach' '$WORKTREE.child-1.pid' '26022' 'app-server' '--stdio' '-c' 'projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'"
+        ],
+        "env": {
+          "HOME": "$HOME",
+          "PATH": "$PATH",
+          "CODEX_HOME": "$CODEX_HOME",
+          "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
+          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
+          "REPLAY_DROP": "$WORKTREE/drop"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "sequence": 1,
+        "data": {
+          "base64": "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"usine\",\"title\":\"usine\",\"version\":\"0.0.1\"},\"capabilities\":null}}\n"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "sequence": 2,
+        "data": { "base64": "{\"method\":\"initialized\",\"params\":{}}\n" }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "sequence": 3,
+        "data": {
+          "base64": "{\"id\":2,\"method\":\"model/list\",\"params\":{\"cursor\":null,\"limit\":100,\"includeHidden\":true}}\n"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "sequence": 4,
+        "data": {
+          "base64": "{\"id\":3,\"method\":\"thread/start\",\"params\":{\"model\":\"gpt-5.6-terra\",\"allowProviderModelFallback\":false,\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandbox\":\"danger-full-access\",\"serviceName\":\"usine\",\"ephemeral\":false}}\n"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "sequence": 5,
+        "data": {
+          "base64": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"input\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": { "ready": true, "offset": 26022 }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-becf4e7f-5968-424e-bcfb-f7f60c02052e\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"57078\",\"source\":\"unifiedExecStartup\",\"status\":\"completed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":0,\"durationMs\":18},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"completedAtMs\":1793910502933},\"emittedAtMs\":1793910502934}\n"
+        },
+        "offset": 26804
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"tokenUsage\":{\"total\":{\"totalTokens\":9648,\"inputTokens\":9520,\"cachedInputTokens\":7936,\"cacheWriteInputTokens\":0,\"outputTokens\":128,\"reasoningOutputTokens\":67},\"last\":{\"totalTokens\":9648,\"inputTokens\":9520,\"cachedInputTokens\":7936,\"cacheWriteInputTokens\":0,\"outputTokens\":128,\"reasoningOutputTokens\":67},\"modelContextWindow\":258400}},\"emittedAtMs\":1793910502937}\n{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":67,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793910502937}\n"
+        },
+        "offset": 28054
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_0915f9152e767ed9016aece6e86ebc87d2aebbec8f4776df32\",\"text\":\"\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"startedAtMs\":1793910504491},\"emittedAtMs\":1793910504491}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"itemId\":\"msg_0915f9152e767ed9016aece6e86ebc87d2aebbec8f4776df32\",\"delta\":\"RE\"},\"emittedAtMs\":1793910504491}\n"
+        },
+        "offset": 28904
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"itemId\":\"msg_0915f9152e767ed9016aece6e86ebc87d2aebbec8f4776df32\",\"delta\":\"PLAY\"},\"emittedAtMs\":1793910504491}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"itemId\":\"msg_0915f9152e767ed9016aece6e86ebc87d2aebbec8f4776df32\",\"delta\":\"_DONE\"},\"emittedAtMs\":1793910504491}\n"
+        },
+        "offset": 29602
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_0915f9152e767ed9016aece6e86ebc87d2aebbec8f4776df32\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"completedAtMs\":1793910504588},\"emittedAtMs\":1793910504589}\n"
+        },
+        "offset": 30132
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"tokenUsage\":{\"total\":{\"totalTokens\":19326,\"inputTokens\":19191,\"cachedInputTokens\":16896,\"cacheWriteInputTokens\":0,\"outputTokens\":135,\"reasoningOutputTokens\":67},\"last\":{\"totalTokens\":9678,\"inputTokens\":9671,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":7,\"reasoningOutputTokens\":0},\"modelContextWindow\":258400}},\"emittedAtMs\":1793910504631}\n{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":67,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793910504631}\n"
+        },
+        "offset": 31382
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "stdout": {
+          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"status\":{\"type\":\"idle\"}},\"emittedAtMs\":1793910504634}\n{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"01a1ad65-e3e4-7ff2-a8a8-8a2fe961812a\",\"turn\":{\"id\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"rootTurnId\":\"01a1ad65-e3fe-7281-9b7d-1ee81cd293a2\",\"items\":[{\"type\":\"agentMessage\",\"id\":\"msg_0915f9152e767ed9016aece6e86ebc87d2aebbec8f4776df32\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null}],\"itemsView\":\"summary\",\"status\":\"completed\",\"error\":null,\"startedAt\":1793910498,\"completedAt\":1793910504,\"durationMs\":6327}},\"emittedAtMs\":1793910504634}\n"
+        },
+        "offset": 32316
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": { "sequence": 6, "eof": true }
+    },
+    { "type": "expect_outbound", "port": "process:2/stdin", "payload": { "eof": true } },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": { "exitCode": 0, "offset": 32331 }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:3",
       "payload": {
         "command": "$SSH_SHIM",
         "args": [
@@ -253,376 +395,13 @@
         }
       }
     },
-    { "type": "runtime_exit", "port": "process:1/exit", "code": 0, "error": null },
-    { "type": "runtime_exit", "port": "process:2/stdout", "code": 0, "error": null },
     { "type": "runtime_exit", "port": "process:2/exit", "code": 0, "error": null },
-    { "type": "runtime_exit", "port": "process:1/stdout", "code": 0, "error": null },
-    {
-      "type": "expect_outbound",
-      "port": "process:3",
-      "payload": {
-        "command": "$SSH_SHIM",
-        "args": [
-          "recorded-worker",
-          "--",
-          "cd '/' && export HOME='$HOME' PATH='$PATH' CODEX_HOME='$CODEX_HOME' ANTHROPIC_BASE_URL='$ANTHROPIC_BASE_URL' ANTHROPIC_AUTH_TOKEN='$USINE_GATEWAY_TOKEN' USINE_GATEWAY_TOKEN='$USINE_GATEWAY_TOKEN' && exec 'node' '-e' '\nconst fs = require('\"'\"'node:fs'\"'\"');\nconst path = require('\"'\"'node:path'\"'\"');\nconst os = require('\"'\"'node:os'\"'\"');\nconst crypto = require('\"'\"'node:crypto'\"'\"');\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\nconst input = path.join(root, '\"'\"'input'\"'\"');\nconst output = path.join(root, '\"'\"'output'\"'\"');\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\n'\"'\"');\nif (mode === '\"'\"'stop'\"'\"') {\n  const stop = async () => {\n    if (!fs.existsSync(pidFile)) return;\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\n    const signal = name => {\n      try { process.kill(target, name); return true; }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\n    };\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\n      for (let n = 0; signal(0); n++) {\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\n        await new Promise(resolve => setTimeout(resolve, 25));\n      }\n    }\n    fs.rmSync(pidFile, { force: true });\n  };\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\n} else if (mode === '\"'\"'remove'\"'\"') {\n  if (fs.existsSync(pidFile)) {\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\n  }\n  fs.rmSync(pidFile, { force: true });\n  fs.rmSync(root, { recursive: true, force: true });\n} else if (mode === '\"'\"'supervise'\"'\"') {\n  // The detached supervisor leads the process group, including Codex and its commands.\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\n  let exited = false;\n  const stop = () => {\n    child.stdin.end();\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\n  };\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'close'\"'\"', code => {\n    exited = true;\n    append({ exitCode: code === null ? 1 : code });\n    clearInterval(timer);\n  });\n  let offset = 0;\n  let buffered = '\"'\"''\"'\"';\n  let sequence = 0;\n  const timer = setInterval(() => {\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset);\n    fs.closeSync(fd);\n    offset += length;\n    buffered += data.subarray(0, length).toString();\n    let end;\n    while ((end = buffered.indexOf('\"'\"'\\n'\"'\"')) >= 0) {\n      const frame = JSON.parse(buffered.slice(0, end));\n      buffered = buffered.slice(end + 1);\n      if (frame.sequence <= sequence) continue;\n      sequence = frame.sequence;\n      if (frame.eof) child.stdin.end();\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\n    }\n  }, 25);\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\n} else {\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\n  try {\n    fs.mkdirSync(root, { mode: 0o700 });\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', \"\\nconst fs = require('\"'\"'node:fs'\"'\"');\\nconst path = require('\"'\"'node:path'\"'\"');\\nconst os = require('\"'\"'node:os'\"'\"');\\nconst crypto = require('\"'\"'node:crypto'\"'\"');\\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\\nconst input = path.join(root, '\"'\"'input'\"'\"');\\nconst output = path.join(root, '\"'\"'output'\"'\"');\\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\\\n'\"'\"');\\nif (mode === '\"'\"'stop'\"'\"') {\\n  const stop = async () => {\\n    if (!fs.existsSync(pidFile)) return;\\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\\n    const signal = name => {\\n      try { process.kill(target, name); return true; }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\\n    };\\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\\n      for (let n = 0; signal(0); n++) {\\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\\n        await new Promise(resolve => setTimeout(resolve, 25));\\n      }\\n    }\\n    fs.rmSync(pidFile, { force: true });\\n  };\\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\\n} else if (mode === '\"'\"'remove'\"'\"') {\\n  if (fs.existsSync(pidFile)) {\\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\\n  }\\n  fs.rmSync(pidFile, { force: true });\\n  fs.rmSync(root, { recursive: true, force: true });\\n} else if (mode === '\"'\"'supervise'\"'\"') {\\n  // The detached supervisor leads the process group, including Codex and its commands.\\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\\n  let exited = false;\\n  const stop = () => {\\n    child.stdin.end();\\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\\n  };\\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'close'\"'\"', code => {\\n    exited = true;\\n    append({ exitCode: code === null ? 1 : code });\\n    clearInterval(timer);\\n  });\\n  let offset = 0;\\n  let buffered = '\"'\"''\"'\"';\\n  let sequence = 0;\\n  const timer = setInterval(() => {\\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset);\\n    fs.closeSync(fd);\\n    offset += length;\\n    buffered += data.subarray(0, length).toString();\\n    let end;\\n    while ((end = buffered.indexOf('\"'\"'\\\\n'\"'\"')) >= 0) {\\n      const frame = JSON.parse(buffered.slice(0, end));\\n      buffered = buffered.slice(end + 1);\\n      if (frame.sequence <= sequence) continue;\\n      sequence = frame.sequence;\\n      if (frame.eof) child.stdin.end();\\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\\n    }\\n  }, 25);\\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\\n} else {\\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\\n  try {\\n    fs.mkdirSync(root, { mode: 0o700 });\\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', null /* supervisor source */, '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\\n    });\\n    supervisor.unref();\\n  } catch (error) {\\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\\n  }\\n  let offset = Number(cursor);\\n  let pending = Buffer.alloc(0);\\n  let ending = false;\\n  let waits = 0;\\n  let announced = false;\\n  const timer = setInterval(() => {\\n    if (!fs.existsSync(ready)) {\\n      if (++waits > 400) process.exit(1);\\n      return;\\n    }\\n    if (!announced) {\\n      announced = true;\\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\\\n'\"'\"');\\n    }\\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\\n    fs.closeSync(fd);\\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\\n    let end;\\n    while ((end = pending.indexOf(10)) >= 0) {\\n      const frame = JSON.parse(pending.subarray(0, end).toString());\\n      offset += end + 1;\\n      pending = pending.subarray(end + 1);\\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\\\n'\"'\"');\\n      if (frame.exitCode !== undefined) ending = true;\\n    }\\n    if (ending) {\\n      clearInterval(timer);\\n      process.stdin.destroy();\\n      process.exitCode = 0;\\n    } else {\\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\\n    }\\n  }, 25);\\n  let incoming = Buffer.alloc(0);\\n  process.stdin.on('\"'\"'data'\"'\"', data => {\\n    incoming = Buffer.concat([incoming, data]);\\n    const end = incoming.lastIndexOf(10);\\n    if (end < 0) return;\\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\\n    incoming = incoming.subarray(end + 1);\\n  });\\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\\n}\\n\", '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\n    });\n    supervisor.unref();\n  } catch (error) {\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\n  }\n  let offset = Number(cursor);\n  let pending = Buffer.alloc(0);\n  let ending = false;\n  let waits = 0;\n  let announced = false;\n  const timer = setInterval(() => {\n    if (!fs.existsSync(ready)) {\n      if (++waits > 400) process.exit(1);\n      return;\n    }\n    if (!announced) {\n      announced = true;\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\n'\"'\"');\n    }\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\n    fs.closeSync(fd);\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\n    let end;\n    while ((end = pending.indexOf(10)) >= 0) {\n      const frame = JSON.parse(pending.subarray(0, end).toString());\n      offset += end + 1;\n      pending = pending.subarray(end + 1);\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\n'\"'\"');\n      if (frame.exitCode !== undefined) ending = true;\n    }\n    if (ending) {\n      clearInterval(timer);\n      process.stdin.destroy();\n      process.exitCode = 0;\n    } else {\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\n    }\n  }, 25);\n  let incoming = Buffer.alloc(0);\n  process.stdin.on('\"'\"'data'\"'\"', data => {\n    incoming = Buffer.concat([incoming, data]);\n    const end = incoming.lastIndexOf(10);\n    if (end < 0) return;\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\n    incoming = incoming.subarray(end + 1);\n  });\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\n}\n' 'attach' '$WORKTREE.child-1-resume.pid' '0' 'app-server' '--stdio' '-c' 'projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'"
-        ],
-        "env": {
-          "HOME": "$HOME",
-          "PATH": "$PATH",
-          "CODEX_HOME": "$CODEX_HOME",
-          "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
-          "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
-          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
-          "REPLAY_DROP": "$WORKTREE/drop"
-        }
-      }
-    },
-    {
-      "type": "expect_outbound",
-      "port": "process:3/stdin",
-      "payload": {
-        "sequence": 1,
-        "data": {
-          "base64": "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"usine\",\"title\":\"usine\",\"version\":\"0.0.1\"},\"capabilities\":null}}\n"
-        }
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": { "ready": true, "offset": 0 }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stderr": {
-          "base64": "\u001b[2m2026-11-05T19:28:32.581292Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\n"
-        },
-        "offset": 238
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"id\":1,\"result\":{\"userAgent\":\"usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)\",\"codexHome\":\"$CODEX_HOME\",\"platformFamily\":\"unix\",\"platformOs\":\"linux\"}}\n"
-        },
-        "offset": 592
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"configWarning\",\"params\":{\"summary\":\"Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.\",\"details\":null},\"emittedAtMs\":1793906912590}\n{\"method\":\"remoteControl/status/changed\",\"params\":{\"status\":\"disabled\",\"serverName\":\"usine-worker-1\",\"installationId\":\"c29e70b3-22c3-4081-a4a1-04748493899f\",\"environmentId\":null},\"emittedAtMs\":1793906912590}\n"
-        },
-        "offset": 1118
-      }
-    },
-    {
-      "type": "expect_outbound",
-      "port": "process:3/stdin",
-      "payload": {
-        "sequence": 2,
-        "data": { "base64": "{\"method\":\"initialized\",\"params\":{}}\n" }
-      }
-    },
-    {
-      "type": "expect_outbound",
-      "port": "process:3/stdin",
-      "payload": {
-        "sequence": 3,
-        "data": {
-          "base64": "{\"id\":2,\"method\":\"thread/resume\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"model\":\"gpt-5.6-terra\",\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandbox\":\"danger-full-access\",\"excludeTurns\":false}}\n"
-        }
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"deprecationNotice\",\"params\":{\"summary\":\"Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`, then page with `thread/turns/list` and `thread/items/list`.\",\"details\":null},\"emittedAtMs\":1793906912635}\n"
-        },
-        "offset": 1456
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"idle\"}},\"emittedAtMs\":1793906912694}\n"
-        },
-        "offset": 1670
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"environments\":[{\"environmentId\":\"local\",\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"]}],\"extra\":null,\"sessionId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"forkedFromId\":null,\"parentThreadId\":null,\"preview\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"ephemeral\":false,\"section\":null,\"sectionEnteredAt\":null,\"projectId\":null,\"historyMode\":\"paginated\",\"modelProvider\":\"usine-gateway\",\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":null,\"createdAt\":1793906907,\"updatedAt\":1793906912,\"recencyAt\":1793906907,\"status\":{\"type\":\"idle\"},\"path\":\"$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-27-01a1ad2f-1a85-7973-b81a-14328e40df66.jsonl\",\"cwd\":\"$WORKTREE\",\"cliVersion\":\"0.164.0\",\"originator\":\"usine\",\"source\":\"vscode\",\"canAcceptDirectInput\":true,\"threadSource\":null,\"agentNickname\":null,\"agentRole\":null,\"gitInfo\":null,\"name\":null,\"daybreakEnabled\":null,\"turns\":[{\"id\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"rootTurnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"items\":[{\"type\":\"userMessage\",\"id\":\"01a1ad2f-1ae0-73c0-8073-1f33c3194282\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\",\"text_elements\":[]}]},{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8de6cfc87d298f235661f50e534\",\"summary\":[],\"content\":[]},{\"type\":\"commandExecution\",\"id\":\"exec-d98af463-d4e5-4a21-bb01-128459395a24\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40206\",\"source\":\"unifiedExecStartup\",\"status\":\"failed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":-1,\"durationMs\":41}],\"itemsView\":\"full\",\"status\":\"interrupted\",\"error\":null,\"startedAt\":1793906907,\"completedAt\":1793906912,\"durationMs\":4433}]},\"model\":\"gpt-5.6-terra\",\"modelProvider\":\"usine-gateway\",\"serviceTier\":null,\"disabledPluginIds\":[],\"cwd\":\"$WORKTREE\",\"runtimeWorkspaceRoots\":[\"$WORKTREE\"],\"instructionSources\":[],\"approvalPolicy\":\"never\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"dangerFullAccess\"},\"activePermissionProfile\":null,\"reasoningEffort\":null,\"collaborationMode\":{\"mode\":\"default\",\"settings\":{\"model\":\"gpt-5.6-terra\",\"reasoning_effort\":null,\"developer_instructions\":null}},\"multiAgentMode\":\"explicitRequestOnly\",\"initialTurnsPage\":null,\"turnsBackwardsCursor\":\"{\\\"requestedThreadId\\\":\\\"01a1ad2f-1a85-7973-b81a-14328e40df66\\\",\\\"rolloutOrdinal\\\":1,\\\"includeAnchor\\\":true,\\\"scope\\\":{\\\"kind\\\":\\\"turns\\\"}}\",\"itemsBackwardsCursor\":\"{\\\"requestedThreadId\\\":\\\"01a1ad2f-1a85-7973-b81a-14328e40df66\\\",\\\"rolloutOrdinal\\\":21,\\\"includeAnchor\\\":true,\\\"scope\\\":{\\\"kind\\\":\\\"itemsByCreatedAtOrdinal\\\"}}\"}}\n{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-1ab6-76b1-94bf-0a245c3a67b2\",\"tokenUsage\":{\"total\":{\"totalTokens\":9634,\"inputTokens\":9525,\"cachedInputTokens\":7936,\"cacheWriteInputTokens\":0,\"outputTokens\":109,\"reasoningOutputTokens\":46},\"last\":{\"totalTokens\":9634,\"inputTokens\":9525,\"cachedInputTokens\":7936,\"cacheWriteInputTokens\":0,\"outputTokens\":109,\"reasoningOutputTokens\":46},\"modelContextWindow\":258400}},\"emittedAtMs\":1793906912698}\n"
-        },
-        "offset": 6528
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/goal/cleared\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\"},\"emittedAtMs\":1793906912699}\n"
-        },
-        "offset": 6706
-      }
-    },
-    {
-      "type": "expect_outbound",
-      "port": "process:3/stdin",
-      "payload": {
-        "sequence": 4,
-        "data": {
-          "base64": "{\"id\":3,\"method\":\"turn/start\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"input\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}],\"cwd\":\"$WORKTREE\",\"approvalPolicy\":\"never\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"effort\":\"low\"}}\n"
-        }
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"id\":3,\"result\":{\"turn\":{\"id\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"rootTurnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":null,\"completedAt\":null,\"durationMs\":null}}}\n"
-        },
-        "offset": 7052
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"active\",\"activeFlags\":[]}},\"emittedAtMs\":1793906912750}\n"
-        },
-        "offset": 7290
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turn\":{\"id\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"rootTurnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"items\":[],\"itemsView\":\"notLoaded\",\"status\":\"inProgress\",\"error\":null,\"startedAt\":1793906912,\"completedAt\":null,\"durationMs\":null}},\"emittedAtMs\":1793906912750}\n"
-        },
-        "offset": 7772
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-2dfa-7150-b0ef-d7be5551b78b\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906912764},\"emittedAtMs\":1793906912764}\n"
-        },
-        "offset": 8398
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"01a1ad2f-2dfa-7150-b0ef-d7be5551b78b\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work.\",\"text_elements\":[]}]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906912764},\"emittedAtMs\":1793906912771}\n"
-        },
-        "offset": 9028
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8e422b087d2a60a3fa26dfe33a7\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906916159},\"emittedAtMs\":1793906916159}\n"
-        },
-        "offset": 9450
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"reasoning\",\"id\":\"rs_088cc8d65011efab016aecd8e422b087d2a60a3fa26dfe33a7\",\"summary\":[],\"content\":[]},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906916360},\"emittedAtMs\":1793906916363}\n"
-        },
-        "offset": 9880
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-235edf41-697f-47f3-87ae-87954cd669e0\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40425\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":null,\"durationMs\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906917630},\"emittedAtMs\":1793906917633}\n"
-        },
-        "offset": 10666
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"commandExecution\",\"id\":\"exec-235edf41-697f-47f3-87ae-87954cd669e0\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/bash -lc 'node wait.cjs'\",\"cwd\":\"$WORKTREE\",\"processId\":\"40425\",\"source\":\"unifiedExecStartup\",\"status\":\"completed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"node wait.cjs\"}],\"aggregatedOutput\":null,\"exitCode\":0,\"durationMs\":0},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906917630},\"emittedAtMs\":1793906917635}\n"
-        },
-        "offset": 11448
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"tokenUsage\":{\"total\":{\"totalTokens\":19504,\"inputTokens\":19252,\"cachedInputTokens\":16896,\"cacheWriteInputTokens\":0,\"outputTokens\":252,\"reasoningOutputTokens\":126},\"last\":{\"totalTokens\":9870,\"inputTokens\":9727,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":143,\"reasoningOutputTokens\":80},\"modelContextWindow\":258400}},\"emittedAtMs\":1793906917654}\n"
-        },
-        "offset": 12146
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":67,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793906917654}\n"
-        },
-        "offset": 12720
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"text\":\"\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"startedAtMs\":1793906919070},\"emittedAtMs\":1793906919070}\n"
-        },
-        "offset": 13230
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"itemId\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"delta\":\"RE\"},\"emittedAtMs\":1793906919070}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"itemId\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"delta\":\"PLAY\"},\"emittedAtMs\":1793906919070}\n{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"itemId\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"delta\":\"_DONE\"},\"emittedAtMs\":1793906919070}\n"
-        },
-        "offset": 14264
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null},\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"completedAtMs\":1793906919147},\"emittedAtMs\":1793906919150}\n"
-        },
-        "offset": 14794
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/tokenUsage/updated\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"tokenUsage\":{\"total\":{\"totalTokens\":29437,\"inputTokens\":29178,\"cachedInputTokens\":25856,\"cacheWriteInputTokens\":0,\"outputTokens\":259,\"reasoningOutputTokens\":126},\"last\":{\"totalTokens\":9933,\"inputTokens\":9926,\"cachedInputTokens\":8960,\"cacheWriteInputTokens\":0,\"outputTokens\":7,\"reasoningOutputTokens\":0},\"modelContextWindow\":258400}},\"emittedAtMs\":1793906919161}\n"
-        },
-        "offset": 15488
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"limitName\":null,\"normalModelSlug\":null,\"primary\":{\"usedPercent\":67,\"windowDurationMins\":10080,\"resetsAt\":1794314556},\"secondary\":null,\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"62717.5395687500\"},\"individualLimit\":null,\"spendControlReached\":null,\"planType\":null,\"rateLimitReachedType\":null}},\"emittedAtMs\":1793906919161}\n"
-        },
-        "offset": 16062
-      }
-    },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": {
-        "stdout": {
-          "base64": "{\"method\":\"thread/status/changed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"status\":{\"type\":\"idle\"}},\"emittedAtMs\":1793906919175}\n{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"01a1ad2f-1a85-7973-b81a-14328e40df66\",\"turn\":{\"id\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"rootTurnId\":\"01a1ad2f-2ddd-7451-ab54-09f84ee6d0bc\",\"items\":[{\"type\":\"agentMessage\",\"id\":\"msg_088cc8d65011efab016aecd8e70b9487d282995ed8bbf08c91\",\"text\":\"REPLAY_DONE\",\"phase\":\"final_answer\",\"memoryCitation\":null,\"delivery\":null,\"questions\":null}],\"itemsView\":\"summary\",\"status\":\"completed\",\"error\":null,\"startedAt\":1793906912,\"completedAt\":1793906919,\"durationMs\":6423}},\"emittedAtMs\":1793906919175}\n"
-        },
-        "offset": 16996
-      }
-    },
-    {
-      "type": "expect_outbound",
-      "port": "process:3/stdin",
-      "payload": { "sequence": 5, "eof": true }
-    },
-    { "type": "expect_outbound", "port": "process:3/stdin", "payload": { "eof": true } },
-    {
-      "type": "emit_inbound",
-      "port": "process:3/stdout",
-      "payload": { "exitCode": 0, "offset": 17011 }
-    },
+    { "type": "runtime_exit", "port": "process:3/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:3/exit", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:2/stdout", "code": 0, "error": null },
     {
       "type": "expect_outbound",
       "port": "process:4",
-      "payload": {
-        "command": "$SSH_SHIM",
-        "args": [
-          "recorded-worker",
-          "--",
-          "export HOME='$HOME' PATH='$PATH' CODEX_HOME='$CODEX_HOME' ANTHROPIC_BASE_URL='$ANTHROPIC_BASE_URL' ANTHROPIC_AUTH_TOKEN='$USINE_GATEWAY_TOKEN' USINE_GATEWAY_TOKEN='$USINE_GATEWAY_TOKEN' && exec 'node' '-e' '\nconst fs = require('\"'\"'node:fs'\"'\"');\nconst path = require('\"'\"'node:path'\"'\"');\nconst os = require('\"'\"'node:os'\"'\"');\nconst crypto = require('\"'\"'node:crypto'\"'\"');\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\nconst input = path.join(root, '\"'\"'input'\"'\"');\nconst output = path.join(root, '\"'\"'output'\"'\"');\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\n'\"'\"');\nif (mode === '\"'\"'stop'\"'\"') {\n  const stop = async () => {\n    if (!fs.existsSync(pidFile)) return;\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\n    const signal = name => {\n      try { process.kill(target, name); return true; }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\n    };\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\n      for (let n = 0; signal(0); n++) {\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\n        await new Promise(resolve => setTimeout(resolve, 25));\n      }\n    }\n    fs.rmSync(pidFile, { force: true });\n  };\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\n} else if (mode === '\"'\"'remove'\"'\"') {\n  if (fs.existsSync(pidFile)) {\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\n  }\n  fs.rmSync(pidFile, { force: true });\n  fs.rmSync(root, { recursive: true, force: true });\n} else if (mode === '\"'\"'supervise'\"'\"') {\n  // The detached supervisor leads the process group, including Codex and its commands.\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\n  let exited = false;\n  const stop = () => {\n    child.stdin.end();\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\n  };\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'close'\"'\"', code => {\n    exited = true;\n    append({ exitCode: code === null ? 1 : code });\n    clearInterval(timer);\n  });\n  let offset = 0;\n  let buffered = '\"'\"''\"'\"';\n  let sequence = 0;\n  const timer = setInterval(() => {\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset);\n    fs.closeSync(fd);\n    offset += length;\n    buffered += data.subarray(0, length).toString();\n    let end;\n    while ((end = buffered.indexOf('\"'\"'\\n'\"'\"')) >= 0) {\n      const frame = JSON.parse(buffered.slice(0, end));\n      buffered = buffered.slice(end + 1);\n      if (frame.sequence <= sequence) continue;\n      sequence = frame.sequence;\n      if (frame.eof) child.stdin.end();\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\n    }\n  }, 25);\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\n} else {\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\n  try {\n    fs.mkdirSync(root, { mode: 0o700 });\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', \"\\nconst fs = require('\"'\"'node:fs'\"'\"');\\nconst path = require('\"'\"'node:path'\"'\"');\\nconst os = require('\"'\"'node:os'\"'\"');\\nconst crypto = require('\"'\"'node:crypto'\"'\"');\\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\\nconst input = path.join(root, '\"'\"'input'\"'\"');\\nconst output = path.join(root, '\"'\"'output'\"'\"');\\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\\\n'\"'\"');\\nif (mode === '\"'\"'stop'\"'\"') {\\n  const stop = async () => {\\n    if (!fs.existsSync(pidFile)) return;\\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\\n    const signal = name => {\\n      try { process.kill(target, name); return true; }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\\n    };\\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\\n      for (let n = 0; signal(0); n++) {\\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\\n        await new Promise(resolve => setTimeout(resolve, 25));\\n      }\\n    }\\n    fs.rmSync(pidFile, { force: true });\\n  };\\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\\n} else if (mode === '\"'\"'remove'\"'\"') {\\n  if (fs.existsSync(pidFile)) {\\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\\n  }\\n  fs.rmSync(pidFile, { force: true });\\n  fs.rmSync(root, { recursive: true, force: true });\\n} else if (mode === '\"'\"'supervise'\"'\"') {\\n  // The detached supervisor leads the process group, including Codex and its commands.\\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\\n  let exited = false;\\n  const stop = () => {\\n    child.stdin.end();\\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\\n  };\\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'close'\"'\"', code => {\\n    exited = true;\\n    append({ exitCode: code === null ? 1 : code });\\n    clearInterval(timer);\\n  });\\n  let offset = 0;\\n  let buffered = '\"'\"''\"'\"';\\n  let sequence = 0;\\n  const timer = setInterval(() => {\\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset);\\n    fs.closeSync(fd);\\n    offset += length;\\n    buffered += data.subarray(0, length).toString();\\n    let end;\\n    while ((end = buffered.indexOf('\"'\"'\\\\n'\"'\"')) >= 0) {\\n      const frame = JSON.parse(buffered.slice(0, end));\\n      buffered = buffered.slice(end + 1);\\n      if (frame.sequence <= sequence) continue;\\n      sequence = frame.sequence;\\n      if (frame.eof) child.stdin.end();\\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\\n    }\\n  }, 25);\\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\\n} else {\\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\\n  try {\\n    fs.mkdirSync(root, { mode: 0o700 });\\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', null /* supervisor source */, '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\\n    });\\n    supervisor.unref();\\n  } catch (error) {\\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\\n  }\\n  let offset = Number(cursor);\\n  let pending = Buffer.alloc(0);\\n  let ending = false;\\n  let waits = 0;\\n  let announced = false;\\n  const timer = setInterval(() => {\\n    if (!fs.existsSync(ready)) {\\n      if (++waits > 400) process.exit(1);\\n      return;\\n    }\\n    if (!announced) {\\n      announced = true;\\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\\\n'\"'\"');\\n    }\\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\\n    fs.closeSync(fd);\\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\\n    let end;\\n    while ((end = pending.indexOf(10)) >= 0) {\\n      const frame = JSON.parse(pending.subarray(0, end).toString());\\n      offset += end + 1;\\n      pending = pending.subarray(end + 1);\\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\\\n'\"'\"');\\n      if (frame.exitCode !== undefined) ending = true;\\n    }\\n    if (ending) {\\n      clearInterval(timer);\\n      process.stdin.destroy();\\n      process.exitCode = 0;\\n    } else {\\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\\n    }\\n  }, 25);\\n  let incoming = Buffer.alloc(0);\\n  process.stdin.on('\"'\"'data'\"'\"', data => {\\n    incoming = Buffer.concat([incoming, data]);\\n    const end = incoming.lastIndexOf(10);\\n    if (end < 0) return;\\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\\n    incoming = incoming.subarray(end + 1);\\n  });\\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\\n}\\n\", '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\n    });\n    supervisor.unref();\n  } catch (error) {\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\n  }\n  let offset = Number(cursor);\n  let pending = Buffer.alloc(0);\n  let ending = false;\n  let waits = 0;\n  let announced = false;\n  const timer = setInterval(() => {\n    if (!fs.existsSync(ready)) {\n      if (++waits > 400) process.exit(1);\n      return;\n    }\n    if (!announced) {\n      announced = true;\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\n'\"'\"');\n    }\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\n    fs.closeSync(fd);\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\n    let end;\n    while ((end = pending.indexOf(10)) >= 0) {\n      const frame = JSON.parse(pending.subarray(0, end).toString());\n      offset += end + 1;\n      pending = pending.subarray(end + 1);\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\n'\"'\"');\n      if (frame.exitCode !== undefined) ending = true;\n    }\n    if (ending) {\n      clearInterval(timer);\n      process.stdin.destroy();\n      process.exitCode = 0;\n    } else {\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\n    }\n  }, 25);\n  let incoming = Buffer.alloc(0);\n  process.stdin.on('\"'\"'data'\"'\"', data => {\n    incoming = Buffer.concat([incoming, data]);\n    const end = incoming.lastIndexOf(10);\n    if (end < 0) return;\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\n    incoming = incoming.subarray(end + 1);\n  });\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\n}\n' 'stop' '$WORKTREE.child-1-resume.pid' '0'"
-        ],
-        "env": {
-          "HOME": "$HOME",
-          "PATH": "$PATH",
-          "CODEX_HOME": "$CODEX_HOME",
-          "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
-          "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
-          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
-          "REPLAY_DROP": "$WORKTREE/drop"
-        }
-      }
-    },
-    { "type": "runtime_exit", "port": "process:3/exit", "code": 0, "error": null },
-    { "type": "runtime_exit", "port": "process:4/stdout", "code": 0, "error": null },
-    { "type": "runtime_exit", "port": "process:4/exit", "code": 0, "error": null },
-    { "type": "runtime_exit", "port": "process:3/stdout", "code": 0, "error": null },
-    {
-      "type": "expect_outbound",
-      "port": "process:5",
-      "payload": {
-        "command": "$SSH_SHIM",
-        "args": [
-          "recorded-worker",
-          "--",
-          "export HOME='$HOME' PATH='$PATH' CODEX_HOME='$CODEX_HOME' ANTHROPIC_BASE_URL='$ANTHROPIC_BASE_URL' ANTHROPIC_AUTH_TOKEN='$USINE_GATEWAY_TOKEN' USINE_GATEWAY_TOKEN='$USINE_GATEWAY_TOKEN' && exec 'node' '-e' '\nconst fs = require('\"'\"'node:fs'\"'\"');\nconst path = require('\"'\"'node:path'\"'\"');\nconst os = require('\"'\"'node:os'\"'\"');\nconst crypto = require('\"'\"'node:crypto'\"'\"');\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\nconst input = path.join(root, '\"'\"'input'\"'\"');\nconst output = path.join(root, '\"'\"'output'\"'\"');\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\n'\"'\"');\nif (mode === '\"'\"'stop'\"'\"') {\n  const stop = async () => {\n    if (!fs.existsSync(pidFile)) return;\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\n    const signal = name => {\n      try { process.kill(target, name); return true; }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\n    };\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\n      for (let n = 0; signal(0); n++) {\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\n        await new Promise(resolve => setTimeout(resolve, 25));\n      }\n    }\n    fs.rmSync(pidFile, { force: true });\n  };\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\n} else if (mode === '\"'\"'remove'\"'\"') {\n  if (fs.existsSync(pidFile)) {\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\n  }\n  fs.rmSync(pidFile, { force: true });\n  fs.rmSync(root, { recursive: true, force: true });\n} else if (mode === '\"'\"'supervise'\"'\"') {\n  // The detached supervisor leads the process group, including Codex and its commands.\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\n  let exited = false;\n  const stop = () => {\n    child.stdin.end();\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\n  };\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\n  child.on('\"'\"'close'\"'\"', code => {\n    exited = true;\n    append({ exitCode: code === null ? 1 : code });\n    clearInterval(timer);\n  });\n  let offset = 0;\n  let buffered = '\"'\"''\"'\"';\n  let sequence = 0;\n  const timer = setInterval(() => {\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset);\n    fs.closeSync(fd);\n    offset += length;\n    buffered += data.subarray(0, length).toString();\n    let end;\n    while ((end = buffered.indexOf('\"'\"'\\n'\"'\"')) >= 0) {\n      const frame = JSON.parse(buffered.slice(0, end));\n      buffered = buffered.slice(end + 1);\n      if (frame.sequence <= sequence) continue;\n      sequence = frame.sequence;\n      if (frame.eof) child.stdin.end();\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\n    }\n  }, 25);\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\n} else {\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\n  try {\n    fs.mkdirSync(root, { mode: 0o700 });\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', \"\\nconst fs = require('\"'\"'node:fs'\"'\"');\\nconst path = require('\"'\"'node:path'\"'\"');\\nconst os = require('\"'\"'node:os'\"'\"');\\nconst crypto = require('\"'\"'node:crypto'\"'\"');\\nconst { spawn } = require('\"'\"'node:child_process'\"'\"');\\nconst [mode, pidFile, cursor, ...args] = process.argv.slice(1);\\nconst key = crypto.createHash('\"'\"'sha256'\"'\"').update(pidFile).digest('\"'\"'hex'\"'\"');\\nconst root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '\"'\"'.codex'\"'\"'), '\"'\"'usine-transport'\"'\"', key);\\nconst input = path.join(root, '\"'\"'input'\"'\"');\\nconst output = path.join(root, '\"'\"'output'\"'\"');\\nconst ready = path.join(root, '\"'\"'ready'\"'\"');\\nconst append = (frame) => fs.appendFileSync(output, JSON.stringify(frame) + '\"'\"'\\\\n'\"'\"');\\nif (mode === '\"'\"'stop'\"'\"') {\\n  const stop = async () => {\\n    if (!fs.existsSync(pidFile)) return;\\n    const target = Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'));\\n    const signal = name => {\\n      try { process.kill(target, name); return true; }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"') return false; throw error; }\\n    };\\n    if (signal('\"'\"'SIGTERM'\"'\"')) {\\n      for (let n = 0; signal(0); n++) {\\n        if (n === 200) signal('\"'\"'SIGKILL'\"'\"');\\n        if (n === 400) throw new Error('\"'\"'Remote Codex process group did not stop'\"'\"');\\n        await new Promise(resolve => setTimeout(resolve, 25));\\n      }\\n    }\\n    fs.rmSync(pidFile, { force: true });\\n  };\\n  stop().catch(error => { console.error(error.message); process.exitCode = 1; });\\n} else if (mode === '\"'\"'remove'\"'\"') {\\n  if (fs.existsSync(pidFile)) {\\n    try { process.kill(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"')), 0); process.exit(1); }\\n    catch (error) { if (error.code !== '\"'\"'ESRCH'\"'\"') throw error; }\\n  }\\n  fs.rmSync(pidFile, { force: true });\\n  fs.rmSync(root, { recursive: true, force: true });\\n} else if (mode === '\"'\"'supervise'\"'\"') {\\n  // The detached supervisor leads the process group, including Codex and its commands.\\n  fs.writeFileSync(pidFile, String(-process.pid), { mode: 0o600 });\\n  const child = spawn('\"'\"'codex'\"'\"', args, { stdio: ['\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"', '\"'\"'pipe'\"'\"'] });\\n  let exited = false;\\n  const stop = () => {\\n    child.stdin.end();\\n    setTimeout(() => child.kill('\"'\"'SIGKILL'\"'\"'), 5000).unref();\\n  };\\n  process.on('\"'\"'SIGTERM'\"'\"', stop);\\n  process.on('\"'\"'SIGHUP'\"'\"', () => {});\\n  child.stdin.on('\"'\"'error'\"'\"', () => {});\\n  child.stdout.on('\"'\"'data'\"'\"', data => append({ stdout: data.toString('\"'\"'base64'\"'\"') }));\\n  child.stderr.on('\"'\"'data'\"'\"', data => append({ stderr: data.toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'error'\"'\"', error => append({ stderr: Buffer.from(error.message).toString('\"'\"'base64'\"'\"') }));\\n  child.on('\"'\"'close'\"'\"', code => {\\n    exited = true;\\n    append({ exitCode: code === null ? 1 : code });\\n    clearInterval(timer);\\n  });\\n  let offset = 0;\\n  let buffered = '\"'\"''\"'\"';\\n  let sequence = 0;\\n  const timer = setInterval(() => {\\n    const fd = fs.openSync(input, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset);\\n    fs.closeSync(fd);\\n    offset += length;\\n    buffered += data.subarray(0, length).toString();\\n    let end;\\n    while ((end = buffered.indexOf('\"'\"'\\\\n'\"'\"')) >= 0) {\\n      const frame = JSON.parse(buffered.slice(0, end));\\n      buffered = buffered.slice(end + 1);\\n      if (frame.sequence <= sequence) continue;\\n      sequence = frame.sequence;\\n      if (frame.eof) child.stdin.end();\\n      else if (!exited) child.stdin.write(Buffer.from(frame.data, '\"'\"'base64'\"'\"'));\\n    }\\n  }, 25);\\n  fs.writeFileSync(ready, '\"'\"''\"'\"');\\n} else {\\n  fs.mkdirSync(path.dirname(root), { recursive: true, mode: 0o700 });\\n  try {\\n    fs.mkdirSync(root, { mode: 0o700 });\\n    fs.writeFileSync(input, '\"'\"''\"'\"', { mode: 0o600 });\\n    fs.writeFileSync(output, '\"'\"''\"'\"', { mode: 0o600 });\\n    const supervisor = spawn(process.execPath, ['\"'\"'-e'\"'\"', null /* supervisor source */, '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\\n    });\\n    supervisor.unref();\\n  } catch (error) {\\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\\n  }\\n  let offset = Number(cursor);\\n  let pending = Buffer.alloc(0);\\n  let ending = false;\\n  let waits = 0;\\n  let announced = false;\\n  const timer = setInterval(() => {\\n    if (!fs.existsSync(ready)) {\\n      if (++waits > 400) process.exit(1);\\n      return;\\n    }\\n    if (!announced) {\\n      announced = true;\\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\\\n'\"'\"');\\n    }\\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\\n    const data = Buffer.alloc(65536);\\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\\n    fs.closeSync(fd);\\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\\n    let end;\\n    while ((end = pending.indexOf(10)) >= 0) {\\n      const frame = JSON.parse(pending.subarray(0, end).toString());\\n      offset += end + 1;\\n      pending = pending.subarray(end + 1);\\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\\\n'\"'\"');\\n      if (frame.exitCode !== undefined) ending = true;\\n    }\\n    if (ending) {\\n      clearInterval(timer);\\n      process.stdin.destroy();\\n      process.exitCode = 0;\\n    } else {\\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\\n    }\\n  }, 25);\\n  let incoming = Buffer.alloc(0);\\n  process.stdin.on('\"'\"'data'\"'\"', data => {\\n    incoming = Buffer.concat([incoming, data]);\\n    const end = incoming.lastIndexOf(10);\\n    if (end < 0) return;\\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\\n    incoming = incoming.subarray(end + 1);\\n  });\\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\\n}\\n\", '\"'\"'supervise'\"'\"', pidFile, '\"'\"'0'\"'\"', ...args], {\n      detached: true, stdio: '\"'\"'ignore'\"'\"', env: process.env,\n    });\n    supervisor.unref();\n  } catch (error) {\n    if (error.code !== '\"'\"'EEXIST'\"'\"') throw error;\n  }\n  let offset = Number(cursor);\n  let pending = Buffer.alloc(0);\n  let ending = false;\n  let waits = 0;\n  let announced = false;\n  const timer = setInterval(() => {\n    if (!fs.existsSync(ready)) {\n      if (++waits > 400) process.exit(1);\n      return;\n    }\n    if (!announced) {\n      announced = true;\n      process.stdout.write(JSON.stringify({ ready: true, offset }) + '\"'\"'\\n'\"'\"');\n    }\n    const fd = fs.openSync(output, '\"'\"'r'\"'\"');\n    const data = Buffer.alloc(65536);\n    const length = fs.readSync(fd, data, 0, data.length, offset + pending.length);\n    fs.closeSync(fd);\n    pending = Buffer.concat([pending, data.subarray(0, length)]);\n    let end;\n    while ((end = pending.indexOf(10)) >= 0) {\n      const frame = JSON.parse(pending.subarray(0, end).toString());\n      offset += end + 1;\n      pending = pending.subarray(end + 1);\n      process.stdout.write(JSON.stringify({ ...frame, offset }) + '\"'\"'\\n'\"'\"');\n      if (frame.exitCode !== undefined) ending = true;\n    }\n    if (ending) {\n      clearInterval(timer);\n      process.stdin.destroy();\n      process.exitCode = 0;\n    } else {\n      try { process.kill(Math.abs(Number(fs.readFileSync(pidFile, '\"'\"'utf8'\"'\"'))), 0); }\n      catch (error) { if (error.code === '\"'\"'ESRCH'\"'\"' || error.code === '\"'\"'ENOENT'\"'\"') process.exit(1); else throw error; }\n    }\n  }, 25);\n  let incoming = Buffer.alloc(0);\n  process.stdin.on('\"'\"'data'\"'\"', data => {\n    incoming = Buffer.concat([incoming, data]);\n    const end = incoming.lastIndexOf(10);\n    if (end < 0) return;\n    fs.appendFileSync(input, incoming.subarray(0, end + 1));\n    incoming = incoming.subarray(end + 1);\n  });\n  process.stdin.on('\"'\"'end'\"'\"', () => process.exit(0));\n}\n' 'remove' '$WORKTREE.child-1-resume.pid' '0'"
-        ],
-        "env": {
-          "HOME": "$HOME",
-          "PATH": "$PATH",
-          "CODEX_HOME": "$CODEX_HOME",
-          "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
-          "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
-          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
-          "REPLAY_DROP": "$WORKTREE/drop"
-        }
-      }
-    },
-    { "type": "runtime_exit", "port": "process:5/stdout", "code": 0, "error": null },
-    { "type": "runtime_exit", "port": "process:5/exit", "code": 0, "error": null },
-    {
-      "type": "expect_outbound",
-      "port": "process:6",
       "payload": {
         "command": "$SSH_SHIM",
         "args": [
@@ -641,7 +420,7 @@
         }
       }
     },
-    { "type": "runtime_exit", "port": "process:6/stdout", "code": 0, "error": null },
-    { "type": "runtime_exit", "port": "process:6/exit", "code": 0, "error": null }
+    { "type": "runtime_exit", "port": "process:4/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:4/exit", "code": 0, "error": null }
   ]
 }

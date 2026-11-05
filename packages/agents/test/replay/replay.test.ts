@@ -61,14 +61,9 @@ it("redacts credential values before JSON escaping", () => {
 });
 
 it("rejects empty and malformed recorder PID files before signaling a process", () => {
-  for (const provider of providers) {
-    for (const invalid of ["", " ", "0", "-1", "123partial", "NaN", "1.5"])
-      assert.throws(() => recordingPid(provider, invalid));
-  }
-  assert.strictEqual(recordingPid("claude", "123\n"), 123);
-  assert.strictEqual(recordingPid("codex", "-123"), -123);
-  assert.throws(() => recordingPid("claude", "-123"));
-  assert.throws(() => recordingPid("codex", "123"));
+  for (const invalid of ["", " ", "0", "-1", "-123", "123partial", "NaN", "1.5"])
+    assert.throws(() => recordingPid(invalid));
+  assert.strictEqual(recordingPid("123\n"), 123);
 });
 
 it.effect("preserves UTF-8 characters split across supervisor frames", () =>

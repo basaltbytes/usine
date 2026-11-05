@@ -33,12 +33,9 @@ export const scenarios: ReadonlyArray<Scenario> = [
 export const recordingModel = (provider: Provider): string | undefined =>
   env[`USINE_${provider.toUpperCase()}_INTEGRATION_MODEL`];
 
-export const recordingPid = (provider: Provider, savedPid: string): number => {
+export const recordingPid = (savedPid: string): number => {
   const pid = Number(savedPid);
-  assert(
-    Number.isSafeInteger(pid) && (provider === "claude" ? pid > 0 : pid < -1),
-    "pid file contains the expected process or process-group ID",
-  );
+  assert(Number.isSafeInteger(pid) && pid > 0, "pid file contains a positive process ID");
   return pid;
 };
 
@@ -163,19 +160,12 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
     const drop = Effect.gen(function* () {
       tape.outbound("scenario", { method: "drop" });
       if (mode !== "record") return;
-      const savedPid = yield* fs.readFileString(childPidFile(cwd, request.session.id));
-      const pid = recordingPid(provider, savedPid);
-      if (provider === "claude") {
-        yield* fs.writeFileString(`${cwd}/drop`, "drop");
-        process.kill(pid, "SIGKILL");
-      } else {
-        const children = yield* fs.readFileString(
-          `/proc/${Math.abs(pid)}/task/${Math.abs(pid)}/children`,
-        );
-        const child = Number(children.trim().split(/\s+/u)[0]);
-        assert(child > 0, "supervisor has a real app-server process");
-        process.kill(child, "SIGTERM");
-      }
+      const savedPid = yield* fs.readFileString(
+        provider === "claude" ? childPidFile(cwd, request.session.id) : `${cwd}/drop.pid`,
+      );
+      const pid = recordingPid(savedPid);
+      yield* fs.writeFileString(`${cwd}/drop`, "drop");
+      process.kill(pid, "SIGKILL");
     });
     const save = Effect.gen(function* () {
       tape.assertComplete();
@@ -186,6 +176,40 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
         assert.include(traffic, provider === "claude" ? '"method":"interrupt"' : "turn/interrupt");
       }
       if (provider === "codex" && scenario === "transport-loss") {
+        const recorded = tape.source === "record" ? tape.entries : tape.source.entries;
+        assert(
+          recorded.some(
+            (entry) =>
+              entry.type === "runtime_exit" &&
+              entry.port === "process:1/exit" &&
+              entry.code === 255,
+          ),
+          "the first SSH relay exits with a transport failure",
+        );
+        const ready = Schema.decodeUnknownOption(
+          Schema.Struct({ ready: Schema.Literal(true), offset: Schema.Int }),
+        );
+        const connections = recorded.flatMap((entry) => {
+          if (entry.type !== "emit_inbound") return [];
+          const frame = ready(entry.payload);
+          return Option.isSome(frame) ? [frame.value] : [];
+        });
+        assert.lengthOf(connections, 2, "transport loss reattaches the running supervisor");
+        assert.strictEqual(connections[0]?.offset, 0);
+        assert((connections[1]?.offset ?? 0) > 0, "reattachment resumes the saved output offset");
+        const input = Schema.decodeUnknownOption(
+          Schema.Struct({ sequence: Schema.Int, data: Schema.Json }),
+        );
+        const inputs = tape.entries.flatMap((entry) => {
+          if (entry.type !== "expect_outbound" || !entry.port.endsWith("/stdin")) return [];
+          const frame = input(entry.payload);
+          return Option.isSome(frame) ? [{ port: entry.port, payload: frame.value }] : [];
+        });
+        assert.deepStrictEqual(
+          inputs.filter((entry) => entry.port === "process:2/stdin").map((entry) => entry.payload),
+          inputs.filter((entry) => entry.port === "process:1/stdin").map((entry) => entry.payload),
+          "the replacement relay replays buffered input without starting a new thread",
+        );
         const sequences = new Map<string, Set<number>>();
         for (const entry of tape.entries) {
           if (entry.type !== "expect_outbound") continue;
