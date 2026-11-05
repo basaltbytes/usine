@@ -1,3 +1,4 @@
+import { transcriptMaintenanceLayer } from "../store/transcript/sealer.ts";
 import { StepOutputStore } from "../step-outputs/store.ts";
 import type { CiResolution } from "@usine/core/ci";
 import type { CommitSha } from "@usine/core/repository";
@@ -460,6 +461,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     ),
   ).pipe(Layer.provide(driver));
   return Layer.mergeAll(
+    transcriptMaintenanceLayer.pipe(Layer.provide(database)),
     runEngine,
     Layer.effect(StepOutputStore, StepOutputStore).pipe(Layer.provide(database)),
     AttentionAcknowledgements.layer.pipe(Layer.provide(database)),

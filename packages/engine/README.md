@@ -97,6 +97,10 @@ Attempt channel envelopes go to an append-only transcript. A redelivered envelop
 
 Session usage and pool rate-limit projection updates log at Debug, including reports that leave the stored projection unchanged.
 
+The local SQLite runtime seals ended attempts after one hour into Brotli-compressed NDJSON segments of at most 500 rows. A background fiber compresses outside write transactions and seals one attempt per second; it pauses for one minute after a pass. Legacy outcomes without an end time use the attempt's start time. Transcript queries merge segments with late envelopes, preserving append positions, pagination, session metadata, and deduplication. Usage and pool-limit projections remain available after sealing. Read-only run exports decode the same segments without starting maintenance.
+
+Runtime backups use `VACUUM INTO` to omit free pages, including those freed by sealing. The live database reuses those pages for later writes.
+
 Session queries also return each operator input's latest delivery or rejection receipt. Queued, forwarded, delivered, and unread message states remain available outside the loaded page.
 
 The run ledger keeps the submitted agent, rendered task, payload snapshot, effective parent model, and each attempt's child brain across restarts.
@@ -184,7 +188,7 @@ const program = Effect.gen(function* () {
 
 `runReaderLayer(instanceDirectory)` (`/local-sqlite`) provides only `RunReader`, on a read-only connection, for maintenance commands. It needs an existing database and never creates tables, migrates, or changes the journal mode. A missing, unreadable, or incompatible database fails with `EnginePersistenceError`.
 
-`backup(instanceDirectory, destination)` (`/local-sqlite`) requires `FileSystem` and `Path`; provide `NodeServices.layer` at the application entry point. It copies every runtime table and committed WAL data while other connections stay open. It opens the source read-only, without migrations. The destination must be a new file in an existing directory that supports hard links; the copy is complete, owner-only, and never overwrites a file. `RuntimeStoreBackupError` gives the failed operation (`open`, `stage`, `copy`, or `publish`), both paths, and the underlying message or code. Logs report failures, or the pages copied. If interrupted, the adapter waits for Node's backup to finish before closing and deleting temporary files.
+`backup(instanceDirectory, destination)` (`/local-sqlite`) requires `FileSystem` and `Path`; provide `NodeServices.layer` at the application entry point. It copies every runtime table and committed WAL data while other connections stay open. It opens the source read-only, without migrations. The destination must be a new file in an existing directory that supports hard links; the copy is complete, owner-only, and never overwrites a file. `RuntimeStoreBackupError` gives the failed operation (`open`, `stage`, `copy`, or `publish`), both paths, and the underlying message or code. Logs report failures or the compact copy's byte size. The adapter completes `VACUUM INTO` before closing and deleting temporary files.
 
 `layerWithDatabase` (`/engine`) takes another SQLite-compatible layer providing `RunDatabase` (`/database`) with atomic transactions, plus the platform `Crypto` layer that hashes dedup keys into run ids. Cloudflare D1 doesn't work with Drizzle RC.4, because its Effect driver can't run the store's transactions.
 

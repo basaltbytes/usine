@@ -2,22 +2,38 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 
-import { DateTime, Effect, Match, Option } from "effect";
-import { jsonExtract, jsonSet, jsonValue } from "../database/dialect.ts";
-import type { RunDatabaseClient } from "../database/database.ts";
-import { attemptTranscripts, poolRateLimits, sessionUsage } from "../database/schema.ts";
+import { DateTime, Effect, Match, Option, Schema } from "effect";
+import { jsonExtract, jsonSet, jsonValue } from "../../database/dialect.ts";
+import type { RunDatabaseClient } from "../../database/database.ts";
+import {
+  attemptTranscripts,
+  poolRateLimits,
+  sessionUsage,
+  transcriptSeals,
+} from "../../database/schema.ts";
 
-import { TranscriptQuery } from "../transcript.ts";
+import { sealedTranscript } from "./segments.ts";
+import type { TranscriptCodec } from "./codec.ts";
+
+import { TranscriptQuery } from "../../transcript.ts";
 
 import {
   decodeTranscriptRows,
   encodeDateTime,
   encodeEnvelope,
   transcriptEntryFromRow,
-} from "./codec.ts";
+} from "../codec.ts";
+
+const SealWatermarks = Schema.Struct({
+  lastInboundSequence: Schema.NullOr(AttemptChannel.Sequence),
+  lastOutboundSequence: Schema.NullOr(AttemptChannel.Sequence),
+});
 
 /** Returns the transcript queries that run on the caller's transaction. */
-export const transcriptQueries = (database: RunDatabaseClient) => {
+export const transcriptQueries = (
+  database: RunDatabaseClient,
+  codec: Option.Option<TranscriptCodec["Service"]> = Option.none(),
+) => {
   /**
    * Appends an envelope and returns whether it was new. A redelivered envelope with the same
    * direction and sequence keeps the first stored copy.
@@ -28,6 +44,27 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
     receivedAt: DateTime.Utc,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId: envelope.attemptId, direction });
+    const storedSeals = yield* database
+      .select({
+        lastInboundSequence: transcriptSeals.lastInboundSequence,
+        lastOutboundSequence: transcriptSeals.lastOutboundSequence,
+      })
+      .from(transcriptSeals)
+      .where(eq(transcriptSeals.attemptId, envelope.attemptId))
+      .execute();
+    const seals = yield* Schema.decodeEffect(Schema.Array(SealWatermarks))(storedSeals);
+    const seal = seals[0];
+    const highWater =
+      direction === "inbound" ? seal?.lastInboundSequence : seal?.lastOutboundSequence;
+    if (highWater != null && envelope.sequence <= highWater) {
+      yield* Effect.logDebug("Sealed transcript envelope already stored", {
+        attemptId: envelope.attemptId,
+        direction,
+        channelSequence: envelope.sequence,
+        highWater,
+      });
+      return false;
+    }
     const values = {
       attemptId: envelope.attemptId,
       envelope: yield* encodeEnvelope(envelope),
@@ -116,6 +153,14 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
 
   const transcript = Effect.fn("RunStoreQueries.transcript")(function* (query: TranscriptQuery) {
     yield* Effect.annotateCurrentSpan({ attemptId: query.attemptId, query: query._tag });
+    if (query._tag !== "TranscriptUsageQuery") {
+      const seals = yield* database
+        .select({ attemptId: transcriptSeals.attemptId })
+        .from(transcriptSeals)
+        .where(eq(transcriptSeals.attemptId, query.attemptId))
+        .execute();
+      if (seals.length > 0) return yield* sealedTranscript(database, codec, query);
+    }
     const selection = database
       .select({
         sequence: attemptTranscripts.sequence,

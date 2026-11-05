@@ -215,7 +215,9 @@ it.live(
           const plan = details.join("\n");
           const message = `${statement.reader} ${statistics}: ${plan}\n${statement.sql}`;
           assert.notMatch(plan, /SCAN usine_attempt_transcripts/iu, message);
-          if (/worker state|session state/iu.test(statement.reader)) {
+          if (/FROM "usine_attempt_transcript_seals"/iu.test(statement.sql)) {
+            assert.match(plan, /SEARCH usine_attempt_transcript_seals .*attempt_id=\?/iu, message);
+          } else if (/worker state|session state/iu.test(statement.reader)) {
             assert.match(
               plan,
               /SEARCH usine_attempt_transcripts USING INDEX usine_attempt_transcript_kind .*payload_tag/iu,
