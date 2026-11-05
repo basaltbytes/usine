@@ -219,7 +219,15 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
 
       assert.strictEqual(evidence.version, 1);
       assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
-      assert.deepStrictEqual(evidence.snapshot.step.result, Option.some(result));
+      assert.deepStrictEqual(
+        evidence.snapshot.step.result,
+        Option.some(
+          StepResult.make({
+            ...result,
+            attemptId: Option.fromNullishOr(saved.snapshot.attempts[1]?.id),
+          }),
+        ),
+      );
       assert.notInclude(awaited1, "Exported output ref");
       assert.deepStrictEqual(evidence.transcript, saved.transcript);
       assert.strictEqual(evidence.snapshot.attempts.length, 2);

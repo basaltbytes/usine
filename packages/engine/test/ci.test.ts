@@ -114,22 +114,44 @@ it.live(
     ),
 );
 
-it.live("a newer head cancels its CI wait and rejects a late green result", () =>
+it.live.each([
+  CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
+  CiFailed.make({ message: "CI failed without an available fix loop" }),
+])("CI settlement preserves the result's producing attempt after $_tag", (resolution) =>
   withInstance((directory) =>
     Effect.gen(function* () {
-      const worker = yield* slottedExecutor([Effect.succeed(pushed)]);
+      const worker = yield* slottedExecutor([Effect.succeed(pushed), Effect.never]);
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const accepted = yield* engine.submit(required());
         assert(accepted._tag === "Claimed");
-        yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "AwaitingCi");
-        yield* engine.settleCi(
+        const waiting = yield* waitFor(
+          engine,
           accepted.runId,
-          head,
-          CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
+          ({ run }) => run.state._tag === "AwaitingCi",
         );
+        assert.deepStrictEqual(
+          Option.flatMap(waiting.step.result, ({ attemptId }) => attemptId),
+          Option.fromNullishOr(waiting.attempts[0]?.id),
+        );
+        yield* engine.settleCi(accepted.runId, head, resolution);
         yield* engine.settleCi(accepted.runId, head, CiPassed.make());
-        assert.strictEqual((yield* engine.inspect(accepted.runId)).run.state._tag, "Canceled");
+        const settled = yield* engine.inspect(accepted.runId);
+        assert.strictEqual(
+          settled.run.state._tag,
+          resolution._tag === "CiSuperseded" ? "Canceled" : "Failed",
+        );
+        assert.deepStrictEqual(settled.step.result, waiting.step.result);
+        if (resolution._tag === "CiFailed") {
+          yield* engine.retry(accepted.runId);
+          const retrying = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ attempts }) => attempts.length === 2,
+          );
+          assert.deepStrictEqual(retrying.step.result, waiting.step.result);
+          yield* engine.cancel(accepted.runId);
+        }
       }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
     }),
   ),

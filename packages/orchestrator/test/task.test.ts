@@ -13,7 +13,13 @@ import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
-import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
+import {
+  AttemptAwaitingCi,
+  AttemptCanceled,
+  AttemptFailed,
+  AttemptSucceeded,
+} from "@usine/core/attempt/outcome";
+import { CiHandoff } from "@usine/core/ci";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -676,6 +682,86 @@ describe("Task view", () => {
         }),
       });
       assert.deepStrictEqual(harvestedAttemptChanges(snapshot), []);
+    }),
+  );
+
+  it.effect.each([
+    AttemptCanceled.make(),
+    AttemptFailed.make({ failure: AgentFailure.make({ message: "CI failed" }) }),
+  ])("preserves recorded attempt changes after CI settles as $_tag", (outcome) =>
+    Effect.gen(function* () {
+      const original = runs[0];
+      assert(original !== undefined);
+      assert(Option.isSome(original.step.result));
+      const producerId = AttemptId.make("run-plan/2");
+      const result = StepResult.make({
+        ...original.step.result.value,
+        attemptId: Option.some(producerId),
+      });
+      const waiting = RunSnapshot.make({
+        ...original,
+        run: Run.make({
+          ...original.run,
+          state: RunState.AwaitingCi.make({
+            handoff: CiHandoff.make({
+              pullRequest: ItemNumber.make(41),
+              head: CommitSha.make("a".repeat(40)),
+              fixLoop: LoopName.make("fix-ci"),
+              timeoutSeconds: 1800,
+              onGreen: [],
+            }),
+          }),
+        }),
+        step: Step.make({ ...original.step, result: Option.some(result) }),
+        attempts: original.attempts.map((attempt) =>
+          attempt.id === producerId
+            ? Attempt.make({ ...attempt, outcome: Option.some(AttemptAwaitingCi.make()) })
+            : attempt,
+        ),
+      });
+      const expected = harvestedAttemptChanges(waiting);
+      assert.strictEqual(expected[0]?.attemptId, producerId);
+      const settled = RunSnapshot.make({
+        ...waiting,
+        run: Run.make({
+          ...waiting.run,
+          state:
+            outcome._tag === "Canceled"
+              ? RunState.Canceled.make({
+                  reason: RunState.HeadChanged.make({ head: CommitSha.make("b".repeat(40)) }),
+                })
+              : RunState.Failed.make(),
+        }),
+        attempts: waiting.attempts.map((attempt) =>
+          attempt.id === producerId
+            ? Attempt.make({ ...attempt, outcome: Option.some(outcome) })
+            : attempt,
+        ),
+      });
+      assert.deepStrictEqual(harvestedAttemptChanges(settled), expected);
+      const encoded = yield* Schema.encodeEffect(StepResult)(original.step.result.value);
+      const legacy = yield* Schema.decodeEffect(StepResult)(encoded);
+      assert.isTrue(Option.isNone(legacy.attemptId));
+      assert.deepStrictEqual(
+        harvestedAttemptChanges(
+          RunSnapshot.make({
+            ...settled,
+            step: Step.make({ ...settled.step, result: Option.some(legacy) }),
+          }),
+        ),
+        expected,
+      );
+      if (outcome._tag === "Failed") {
+        const retrying = RunSnapshot.make({
+          ...settled,
+          run: Run.make({ ...settled.run, state: RunState.Running.make() }),
+          attempts: [
+            ...settled.attempts,
+            attempt(original.run.id, 3, "2026-10-02T10:00:00Z", Option.none(), Option.none()),
+          ],
+        });
+        assert.deepStrictEqual(harvestedAttemptChanges(retrying), expected);
+      }
     }),
   );
 

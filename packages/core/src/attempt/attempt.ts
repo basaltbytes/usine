@@ -12,11 +12,9 @@ import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
 import { AttemptStart } from "./start.ts";
+import { AttemptId } from "./id.ts";
 
-/** The ID of an Attempt; each retry gets a new ID under the same Run and Step. */
-export const AttemptId = Schema.NonEmptyString.pipe(Schema.brand("AttemptId"));
-
-export type AttemptId = typeof AttemptId.Type;
+export { AttemptId } from "./id.ts";
 
 /** The 1-based position of the Attempt in its Step. */
 export const AttemptNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(

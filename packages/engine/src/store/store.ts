@@ -33,6 +33,7 @@ import * as RunState from "@usine/core/run/state";
 import { type Comment, StepResult } from "@usine/core/step/result";
 import {
   type Brand,
+  Array as EffectArray,
   Context,
   Crypto,
   DateTime,
@@ -436,7 +437,11 @@ const makeRunStore = Effect.gen(function* () {
     yield* tx.closeAttempt(attempt.id, outcome, endedAt);
     if (decision._tag === "RetryAttempt") return;
     if (decision._tag === "RunSucceeded" || decision._tag === "RunAwaitingCi") {
-      yield* tx.updateStepResult(runId, attempt.stepName, decision.result);
+      yield* tx.updateStepResult(
+        runId,
+        attempt.stepName,
+        StepResult.make({ ...decision.result, attemptId: Option.some(attempt.id) }),
+      );
     }
     yield* tx.updateState(runId, decision.state, endedAt);
   });
@@ -839,6 +844,30 @@ const makeRunStore = Effect.gen(function* () {
               openRunId: blocking.runId,
               message: `Cannot retry run ${runId}: run ${blocking.runId} of loop "${current.run.loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
             });
+          }
+          // Preserve attribution for results stored before producing attempt IDs were recorded.
+          if (
+            Option.isSome(current.step.result) &&
+            Option.isNone(current.step.result.value.attemptId)
+          ) {
+            const producer = EffectArray.findLast(
+              current.attempts,
+              ({ stepName }) => stepName === current.step.name,
+            );
+            if (Option.isSome(producer)) {
+              yield* tx.updateStepResult(
+                runId,
+                current.step.name,
+                StepResult.make({
+                  ...current.step.result.value,
+                  attemptId: Option.some(producer.value.id),
+                }),
+              );
+              yield* Effect.logInfo("Recorded producing attempt for a legacy step result", {
+                runId,
+                attemptId: producer.value.id,
+              });
+            }
           }
           if (Option.isSome(amendment)) {
             yield* tx.amend(runId, amendment.value);

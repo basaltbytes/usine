@@ -17,7 +17,7 @@ export class TaskPullRequestState extends Schema.Class<
   review: Schema.NullOr(Schema.String),
 }) {}
 
-/** A successful attempt's recorded commits associated with one pull request. */
+/** An attempt's recorded commits associated with one pull request. */
 export class TaskAttemptChangesView extends Schema.Class<
   TaskAttemptChangesView,
   Brand.Brand<"@usine/orchestrator/operator/TaskAttemptChangesView">
@@ -35,15 +35,14 @@ export const harvestedAttemptChanges = (
   snapshot: RunSnapshot,
 ): ReadonlyArray<TaskAttemptChangesView> => {
   if (Option.isNone(snapshot.step.result)) return [];
-  const attempt = EffectArray.findLast(snapshot.attempts, ({ outcome }) =>
-    Option.exists(
-      outcome,
-      ({ _tag }) => _tag === "Succeeded" || _tag === "AwaitingCi" || _tag === "HandedOff",
-    ),
-  );
+  const result = snapshot.step.result.value;
+  const attempt = Option.match(result.attemptId, {
+    onSome: (id) => EffectArray.findFirst(snapshot.attempts, (attempt) => attempt.id === id),
+    onNone: () =>
+      EffectArray.findLast(snapshot.attempts, ({ stepName }) => stepName === snapshot.step.name),
+  });
   if (Option.isNone(attempt)) return [];
-  const facts = snapshot.step.result.value.facts;
-  return facts.flatMap((fact) => {
+  return result.facts.flatMap((fact) => {
     if (fact._tag !== "PullRequest" || Option.isNone(fact.base) || Option.isNone(fact.head))
       return [];
     return [

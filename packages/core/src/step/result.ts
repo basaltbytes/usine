@@ -1,6 +1,7 @@
 import { type Brand, Effect, Schema } from "effect";
 import { StepOutput, StepOutputRef } from "./output.ts";
 import { CommitSha } from "../repository.ts";
+import { AttemptId } from "../attempt/id.ts";
 
 /** A commit between the workspace base and the final HEAD. */
 export class Commit extends Schema.TaggedClass<
@@ -65,6 +66,10 @@ export class StepResult extends Schema.Class<
   StepResult,
   Brand.Brand<"@usine/core/step/result/StepResult">
 >("StepResult")({
+  /** The producing attempt, assigned by the engine; `None` for older results. */
+  attemptId: Schema.OptionFromOptionalKey(AttemptId).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** The agent's final response for the completed step. */
   message: Schema.NonEmptyString,
   /** The commits and GitHub writes retained as evidence after checkout cleanup. */

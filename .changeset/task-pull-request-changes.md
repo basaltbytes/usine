@@ -6,3 +6,5 @@
 ---
 
 Show whole pull request and recorded attempt changes on task pages with collapsed file diffs, change counts, and CI and review state. Add a project-scoped files API and commit-based caching, with explicit reporting for missing and truncated GitHub patches.
+
+Keep recorded attempt changes available after failed or canceled CI waits, with their producing attempt preserved across retries.

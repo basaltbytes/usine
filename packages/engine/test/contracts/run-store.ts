@@ -182,7 +182,15 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           yield* store.finishAttempt(recovered.execution.attempt, Result.succeed(result));
           const completed = yield* store.snapshot(runId);
           assert.strictEqual(completed.run.state._tag, "Succeeded");
-          assert.deepStrictEqual(completed.step.result, Option.some(result));
+          assert.deepStrictEqual(
+            completed.step.result,
+            Option.some(
+              StepResult.make({
+                ...result,
+                attemptId: Option.some(recovered.execution.attempt.id),
+              }),
+            ),
+          );
         }),
       ),
     );
@@ -240,7 +248,15 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             );
             const snapshot = yield* store.snapshot(runId);
             assert.strictEqual(snapshot.run.state._tag, "Succeeded");
-            assert.deepStrictEqual(snapshot.step.result, Option.some(result));
+            assert.deepStrictEqual(
+              snapshot.step.result,
+              Option.some(
+                StepResult.make({
+                  ...result,
+                  attemptId: Option.some(started.execution.attempt.id),
+                }),
+              ),
+            );
             assert.strictEqual(snapshot.attempts.length, 1);
           }),
         ),
