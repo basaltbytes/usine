@@ -84,3 +84,25 @@ printf '%s\\n' 'sk-ant-oat01-private-subscription-token'
     }),
   ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("20 seconds")),
 );
+
+it.live("reports a missing Codex binary before starting sign-in", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped();
+      const context = yield* Layer.build(
+        providerLoginRunnerLayer.pipe(
+          Layer.provide(
+            Layer.succeed(
+              ConfigProvider.ConfigProvider,
+              ConfigProvider.fromUnknown({ HOME: directory, PATH: directory }),
+            ),
+          ),
+        ),
+      );
+      const runner = Context.get(context, ProviderLoginRunner);
+      const error = yield* runner.start("chatgpt").pipe(Effect.flip);
+      assert.equal(error.message, "Codex not found on PATH. Install it to connect ChatGPT.");
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);

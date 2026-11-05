@@ -64,7 +64,7 @@ Local preflight and attempt children use the same credential directories. If one
 
 Local preflight and children accept subscription credentials and API keys. Claude setup tokens count as subscription credentials. Children report API-key usage in the API keys pool and subscription usage in the matching plan pool.
 
-Without a gateway, usine reads each provider's status separately. If `claude` isn't on the `PATH` of the user running `usine up`, Claude shows as unavailable and `usine login claude` reports the missing command; ChatGPT remains available, as in the Codex-only quickstart.
+Without a gateway, usine checks each provider separately using the `PATH` of the user running `usine up`. A missing `claude` or `codex` command makes its provider unavailable and displays an installation instruction in that provider's row. `usine login` reports the same instruction before starting authorization. The other provider remains available when its harness is installed, as in the Codex-only quickstart. Local provider availability changes log once at Info; repeated polls with the same error produce no additional log entries.
 
 Local Claude status uses `claude auth status --json`, including macOS Keychain logins. Disconnect runs `claude auth logout`, removes usine's settings overrides and file credentials, and verifies that Claude reports signed out. It clears the native login for the configured Claude directory, including an older login that a replacement credential overrides.
 
@@ -74,7 +74,7 @@ Subscription sign-in uses the installed Claude Code `setup-token` command or Cod
 
 Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.
 
-Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values; opaque Claude setup tokens report neither. Pi parent authentication remains a separate Pi login.
+Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values as local dates and times; opaque Claude setup tokens report neither. Pi parent authentication remains a separate Pi login.
 
 ## usine status
 

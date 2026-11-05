@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
 import { ProviderConnections } from "./connections";
+import { timestampLabel } from "~/lib/strings";
 import type { ProviderStatus } from "@usine/gateway/credentials";
 import "~/index.css";
 
@@ -101,6 +102,12 @@ it.each([
       await expect
         .element(page.getByRole("button", { name: "Connect Claude", exact: true }))
         .toBeVisible();
+      for (const instant of ["2027-01-01T00:00:00Z", "2026-11-01T12:00:00Z"]) {
+        await expect
+          .element(page.getByText(timestampLabel(instant), { exact: true }))
+          .toBeVisible();
+        expect(host.textContent).not.toContain(instant);
+      }
       await document.fonts.ready;
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
       await commands.configurationEditorScreenshot(`960-providers-${device}`);
@@ -143,51 +150,63 @@ it.each([
   },
 );
 
-it("shows a missing harness on its provider and keeps the other provider's controls", async () => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const state: ProviderStatus = {
-    targets: [
-      {
-        target: "local",
-        label: "Local harnesses",
-        providers: [
-          {
-            provider: "anthropic-messages",
-            error: "Claude Code not found on PATH. Install it to connect Claude.",
-          },
-          { provider: "openai-responses", credential: null, expiresAt: null, lastRefresh: null },
-        ],
-      },
-    ],
-    logins: [],
-  };
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json(state);
-  const host = document.createElement("div");
-  document.body.append(host);
-  const root = createRoot(host);
-  try {
-    flushSync(() =>
-      root.render(
-        <QueryClientProvider client={client}>
-          <ProviderConnections />
-        </QueryClientProvider>,
-      ),
-    );
-    await expect
-      .element(page.getByText("Claude Code not found on PATH. Install it to connect Claude."))
-      .toBeVisible();
-    await expect
-      .element(page.getByRole("button", { name: "Connect ChatGPT", exact: true }))
-      .toBeVisible();
-    expect(
-      page.getByRole("button", { name: "Connect Claude", exact: true }).elements(),
-    ).toHaveLength(0);
-    expect(host.querySelectorAll("details")).toHaveLength(1);
-  } finally {
-    root.unmount();
-    host.remove();
-    client.clear();
-    globalThis.fetch = originalFetch;
-  }
-});
+it.each([
+  {
+    provider: "anthropic-messages" as const,
+    message: "Claude Code not found on PATH. Install it to connect Claude.",
+    unavailable: "Claude",
+    available: "ChatGPT",
+  },
+  {
+    provider: "openai-responses" as const,
+    message: "Codex not found on PATH. Install it to connect ChatGPT.",
+    unavailable: "ChatGPT",
+    available: "Claude",
+  },
+])(
+  "shows missing $unavailable and keeps $available controls",
+  async ({ provider, message, unavailable, available }) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const state: ProviderStatus = {
+      targets: [
+        {
+          target: "local",
+          label: "Local harnesses",
+          providers: ["anthropic-messages" as const, "openai-responses" as const].map((entry) =>
+            entry === provider
+              ? { provider: entry, error: message }
+              : { provider: entry, credential: null, expiresAt: null, lastRefresh: null },
+          ),
+        },
+      ],
+      logins: [],
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json(state);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      flushSync(() =>
+        root.render(
+          <QueryClientProvider client={client}>
+            <ProviderConnections />
+          </QueryClientProvider>,
+        ),
+      );
+      await expect.element(page.getByText(message)).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: `Connect ${available}`, exact: true }))
+        .toBeVisible();
+      expect(
+        page.getByRole("button", { name: `Connect ${unavailable}`, exact: true }).elements(),
+      ).toHaveLength(0);
+      expect(host.querySelectorAll("details")).toHaveLength(1);
+    } finally {
+      root.unmount();
+      host.remove();
+      client.clear();
+      globalThis.fetch = originalFetch;
+    }
+  },
+);

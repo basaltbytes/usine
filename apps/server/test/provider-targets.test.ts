@@ -14,6 +14,7 @@ import {
   Effect,
   FileSystem,
   Layer,
+  Logger,
   Option,
   Redacted,
   Schema,
@@ -270,6 +271,7 @@ ${["missing-token", "unreachable", "outdated"]
           null,
         );
         const nativeSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        yield* fs.writeFileString(`${directory}/codex`, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
         const claudeStatus = ChildProcessSpawner.make((command) => {
           if (command._tag !== "StandardCommand" || command.command !== "claude")
             return nativeSpawner.spawn(command);
@@ -299,6 +301,7 @@ ${["missing-token", "unreachable", "outdated"]
                 ConfigProvider.ConfigProvider,
                 ConfigProvider.fromUnknown({
                   HOME: directory,
+                  PATH: directory,
                   CLAUDE_CONFIG_DIR: `${directory}/custom claude`,
                   CODEX_HOME: `${directory}/custom codex`,
                 }),
@@ -409,6 +412,10 @@ it.live("manages ChatGPT on a local host without Claude Code", () =>
         ),
       );
       const logins = Context.get(loginContext, ProviderLogins);
+      const unavailable = yield* logins.begin("local", "chatgpt").pipe(Effect.flip);
+      assert.equal(unavailable.message, "Codex not found on PATH. Install it to connect ChatGPT.");
+      assert.equal(starts, 0);
+      yield* fs.writeFileString(`${directory}/codex`, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
       const providers = Effect.map(logins.status, ({ targets: [local] }) => {
         assert(local !== undefined && "providers" in local);
         const [claude, chatgpt] = local.providers;
@@ -440,6 +447,70 @@ it.live("manages ChatGPT on a local host without Claude Code", () =>
       assert.notInclude(jsonKey(connected), "fixture-openai-key");
       yield* logins.disconnect("local", "chatgpt");
       assert.equal((yield* providers).credential, null);
+    }),
+  ).pipe(
+    Effect.provide(
+      memoryConfigurationLayer.pipe(
+        Layer.provide(ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer))),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
+);
+
+it.live("logs local provider availability changes once at info across repeated polls", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped();
+      yield* fs.writeFileString(`${directory}/codex`, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+      const store = yield* ConfigurationStore;
+      const context = yield* Layer.build(
+        ProviderTargets.layer(Effect.succeed([])).pipe(
+          Layer.provide(Layer.succeed(ConfigurationStore, store)),
+          Layer.provide(
+            Layer.succeed(
+              ConfigProvider.ConfigProvider,
+              ConfigProvider.fromUnknown({ HOME: directory, PATH: directory }),
+            ),
+          ),
+        ),
+      );
+      const targets = Context.get(context, ProviderTargets);
+      const logged: Array<{ level: string; message: unknown }> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        logged.push({ level: logLevel, message });
+      });
+      yield* Effect.gen(function* () {
+        yield* targets.list;
+        yield* targets.list;
+        assert.lengthOf(logged, 1);
+        assert.equal(logged[0]?.level, "Info");
+        assert.include(jsonKey(logged), "Claude Code not found on PATH");
+
+        yield* fs.writeFileString(`${directory}/claude`, "#!/bin/sh\nexit 2\n", { mode: 0o700 });
+        yield* targets.list;
+        yield* targets.list;
+        assert.lengthOf(logged, 2);
+        assert.include(jsonKey(logged[1]), "Claude authentication command failed");
+
+        yield* fs.writeFileString(
+          `${directory}/claude`,
+          '#!/bin/sh\nprintf \'%s\' \'{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}\'\n',
+          { mode: 0o700 },
+        );
+        yield* targets.list;
+        yield* targets.list;
+        assert.lengthOf(logged, 3);
+        assert.include(jsonKey(logged[2]), "Local provider status available");
+
+        yield* fs.remove(`${directory}/claude`);
+        yield* targets.list;
+        yield* targets.list;
+        assert.lengthOf(logged, 4);
+        assert.include(jsonKey(logged[3]), "Claude Code not found on PATH");
+        assert.isTrue(logged.every(({ level }) => level === "Info"));
+      }).pipe(Effect.provide(Logger.layer([logger])));
     }),
   ).pipe(
     Effect.provide(
