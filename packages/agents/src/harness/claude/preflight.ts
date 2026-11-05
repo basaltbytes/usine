@@ -52,12 +52,12 @@ const check = Effect.fn("ClaudeRuntime.check")(function* (brain: BrainSpec, targ
   if (
     status.exitCode !== 0 ||
     !loggedIn ||
-    authMethod !== "claude.ai" ||
+    !["claude.ai", "oauth_token", "api_key"].includes(authMethod) ||
     apiProvider !== "firstParty"
   )
     return yield* loginUnavailable(
       brain,
-      "Claude Code needs a subscription login. Run claude auth login on the worker.",
+      "Claude Code needs a subscription login or API key. Run claude auth login on the worker.",
     );
 });
 

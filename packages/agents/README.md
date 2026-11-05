@@ -60,6 +60,8 @@ Executors run `CHILD_KILL_SCRIPT` remotely to stop every child in those pid file
 
 The worktree is repo-controlled input: Pi ignores the project's `.pi/` settings, extensions, prompt templates, skills, and themes; Claude omits project setting sources; Codex marks the worktree untrusted. AGENTS instructions still apply. The executor isolates the worker.
 
+Codex starts its app server in `/` and applies checkout trust through a top-level `projects` table override. Project-local configuration, hooks, and exec policies stay disabled even when Codex's saved configuration lists the checkout as trusted. Starting outside the home directory also avoids diagnostics about disabled project configuration in the worker's `.codex` directory. Other Codex diagnostics log at Warning.
+
 ## Session events and operator actions
 
 Child output becomes typed events: `SessionStarted`, `TextOutput` for completed assistant text (streaming deltas stay out of the transcript), tool calls, pool observations, and `SessionFinished`. Each child session has one parent session; recursive child events can't enter the public model.
@@ -141,6 +143,8 @@ USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agen
 ```
 
 The protocol conformance baseline is 0.164.0. Preflight retains 0.159.0 through 0.159.3 for one release so existing worker images can upgrade, and refuses 0.153.4. Install 0.164.0 for its updated TLS certificate roots. Other CLI builds need verification first.
+
+When Codex 0.164.0 is on `PATH`, the unit suite also checks launch overrides with `--strict-config` and verifies project configuration isolation locally and over the SSH shim. These tests use temporary homes and start threads without sending model requests.
 
 Provider capacity refusals use `AgentCapacityError`, which maps to `ProviderCapacityFailure`. Codex's `serverOverloaded` code and Claude's `overloaded` code take precedence over error text. HTTP 529 and HTTP 503 with a retry hint also qualify. When a harness exposes only text, `harnessFailure` recognizes “Selected model is at capacity”, `overloaded_error`, HTTP 529, and 503 with a retry hint. Other task failures remain `AgentResultError`.
 

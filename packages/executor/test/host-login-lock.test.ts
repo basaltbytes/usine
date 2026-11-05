@@ -72,6 +72,7 @@ describe("Claude login lock", () => {
                 Effect.runForkWith(context)(Queue.end(output));
               },
               interrupt: () => Promise.resolve(),
+              usesApiKey: () => Promise.resolve(false),
               supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
               [Symbol.asyncIterator]: () => messages[Symbol.asyncIterator](),
             };

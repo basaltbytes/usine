@@ -273,6 +273,8 @@ Run `pnpm --filter @usine/server check` after building dependencies to check Typ
 
 The upgrade helper shell scenarios require GNU coreutils, GNU findutils, and `flock` on PATH. They skip when these tools are unavailable, including on a standard macOS checkout. The upgrade HTTP health checks run independently of these tools.
 
+Provider connections are available in setup and Configuration > Settings. `usine login claude` and `usine login chatgpt` authorize subscription logins; `--api-key` reads a masked API key. `usine logout <provider>` disconnects them. Run these commands from the instance folder while the server runs. The server sends completed logins to configured gateways over their authenticated admin APIs, or writes the local harness credential files when no gateway is configured.
+
 ## Step outputs
 
 Attempts can return typed JSON documents from `.usine/outputs/`. The runtime database stores gzip bodies separately from run snapshots, while run evidence and `usine export-run` include output refs. See [agent step outputs](https://docs.usine.dev/reference/configuration/agents/#step-outputs) for the format and limits.

@@ -1,4 +1,6 @@
-import { Effect, Layer, Redacted } from "effect";
+import { ProviderCredentials } from "../credentials/store.ts";
+import { ProviderCredentialError } from "../credentials/model.ts";
+import { Effect, Layer, Option, Redacted } from "effect";
 import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { Attachment, type AttachmentId, newAttachmentId } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
@@ -96,21 +98,46 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
     ),
 );
 
+const credentials = <A>(
+  use: (store: ProviderCredentials["Service"]) => Effect.Effect<A, ProviderCredentialError>,
+) =>
+  Effect.flatMap(Effect.serviceOption(ProviderCredentials), (store) =>
+    Option.match(store, {
+      onNone: () =>
+        Effect.fail(
+          ProviderCredentialError.make({
+            message: "Upgrade the gateway to enable provider connections.",
+          }),
+        ),
+      onSome: use,
+    }),
+  );
+
 /** Handlers that return the current LLM providers, including changes from a reload. */
 const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
-  routes.handle(
-    "providers",
-    Effect.fn("GatewayAdmin.providers")(function* () {
-      const { providers } = yield* (yield* SettingsInForce).current;
-      const list = LlmProviderList.fromProviders(providers);
-      yield* Effect.annotateCurrentSpan({
-        providers: list.providers
-          .map(({ provider, credential }) => `${provider}:${credential}`)
-          .join(","),
-      });
-      return list;
-    }),
-  ),
+  routes
+    .handle("connections", () =>
+      credentials((store) => Effect.map(store.status, (providers) => ({ providers }))),
+    )
+    .handle("connect", ({ payload }) =>
+      credentials((store) => store.replace(payload)).pipe(Effect.as({ ok: true })),
+    )
+    .handle("disconnect", ({ params }) =>
+      credentials((store) => store.disconnect(params.provider)).pipe(Effect.as({ ok: true })),
+    )
+    .handle(
+      "providers",
+      Effect.fn("GatewayAdmin.providers")(function* () {
+        const { providers } = yield* (yield* SettingsInForce).current;
+        const list = LlmProviderList.fromProviders(providers);
+        yield* Effect.annotateCurrentSpan({
+          providers: list.providers
+            .map(({ provider, credential }) => `${provider}:${credential}`)
+            .join(","),
+        });
+        return list;
+      }),
+    ),
 );
 
 /**

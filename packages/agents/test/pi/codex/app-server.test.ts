@@ -409,7 +409,7 @@ describe("Codex app-server transport", () => {
       const command = codexAppServerCommand({ ...client(LocalProcess.make()), sessionId });
       assert.strictEqual(command._tag, "StandardCommand");
       if (command._tag !== "StandardCommand") return;
-      assert.notStrictEqual(command.options.cwd, "/workspace/repo");
+      assert.strictEqual(command.options.cwd, "/");
       assert.deepStrictEqual(command.options.env, request.environment);
       assert.strictEqual(command.options.extendEnv, false);
       assert.strictEqual(command.options.detached, false);
@@ -418,7 +418,7 @@ describe("Codex app-server transport", () => {
         "app-server",
         "--stdio",
         "-c",
-        'projects."/workspace/repo".trust_level="untrusted"',
+        'projects={"/workspace/repo"={trust_level="untrusted"}}',
         "-c",
         "features.multi_agent=false",
         "-c",
@@ -431,6 +431,8 @@ describe("Codex app-server transport", () => {
         "check_for_update_on_startup=false",
         "-c",
         "analytics.enabled=false",
+        "-c",
+        'cli_auth_credentials_store="file"',
       ]);
     });
   }
@@ -451,7 +453,7 @@ describe("Codex app-server transport", () => {
       "BatchMode=yes",
       "worker.exe.xyz",
       "--",
-      `export GH_HOST='github.int.exe.xyz' && sh -c 'printf %s "$$" > "$0" && exec "$@"' '/workspace/repo.child-2.pid' 'codex' 'app-server' '--stdio' '-c' 'projects."/workspace/repo".trust_level="untrusted"' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'; code=$?; rm -f '/workspace/repo.child-2.pid'; exit "$code"`,
+      `cd '/' && export GH_HOST='github.int.exe.xyz' && sh -c 'printf %s "$$" > "$0" && exec "$@"' '/workspace/repo.child-2.pid' 'codex' 'app-server' '--stdio' '-c' 'projects={"/workspace/repo"={trust_level="untrusted"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'; code=$?; rm -f '/workspace/repo.child-2.pid'; exit "$code"`,
     ]);
     assert.deepStrictEqual(command.options.env, host.sshEnvironment);
     assert.strictEqual(command.options.extendEnv, false);
