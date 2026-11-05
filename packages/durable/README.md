@@ -52,6 +52,8 @@ Every child receives the stored rendered loop task unchanged. The parent supplie
 
 Children aren't resumed after a restart: the tool call ends as interrupted with the output committed so far, and the parent model decides next.
 
+After a restart, admitting another delegation clears a previous process's stored child infrastructure failure. The replacement child's report determines the attempt outcome. The previous failure remains in the transcript. If the parent finishes without another delegation, the stored infrastructure failure still fails the attempt. Infrastructure failures recorded in the current process retain their precedence and trigger the existing automatic retry.
+
 ## Operator input
 
 `intervene(attemptId, intervention)` needs a live `execute`. It records the inbound envelope, applies the action, and records the result, in order with the relay's envelopes, so a sink's `append` must not wait for it. Input sent before `execute` has read durable storage and started relaying fails. `attached(attemptId)` completes once an `execute` in this process relays the channel; the runaway guard waits on it to deliver a reattached attempt's due warning (#178).
