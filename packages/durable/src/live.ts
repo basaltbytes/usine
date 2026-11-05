@@ -1,5 +1,3 @@
-import { type ParentBrainOptions, resolveParent } from "./attempt/parent.ts";
-export type { ParentBrainOptions } from "./attempt/parent.ts";
 import { NodeServices } from "@effect/platform-node";
 import { getAgentDir, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ModelRef } from "@earendil-works/pi-durable";
@@ -18,14 +16,11 @@ import {
 import { durableStoragePath } from "./storage-path.ts";
 import { configureHarnessHttp } from "./http-dispatcher.ts";
 
-const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
+/** Loads the orchestrator's Pi models and credentials without opening durable storage. */
+export const loadParentModels = Effect.fn("ParentModels.load")(function* (
   instanceDirectory: InstanceDirectory,
-  parents: ReadonlyArray<ParentBrainOptions>,
 ) {
   yield* Effect.annotateCurrentSpan({ directory: instanceDirectory });
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const file = durableStoragePath(path, instanceDirectory);
   // Only the Pi user's global settings: the instance folder's own `.pi/` is not trusted.
   const settings = SettingsManager.create(instanceDirectory, getAgentDir(), {
     projectTrusted: false,
@@ -43,15 +38,17 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
         modelId,
       })),
   );
-  yield* Effect.forEach(
-    parents,
-    (parent) =>
-      resolveParent(models, defaultModel, parent).pipe(
-        Effect.mapError((cause) => durableError("admit the coordinator brain at startup", cause)),
-      ),
-    { discard: true },
-  );
-  yield* Effect.logInfo("Coordinator brains admitted at startup", { count: parents.length });
+  return { models, defaultModel };
+});
+
+const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
+  instanceDirectory: InstanceDirectory,
+) {
+  yield* Effect.annotateCurrentSpan({ directory: instanceDirectory });
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const file = durableStoragePath(path, instanceDirectory);
+  const { models, defaultModel } = yield* loadParentModels(instanceDirectory);
   yield* Effect.logInfo("Durable harness storage", { file });
   return {
     openStorage: fileSystem.makeDirectory(path.dirname(file), { recursive: true }).pipe(
@@ -72,11 +69,8 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
  * Provides the durable harness on `.usine/durable.sqlite` with Pi's configured models and
  * credentials.
  */
-export const harnessLayer = (
-  instanceDirectory: InstanceDirectory,
-  parents: ReadonlyArray<ParentBrainOptions> = [],
-) =>
-  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory, parents), durableHarnessLayer)).pipe(
+export const harnessLayer = (instanceDirectory: InstanceDirectory) =>
+  Layer.unwrap(Effect.map(nodeOptions(instanceDirectory), durableHarnessLayer)).pipe(
     Layer.provide(NodeServices.layer),
   );
 
@@ -87,11 +81,8 @@ export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = ch
  * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every
  * unfinished Attempt.
  */
-export const layer = (
-  instanceDirectory: InstanceDirectory,
-  parents: ReadonlyArray<ParentBrainOptions> = [],
-) =>
+export const layer = (instanceDirectory: InstanceDirectory) =>
   attemptRuntimeLayer.pipe(
-    Layer.provideMerge(harnessLayer(instanceDirectory, parents)),
+    Layer.provideMerge(harnessLayer(instanceDirectory)),
     Layer.provide(childBackendLayer),
   );

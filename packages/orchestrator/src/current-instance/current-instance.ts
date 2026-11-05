@@ -1,6 +1,8 @@
 import { ChangeBus } from "@usine/core/changes";
 import { ConfigParser } from "@usine/config/parser";
-import { FactoryConfigError, InstancePath } from "@usine/config/file";
+import { InvalidAgent } from "@usine/config/agent";
+import { QuarantinedLoop, loopPath } from "@usine/config/loop";
+import { ConfigFileError, FactoryConfigError, InstancePath } from "@usine/config/file";
 import {
   Configuration,
   ConfigurationStore,
@@ -12,7 +14,7 @@ import {
   type ConfigurationStoreError,
   type StaleRevision,
 } from "@usine/config/configuration";
-import type { LoadedInstance } from "@usine/config/instance";
+import { LoadedInstance } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { WorkerName } from "@usine/core/worker";
@@ -193,9 +195,9 @@ export class CurrentInstance extends Context.Service<
      * setup mode, a reload rejects any `workers` change.
      */
     readonly registerWorkers: (workers: WorkerReload) => Effect.Effect<void, never, Scope.Scope>;
-    /** Checks coordinator brains before a revision is stored or applied, until the scope closes. */
+    /** Quarantines startup refusals and checks later revisions until the scope closes. */
     readonly registerParentAdmission: (
-      admit: (loaded: LoadedInstance) => Effect.Effect<void, FactoryConfigError>,
+      admit: (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>,
     ) => Effect.Effect<void, never, Scope.Scope>;
   }
 >()("@usine/orchestrator/current-instance/current-instance/CurrentInstance") {
@@ -219,8 +221,8 @@ export class CurrentInstance extends Context.Service<
         const current = yield* SubscriptionRef.make(initial);
         const registered = yield* Ref.make(Option.none<WorkerReload>());
         const parentAdmission = yield* Ref.make<
-          (loaded: LoadedInstance) => Effect.Effect<void, FactoryConfigError>
-        >(() => Effect.void);
+          (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>
+        >(() => Effect.succeed([]));
         const reloading = yield* Semaphore.make(1);
 
         const beforeWorkersStart = Effect.fn("CurrentInstance.beforeWorkersStart")(function* (
@@ -256,7 +258,14 @@ export class CurrentInstance extends Context.Service<
               if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
                 return yield* restartRequired(restart);
               }
-              yield* restore((yield* Ref.get(parentAdmission))(loaded));
+              const problems = yield* restore((yield* Ref.get(parentAdmission))(loaded));
+              const problem = problems[0];
+              if (problem !== undefined)
+                return yield* FactoryConfigError.make({
+                  file: problem.file,
+                  stage: problem.stage,
+                  message: `${problem.message}. The running configuration is unchanged.`,
+                });
               const applyWorkers = yield* restore(
                 Option.isSome(workers)
                   ? workers.value(running, loaded)
@@ -415,12 +424,58 @@ export class CurrentInstance extends Context.Service<
           commit: commitRevision,
           registerWorkers,
           registerParentAdmission: Effect.fn("CurrentInstance.registerParentAdmission")(function* (
-            admit: (loaded: LoadedInstance) => Effect.Effect<void, FactoryConfigError>,
+            admit: (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>,
           ) {
             yield* Effect.annotateCurrentSpan({ directory });
             yield* Effect.acquireRelease(Ref.set(parentAdmission, admit), () =>
-              Ref.set(parentAdmission, () => Effect.void),
+              Ref.set(parentAdmission, () => Effect.succeed([])),
             );
+            yield* Effect.gen(function* () {
+              const loaded = yield* SubscriptionRef.get(current);
+              const problems = yield* admit(loaded);
+              if (problems.length === 0) return;
+              const refused = new Set(problems.map(({ file }) => file));
+              const agents = loaded.agents.filter(
+                ({ name }) => !refused.has(InstancePath.make(`agents/${name}.md`)),
+              );
+              const names = new Set(agents.map(({ name }) => name));
+              const loops = loaded.loops.filter((loop) => names.has(loop.agent));
+              const quarantined = loaded.loops.filter((loop) => !names.has(loop.agent));
+              yield* SubscriptionRef.set(
+                current,
+                LoadedInstance.make({
+                  ...loaded,
+                  agents,
+                  loops,
+                  invalidAgents: [
+                    ...loaded.invalidAgents,
+                    ...problems.map((error) => InvalidAgent.make({ file: error.file, error })),
+                  ],
+                  quarantinedLoops: [
+                    ...loaded.quarantinedLoops,
+                    ...quarantined.map((loop) => {
+                      const file = loopPath(loop.name);
+                      return QuarantinedLoop.make({
+                        file,
+                        error: ConfigFileError.make({
+                          file,
+                          stage: "reference",
+                          expression: Option.none(),
+                          message: `Agent "${loop.agent}" cannot run as coordinator. Correct its parent configuration and reload.`,
+                        }),
+                      });
+                    }),
+                  ],
+                }),
+              );
+              yield* Effect.logWarning(
+                "Coordinator admission quarantined agents and loops at startup",
+                {
+                  agents: problems.map(({ file }) => file),
+                  loops: quarantined.map(({ name }) => name),
+                },
+              );
+            }).pipe(reloading.withPermits(1));
           }),
         };
       }),

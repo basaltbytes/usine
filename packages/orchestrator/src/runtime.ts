@@ -1,4 +1,3 @@
-import { resolveParentEffort, resolveParentModel } from "@usine/core/agent";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { GitHubChecks } from "@usine/github/checks";
 import { CiMonitor } from "./ci.ts";
@@ -93,18 +92,7 @@ export const runtimeLayer = (
   );
   // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
   // executor's preflight and the Attempts' Claude children.
-  const attemptRuntime = Layer.unwrap(
-    Effect.gen(function* () {
-      const startup = yield* (yield* CurrentInstance).get;
-      return durableAttemptRuntimeLayer(
-        instanceDirectory,
-        startup.agents.map(({ agent }) => ({
-          parentModel: resolveParentModel(agent, startup.config.settings.parentModel),
-          parentEffort: resolveParentEffort(agent, startup.config.settings.parentEffort),
-        })),
-      );
-    }),
-  ).pipe(
+  const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
     (runtime) => parentAdmissionLayer.pipe(Layer.provideMerge(runtime)),
     Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),

@@ -4,7 +4,7 @@ Runs an attempt's Pi parent in the orchestrator on [`@earendil-works/pi-durable`
 
 Brain specifications use the branded `Harness` ID from `@usine/core/agent/brain`. Configuration checks registered harnesses through the platform-free `@usine/agents/harness` catalog before an attempt starts.
 
-Coordinator startup and `subagent` use the shared harness admission check. The live `harnessLayer(directory, parents)` and `layer(directory, parents)` accept resolved parent model and effort options. They validate those options against Pi's model registry and credentials before opening storage or resuming attempts. Parent selection repeats admission when each attempt starts.
+Coordinator startup and `subagent` use the shared harness admission check. `/live` exports `loadParentModels(directory)` for configuration validation without opening durable storage. The orchestrator quarantines refused coordinator brains while keeping its operator UI available. Parent selection repeats admission when each attempt starts.
 
 ## Entry points
 

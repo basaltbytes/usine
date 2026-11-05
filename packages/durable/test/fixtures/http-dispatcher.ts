@@ -17,9 +17,10 @@ import { gzipSync } from "node:zlib";
 import { InstanceDirectory } from "@usine/core/instance";
 import { Effect, Option, Schema } from "effect";
 import { ModelId } from "@usine/core/agent/brain";
+import { resolveParent } from "../../src/parent.ts";
 import { EnvHttpProxyAgent, fetch as undiciFetch, getGlobalDispatcher } from "undici";
 import { DurableHarness } from "../../src/harness.ts";
-import { harnessLayer } from "../../src/live.ts";
+import { loadParentModels, harnessLayer } from "../../src/live.ts";
 
 assert(process.argv[2]);
 const directory = InstanceDirectory.make(process.argv[2]);
@@ -110,17 +111,13 @@ try {
   if (scenario === "unknown-parent") {
     await assert.rejects(
       Effect.runPromise(
-        Effect.void.pipe(
-          Effect.provide(
-            harnessLayer(directory, [
-              {
-                parentModel: Option.some(ModelId.make("missing/parent-model")),
-                parentEffort: "high",
-              },
-            ]),
-          ),
-          Effect.scoped,
-        ),
+        Effect.gen(function* () {
+          const parents = yield* loadParentModels(directory);
+          yield* resolveParent(parents.models, parents.defaultModel, {
+            parentModel: Option.some(ModelId.make("missing/parent-model")),
+            parentEffort: "high",
+          });
+        }),
       ),
       /Pi has no model "missing\/parent-model"/u,
     );
