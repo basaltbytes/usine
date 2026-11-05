@@ -1,3 +1,4 @@
+import type { TranscriptCodec } from "./transcript/codec.ts";
 import type { ChangeBus } from "@usine/core/changes";
 import { changeTransaction } from "./changes.ts";
 import { AgentFailure } from "@usine/core/attempt/failure";
@@ -20,7 +21,11 @@ import { persistence } from "./codec.ts";
 import { queriesFor } from "./queries.ts";
 
 /** Durable CI waits share the run transaction and keep the attempt's session end time. */
-export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBus.Service) => ({
+export const ciQueries = (
+  database: RunDatabase["Service"],
+  bus: typeof ChangeBus.Service,
+  codec: TranscriptCodec["Service"],
+) => ({
   awaitingCi: Effect.gen(function* () {
     const rows = yield* database
       .select({ runId: runs.runId })
@@ -28,7 +33,7 @@ export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBu
       .where(sql`${jsonExtract(runs.stateJson, "$._tag")} = 'AwaitingCi'`)
       .execute();
     return yield* Effect.forEach(rows, ({ runId }) =>
-      database.transaction((transaction) => queriesFor(transaction).snapshot(runId)),
+      database.transaction((transaction) => queriesFor(transaction, codec).snapshot(runId)),
     );
   }).pipe(
     persistence("read CI waits"),
@@ -50,7 +55,7 @@ export const ciQueries = (database: RunDatabase["Service"], bus: typeof ChangeBu
       bus,
     )((transaction, record) =>
       Effect.gen(function* () {
-        const queries = queriesFor(transaction, record);
+        const queries = queriesFor(transaction, codec, record);
         const current = yield* queries.snapshot(runId);
         if (current.run.state._tag !== "AwaitingCi" || current.run.state.handoff.head !== head) {
           yield* Effect.logInfo(
