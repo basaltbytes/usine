@@ -35,9 +35,10 @@ export const requestSystemUpgrade = Effect.fn("Cli.requestSystemUpgrade")(
         version: Option.some(target),
       }),
     });
-    yield* Console.log(
-      `Upgrade to ${target} requested. Follow progress in Settings or the upgrade service journal.`,
-    );
+    const output = Option.isSome(record.launchdService)
+      ? ".usine/upgrade/helper.log"
+      : "the upgrade service journal";
+    yield* Console.log(`Upgrade to ${target} requested. Follow progress in Settings or ${output}.`);
   },
   Effect.mapError((error) => UpgradeError.make({ message: error.message })),
 );

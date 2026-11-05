@@ -14,7 +14,7 @@ const testTasks = (plan) =>
 test("the CI matrix runs every package test task exactly once", () => {
   const expected = testTasks(
     JSON.parse(
-      execFileSync("pnpm", ["turbo", "run", "test", "--dry=json"], {
+      execFileSync("corepack", ["pnpm", "turbo", "run", "test", "--dry=json"], {
         cwd: root,
         encoding: "utf8",
       }),
@@ -24,7 +24,7 @@ test("the CI matrix runs every package test task exactly once", () => {
     testTasks(
       JSON.parse(
         execSync(
-          `pnpm turbo run test --dry=json --concurrency=1 ${leg.filters} ${leg.args ?? ""}`,
+          `corepack pnpm turbo run test --dry=json --concurrency=1 ${leg.filters} ${leg.args ?? ""}`,
           {
             cwd: root,
             encoding: "utf8",

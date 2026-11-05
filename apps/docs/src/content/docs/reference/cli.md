@@ -34,17 +34,21 @@ A detached start retains the selected Node binary, options, entry point, and lau
 
 ### Instance record
 
-`.usine/instance.json` records PID, release, start time, launch settings, systemd unit when applicable, and drain start time. The lock determines whether a process owns the instance; stale process records are replaced on the next start. `.usine/instance-id` identifies attempt containers and must remain with the instance during moves and restores.
+`.usine/instance.json` records PID, release, start time, launch settings, systemd unit or launchd service target when applicable, and drain start time. The lock determines whether a process owns the instance; stale process records are replaced on the next start. `.usine/instance-id` identifies attempt containers and must remain with the instance during moves and restores.
 
 ### Instances that systemd runs
 
 Lifecycle commands verify that the recorded unit owns the process. They use `systemctl stop --no-block` and `systemctl start` to preserve service management. Service starts use the service environment and the instance `.env`. The service user needs authorization to manage the unit. See [server deployment](/guides/host-usine-on-linux/).
 
+### Instances that launchd runs
+
+Set `USINE_LAUNCHD_SERVICE=gui/<uid>/<label>` in the instance `.env` and install the matching `~/Library/LaunchAgents/<label>.plist`. `up` records the target only when `launchctl print` reports its PID. `stop` uses `bootout`; `restart` uses `bootout`, `bootstrap`, and `kickstart`. `up --detach` starts the configured job, loading its plist if needed, and uses its configured arguments. Commands run as the owning user in the login session. `status` uses `print` to verify supervision and reports launchctl failures. A failed start unloads a job waiting to retry. See [macOS deployment](/guides/host-usine-on-macos/) for both jobs, login requirements, and log paths.
+
 ## usine status
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
-| none | none | instance folder | Report the owning process, listener, version, uptime, open runs, and systemd unit. |
+| none | none | instance folder | Report the owning process, listener, version, uptime, open runs, and supervising service. |
 
 ```sh
 usine status
@@ -80,7 +84,7 @@ Ctrl+C or SIGTERM starts a drain. Its deadline uses `settings.max_attempt_minute
 usine restart
 ```
 
-Restart requires a running instance and retains its launch flags. It refuses active attempts unless forced and verifies required gateway credential variables before stopping. A detached restart appends to `.usine/usine.log`; systemd instances restart through their unit. The new process reads the instance environment again.
+Restart requires a running instance and retains its launch flags. It refuses active attempts unless forced and verifies required gateway credential variables before stopping. A detached restart appends to `.usine/usine.log`; systemd and launchd instances restart through their service manager. The new process reads the instance environment again.
 
 ## usine upgrade
 
@@ -97,7 +101,7 @@ usine upgrade --check
 usine upgrade
 ```
 
-For a global installation managed by systemd, the command requests the separate upgrade helper and exits after acceptance. The default waits for admitted attempts to finish. **Settings** and the helper journal report the final outcome. The helper backs up stores, installs, restarts, and checks version and readiness. Installation or readiness failure restores the prior package and databases.
+For a global installation managed by systemd or launchd, the command requests the separate upgrade helper and exits after acceptance. The default waits for admitted attempts to finish. **Settings** and the helper's journal or log report the final outcome. The helper backs up stores, installs, restarts, and checks version and readiness. Installation or readiness failure restores the prior package and databases.
 
 For an instance-local registry pin, upgrade backs up stores in `.usine/backups/`, changes package pins, installs with the instance package manager, commits manifest and lockfile changes, and restarts if the instance was running. It refuses active attempts unless forced. Failed installation restores manifests and lockfiles and leaves the instance stopped. Startup failure prints recovery instructions. A stopped instance receives the package update without starting.
 
@@ -162,6 +166,7 @@ The URL works once within ten minutes. Local lifecycle and link commands require
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `USINE_LAUNCHD_SERVICE` | `gui/<uid>/<label>` | none | LaunchAgent target for supervised detached starts and lifecycle commands. The matching plist is in `~/Library/LaunchAgents/`. |
 | `USINE_PORT` | integer, 1–65535 | `7331` | Port used when `--port` is absent. |
 | `USINE_ORIGIN` | origin | loopback listener | Canonical origin used when `--origin` is absent. |
 | `USINE_LOG_LEVEL` | log level | `info` | Minimum log level used when the flag is absent. |

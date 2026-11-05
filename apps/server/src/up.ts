@@ -19,7 +19,7 @@ import { FetchHttpClient, HttpServer, type HttpRouter } from "effect/http";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
-import { ServerUpgrades } from "./upgrade/control.ts";
+import { ServerUpgrades, UpgradeError } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
 import { localSqliteLayer, SqliteReader } from "@usine/engine/local-sqlite";
 import type { RunDatabase, TranscriptCodec } from "@usine/engine/database";
@@ -75,6 +75,7 @@ import { serverLayer } from "./http.ts";
 import { instanceIdOf } from "./instance/id.ts";
 import { holdInstance } from "./instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
+import { configuredLaunchdService, supervisingLaunchdService } from "./instance/launchd.ts";
 import { currentSystemService } from "./instance/systemd.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
@@ -211,7 +212,11 @@ const start = Effect.fnUntraced(function* (
       ServerUpgrades.layer({
         running: record.version,
         settings: Effect.map(instances.get, ({ config }) => config.settings),
-        platform: Option.none(),
+        platform: Result.fail(
+          UpgradeError.make({
+            message: "App upgrades are available after GitHub App setup is complete.",
+          }),
+        ),
         drain: () => Effect.void,
         resume: Effect.void,
       }),
@@ -259,11 +264,16 @@ const start = Effect.fnUntraced(function* (
     const operator = Context.get(context, Operator);
     const orchestrator = Context.get(context, Orchestrator);
     const engine = Context.get(context, RunEngine);
+    const platform = yield* systemUpgradePlatform(directory, record);
     const upgradeContext = yield* Layer.build(
       ServerUpgrades.layer({
         running: record.version,
         settings: Effect.map(instances.get, ({ config }) => config.settings),
-        platform: yield* systemUpgradePlatform(directory, record),
+        platform: Result.fromOption(platform, () =>
+          UpgradeError.make({
+            message: "App upgrades require a global npm install managed by systemd or launchd.",
+          }),
+        ),
         drain: engine.waitForUpgrade,
         resume: engine.cancelUpgrade,
       }),
@@ -328,12 +338,18 @@ export const up = (command: UpCommand) =>
         yield* monitorEventLoop;
         const directory = InstanceDirectory.make(process.cwd());
         yield* refuseVolatileInstance(directory, command.allowVolatileInstance);
+        const configuredService = yield* configuredLaunchdService;
+        const launchdService = yield* supervisingLaunchdService(
+          ProcessId.make(process.pid),
+          configuredService,
+        );
         const record = InstanceRecord.make({
           pid: ProcessId.make(process.pid),
           version: yield* packageVersion(),
           startedAt: yield* DateTime.now,
           launch: yield* currentLaunch(command),
           systemdUnit: yield* currentSystemService(),
+          launchdService,
         });
         // Acquired before any store opens and released after every store closes.
         yield* holdInstance(directory, record);

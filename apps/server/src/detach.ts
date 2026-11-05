@@ -21,10 +21,18 @@ import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
 import { answers } from "./instance/operator-api.ts";
 import { probeInstance } from "./instance/state.ts";
-import { type SystemctlError, SystemdUnit, systemctl, unitState } from "./instance/systemd.ts";
+import { configuredLaunchdService } from "./instance/launchd.ts";
+import {
+  ServiceUnit,
+  type ServiceError,
+  startService,
+  stopService,
+  serviceState,
+  serviceOutput,
+} from "./instance/service.ts";
 
 const READY_POLL_INTERVAL = "250 millis";
-/** Spaces the checks of a starting systemd service, each of which runs `systemctl show`. */
+/** Spaces service-manager queries during startup. */
 const UNIT_POLL_INTERVAL = "500 millis";
 const LOG_TAIL_LINES = 20;
 const LOG_TAIL_BYTES = 64 * 1024;
@@ -116,9 +124,9 @@ export class StartedInstance extends Schema.Class<
 >("@usine/server/StartedInstance")({
   pid: ProcessId,
   port: Port,
-  /** The systemd service that started the process, whose journal has its output. */
-  unit: Schema.Option(SystemdUnit).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none<SystemdUnit>())),
+  /** The service that started the process, whose manager captures its output. */
+  unit: Schema.Option(ServiceUnit).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<ServiceUnit>())),
   ),
 }) {}
 
@@ -278,21 +286,20 @@ export const startedMessage = ({ pid, port, unit }: StartedInstance): string =>
     onNone: () =>
       `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}), with its output in .usine/usine.log.`,
     onSome: (service) =>
-      `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}) in ${service}, with its output in the journal: journalctl -u ${service}.`,
+      `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}) in ${service}, with its output at ${serviceOutput(service)}.`,
   });
 
 /**
- * The systemd service that `systemctl start` started failed before its `usine up` answered, or its
- * `usine up` didn't answer within the timeout.
+ * A supervised start failed before `usine up` answered, or did not answer within the timeout.
  */
-export class SystemdStartError extends Schema.TaggedError<
-  SystemdStartError,
-  Brand.Brand<"@usine/server/detach/SystemdStartError">
->("@usine/server/SystemdStartError")("SystemdStartError", {
-  unit: SystemdUnit,
+export class ServiceStartError extends Schema.TaggedError<
+  ServiceStartError,
+  Brand.Brand<"@usine/server/detach/ServiceStartError">
+>("@usine/server/ServiceStartError")("ServiceStartError", {
+  unit: ServiceUnit,
   /** `failed` if the service stopped or waits to restart, `silent` if it runs but didn't answer. */
   outcome: Schema.Literals(["failed", "silent"]),
-  /** The service's `ActiveState` and `SubState`, such as `activating (auto-restart)`. */
+  /** The manager's active state and detail, such as `activating (auto-restart)`. */
   state: Schema.String,
   timeout: Schema.Duration,
 }) {}
@@ -301,60 +308,55 @@ export class SystemdStartError extends Schema.TaggedError<
 const ENDED_STATES: ReadonlySet<string> = new Set(["failed", "inactive", "deactivating"]);
 
 /**
- * Stops `unit` if it waits to restart after `systemctl start` failed, as a `Type=exec` service with
- * `Restart=on-failure` does when its command can't run, so that the failed start doesn't repeat.
- * Logs a `systemctl` that fails here, and never fails itself.
+ * Cancels a supervisor's pending retry after a failed start. Logs cleanup failures while
+ * preserving the original start error.
  */
 const cancelPendingRestart = Effect.fn("Cli.cancelPendingRestart")(
-  function* (unit: SystemdUnit, failure: SystemctlError) {
-    const state = yield* unitState(unit);
-    if (state.sub !== "auto-restart") {
-      yield* Effect.logWarning("systemctl start failed; the service doesn't wait to restart", {
+  function* (unit: ServiceUnit, failure: ServiceError) {
+    const state = yield* serviceState(unit);
+    if (state.sub !== "auto-restart" && state.sub !== "waiting") {
+      yield* Effect.logWarning("Service start failed; the service doesn't wait to restart", {
         unit,
         state: `${state.active} (${state.sub})`,
         reason: failure.reason,
       });
       return;
     }
-    yield* Effect.logWarning(
-      "systemctl start failed and the service waits to restart; stopping it",
-      {
-        unit,
-        reason: failure.reason,
-      },
-    );
-    yield* systemctl(unit, ["stop", "--no-block"]);
+    yield* Effect.logWarning("Service start failed and the service waits to restart; stopping it", {
+      unit,
+      reason: failure.reason,
+    });
+    yield* stopService(unit);
   },
-  Effect.catchTag("SystemctlError", (error) =>
-    Effect.logWarning(
-      "Could not check or cancel the restart of the service after systemctl start failed",
-      {
+  Effect.catchTags({
+    SystemctlError: (error) =>
+      Effect.logWarning("Could not check or cancel the service restart after a failed start", {
         unit: error.unit,
         command: error.command,
         reason: error.reason,
-      },
-    ),
-  ),
+      }),
+    LaunchctlError: (error) =>
+      Effect.logWarning("Could not check or cancel the launchd restart", {
+        service: error.service,
+        command: error.command,
+        reason: error.reason,
+      }),
+  }),
 );
 
 /**
- * Starts the instance's systemd service with `systemctl start`, and waits until a process other
- * than `previous` holds the instance and answers on its recorded port. Fails with
- * `SystemdStartError` if the service stops or waits to restart first, and then stops it, or after
- * `timeout`, when the service keeps running. Fails with the `SystemctlError` of a
- * `systemctl start` that fails, after it stops a service that waits to restart.
+ * Starts a supervised instance and waits for a different process to own its lock and answer.
+ * Cancels pending supervisor retries when startup fails. A timeout leaves a running service up.
  */
 export const startUnit = Effect.fn("Cli.startUnit")(function* (
   directory: InstanceDirectory,
-  unit: SystemdUnit,
+  unit: ServiceUnit,
   previous: ProcessId,
   timeout: Duration.Duration,
 ) {
   yield* Effect.annotateCurrentSpan({ instanceDirectory: directory, unit });
-  yield* systemctl(unit, ["start"]).pipe(
-    Effect.tapError((failure) => cancelPendingRestart(unit, failure)),
-  );
-  yield* Effect.logInfo("Started the instance's systemd service", { unit });
+  yield* startService(unit).pipe(Effect.tapError((failure) => cancelPendingRestart(unit, failure)));
+  yield* Effect.logInfo("Started the instance's service", { unit });
   let last = "unknown";
   const listening = Effect.gen(function* () {
     while (true) {
@@ -370,45 +372,44 @@ export const startUnit = Effect.fn("Cli.startUnit")(function* (
           unit: Option.some(unit),
         });
       }
-      const { active, sub } = yield* unitState(unit);
+      const { active, sub } = yield* serviceState(unit);
       last = `${active} (${sub})`;
       if (ENDED_STATES.has(active) || sub === "auto-restart") {
-        yield* Effect.logWarning("The instance's systemd service ended before usine up answered", {
+        yield* Effect.logWarning("The instance's service ended before usine up answered", {
           unit,
           state: last,
         });
         // Cancels the restart, so that a start that fails, such as a failed migration, doesn't repeat.
-        if (sub === "auto-restart") yield* systemctl(unit, ["stop", "--no-block"]);
-        return yield* SystemdStartError.make({ unit, outcome: "failed", state: last, timeout });
+        if (sub === "auto-restart" || sub === "waiting") yield* stopService(unit);
+        return yield* ServiceStartError.make({ unit, outcome: "failed", state: last, timeout });
       }
       yield* Effect.sleep(UNIT_POLL_INTERVAL);
     }
   });
   const started = yield* Effect.timeoutOption(listening, timeout);
   if (Option.isSome(started)) {
-    yield* Effect.logInfo("The instance's systemd service is listening", {
+    yield* Effect.logInfo("The instance's service is listening", {
       unit,
       pid: started.value.pid,
       port: started.value.port,
     });
     return started.value;
   }
-  yield* Effect.logWarning("The instance's systemd service didn't answer before the timeout", {
+  yield* Effect.logWarning("The instance's service didn't answer before the timeout", {
     unit,
     state: last,
     timeoutSeconds: Duration.toSeconds(timeout),
   });
-  return yield* SystemdStartError.make({ unit, outcome: "silent", state: last, timeout });
+  return yield* ServiceStartError.make({ unit, outcome: "silent", state: last, timeout });
 });
 
 /**
- * Starts the instance again after `previous` stopped: with `systemctl start` if `unit` ran it, else
- * in the background with `launch`.
+ * Starts the instance after `previous` stops, using its supervisor or a detached process.
  */
 export const startAgain = Effect.fn("Cli.startAgain")(function* (
   directory: InstanceDirectory,
   launch: InstanceLaunch,
-  unit: Option.Option<SystemdUnit>,
+  unit: Option.Option<ServiceUnit>,
   previous: ProcessId,
   timeout: Duration.Duration,
 ) {
@@ -431,9 +432,12 @@ export const upDetached = Effect.fn("Cli.upDetached")(function* (
     });
   }
   const launch = yield* currentLaunch(command);
-  const started = yield* startDetached(
+  const service = yield* configuredLaunchdService;
+  const started = yield* startAgain(
     directory,
     launch,
+    service,
+    ProcessId.make(process.pid),
     Duration.seconds(DEFAULT_LIFECYCLE_TIMEOUT_SECONDS),
   );
   yield* Console.log(startedMessage(started));
