@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { Attachments } from "@usine/gateway";
 import { fakeGateway } from "../gateway/support.ts";
 import { LoopName } from "@usine/core/loop";
@@ -16,7 +17,7 @@ import {
 } from "@usine/durable/testing";
 
 import { Effect, Layer, Option, Redacted } from "effect";
-import { claudeLoginLockLayer, type AttemptConnections } from "../../../src/executor.ts";
+import { hostLoginLockLayer, type AttemptConnections } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 
 import { layer as sshLayer } from "../../../src/ssh/ssh.ts";
@@ -98,10 +99,11 @@ export const runtimeOf = (
     providerEndpoints: { hetzner: HETZNER_TEST_API, boat: BOAT_TEST_API },
     machinePollInterval: "1 millis",
   }).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(machine.layer),
     Layer.provide(mintingProvider().layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
     Layer.provide(providers.layer),
   );
 
@@ -130,10 +132,11 @@ export const gatewayRuntimeOf = (
       machinePollInterval: "1 millis",
       machineReadyTimeout: "1 second",
     }).pipe(
+      Layer.provide(harnessesLive),
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(hostLoginLockLayer),
       Layer.provide(providers.over(gateway.layer)),
     ),
     Layer.effect(Attachments, Attachments).pipe(Layer.provide(gateway.layer)),

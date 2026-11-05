@@ -2,8 +2,8 @@ import { jsonKey } from "@usine/core/json-key";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
-import { CodexAppServer, codexChildBackendLayer, codexAppServerLive } from "@usine/agents/codex";
-import { ChildRequest, CodexChildBackend, WorkingDirectory } from "@usine/agents/runtime";
+import { CodexAppServer, codexChildLayer, codexAppServerLive } from "@usine/agents/codex";
+import { ChildRequest, ChildBackend, WorkingDirectory } from "@usine/agents/runtime";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { WorkerName } from "@usine/core/worker";
@@ -174,7 +174,7 @@ const timer = setInterval(() => {
 relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255 : code || 0); });
 `,
           );
-          const running = yield* (yield* CodexChildBackend).launch(
+          const running = yield* (yield* ChildBackend).launch(
             ChildRequest.make({
               worker: WorkerName.make("boat"),
               machine: Option.none(),
@@ -259,7 +259,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
         }),
       ).pipe(
         Effect.provide(
-          codexChildBackendLayer.pipe(
+          codexChildLayer.pipe(
             Layer.provideMerge(
               failure === "before-initial-turn-exit"
                 ? Layer.effect(

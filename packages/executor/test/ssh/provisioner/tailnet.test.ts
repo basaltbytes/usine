@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { MACHINE_RUN } from "./fixtures.ts";
 import { AttemptId } from "@usine/core/attempt";
@@ -27,7 +28,7 @@ import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect
 import { HttpClient, HttpClientResponse } from "effect/http";
 import {
   CheckoutRequest,
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   Executor,
   WorkerMachines,
 } from "../../../src/executor.ts";
@@ -174,10 +175,11 @@ describe("Boat tailnet", () => {
       instanceId: INSTANCE_ID,
       providerEndpoints: { boat: BOAT_TEST_API },
     }).pipe(
+      Layer.provide(harnessesLive),
       Layer.provide(machine.layer),
       Layer.provide(mintingProvider().layer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(hostLoginLockLayer),
       Layer.provide(boat.over(api.over(gateway.layer))),
     );
     return Effect.gen(function* () {
@@ -286,10 +288,11 @@ describe("Boat tailnet", () => {
         machinePollInterval: "1 millis",
         machineReadyTimeout: "5 seconds",
       }).pipe(
+        Layer.provide(harnessesLive),
         Layer.provide(machine.layer),
         Layer.provide(mintingProvider().layer),
         Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(boat.over(api.over(gateway.layer))),
       );
       return Effect.gen(function* () {
@@ -358,10 +361,11 @@ describe("Boat tailnet", () => {
           machinePollInterval: "1 millis",
           machineReadyTimeout: "5 seconds",
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(machine.layer),
           Layer.provide(mintingProvider().layer),
           Layer.provide(runtime),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(boat.over(api.over(gateway.layer))),
         );
         return Effect.gen(function* () {

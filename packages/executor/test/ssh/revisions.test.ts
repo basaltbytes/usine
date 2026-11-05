@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -7,7 +8,7 @@ import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { type StubParent, StubStorage, stubAttemptRuntime } from "@usine/durable/testing";
 import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { ChildProcessSpawner } from "effect/process";
-import { CheckoutRequest, Executor, claudeLoginLockLayer } from "../../src/executor.ts";
+import { CheckoutRequest, Executor, hostLoginLockLayer } from "../../src/executor.ts";
 import { keptCheckoutRecovery } from "../../src/provision.ts";
 import { layer as sshLayer, SshWorkers, type SshWorkerAddress } from "../../src/ssh/ssh.ts";
 import {
@@ -80,6 +81,7 @@ for (const transition of ["unchanged", "live", "restart"] as const) {
                 remove: (id) => Effect.sync(() => void records.delete(id)),
               },
             }).pipe(
+              Layer.provide(harnessesLive),
               Layer.provide(Layer.merge(original.layer, remoteHosts)),
               Layer.provide(credentials.layer),
               Layer.provide(
@@ -104,7 +106,7 @@ for (const transition of ["unchanged", "live", "restart"] as const) {
                   }),
                 ).pipe(Layer.provide(stubAttemptRuntime(storage, parent))),
               ),
-              Layer.provide(claudeLoginLockLayer),
+              Layer.provide(hostLoginLockLayer),
               Layer.provide(noGateway),
             );
           return Effect.gen(function* () {

@@ -1,0 +1,74 @@
+import { Harness } from "@usine/core/agent/brain";
+import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
+import { HarnessCatalog } from "./harness.ts";
+import type { HarnessRuntime } from "./runtime.ts";
+
+/** A descriptor and its runtime cannot be registered together. */
+export class HarnessRegistrationError extends Schema.TaggedError<
+  HarnessRegistrationError,
+  Brand.Brand<"@usine/agents/HarnessRegistrationError">
+>("@usine/agents/HarnessRegistrationError")("HarnessRegistrationError", {
+  harness: Harness,
+  message: Schema.NonEmptyString,
+}) {}
+
+/** A requested harness has no registered runtime. */
+export class UnknownHarnessError extends Schema.TaggedError<
+  UnknownHarnessError,
+  Brand.Brand<"@usine/agents/UnknownHarnessError">
+>("@usine/agents/UnknownHarnessError")("UnknownHarnessError", {
+  harness: Harness,
+  message: Schema.NonEmptyString,
+}) {}
+
+/** A complete catalog of harness descriptors and their runtimes. */
+export class Harnesses extends Context.Service<
+  Harnesses,
+  {
+    readonly catalog: HarnessCatalog;
+    readonly runtime: (id: Harness) => Effect.Effect<HarnessRuntime, UnknownHarnessError>;
+  }
+>()("@usine/agents/harness/registry/Harnesses") {
+  private static readonly make = Effect.fn("Harnesses.make")(function* (
+    catalog: HarnessCatalog,
+    runtimes: ReadonlyArray<HarnessRuntime>,
+  ) {
+    const registered = new Map<Harness, HarnessRuntime>();
+    for (const runtime of runtimes) {
+      const message = registered.has(runtime.id)
+        ? `Duplicate runtime for harness "${runtime.id}"`
+        : Option.isNone(catalog.get(runtime.id))
+          ? `No descriptor for harness runtime "${runtime.id}"`
+          : undefined;
+      if (message !== undefined) {
+        yield* Effect.logError("Harness registration failed", { harness: runtime.id, message });
+        return yield* HarnessRegistrationError.make({ harness: runtime.id, message });
+      }
+      registered.set(runtime.id, runtime);
+    }
+    for (const id of catalog.ids) {
+      if (!registered.has(id)) {
+        const message = `No runtime for harness descriptor "${id}"`;
+        yield* Effect.logError("Harness registration failed", { harness: id, message });
+        return yield* HarnessRegistrationError.make({ harness: id, message });
+      }
+    }
+    yield* Effect.logDebug("Registered harness runtimes", { harnesses: catalog.ids.join(",") });
+    return Harnesses.of({
+      catalog,
+      runtime: Effect.fn("Harnesses.runtime")(function* (id) {
+        yield* Effect.annotateCurrentSpan({ harness: id });
+        const runtime = registered.get(id);
+        if (runtime !== undefined) return runtime;
+        yield* Effect.logWarning("Harness runtime is unavailable", { harness: id });
+        return yield* UnknownHarnessError.make({
+          harness: id,
+          message: `No runtime for harness "${id}"`,
+        });
+      }),
+    });
+  });
+
+  static readonly layerFrom = (catalog: HarnessCatalog, runtimes: ReadonlyArray<HarnessRuntime>) =>
+    Layer.effect(Harnesses, Harnesses.make(catalog, runtimes));
+}

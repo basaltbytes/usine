@@ -1,9 +1,6 @@
 import { catalog, type HarnessCredential, type HarnessDescriptor } from "@usine/agents/harness";
 import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
-import { codexConfigArgs } from "@usine/agents/codex";
-import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
-import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { GatewayCredentialKind, GatewayLlmProvider, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
 import type { CommandResult } from "../../child-command.ts";
@@ -266,53 +263,6 @@ export const verifyGateway = (
   );
 
 /**
- * Checks only the binary of a harness whose credential the machine doesn't keep, the Gateway's
- * or an API key in the Attempt's environment, named by `credential` in the log. Codex's version
- * must also be supported.
- */
-export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(function* (
-  commands: RemoteCommands,
-  host: string,
-  shell: RemoteShell,
-  harness: Harness,
-  credential: string,
-) {
-  const label = Option.match(catalog.get(harness), {
-    onNone: () => harness,
-    onSome: ({ label }) => label,
-  });
-  yield* Effect.annotateCurrentSpan({ host, harness, credential });
-  if (harness === "codex") {
-    const runtime = yield* commands.inspect("preflight", shell, "node", ["--version"]);
-    if (runtime.exitCode === SSH_FAILURE) return yield* unreachable(host, "node", runtime);
-    if (runtime.exitCode !== 0)
-      return HarnessUnavailableError.make({
-        harness,
-        capability: "binary",
-        message: "Remote Codex children require Node.js on the worker's command path.",
-      });
-  }
-  const args = harness === "codex" ? [...codexConfigArgs, "--version"] : ["--version"];
-  const result = yield* commands.inspect("preflight", shell, harness, args);
-  if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, harness, result);
-  if (result.exitCode !== 0)
-    return HarnessUnavailableError.make({
-      harness,
-      capability: "binary",
-      message: `${harness} --version failed. Check the ${label} installation on the worker.`,
-    });
-  const version = result.stdout.trim();
-  const unsupported = harness === "codex" ? unsupportedCodexVersion(version) : Option.none();
-  if (Option.isSome(unsupported)) return unsupported.value;
-  yield* Effect.logInfo(`${label} uses ${credential}; checked its binary only`, {
-    host,
-    harness,
-    version,
-  });
-  return HarnessReady.make({ harness });
-});
-
-/**
  * A script that takes the forward proxy URL and host names, and prints one line per host: the
  * host, curl's exit code, the proxy's CONNECT status, and the host's HTTP status (`000` if the
  * host didn't respond).
@@ -347,15 +297,12 @@ export const gatewayHarnessProbe = (
   probe: HarnessProbe,
   shell: RemoteShell,
   apiKeyed: (harness: Harness) => boolean,
+  external: HarnessProbe,
 ): HarnessProbe => {
   const worker = machine.address.name;
   const host = machine.shell.destination;
   const { domain } = gateway.settings;
   const proxy = forwardProxyUrl(domain);
-
-  /** Checks only the binary of a harness whose provider credential the Gateway holds. */
-  const binaryOnly = (harness: Harness, providerLabel: string) =>
-    harnessBinaryProbe(commands, host, shell, harness, `the Gateway's ${providerLabel} credential`);
 
   const loginHostsReachable = Effect.fn("SshExecutor.probeLoginHostsBehindGateway")(function* (
     descriptor: HarnessDescriptor,
@@ -413,26 +360,27 @@ export const gatewayHarnessProbe = (
     brain: BrainSpec,
     descriptor: HarnessDescriptor,
     credential: HarnessCredential,
+    login: Parameters<HarnessProbe>[1],
   ) {
     const harness = descriptor.id;
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
-    const readiness = yield* probe(brain);
+    const readiness = yield* probe(brain, login);
     if (readiness._tag === "HarnessUnavailableError") return readiness;
     if (gateway.settings.egress === "proxy") yield* loginHostsReachable(descriptor, credential);
     return readiness;
   });
 
-  return (brain) =>
+  return (brain, login) =>
     Option.match(
       Option.flatMap(catalog.get(brain.harness), (descriptor) =>
         Option.map(descriptor.worker.credential, (credential) => ({ descriptor, credential })),
       ),
       {
-        onNone: () => probe(brain),
+        onNone: () => probe(brain, login),
         onSome: ({ descriptor, credential }) =>
           gateway.settings.llmProviders.includes(credential.provider)
-            ? binaryOnly(brain.harness, credential.label)
-            : loginOnMachine(brain, descriptor, credential),
+            ? external(brain, login)
+            : loginOnMachine(brain, descriptor, credential, login),
       },
     );
 };

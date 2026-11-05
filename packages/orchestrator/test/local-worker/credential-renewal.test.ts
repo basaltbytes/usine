@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -8,7 +9,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import {
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   CheckoutRequest,
   CredentialProvider,
   Executor,
@@ -86,9 +87,10 @@ it.effect(
         repositoryUrl: () => remote,
         harnessReadiness: harnessReady,
       }).pipe(
+        Layer.provide(harnessesLive),
         Layer.provide(credentials),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, capturing)),
       );
       yield* Effect.gen(function* () {

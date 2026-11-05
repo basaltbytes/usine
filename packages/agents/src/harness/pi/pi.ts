@@ -1,10 +1,13 @@
+import { piPreflight } from "./preflight.ts";
+import { pi } from "./descriptor.ts";
+import type { HarnessRuntime } from "../runtime.ts";
 import { Harness, BrainSpec } from "@usine/core/agent/brain";
 import { ChildSession, EndpointName, SessionStarted } from "@usine/core/agent/session";
 import { Deferred, Effect, Layer, Option, Stream } from "effect";
 import {
   AgentResultError,
   type ChildRequest,
-  PiChildBackend,
+  ChildBackend,
   PoolUnavailableError,
   type RunningSession,
   SessionOperationError,
@@ -57,7 +60,7 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
 const makePiChild = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
-  const launch: PiChildBackend["Service"]["launch"] = Effect.fn("PiChildBackend.launch")(
+  const launch: ChildBackend["Service"]["launch"] = Effect.fn("PiRuntime.launch")(
     function* (request) {
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
@@ -179,8 +182,15 @@ const makePiChild = Effect.gen(function* () {
       );
     },
   );
-  return PiChildBackend.of({ launch });
+  return ChildBackend.of({ launch });
 });
 
-/** Provides `PiChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
-export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);
+/** Provides `ChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
+export const piChildLayer = Layer.effect(ChildBackend, makePiChild);
+
+/** Combines preflight and scoped launch for registration. */
+export const piRuntime = Effect.gen(function* () {
+  const child = yield* makePiChild;
+  const preflight = yield* piPreflight;
+  return { id: pi.id, preflight, launch: child.launch } satisfies HarnessRuntime;
+});

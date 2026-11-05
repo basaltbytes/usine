@@ -1,3 +1,5 @@
+import type { HarnessDescriptor } from "../harness/harness.ts";
+import type { ProbeTarget } from "../harness/runtime.ts";
 import type { Harness } from "@usine/core/agent/brain";
 import { HarnessUnavailableError, type HarnessCapability } from "@usine/core/agent/capability";
 import { Effect, Option } from "effect";
@@ -68,19 +70,36 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   );
 });
 
-/** Runs a readiness command and returns its trimmed stdout. Fails with `HarnessUnavailableError` if the command exits non-zero. */
-export const probeCommand = (
-  host: ChildHost,
-  environment: Readonly<Record<string, string>>,
-  harness: Harness,
-  capability: HarnessCapability,
+/** Checks a runtime prerequisite using the target's installation guidance. */
+export const probeBinary = Effect.fn("HarnessPreflight.binary")(function* (
+  descriptor: HarnessDescriptor,
+  target: ProbeTarget,
   command: string,
   args: ReadonlyArray<string>,
-) =>
-  probeOutput(host, environment, harness, capability, command, args).pipe(
-    Effect.flatMap(({ stdout, exitCode }) =>
-      exitCode === 0
-        ? Effect.succeed(stdout)
-        : Effect.fail(probeFailed(harness, capability, command, args)),
-    ),
+) {
+  const { host, environment, credential } = target;
+  yield* Effect.annotateCurrentSpan({ harness: descriptor.id, worker: target.worker, credential });
+  const failed = () =>
+    HarnessUnavailableError.make({
+      harness: descriptor.id,
+      capability: "binary",
+      message:
+        credential === "sandbox-api-key"
+          ? `${command} --version failed in the sandbox image. Check the ${descriptor.label} installation in the sandbox image.`
+          : command === "node" && credential !== "host-login"
+            ? `Remote ${descriptor.label} children require Node.js on the worker's command path.`
+            : `${command} --version failed. Check the ${descriptor.label} installation${credential === "host-login" ? " and login" : ""} on the worker.`,
+    });
+  const result = yield* probeOutput(host, environment, descriptor.id, "binary", command, args).pipe(
+    Effect.catchTag("HarnessUnavailableError", () => failed()),
   );
+  if (result.exitCode !== 0) return yield* failed();
+  yield* Effect.logInfo("Harness prerequisite verified", {
+    harness: descriptor.id,
+    worker: target.worker,
+    credential,
+    command,
+    version: result.stdout,
+  });
+  return result.stdout;
+});

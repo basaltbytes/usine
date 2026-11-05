@@ -370,38 +370,22 @@ export class ChildBackend extends Context.Service<ChildBackend, ChildBackendServ
 ) {}
 
 /**
- * A lock per Claude login for the Claude commands that can refresh it: the preflight login check
- * and the start of a Claude child. Claude Code ends a process that finds another process
- * refreshing the login (#453). Each machine of a provisioned worker has its own login; on other
- * workers, all attempts share one. Provide one instance to both the executor and the attempt
- * runtime.
+ * Serializes commands that can refresh one harness login. Provisioned machines have separate
+ * logins; other attempts share their worker's login. Share one instance between preflight and
+ * session launch.
  */
-export class ClaudeLoginLock extends Context.Service<
-  ClaudeLoginLock,
+export class HostLoginLock extends Context.Service<
+  HostLoginLock,
   {
     /**
-     * Runs `effect` with the lock of the login on `worker`'s provisioned `machine`, or of the
+     * Runs `effect` with the lock of `harness`'s login on `worker`'s provisioned `machine`, or of the
      * worker's shared login if `machine` is `None`, after waiting for any other effect that has
      * the lock.
      */
     readonly withLock: (
+      harness: Harness,
       worker: WorkerName,
       machine: Option.Option<MachineId>,
     ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   }
->()("@usine/agents/runtime/ClaudeLoginLock") {}
-
-/** The child backend for Claude Code. */
-export class ClaudeChildBackend extends Context.Service<ClaudeChildBackend, ChildBackendService>()(
-  "@usine/agents/runtime/ClaudeChildBackend",
-) {}
-
-/** The child backend for Codex. */
-export class CodexChildBackend extends Context.Service<CodexChildBackend, ChildBackendService>()(
-  "@usine/agents/runtime/CodexChildBackend",
-) {}
-
-/** The child backend for Pi. */
-export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackendService>()(
-  "@usine/agents/runtime/PiChildBackend",
-) {}
+>()("@usine/agents/runtime/HostLoginLock") {}

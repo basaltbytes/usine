@@ -1,3 +1,7 @@
+import { Harnesses, harnessesLayer, ProbeTarget } from "../src/harness/node.ts";
+import { claudeSdkLive } from "../src/harness/claude/sdk.ts";
+import { HostLoginLock } from "../src/runtime.ts";
+import { WorkerName } from "@usine/core/worker";
 import { catalog } from "../src/harness/catalog.ts";
 import { jsonKey } from "@usine/core/json-key";
 // Fetch and agent SDK interfaces require Promise callbacks.
@@ -18,8 +22,37 @@ import { fileURLToPath } from "node:url";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/harness/codex/app-server.ts";
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/harness/pi/sdk.ts";
-import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
+import { CODEX_CLI_VERSION } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
+
+const verifyHarness = (
+  brain: BrainSpec,
+  host: typeof local | typeof remote,
+  environment: Readonly<Record<string, string>>,
+  credential: ProbeTarget["credential"] = "host-login",
+) =>
+  Effect.gen(function* () {
+    const harnesses = yield* Harnesses;
+    const runtime = yield* harnesses.runtime(brain.harness);
+    const readiness = yield* runtime.preflight(
+      brain,
+      ProbeTarget.make({
+        host,
+        environment,
+        credential,
+        worker: WorkerName.make("test-worker"),
+        machine: Option.none(),
+      }),
+    );
+    return readiness._tag === "HarnessUnavailableError" ? yield* readiness : readiness;
+  }).pipe(
+    Effect.provide(
+      harnessesLayer.pipe(
+        Layer.provide(claudeSdkLive),
+        Layer.provide(Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect })),
+      ),
+    ),
+  );
 
 /** The Claude Code version that the installed Claude Agent SDK bundles. */
 const claudeVersion = Schema.decodeEffect(
@@ -120,6 +153,8 @@ const account = (response: Effect.Effect<Schema.Json>) => {
   });
   return { layer, opened: () => opened, closed: () => closed };
 };
+const unusedAccount = account(Effect.die("the probe must not inspect an account")).layer;
+
 const unusedPi = Layer.succeed(PiSdk)({
   start: async () => {
     throw new Error("Pi must not start for another harness");
@@ -459,6 +494,82 @@ describe("worker harness readiness", () => {
       ),
     ),
   );
+
+  for (const credential of ["host-login", "gateway", "api-key", "sandbox-api-key"] as const) {
+    it.effect(`reports the Claude Code installation for the ${credential} route`, () =>
+      Effect.gen(function* () {
+        const error = yield* verifyHarness(
+          brain(Harness.make("claude")),
+          local,
+          workerEnvironment,
+          credential,
+        ).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "HarnessUnavailableError");
+        assert.strictEqual(
+          error.message,
+          credential === "sandbox-api-key"
+            ? "claude --version failed in the sandbox image. Check the Claude Code installation in the sandbox image."
+            : `claude --version failed. Check the Claude Code installation${credential === "host-login" ? " and login" : ""} on the worker.`,
+        );
+      }).pipe(
+        Effect.provide(
+          commands({ "claude --version": { stdout: "", exitCode: 127 } }).pipe(
+            Layer.provideMerge(unusedAccount),
+            Layer.provideMerge(unusedPi),
+          ),
+        ),
+      ),
+    );
+    if (credential === "host-login") continue;
+    it.effect(`reports the Node.js requirement for the ${credential} route`, () =>
+      Effect.gen(function* () {
+        const error = yield* verifyHarness(coder, remote, {}, credential).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "HarnessUnavailableError");
+        assert.strictEqual(
+          error.message,
+          credential === "sandbox-api-key"
+            ? "node --version failed in the sandbox image. Check the Codex installation in the sandbox image."
+            : "Remote Codex children require Node.js on the worker's command path.",
+        );
+      }).pipe(
+        Effect.provide(
+          commands({ [overSsh("exec 'node' '--version'")]: { stdout: "", exitCode: 127 } }).pipe(
+            Layer.provideMerge(unusedAccount),
+            Layer.provideMerge(unusedPi),
+          ),
+        ),
+      ),
+    );
+  }
+
+  for (const credential of ["gateway", "api-key"] as const) {
+    for (const harness of ["claude", "codex"] as const) {
+      it.effect(`checks remote ${harness} without a host login on the ${credential} route`, () => {
+        const server = account(Effect.die("external credentials must not inspect a host account"));
+        const selected = brain(Harness.make(harness));
+        return Effect.gen(function* () {
+          const ready = yield* verifyHarness(selected, remote, {}, credential);
+          assert.strictEqual(ready._tag, "HarnessReady");
+          assert.strictEqual(server.opened(), 0);
+        }).pipe(
+          Effect.provide(
+            commands({
+              [overSsh("exec 'node' '--version'")]: { stdout: "v24.0.0", exitCode: 0 },
+              [overSsh("exec 'claude' '--version'")]: { stdout: "any Claude version", exitCode: 0 },
+              [overSsh(
+                "exec 'codex' " +
+                  codexVersionCommand
+                    .slice("codex ".length)
+                    .split(" ")
+                    .map((arg) => `'${arg}'`)
+                    .join(" "),
+              )]: { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
+            }).pipe(Layer.provideMerge(server.layer), Layer.provideMerge(unusedPi)),
+          ),
+        );
+      });
+    }
+  }
 
   it.effect("refuses remote Codex when its supervisor cannot run Node.js", () =>
     Effect.gen(function* () {

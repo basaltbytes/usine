@@ -1,5 +1,6 @@
 // Fetch and agent SDK interfaces require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
+import { harnessesLive } from "@usine/agents/harness/node";
 import { configurationLayer } from "./support/configuration.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -9,7 +10,7 @@ import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { claudeLoginLockLayer } from "@usine/executor";
+import { hostLoginLockLayer } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Option, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
@@ -57,10 +58,11 @@ const startupFailure = (workers: NonNullable<(typeof UsineConfig.Encoded)["worke
         config,
         [],
       ).pipe(
+        Layer.provide(harnessesLive),
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(credentialLayer),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
-        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(hostLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(fixedConfigLayer(config)),
         Layer.provide(testAppLayer),
@@ -155,10 +157,11 @@ const productionObservation = (
   environment: Record<string, string>,
 ) => {
   const engine = workerEngineLayer(directory, instanceId, config, []).pipe(
+    Layer.provide(harnessesLive),
     Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentialLayer),
     Layer.provide(stubAttemptRuntime(new StubStorage())),
-    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(hostLoginLockLayer),
     Layer.provide(alwaysHoldsLayer),
     Layer.provide(testAppLayer),
     Layer.provide(testCredentialsLayer),

@@ -194,6 +194,8 @@ export const failureMessage = (failure: CliFailure): string =>
         : `usine up did not start: could not read the instance ID in ${path} (${clause(reason)}). Restore the file, or delete it so that usine up creates a new ID. With a new ID, usine no longer removes the attempt containers that it left on SSH workers before; remove those with docker rm.`,
     PortInUseError: ({ port, holder }) =>
       `usine up stopped: port ${port} is already in use${holderOf(holder)}. Stop that process, or run usine up --port <port> with another port.`,
+    HarnessRegistrationError: ({ message }) =>
+      `usine up did not start: ${clause(message)}. Check the registered harness descriptors and runtimes.`,
     ServerStartError: ({ port, cause }) =>
       `usine up stopped: could not listen on 127.0.0.1:${port}${because(cause)}. Run usine up --port <port> to use another port.`,
     ResourceAttributesError: ({ variable, message }) =>

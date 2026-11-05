@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -18,7 +19,7 @@ import { Run, RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import {
-  claudeLoginLockLayer,
+  hostLoginLockLayer,
   CheckoutRequest,
   CredentialProvider,
   CredentialUnavailableError,
@@ -212,9 +213,10 @@ const withGitHubEngine = <A, E, R>(
       repositoryUrl: () => remote,
       harnessReadiness: harnessReady,
     }).pipe(
+      Layer.provide(harnessesLive),
       Layer.provide(credentialLayer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-      Layer.provide(claudeLoginLockLayer),
+      Layer.provide(hostLoginLockLayer),
       Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, github)),
       Layer.provide(NodeServices.layer),
     );
@@ -249,10 +251,11 @@ describe("local worker", () => {
         const runtime = localLayer(instance, configDecoded1, [testAgent.brain], {
           harnessReadiness: harnessUnavailable,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(decodedValue5)),
           Layer.provide(testAppLayer),
@@ -426,13 +429,14 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(
             Layer.succeed(CredentialProvider)({
               issue: () => Effect.succeed(workerCredential(credential)),
             }),
           ),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
         const decodedValue9 = yield* config;
@@ -555,11 +559,12 @@ describe("local worker", () => {
           const runtime = localExecutorLayer({
             instanceDirectory: InstanceDirectory.make(root),
             repositoryUrl: () => remote,
-            harnessReadiness: (brain) =>
+            harnessReadiness: (brain, login) =>
               phase === "preflight"
                 ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
-                : harnessReady(brain),
+                : harnessReady(brain, login),
           }).pipe(
+            Layer.provide(harnessesLive),
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(CredentialProvider)({
@@ -569,7 +574,7 @@ describe("local worker", () => {
                       : Effect.succeed(workerCredential(credential)),
                 }),
                 stubAttemptRuntime(new StubStorage()),
-                claudeLoginLockLayer,
+                hostLoginLockLayer,
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
             ),
@@ -657,9 +662,10 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentials),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
         );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
@@ -788,10 +794,11 @@ describe("local worker", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(decodedValue17)),
           Layer.provide(testAppLayer),

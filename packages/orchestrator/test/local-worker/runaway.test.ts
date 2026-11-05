@@ -1,3 +1,4 @@
+import { harnessesLive } from "@usine/agents/harness/node";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -32,7 +33,7 @@ import {
   testAgent,
   waitFor,
 } from "./support.ts";
-import { claudeLoginLockLayer } from "@usine/executor";
+import { hostLoginLockLayer } from "@usine/executor";
 
 /** Returns a new Attempt of a Run, as the engine passes it to the StepExecutor. */
 const freshExecution = (runId: RunId, attemptId: AttemptId) => {
@@ -105,10 +106,11 @@ describe("local worker runaway guard", () => {
             interruptGrace: "100 millis",
             harnessReadiness: harnessReady,
           }).pipe(
+            Layer.provide(harnessesLive),
             Layer.provide(MarcbachmannCelLayer),
             Layer.provide(credentialLayer),
             Layer.provide(stubAttemptRuntime(storage, spender)),
-            Layer.provide(claudeLoginLockLayer),
+            Layer.provide(hostLoginLockLayer),
             Layer.provide(alwaysHoldsLayer),
             Layer.provide(fixedConfigLayer(ceiling)),
             Layer.provide(testAppLayer),
@@ -146,9 +148,10 @@ describe("local worker runaway guard", () => {
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
         }).pipe(
+          Layer.provide(harnessesLive),
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(storage, idle)),
-          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(hostLoginLockLayer),
         );
         const decodedValue1 = yield* config;
         const ceiling = UsineConfig.make({

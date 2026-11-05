@@ -58,6 +58,10 @@
     "./harness": {
       "types": "./dist/harness/catalog.d.ts",
       "default": "./dist/harness/catalog.js"
+    },
+    "./harness/node": {
+      "types": "./dist/harness/node.d.ts",
+      "default": "./dist/harness/node.js"
     }
   },
   "publishConfig": {
