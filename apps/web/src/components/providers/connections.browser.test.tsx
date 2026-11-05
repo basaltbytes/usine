@@ -137,3 +137,52 @@ it.each([
     }
   },
 );
+
+it("shows a missing harness on its provider and keeps the other provider's controls", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const state: ProviderStatus = {
+    targets: [
+      {
+        target: "local",
+        label: "Local harnesses",
+        providers: [
+          {
+            provider: "anthropic",
+            error: "Claude Code not found on PATH. Install it to connect Claude.",
+          },
+          { provider: "openai", credential: null, expiresAt: null, lastRefresh: null },
+        ],
+      },
+    ],
+    logins: [],
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(state);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <ProviderConnections />
+        </QueryClientProvider>,
+      ),
+    );
+    await expect
+      .element(page.getByText("Claude Code not found on PATH. Install it to connect Claude."))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Connect ChatGPT", exact: true }))
+      .toBeVisible();
+    expect(
+      page.getByRole("button", { name: "Connect Claude", exact: true }).elements(),
+    ).toHaveLength(0);
+    expect(host.querySelectorAll("details")).toHaveLength(1);
+  } finally {
+    root.unmount();
+    host.remove();
+    client.clear();
+    globalThis.fetch = originalFetch;
+  }
+});

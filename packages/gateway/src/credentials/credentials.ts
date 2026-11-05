@@ -7,5 +7,11 @@ export {
   credentialProvider,
 } from "./model.ts";
 export { ProviderCredentials } from "./store.ts";
-export { LoginProvider, ProviderLoginState, ProviderLoginView, ProviderStatus } from "./model.ts";
+export {
+  LoginProvider,
+  loginLlmProvider,
+  ProviderLoginState,
+  ProviderLoginView,
+  ProviderStatus,
+} from "./model.ts";
 export { readAuthFile } from "../chatgpt/auth-file.ts";

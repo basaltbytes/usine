@@ -39,6 +39,21 @@ import {
   working,
 } from "./strings";
 
+export const ProviderUnavailableRow = ({
+  provider,
+  message,
+}: {
+  readonly provider: LoginProvider;
+  readonly message: string;
+}) => (
+  <section className="flex flex-col gap-1 border-t py-4" aria-label={providerNames[provider]}>
+    <h3 className="font-medium">{providerNames[provider]}</h3>
+    <p className="text-xs text-muted-foreground" role="status">
+      {message}
+    </p>
+  </section>
+);
+
 type ProviderConnectionRowProps = {
   readonly target: string;
   readonly provider: LoginProvider;

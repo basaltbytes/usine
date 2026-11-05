@@ -36693,57 +36693,81 @@
                               "providers": {
                                 "type": "array",
                                 "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string",
-                                      "enum": [
-                                        "anthropic",
-                                        "openai"
-                                      ]
-                                    },
-                                    "credential": {
-                                      "anyOf": [
-                                        {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
                                           "type": "string",
                                           "enum": [
-                                            "api-key",
-                                            "subscription"
+                                            "anthropic",
+                                            "openai"
                                           ]
                                         },
-                                        {
-                                          "type": "null"
-                                        }
-                                      ]
-                                    },
-                                    "expiresAt": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string"
+                                        "credential": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "enum": [
+                                                "api-key",
+                                                "subscription"
+                                              ]
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
-                                        {
-                                          "type": "null"
-                                        }
-                                      ]
-                                    },
-                                    "lastRefresh": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string"
+                                        "expiresAt": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         },
-                                        {
-                                          "type": "null"
+                                        "lastRefresh": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
                                         }
-                                      ]
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "credential",
+                                        "expiresAt",
+                                        "lastRefresh"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string",
+                                          "enum": [
+                                            "anthropic",
+                                            "openai"
+                                          ]
+                                        },
+                                        "error": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "error"
+                                      ],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "credential",
-                                    "expiresAt",
-                                    "lastRefresh"
-                                  ],
-                                  "additionalProperties": false
+                                  ]
                                 }
                               }
                             },

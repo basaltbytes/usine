@@ -60,6 +60,8 @@ Local preflight and attempt children use the same credential directories. If one
 
 Local preflight and children accept subscription credentials and API keys. Claude setup tokens count as subscription credentials. Children report API-key usage in the API keys pool and subscription usage in the matching plan pool.
 
+Without a gateway, usine reads each provider's status separately. If `claude` isn't on the `PATH` of the user running `usine up`, Claude shows as unavailable and `usine login claude` reports the missing command; ChatGPT remains available, as in the Codex-only quickstart.
+
 Local Claude status uses `claude auth status --json`, including macOS Keychain logins. Disconnect runs `claude auth logout`, removes usine's settings overrides and file credentials, and verifies that Claude reports signed out. It clears the native login for the configured Claude directory, including an older login that a replacement credential overrides.
 
 Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Connect replaces `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default), and disconnect removes it. Keyring credentials remain available to Codex commands run outside usine. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.

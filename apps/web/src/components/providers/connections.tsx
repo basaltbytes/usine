@@ -3,7 +3,7 @@ import { Button } from "~/components/ui/button";
 import { rejectionMessage } from "~/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { providersQuery } from "~/lib/providers/queries";
-import { ProviderConnectionRow } from "./connection";
+import { ProviderConnectionRow, ProviderUnavailableRow } from "./connection";
 import { providersTitle, providersHelp, targetLabel, refreshProviders } from "./strings";
 
 export const ProviderConnections = () => {
@@ -35,7 +35,13 @@ export const ProviderConnections = () => {
               ) : (
                 destination.providers.map((connection) => {
                   const provider = connection.provider === "anthropic" ? "claude" : "chatgpt";
-                  return (
+                  return "error" in connection ? (
+                    <ProviderUnavailableRow
+                      key={provider}
+                      provider={provider}
+                      message={connection.error}
+                    />
+                  ) : (
                     <ProviderConnectionRow
                       key={provider}
                       target={target}

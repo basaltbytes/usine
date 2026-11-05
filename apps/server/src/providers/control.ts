@@ -1,5 +1,6 @@
 import { Context, Crypto, Effect, Fiber, Layer, Redacted, Semaphore } from "effect";
 import {
+  loginLlmProvider,
   type LoginProvider,
   type ProviderLoginView,
   ProviderCredentialError,
@@ -73,7 +74,12 @@ export class ProviderLogins extends Context.Service<
           lock.withPermit(
             Effect.gen(function* () {
               yield* Effect.annotateCurrentSpan({ target, provider });
-              yield* targets.get(target);
+              const { providers } = yield* targets.get(target);
+              const connection = providers.find(
+                (entry) => entry.provider === loginLlmProvider(provider),
+              );
+              if (connection !== undefined && "error" in connection)
+                return yield* ProviderCredentialError.make({ message: connection.error });
               for (const [id, session] of sessions) {
                 if (session.view.target !== target || session.view.provider !== provider) continue;
                 if (active(session)) {
@@ -201,7 +207,7 @@ export class ProviderLogins extends Context.Service<
                     active(session)
                   )
                     yield* stop(session);
-                yield* targets.disconnect(target, provider === "claude" ? "anthropic" : "openai");
+                yield* targets.disconnect(target, loginLlmProvider(provider));
               }),
             ),
         ),

@@ -27,9 +27,13 @@ export const ProviderConnection = Schema.Struct({
 });
 export type ProviderConnection = typeof ProviderConnection.Type;
 export const ProviderConnections = Schema.Struct({ providers: Schema.Array(ProviderConnection) });
+/** A provider whose status could not be read on its destination, such as a missing harness. */
+const ProviderUnavailable = Schema.Struct({ provider: LlmProviderName, error: Schema.String });
 
 export const LoginProvider = Schema.Literals(["claude", "chatgpt"]);
 export type LoginProvider = typeof LoginProvider.Type;
+export const loginLlmProvider = (provider: LoginProvider): LlmProviderName =>
+  provider === "claude" ? "anthropic" : "openai";
 export const ProviderLoginState = Schema.Union([
   Schema.Struct({ status: Schema.Literal("starting") }),
   Schema.Struct({
@@ -52,7 +56,7 @@ export type ProviderLoginView = typeof ProviderLoginView.Type;
 export const ProviderTarget = Schema.Struct({
   target: Schema.String,
   label: Schema.String,
-  providers: Schema.Array(ProviderConnection),
+  providers: Schema.Array(Schema.Union([ProviderConnection, ProviderUnavailable])),
 });
 export type ProviderTarget = typeof ProviderTarget.Type;
 export const ProviderStatus = Schema.Struct({

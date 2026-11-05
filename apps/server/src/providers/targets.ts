@@ -33,6 +33,10 @@ import {
 const quoteCurl = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
 const Json = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json));
 const failed = (message: string) => ProviderCredentialError.make({ message });
+const unreachableClaude = () =>
+  failed(
+    "Could not check or clear the local Claude login. Check Claude Code and its native credential store.",
+  );
 const localFailure = () =>
   failed("Could not read or save the local harness login. Check its directory permissions.");
 const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
@@ -61,25 +65,33 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
     yield* Effect.annotateCurrentSpan({ target: "local", provider: "anthropic", action });
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const child = yield* spawner.spawn(
-          ChildProcess.make(
-            "claude",
-            [
-              "--setting-sources",
-              "user",
-              "auth",
-              action,
-              ...(action === "status" ? ["--json"] : []),
-            ],
-            {
-              env: { HOME: home, PATH: path, CLAUDE_CONFIG_DIR: claudeHome },
-              extendEnv: false,
-              stdin: "ignore",
-              stderr: "ignore",
-              stdout: action === "status" ? "pipe" : "ignore",
-            },
-          ),
-        );
+        const child = yield* spawner
+          .spawn(
+            ChildProcess.make(
+              "claude",
+              [
+                "--setting-sources",
+                "user",
+                "auth",
+                action,
+                ...(action === "status" ? ["--json"] : []),
+              ],
+              {
+                env: { HOME: home, PATH: path, CLAUDE_CONFIG_DIR: claudeHome },
+                extendEnv: false,
+                stdin: "ignore",
+                stderr: "ignore",
+                stdout: action === "status" ? "pipe" : "ignore",
+              },
+            ),
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              error.reason._tag === "NotFound"
+                ? failed("Claude Code not found on PATH. Install it to connect Claude.")
+                : error,
+            ),
+          );
         const output = yield* Stream.mkString(Stream.decodeText(child.stdout));
         const exitCode = yield* child.exitCode;
         const exit = Number(exitCode);
@@ -91,11 +103,10 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
       }),
     ).pipe(
       Effect.timeout("30 seconds"),
-      Effect.mapError(() =>
-        failed(
-          "Could not check or clear the local Claude login. Check Claude Code and its native credential store.",
-        ),
-      ),
+      Effect.catchTags({
+        PlatformError: () => unreachableClaude(),
+        TimeoutError: () => unreachableClaude(),
+      }),
       Effect.tapError((error) =>
         Effect.logWarning("Local Claude authentication command failed", {
           action,
@@ -211,7 +222,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         ),
     }),
   );
-  const localStatus = Effect.gen(function* () {
+  const claudeConnection = Effect.gen(function* () {
     const claude = yield* claudeStatus;
     const nativeClaude = yield* read(`${claudeHome}/.credentials.json`);
     const claudeLogin = Schema.decodeUnknownOption(
@@ -220,6 +231,29 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         expiresAt: Schema.optionalKey(Schema.Finite),
       }),
     )(nativeClaude.claudeAiOauth);
+    return {
+      provider: "anthropic" as const,
+      credential:
+        !claude.loggedIn || claude.apiProvider !== "firstParty"
+          ? null
+          : claude.authMethod === "api_key"
+            ? ("api-key" as const)
+            : ["claude.ai", "oauth_token"].includes(claude.authMethod)
+              ? ("subscription" as const)
+              : null,
+      expiresAt:
+        claude.loggedIn &&
+        claude.authMethod === "claude.ai" &&
+        Option.isSome(claudeLogin) &&
+        claudeLogin.value.expiresAt !== undefined
+          ? Option.getOrNull(
+              Option.map(DateTime.make(claudeLogin.value.expiresAt), DateTime.formatIso),
+            )
+          : null,
+      lastRefresh: null,
+    };
+  });
+  const codexConnection = Effect.gen(function* () {
     const codex = yield* read(codexFile);
     const tokenFields = Schema.decodeUnknownOption(
       Schema.Struct({
@@ -234,42 +268,35 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
           Effect.asSome,
         )
       : Option.none();
-    return [
-      {
-        provider: "anthropic" as const,
-        credential:
-          !claude.loggedIn || claude.apiProvider !== "firstParty"
-            ? null
-            : claude.authMethod === "api_key"
-              ? ("api-key" as const)
-              : ["claude.ai", "oauth_token"].includes(claude.authMethod)
-                ? ("subscription" as const)
-                : null,
-        expiresAt:
-          claude.loggedIn &&
-          claude.authMethod === "claude.ai" &&
-          Option.isSome(claudeLogin) &&
-          claudeLogin.value.expiresAt !== undefined
-            ? Option.getOrNull(
-                Option.map(DateTime.make(claudeLogin.value.expiresAt), DateTime.formatIso),
-              )
-            : null,
-        lastRefresh: null,
-      },
-      {
-        provider: "openai" as const,
-        credential: Option.isSome(tokenFields)
-          ? ("subscription" as const)
-          : Option.isSome(Schema.decodeUnknownOption(Schema.NonEmptyString)(codex.OPENAI_API_KEY))
-            ? ("api-key" as const)
-            : null,
-        expiresAt: Option.getOrNull(
-          Option.flatMap(codexTokens, (tokens) => Option.map(tokens.expiresAt, DateTime.formatIso)),
-        ),
-        lastRefresh: Option.isSome(tokenFields) ? (tokenFields.value.last_refresh ?? null) : null,
-      },
-    ];
+    return {
+      provider: "openai" as const,
+      credential: Option.isSome(tokenFields)
+        ? ("subscription" as const)
+        : Option.isSome(Schema.decodeUnknownOption(Schema.NonEmptyString)(codex.OPENAI_API_KEY))
+          ? ("api-key" as const)
+          : null,
+      expiresAt: Option.getOrNull(
+        Option.flatMap(codexTokens, (tokens) => Option.map(tokens.expiresAt, DateTime.formatIso)),
+      ),
+      lastRefresh: Option.isSome(tokenFields) ? (tokenFields.value.last_refresh ?? null) : null,
+    };
   });
+  const isolated = <A>(
+    provider: "anthropic" | "openai",
+    connection: Effect.Effect<A, ProviderCredentialError>,
+  ) =>
+    connection.pipe(
+      Effect.catchTag("ProviderCredentialError", (error) =>
+        Effect.logWarning("Local provider status unavailable", {
+          provider,
+          message: error.message,
+        }).pipe(Effect.as({ provider, error: error.message })),
+      ),
+    );
+  const localStatus = Effect.all(
+    [isolated("anthropic", claudeConnection), isolated("openai", codexConnection)],
+    { concurrency: "unbounded" },
+  );
   const replaceLocal = (credential: ProviderCredential) =>
     Effect.gen(function* () {
       if (credentialProvider(credential) === "anthropic") {

@@ -80,7 +80,8 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
       const targets = Context.get(context, ProviderTargets);
       const credential = Effect.map(targets.get("local"), ({ providers }) => {
         assert.notInclude(jsonKey(providers), "fixture-native-secret");
-        return providers.find(({ provider }) => provider === "anthropic")?.credential;
+        const claude = providers.find(({ provider }) => provider === "anthropic");
+        return claude !== undefined && "credential" in claude ? claude.credential : claude?.error;
       });
       const nativeCredential = yield* credential;
       assert.equal(nativeCredential, "subscription");

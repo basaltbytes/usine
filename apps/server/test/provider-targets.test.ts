@@ -44,6 +44,10 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ProviderLogins } from "../src/providers/control.ts";
 import { ProviderLoginRunner } from "../src/providers/runner.ts";
 import { ProviderTargets } from "../src/providers/targets.ts";
+import type { ProviderTarget } from "@usine/gateway/credentials";
+
+const credentialOf = (connection: ProviderTarget["providers"][number] | undefined) =>
+  connection !== undefined && "credential" in connection ? connection.credential : undefined;
 
 it.live(
   "hands credentials to the gateway admin API and updates routing; uses native files without a gateway",
@@ -223,7 +227,7 @@ ${["missing-token", "unreachable", "outdated"]
         );
         assert.equal(
           connected[0] !== undefined && "providers" in connected[0]
-            ? connected[0].providers[0]?.credential
+            ? credentialOf(connected[0].providers[0])
             : undefined,
           "api-key",
         );
@@ -258,7 +262,7 @@ ${["missing-token", "unreachable", "outdated"]
         );
         assert.equal(
           removed[0] !== undefined && "providers" in removed[0]
-            ? removed[0].providers[0]?.credential
+            ? credentialOf(removed[0].providers[0])
             : undefined,
           null,
         );
@@ -353,10 +357,93 @@ ${["missing-token", "unreachable", "outdated"]
         const empty = yield* local.list;
         assert.deepEqual(
           empty[0] !== undefined && "providers" in empty[0]
-            ? empty[0].providers.map(({ credential }) => credential)
+            ? empty[0].providers.map(credentialOf)
             : undefined,
           [null, null],
         );
       }),
     ).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer])),
+);
+
+it.live("manages ChatGPT on a local host without Claude Code", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped();
+      const store = yield* ConfigurationStore;
+      const targetsContext = yield* Layer.build(
+        ProviderTargets.layer(Effect.succeed([])).pipe(
+          Layer.provide(Layer.succeed(ConfigurationStore, store)),
+          Layer.provide(
+            Layer.succeed(
+              ConfigProvider.ConfigProvider,
+              ConfigProvider.fromUnknown({ HOME: directory, PATH: directory }),
+            ),
+          ),
+        ),
+      );
+      const targets = Context.get(targetsContext, ProviderTargets);
+      let starts = 0;
+      const loginContext = yield* Layer.build(
+        ProviderLogins.layer.pipe(
+          Layer.provide([
+            Layer.succeed(ProviderTargets, targets),
+            Layer.succeed(ProviderLoginRunner, {
+              start: () =>
+                Effect.sync(() => {
+                  starts += 1;
+                  return {
+                    prompt: Effect.succeed({
+                      url: "https://auth.openai.com/codex/device",
+                      code: "ABCD-EFGH",
+                    }),
+                    result: Effect.never,
+                    submit: () => Effect.void,
+                  };
+                }),
+            }),
+          ]),
+        ),
+      );
+      const logins = Context.get(loginContext, ProviderLogins);
+      const providers = Effect.map(logins.status, ({ targets: [local] }) => {
+        assert(local !== undefined && "providers" in local);
+        const [claude, chatgpt] = local.providers;
+        assert(claude !== undefined && "error" in claude);
+        assert.equal(claude.provider, "anthropic");
+        assert.include(claude.error, "Claude Code not found on PATH");
+        assert(chatgpt !== undefined && "credential" in chatgpt);
+        return chatgpt;
+      });
+      const initial = yield* providers;
+      assert.deepEqual(initial, {
+        provider: "openai",
+        credential: null,
+        expiresAt: null,
+        lastRefresh: null,
+      });
+
+      const login = yield* logins.begin("local", "chatgpt");
+      yield* Effect.sleep("20 millis");
+      assert.equal(starts, 1);
+      yield* logins.cancel(login.id);
+      const refused = yield* logins.begin("local", "claude").pipe(Effect.flip);
+      assert.include(refused.message, "Claude Code not found on PATH");
+      assert.equal(starts, 1);
+
+      yield* logins.apiKey("local", "chatgpt", Redacted.make("fixture-openai-key"));
+      const connected = yield* providers;
+      assert.equal(connected.credential, "api-key");
+      assert.notInclude(jsonKey(connected), "fixture-openai-key");
+      yield* logins.disconnect("local", "chatgpt");
+      assert.equal((yield* providers).credential, null);
+    }),
+  ).pipe(
+    Effect.provide(
+      memoryConfigurationLayer.pipe(
+        Layer.provide(ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer))),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
 );

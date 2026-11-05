@@ -1,5 +1,5 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import { ProviderLoginView, ProviderStatus } from "@usine/gateway/credentials";
+import { loginLlmProvider, ProviderLoginView, ProviderStatus } from "@usine/gateway/credentials";
 import { Console, Effect, Option, Redacted, Schema } from "effect";
 import { Prompt } from "effect/cli";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
@@ -59,6 +59,11 @@ export const providerCommand = Effect.fn("Cli.providerLogin")(function* (
       400,
     );
   if ("error" in target) return yield* authFailure(`${target.label}: ${target.error}`, 503);
+  const connection = target.providers.find(
+    ({ provider }) => provider === loginLlmProvider(command.provider),
+  );
+  if (connection !== undefined && "error" in connection)
+    return yield* authFailure(`${target.label}: ${connection.error}`, 503);
   const body = { target: target.target, provider: command.provider };
   const ok = Schema.Struct({ ok: Schema.Boolean });
   if (command.action === "logout") {
