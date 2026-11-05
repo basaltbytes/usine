@@ -4,6 +4,8 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { safeSegment } from "@usine/core/repository";
 import { Effect, Option, Ref } from "effect";
+import type { ExecutorOperation } from "../executor.ts";
+import type { AttemptIsolation } from "../remote/container.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import { directChildren } from "../remote/sweep.ts";
 import type { SshMachine } from "./model.ts";
@@ -95,14 +97,49 @@ export const attemptHomesFor = Effect.fn("SshExecutor.attemptHomesFor")(function
     return home;
   });
 
+  const mounts = Effect.fn("SshExecutor.prepareSessionMounts")(function* (
+    machine: SshMachine,
+    attemptId: AttemptId,
+    harness: Option.Option<Harness>,
+    isolation: AttemptIsolation,
+    operation: ExecutorOperation,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name });
+    if (isolation._tag === "SharedUser") return [];
+    const directories = catalog.descriptors
+      .filter(({ id }) => Option.isNone(harness) || harness.value === id)
+      .flatMap((descriptor) =>
+        Option.toArray(descriptor.worker.sessionDirectory).map((directory) => ({
+          descriptor,
+          directory,
+        })),
+      );
+    return yield* Effect.forEach(directories, ({ descriptor, directory }) =>
+      Effect.gen(function* () {
+        const home = yield* hold(machine, attemptId, descriptor);
+        yield* commands.run(operation, machine.shell, "sh", [
+          "-c",
+          'umask 077; mkdir -p "$1"',
+          "sh",
+          home,
+        ]);
+        yield* Effect.logInfo("Prepared the attempt's persistent session directory", {
+          attemptId,
+          worker: machine.address.name,
+          harness: descriptor.id,
+          home,
+        });
+        return { source: home, destination: `/home/usine/${directory}` };
+      }),
+    );
+  });
+
   const sweep = Effect.fn("SshExecutor.sweepAttemptHomes")(function* (machine: SshMachine) {
     const worker = machine.address.name;
     const host = machine.shell.destination;
     yield* Effect.annotateCurrentSpan({ worker, host });
     yield* Effect.forEach(
-      catalog.descriptors.filter(({ worker }) =>
-        Option.exists(worker.credential, ({ home }) => Option.isSome(home)),
-      ),
+      catalog.descriptors.filter(({ worker }) => worker.hasAttemptHome),
       (descriptor) =>
         sweepHarness(machine, descriptor).pipe(
           Effect.tapError((error) =>
@@ -167,7 +204,7 @@ export const attemptHomesFor = Effect.fn("SshExecutor.attemptHomesFor")(function
     );
   });
 
-  return { hold, sweep };
+  return { hold, mounts, sweep };
 });
 
 /** The harness homes of the SSH executor's Attempts. See `attemptHomesFor`. */

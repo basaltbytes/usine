@@ -95,6 +95,7 @@ for (const address of [hetznerAddress, boatAddress]) {
             "reset removes every registered harness home before reusing the machine",
           );
           assert.include(reset.line, "/codex'");
+          assert.include(reset.line, "/claude'", "reset removes orphan Claude session directories");
           const reused = yield* machines.create(WORKER, MACHINE_RUN, second, [TEST_AGENT.brain]);
           assert.isTrue(records.has(second));
           assert.strictEqual(reused.id, first.id);

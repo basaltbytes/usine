@@ -105,8 +105,20 @@ export class WorkerRequirements extends Schema.Class<
     /** Paths under the worker home copied when the container starts. */
     seeded: Schema.Array(Schema.NonEmptyString),
   }),
+  /** Session directory under the container home, persisted separately from login files. */
+  sessionDirectory: Schema.Option(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+    Schema.withDecodingDefaultKey(Effect.succeedNone),
+  ),
   credential: Schema.Option(HarnessCredential),
-}) {}
+}) {
+  get hasAttemptHome(): boolean {
+    return (
+      Option.isSome(this.sessionDirectory) ||
+      Option.exists(this.credential, ({ home }) => Option.isSome(home))
+    );
+  }
+}
 
 /** US dollars per million tokens. Cache writes use the input rate when no rate is supplied. */
 const TokenRates = Schema.Struct({

@@ -129,7 +129,7 @@ export const sshWorkerRecordsFor = Effect.fn("SshExecutor.workerRecordsFor")(fun
     const workerDirectory = workerDirectoryOf(record.value);
     const attemptHomes = attempts.flatMap((attemptId) =>
       catalog.descriptors
-        .filter(({ worker }) => Option.exists(worker.credential, ({ home }) => Option.isSome(home)))
+        .filter(({ worker }) => worker.hasAttemptHome)
         .map(({ id }) => attemptHomeIn(workerDirectory, attemptId, id)),
     );
     const fields = {

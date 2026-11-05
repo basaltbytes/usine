@@ -1208,7 +1208,7 @@ describe("SSH Worker behind a Gateway", () => {
   );
 
   it.effect.each(["absent", "running"] as const)(
-    "removes the Codex homes of discarded Attempts after usine.yaml stops declaring the Worker (Docker %s)",
+    "removes harness homes of discarded Attempts after usine.yaml stops declaring the Worker (Docker %s)",
     (docker) => {
       const machine = fakeMachine();
       machine.state.docker = docker;
@@ -1219,6 +1219,9 @@ describe("SSH Worker behind a Gateway", () => {
       machine.state.attemptHomes.set(crashed, false);
       machine.state.attemptHomes.set(kept, true);
       machine.state.attemptHomes.set(other, false);
+      for (const home of [crashed, kept, other])
+        machine.state.attemptHomes.set(home.replace("/codex/", "/claude/"), home === kept);
+      const claudeOther = other.replace("/codex/", "/claude/");
       const record = `${LOCAL_TEMPORARY_DIRECTORY}/${WORKER}.json`;
       return Effect.gen(function* () {
         // The executor recorded the Worker when it added it; a reload then removed it.
@@ -1239,7 +1242,7 @@ describe("SSH Worker behind a Gateway", () => {
           AttemptId.make("crashed-run/execute/1"),
           AttemptId.make("kept-run/execute/1"),
         ]);
-        assert.sameMembers([...machine.state.attemptHomes.keys()], [other]);
+        assert.sameMembers([...machine.state.attemptHomes.keys()], [other, claudeOther]);
         const removal = machine.state.calls.at(-1);
         assert.includeMembers(
           [...(removal?.command.args ?? [])],
@@ -1248,7 +1251,7 @@ describe("SSH Worker behind a Gateway", () => {
         // An unreachable machine doesn't fail the discard.
         machine.state.reachable = false;
         yield* records.discard(WORKER, [AttemptId.make("other-run/execute/1")]);
-        assert.sameMembers([...machine.state.attemptHomes.keys()], [other]);
+        assert.sameMembers([...machine.state.attemptHomes.keys()], [other, claudeOther]);
       }).pipe(
         Effect.provide(
           gatewayRuntime(machine, mintingProvider(), gateway, {

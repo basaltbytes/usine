@@ -73,9 +73,7 @@ export const machineResetFor = (
         "gh",
         "container-checkouts",
         ...catalog.descriptors
-          .filter(({ worker }) =>
-            Option.exists(worker.credential, ({ home }) => Option.isSome(home)),
-          )
+          .filter(({ worker }) => worker.hasAttemptHome)
           .map(({ id }) => safeSegment(id)),
       ].map((directory) => `${machine.workerDirectory}/${directory}`),
     ]);

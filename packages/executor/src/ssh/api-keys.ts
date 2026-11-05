@@ -105,7 +105,10 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
       ...access.apiKeyHarnesses,
       ...keyed.map(({ descriptor }) => descriptor.id),
     ]),
-    writablePaths: [...access.writablePaths, ...wirings.flatMap(({ homes }) => homes)],
+    writableMounts: [
+      ...access.writableMounts,
+      ...wirings.flatMap(({ homes }) => homes.map((home) => ({ source: home, destination: home }))),
+    ],
     environment: {
       ...access.environment,
       ...Object.assign({}, ...wirings.map(({ wiring }) => wiring.environment)),

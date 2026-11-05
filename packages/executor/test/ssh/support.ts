@@ -607,9 +607,12 @@ export const fakeMachine = () => {
       state.attemptHomes.delete(home);
       return oneShotHandle("removed", 0);
     }
-    // Lists the Codex homes whose Attempt has no checkout.
+    // Lists harness homes whose attempt has no checkout.
     if (line.includes("basename")) {
-      const listed = [...state.attemptHomes].filter(([, checkout]) => !checkout);
+      const root = remoteWords(line).at(-2) ?? "";
+      const listed = [...state.attemptHomes].filter(
+        ([home, checkout]) => home.startsWith(`${root}/`) && !checkout,
+      );
       return oneShotHandle(listed.map(([home]) => `${home}${NUL}`).join(""), 0);
     }
     // Writes configuration files: path and contents pairs after the script and `$0`.

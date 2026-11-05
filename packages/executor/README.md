@@ -1,6 +1,6 @@
 # @usine/executor
 
-Gateway, provisioner API-key, and Cloudflare environment wiring reads the registered harness descriptors. Credential preparation selects the attempt's harness before adding its variables or forwarding tokens; repository-only recovery commands use the base git and gh environment. Other harnesses' variables and provisioner API keys do not enter the launched process or its tool commands. SSH gateway preflight requires `AcceptEnv` only for the base git and gh variables and harness tokens whose protocols the gateway serves. SSH attempt homes are tracked per harness and attempt and mounted writable when required. Scope closure removes a home only after its attempt checkout is gone, preserving Codex threads across orchestrator stops and restarts. Claude Code sessions in attempt containers are stored in the container and are lost when it is removed. Cleanup preserves homes still in use or associated with an existing checkout.
+Gateway, provisioner API-key, and Cloudflare environment wiring reads the registered harness descriptors. Credential preparation selects the attempt's harness before adding its variables or forwarding tokens; repository-only recovery commands use the base git and gh environment. Other harnesses' variables and provisioner API keys do not enter the launched process or its tool commands. SSH gateway preflight requires `AcceptEnv` only for the base git and gh variables and harness tokens whose protocols the gateway serves. SSH attempt homes are tracked per harness and attempt and mounted writable when required. Scope closure removes a home only after its attempt checkout is gone, preserving Codex threads and Claude Code container sessions across orchestrator stops and restarts. Claude projects are stored in `<root>/workers/<name>/claude/<attempt>` and mounted writable at `/home/usine/.claude/projects`, separately from the existing credential mounts. Shared-user SSH uses the worker login and session directories. Cleanup preserves homes still in use or associated with an existing checkout.
 
 Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free root defines worker preflight, scoped attempt preparation, and cancellation, plus the credential provider, worker capability errors, and adapter-neutral request types. Each prepared attempt runs its Pi parent in this process as a durable task, tells it where the worker runs children (local processes, SSH on an exe.dev VM or any Linux machine, or a Cloudflare sandbox), and releases its resources at completion or when its scope closes. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) and [Workers and the gateway](https://github.com/basaltbytes/usine/blob/main/docs/architecture/workers-and-gateway.mdx) cover the executors.
 
@@ -53,7 +53,7 @@ A request whose `resume` names a pushed salvage fetches the revision and applies
 
 Startup reconciliation lists each worker connection's `attempts/` once per executor instance, and adapters skip historical attempts missing from the listing without checking paths. A failed listing stays cached for that startup and is retried after a restart. Existing checkouts keep the record-before-remove salvage order; succeeded attempts only need removal. `recover` has no `CheckoutRequest`, so its caller passes the salvage commit's author as an effect, which runs only before a salvage: the orchestrator reads the App's bot account there.
 
-`Executor.sweep` removes the files on the workers that no attempt holds or can use. The orchestrator runs it after startup recovery and at each reconcile. It never fails and logs what it couldn't remove. The SSH executor removes Codex homes there (see [Behind a gateway](#behind-a-gateway)); the local, exe.dev, and Cloudflare executors remove nothing.
+`Executor.sweep` removes the files on the workers that no attempt holds or can use. The orchestrator runs it after startup recovery and at each reconcile. It never fails and logs what it couldn't remove. The SSH executor removes Codex homes and Claude project directories there (see [Behind a gateway](#behind-a-gateway)); the local, exe.dev, and Cloudflare executors remove nothing.
 
 ### Cancel
 
@@ -242,7 +242,7 @@ attempt can finish after the age limit. Provider metadata records the current at
 count for restart recovery. Older machines without a count are recovered but not reused.
 
 Reset removes attempt containers and their anonymous volumes, checkouts, credentials, and
-Codex homes. Shared pnpm and Turbo cache volumes and the pulled image remain.
+Codex homes and Claude project directories. Shared pnpm and Turbo cache volumes and the pulled image remain.
 `machines` includes idle machines, assignment counts, and creation times. `starts` returns
 acknowledged provider creations by worker and UTC day, including failed preflights. The
 counts persist in `machine-starts.json` under `knownHostsDirectory`; use a persistent directory

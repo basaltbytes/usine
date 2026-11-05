@@ -14,7 +14,7 @@ import type {
 } from "../executor.ts";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteCommands } from "./commands.ts";
-import type { AttemptIsolation } from "./container.ts";
+import type { AttemptIsolation, WritableMount } from "./container.ts";
 import type { ProbeConnection } from "./liveness.ts";
 
 /** A machine with checkouts left for reconciliation. */
@@ -48,7 +48,7 @@ export interface RemoteAccess {
   /** The machine directories that the Attempt's container mounts read-only, such as its credential directory. */
   readonly readOnlyPaths: ReadonlyArray<string>;
   /** The machine directories of the Attempt that its container mounts read-write, such as a harness's home. */
-  readonly writablePaths: ReadonlyArray<string>;
+  readonly writableMounts: ReadonlyArray<WritableMount>;
   /** The extra environment for the Attempt's children and harvesting commands. Values appear in the command line, so none can be secret. */
   readonly environment: Readonly<Record<string, string>>;
   /** The extra environment for the executor's git commands on the checkout. Values appear in the command line, so none can be secret. */

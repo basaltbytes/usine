@@ -289,6 +289,7 @@ describe("SSH Worker with Docker", () => {
           `type=bind,"source=${WORKTREE}","destination=${WORKTREE}"`,
           `type=bind,"source=${CACHE}","destination=${CACHE}",readonly`,
           `type=bind,"source=${CREDENTIALS}","destination=${CREDENTIALS}",readonly`,
+          `type=bind,"source=${WORKER_ROOT}/claude/remote-run_execute_1","destination=/home/usine/.claude/projects"`,
           `type=bind,"source=/home/usine/.claude/.credentials.json","destination=/home/usine/.claude/.credentials.json"`,
           `type=bind,"source=/home/usine/.claude.json","destination=/usr/local/share/usine/seed/.claude.json",readonly`,
         ]);
