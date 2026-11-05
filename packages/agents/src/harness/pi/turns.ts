@@ -37,6 +37,7 @@ export const piPauseGate = Effect.gen(function* () {
 /** Runs successive Pi turns in one SDK session; the conversation decides when the session completes. */
 export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   readonly session: ChildSession;
+  readonly held: boolean;
   readonly sdk: PiSession;
   readonly channel: SessionChannel;
   readonly prompt: string;
@@ -88,6 +89,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   const conversation = yield* sessionConversation({
     session: options.session,
     channel: options.channel,
+    held: options.held,
     send: (message, activity) =>
       activity === "idle"
         ? startTurn(message).pipe(Effect.as("read" as const))

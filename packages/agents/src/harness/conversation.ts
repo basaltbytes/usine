@@ -13,6 +13,7 @@ export type MessageTaken = "read" | "queued";
 interface ConversationOptions {
   readonly session: ChildSession;
   readonly channel: SessionChannel;
+  readonly held: boolean;
   /**
    * Queues a message during a turn, or starts another turn in an idle session. If it returns
    * `queued`, the harness reports the read later through `read`.
@@ -43,7 +44,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
 ) {
   const { session, channel } = options;
   const mutex = yield* Semaphore.make(1);
-  let held = false;
+  let held = options.held;
   let paused = false;
   let idle = Option.none<string>();
   let closing = false;

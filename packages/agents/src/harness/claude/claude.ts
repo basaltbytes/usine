@@ -566,6 +566,7 @@ const makeClaudeChild = Effect.gen(function* () {
       const conversation = yield* sessionConversation({
         session,
         channel,
+        held: request.held,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
         send: (message, activity) =>
           Effect.try({

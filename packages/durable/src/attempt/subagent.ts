@@ -263,6 +263,15 @@ export const subagentTool = (services: ExtensionServices) => {
           brain: spec.agent.brain,
           gatewayCredential: yield* request.gatewayCredential,
         });
+    const held = yield* call("restore the child's Hold", async () => {
+      const hold = await api.snapshot(HoldDoc, owner.taskId, context);
+      return hold?.held.includes(sessionId) ?? false;
+    });
+    if (held)
+      yield* Effect.logInfo("Restoring the child's operator Hold before launch", {
+        attemptId: spec.attemptId,
+        sessionId,
+      });
     const childRequest = ChildRequest.make({
       session,
       cwd: WorkingDirectory.make(request.cwd),
@@ -271,6 +280,7 @@ export const subagentTool = (services: ExtensionServices) => {
       worker: request.worker,
       machine: request.machine,
       resume: Option.map(saved, (child) => child.harnessSession),
+      held,
       prompt: assembleChildPrompt({
         baseCommit: spec.baseCommit,
         agent: spec.agent.name,

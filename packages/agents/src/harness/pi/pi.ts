@@ -183,6 +183,7 @@ const makePiChild = Effect.gen(function* () {
             );
             const controls = yield* piTurns({
               session,
+              held: request.held,
               sdk: started.session,
               channel,
               gate,

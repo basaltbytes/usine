@@ -53,6 +53,8 @@ export class ChildRequest extends Schema.Class<
   resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
   ),
+  /** Keeps the child addressable after a turn until the operator releases its persisted Hold. */
+  held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /**
    * The complete environment of the child process and its commands: the worker's allowlisted
    * variables plus the attempt's credential configuration, with nothing inherited from the launching

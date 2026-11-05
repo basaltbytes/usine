@@ -401,6 +401,7 @@ const makeCodexChild = Effect.gen(function* () {
       const conversation = yield* sessionConversation({
         session,
         channel,
+        held: request.held,
         send: steer,
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
         beforeFinish: Effect.suspend(() => connection.close),
