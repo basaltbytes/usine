@@ -112,6 +112,8 @@ A child's provider capacity refusal remains `ProviderCapacityFailure` when the p
 
 Live restart contracts for Claude Code, Codex, and Pi run with `pnpm --filter @usine/durable test:integration`. Set `USINE_CLAUDE_INTEGRATION_MODEL`, `USINE_CODEX_INTEGRATION_MODEL`, and `USINE_PI_INTEGRATION_MODEL` and supply each harness's credentials. For gateway-authenticated children, set the matching `USINE_<HARNESS>_INTEGRATION_GATEWAY_CREDENTIAL` to `api-key` or `subscription`. Claude Code and Codex run locally and through the SSH shim; Pi runs locally. Each contract stops an active attempt, rebuilds the durable runtime on the same SQLite database, and checks that the saved child returns its final report.
 
+The child recovery tests also remove a saved harness home from disk between runtimes. The resumed child returns as interrupted, and the parent can delegate a replacement using another child-session slot.
+
 ## Test storage
 
 Durable storage fixtures use the shared [SQLite fixture directory helper](../../tooling/test/sqlite.mts).

@@ -21,6 +21,17 @@ for home in "$1"/* "$1"/.[!.]* "$1"/..?*; do
 done
 `.trim();
 
+/** Removes the home `$1` only after its attempt's checkout `$2` is gone. */
+const RELEASE_HOME_SCRIPT = String.raw`
+set -e
+if [ -e "$2" ]; then
+  printf 'retained'
+else
+  rm -rf "$1"
+  printf 'removed'
+fi
+`.trim();
+
 /** Returns the harness home of `attemptId` in the Worker directory `workerDirectory`. */
 export const attemptHomeIn = (
   workerDirectory: string,
@@ -30,9 +41,9 @@ export const attemptHomeIn = (
 
 /**
  * Tracks the harness homes that Attempts in this process use. `hold` gives an Attempt its harness
- * home and removes the directory when the caller's scope closes. `sweep` removes the harness homes
- * on a long-lived machine that no Attempt holds and whose Attempt has no checkout there, which
- * a crash or a failed removal left.
+ * home and removes the directory on scope closure only if its checkout is gone. `sweep` removes
+ * harness homes on a long-lived machine that no Attempt holds and whose Attempt has no checkout
+ * there, which a crash or a failed removal left.
  */
 export const attemptHomesFor = Effect.fn("SshExecutor.attemptHomesFor")(function* (
   commands: RemoteCommands,
@@ -55,21 +66,31 @@ export const attemptHomesFor = Effect.fn("SshExecutor.attemptHomesFor")(function
     descriptor: HarnessDescriptor,
   ) {
     const home = attemptHomeIn(machine.workerDirectory, attemptId, descriptor.id);
+    const checkout = `${machine.workerDirectory}/attempts/${safeSegment(attemptId)}`;
     const fields = { attemptId, worker: machine.address.name, home };
     yield* Effect.annotateCurrentSpan(fields);
     // Held before the caller writes the directory, so a sweep that lists it finds the hold.
     yield* Effect.acquireRelease(count(home, 1), () =>
-      commands.run("cleanup", machine.shell, "rm", ["-rf", home]).pipe(
-        Effect.tap(() => Effect.logDebug("Removed the Attempt's harness home", fields)),
-        Effect.tapError((error) =>
-          Effect.logWarning(
-            "Could not remove the Attempt's harness home; the next sweep removes it once the Attempt's checkout is gone",
-            { ...fields, message: error.message },
+      commands
+        .run("cleanup", machine.shell, "sh", ["-c", RELEASE_HOME_SCRIPT, "sh", home, checkout])
+        .pipe(
+          Effect.tap((outcome) =>
+            outcome === "retained"
+              ? Effect.logInfo(
+                  "Kept the Attempt's harness home because its checkout remains",
+                  fields,
+                )
+              : Effect.logDebug("Removed the Attempt's harness home", fields),
           ),
+          Effect.tapError((error) =>
+            Effect.logWarning(
+              "Could not remove the Attempt's harness home; the next sweep removes it once the Attempt's checkout is gone",
+              { ...fields, message: error.message },
+            ),
+          ),
+          Effect.ignore,
+          Effect.ensuring(count(home, -1)),
         ),
-        Effect.ignore,
-        Effect.ensuring(count(home, -1)),
-      ),
     );
     return home;
   });
