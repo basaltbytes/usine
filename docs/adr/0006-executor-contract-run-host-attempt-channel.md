@@ -164,3 +164,11 @@ The executor reads credential provider mappings, login file mounts, and login eg
 ## Amendment (2026-11-05, #957): descriptor credential wiring and protocol slots
 
 The executor reads credential environment and configuration-file recipes from harness descriptors for gateway access, provisioner API keys, and Cloudflare outbound handlers. It manages SSH attempt homes by harness ID and attempt ID, preserving the existing Codex path. This restores the executor boundary: harness modules define vendor authentication wiring, and the executor writes files, supplies secrets, and manages their lifetime.
+
+## Amendment (2026-11-05, #977): child recovery stops with the attempt channel
+
+An orderly restart detached attempt channels and released worker credentials while harness children still consumed output in the durable harness's scope. Codex interpreted the resulting relay exits as crashes, resumed saved threads over the closing transport, and reported infrastructure failures.
+
+The existing channel attachment owns the child lifecycle signal. The durable tool supplies the optional `ChildSessionLifecycle` service to each backend launch, comparing the attachment that supplied the child's host with the current attachment. Detachment makes the signal true before executor resources close; a later attachment cannot reactivate an older child. `RunningSession.interrupt` remains an operator control, and `RunEngineShutdown` remains an engine admission latch, so neither carries this per-attachment state. Direct backend callers without the service retain their existing behavior.
+
+Codex skips reconnect, thread resume, EOF, remote process stops, and journal removal while stopping. Claude Code skips recovery, including after a pending retry delay. Shared child failure reporting suppresses shutdown errors for Codex, Claude Code, and Pi. Real transport failures while the channel is attached retain their existing recovery and typed failure behavior.
