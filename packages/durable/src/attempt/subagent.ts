@@ -29,7 +29,7 @@ import {
   SessionStarted,
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Schema, Stream } from "effect";
-import { durableError } from "../harness.ts";
+import { durableError, type DurableHarnessError } from "../harness.ts";
 import { AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
 import { parentSessionId } from "./parent.ts";
@@ -183,15 +183,45 @@ export const subagentTool = (services: ExtensionServices) => {
       });
     }
     const sessionId = AgentSessionId.make(`${parentId}:child:${attemptedChildren}`);
-    const interrupted = (reason: string) =>
-      Effect.sync(() => hub.childSpawns.delete(sessionId)).pipe(
-        Effect.andThen(
-          Effect.logWarning("Saved child call returns as interrupted", {
+    const checkpoint = <A>(effect: Effect.Effect<A, DurableHarnessError>) =>
+      effect.pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Child progress checkpoint failed; event forwarding continues", {
             attemptId: spec.attemptId,
             sessionId,
-            reason,
+            operation: error.operation,
+            cause: error.message,
           }),
         ),
+        Effect.ignore,
+      );
+    const interrupted = (reason: string) =>
+      Effect.gen(function* () {
+        hub.childSpawns.delete(sessionId);
+        yield* call("clear the interrupted child's supervision", () =>
+          api.commit(async (tx) => {
+            const hold = await tx.doc(HoldDoc, owner.taskId);
+            hold.held = hold.held.filter((id) => id !== sessionId);
+            hold.pausedChildren = (hold.pausedChildren ?? []).filter((id) => id !== sessionId);
+          }, context),
+        );
+        yield* services.hubs.event(
+          hub,
+          SessionFinished.make({
+            session: ChildSession.make({
+              id: sessionId,
+              parentId,
+              agent: spec.agent.name,
+              brain: spec.agent.brain,
+            }),
+          }),
+        );
+        yield* Effect.logWarning("Saved child call returns as interrupted", {
+          attemptId: spec.attemptId,
+          sessionId,
+          reason,
+        });
+      }).pipe(
         Effect.as({
           output: [{ type: "text" as const, text: api.retainedOutput().text || previous.output }],
           isError: true,
@@ -205,7 +235,13 @@ export const subagentTool = (services: ExtensionServices) => {
           details: { childSessionId: sessionId },
         } satisfies ToolExecutionResult<SpawnDetails>),
       );
-    if (replayed) api.output(previous.output);
+    if (replayed)
+      yield* checkpoint(
+        Effect.try({
+          try: () => api.output(previous.output),
+          catch: (cause) => durableError("restore the child's output", cause),
+        }),
+      );
     const decoded = yield* Option.match(Option.fromNullOr(previous.saved), {
       onNone: () => Effect.succeedNone,
       onSome: (value) => Schema.decodeUnknownEffect(SavedChild)(value).pipe(Effect.asSome),
@@ -391,14 +427,18 @@ export const subagentTool = (services: ExtensionServices) => {
                 machine: request.machine,
               }),
             ).pipe(Effect.orDie);
-            yield* call("save the child's conversation", () =>
-              api.commit(async (tx) => {
-                const record = await tx.doc(SubagentDoc, api.taskId);
-                record.saved = recovery;
-              }, context),
+            yield* checkpoint(
+              call("save the child's conversation", () =>
+                api.commit(async (tx) => {
+                  const record = await tx.doc(SubagentDoc, api.taskId);
+                  record.saved = recovery;
+                }, context),
+              ),
             );
-            yield* call("publish the saved child conversation", () =>
-              api.details({ childSessionId: session.id, saved: recovery }, context),
+            yield* checkpoint(
+              call("publish the saved child conversation", () =>
+                api.details({ childSessionId: session.id, saved: recovery }, context),
+              ),
             );
           }
           if (event._tag === "SessionTokensUpdated") {
@@ -406,24 +446,30 @@ export const subagentTool = (services: ExtensionServices) => {
             const usage = yield* Schema.encodeEffect(ChildRequest.fields.usage)(
               cumulativeUsage,
             ).pipe(Effect.orDie);
-            yield* call("save the child's cumulative usage", () =>
-              api.commit(async (tx) => {
-                const record = await tx.doc(SubagentDoc, api.taskId);
-                if (record.saved !== null) record.saved.usage = usage;
-              }, context),
+            yield* checkpoint(
+              call("save the child's cumulative usage", () =>
+                api.commit(async (tx) => {
+                  const record = await tx.doc(SubagentDoc, api.taskId);
+                  if (record.saved !== null) record.saved.usage = usage;
+                }, context),
+              ),
             );
           }
           if (event._tag === "TextOutput") {
-            yield* Effect.try({
-              try: () => api.output(`${event.text}\n`),
-              catch: (cause) => durableError("record the child's output", cause),
-            });
+            yield* checkpoint(
+              Effect.try({
+                try: () => api.output(`${event.text}\n`),
+                catch: (cause) => durableError("record the child's output", cause),
+              }),
+            );
             const output = api.retainedOutput().text;
-            yield* call("save the child's partial output", () =>
-              api.commit(async (tx) => {
-                const record = await tx.doc(SubagentDoc, api.taskId);
-                record.output = output;
-              }, context),
+            yield* checkpoint(
+              call("save the child's partial output", () =>
+                api.commit(async (tx) => {
+                  const record = await tx.doc(SubagentDoc, api.taskId);
+                  record.output = output;
+                }, context),
+              ),
             );
           }
           const recorded =

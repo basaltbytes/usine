@@ -12,11 +12,12 @@ import {
 } from "@usine/core/agent/session";
 import { jsonKey } from "@usine/core/json-key";
 import { BlockedFailure, InfraFailure } from "@usine/core/attempt/failure";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Result } from "effect";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
-import { AttemptRecordDoc } from "../src/attempt/documents.ts";
+import { AttemptRecordDoc, type Hold, HoldDoc } from "../src/attempt/documents.ts";
 import { DurableHarness } from "../src/harness.ts";
 import { answer, delegate, layer, StubChildren } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
@@ -46,6 +47,17 @@ for (const [recovery, blocker] of [
       const replaces =
         recovery === "resume-crashes-then-replacement" ||
         recovery === "worker-gone-then-replacement";
+      const failsRecovery = [
+        "missing-session",
+        "invalid-session",
+        "worker-gone",
+        "machine-gone",
+        "checkout-gone",
+        "resume-fails",
+        "resume-fails-after-infra",
+        "resume-crashes-then-replacement",
+        "worker-gone-then-replacement",
+      ].includes(recovery);
       const childCount = blocker?.child ?? 1;
       const request = AttemptRequest.make({
         ...attemptRequest(`recovery/${recovery}`, childCount + (replaces ? 1 : 0)),
@@ -117,6 +129,22 @@ for (const [recovery, blocker] of [
             );
             yield* child.emit(TextOutput.make({ session: child.request.session, text }));
             yield* output.committed;
+            if (failsRecovery) {
+              for (const action of [
+                AttemptChannel.OperatorMessage.make({ message: "Review this with me." }),
+                AttemptChannel.Interrupt.make(),
+              ])
+                yield* runtime.intervene(
+                  request.spec.attemptId,
+                  AttemptChannel.Intervention.make({
+                    operator: "PhilDL",
+                    target: AttemptChannel.ChildTarget.make({
+                      sessionId: child.request.session.id,
+                    }),
+                    action,
+                  }),
+                );
+            }
             if (recovery === "invalid-session" || recovery === "extra-saved-fields")
               yield* Context.get(services, DurableHarness).use(
                 "restore saved data from a different version",
@@ -189,7 +217,40 @@ for (const [recovery, blocker] of [
                         ),
                       })
                     : request;
-          const execution = yield* Effect.forkChild(runtime.execute(attached, recording.sink));
+          let supervisionAtFinish: Hold | undefined;
+          const execution = yield* Effect.forkChild(
+            runtime.execute(attached, {
+              ...recording.sink,
+              append: (direction, envelope) =>
+                recording.sink.append(direction, envelope).pipe(
+                  Effect.andThen(() => {
+                    if (
+                      !failsRecovery ||
+                      envelope._tag !== "OutboundEnvelope" ||
+                      envelope.payload._tag !== "SessionEvent" ||
+                      envelope.payload.event._tag !== "SessionFinished" ||
+                      envelope.payload.event.session.id !== first.session.id
+                    )
+                      return Effect.void;
+                    return Context.get(services, DurableHarness)
+                      .use("read interrupted child supervision", async (opened, context) => {
+                        const record = await opened.snapshot(
+                          AttemptRecordDoc,
+                          request.spec.attemptId,
+                          context,
+                        );
+                        assert(record?.taskId !== null && record?.taskId !== undefined);
+                        supervisionAtFinish = await opened.snapshot(
+                          HoldDoc,
+                          record.taskId,
+                          context,
+                        );
+                      })
+                      .pipe(Effect.orDie);
+                  }),
+                ),
+            }),
+          );
           if (
             ![
               "missing-session",
@@ -261,6 +322,21 @@ for (const [recovery, blocker] of [
           } else {
             assert(Result.isSuccess(report));
             assert.strictEqual(report.success.message, "Finished after restart.");
+          }
+          if (failsRecovery) {
+            assert.deepStrictEqual(supervisionAtFinish?.held ?? [], []);
+            assert.deepStrictEqual(supervisionAtFinish?.pausedChildren ?? [], []);
+            assert(
+              recording
+                .outbound()
+                .some(
+                  ({ payload }) =>
+                    payload._tag === "SessionEvent" &&
+                    payload.event._tag === "SessionFinished" &&
+                    payload.event.session.id === first.session.id,
+                ),
+              "failed recovery must finish the child so its guard Hold ends",
+            );
           }
           const children = yield* Context.get(services, DurableHarness).use(
             "read the child budget",
