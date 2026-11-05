@@ -1,6 +1,8 @@
 // Durable storage transactions use Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { assert, it } from "@effect/vitest";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { ChildBackend, SessionOperationError } from "@usine/agents/runtime";
 import {
   ChildSession,
   HarnessSession,
@@ -19,8 +21,16 @@ import { Context, Deferred, Effect, Fiber, Layer, Option, Result } from "effect"
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc } from "../src/attempt/documents.ts";
-import { DurableHarness } from "../src/harness.ts";
-import { answer, delegate, layer, StubChildren } from "../src/testing.ts";
+import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
+import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
+import {
+  answer,
+  delegate,
+  fauxParent,
+  layer,
+  stubChildBackendLayer,
+  StubChildren,
+} from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
 for (const [recovery, blocker] of [
@@ -35,6 +45,7 @@ for (const [recovery, blocker] of [
   ["worker-gone-then-replacement", { kind: "infra", child: 1 }],
   ["credential-changed", null],
   ["harness-changed", null],
+  ["harness-changed-stop-fails", null],
   ["invalid-session", null],
   ["extra-saved-fields", null],
   ["missing-session", null],
@@ -46,6 +57,8 @@ for (const [recovery, blocker] of [
   it.live(`recovers a durable child call after restart (${recovery})`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
+      const harnessChanged =
+        recovery === "harness-changed" || recovery === "harness-changed-stop-fails";
       const replaces =
         recovery === "resume-crashes-then-replacement" ||
         recovery === "worker-gone-then-replacement";
@@ -53,6 +66,7 @@ for (const [recovery, blocker] of [
         "missing-session",
         "invalid-session",
         "harness-changed",
+        "harness-changed-stop-fails",
         "worker-gone",
         "machine-gone",
         "checkout-gone",
@@ -154,7 +168,7 @@ for (const [recovery, blocker] of [
             if (
               recovery === "invalid-session" ||
               recovery === "extra-saved-fields" ||
-              recovery === "harness-changed" ||
+              harnessChanged ||
               recovery === "credential-changed"
             )
               yield* Context.get(services, DurableHarness).use(
@@ -169,7 +183,7 @@ for (const [recovery, blocker] of [
                     assert(record.saved !== null);
                     if (recovery === "invalid-session")
                       Object.assign(record.saved.session.brain, { effort: "retired-effort" });
-                    else if (recovery === "harness-changed")
+                    else if (harnessChanged)
                       Object.assign(record.saved.session.brain, { harness: "codex" });
                     else if (recovery === "credential-changed") {
                       assert.notProperty(record.saved.session, "gatewayCredential");
@@ -206,14 +220,44 @@ for (const [recovery, blocker] of [
       }
       yield* Effect.scoped(
         Effect.gen(function* () {
-          const services = yield* Layer.build(
-            layer({
-              database,
-              parent: [
-                ...(replaces ? [delegate("Try again")] : []),
-                answer("Finished after restart."),
-              ],
+          const recoveryBackend = Layer.effectContext(
+            Effect.gen(function* () {
+              const services = yield* Effect.context<ChildBackend | StubChildren>();
+              const backend = Context.get(services, ChildBackend);
+              return Context.add(services, ChildBackend, {
+                ...backend,
+                stop: (request) =>
+                  backend.stop(request).pipe(
+                    Effect.andThen(
+                      recovery === "harness-changed-stop-fails"
+                        ? SessionOperationError.make({
+                            operation: "interrupt",
+                            sessionId: Option.some(request.session.id),
+                            message: "SSH connection unavailable",
+                            cause: "SSH connection unavailable",
+                          })
+                        : Effect.void,
+                    ),
+                  ),
+              });
             }),
+          ).pipe(Layer.provide(stubChildBackendLayer));
+          const services = yield* Layer.build(
+            runtimeLayer.pipe(
+              Layer.provideMerge(
+                harnessLayer({
+                  ...fauxParent([
+                    ...(replaces ? [delegate("Try again")] : []),
+                    answer("Finished after restart."),
+                  ]),
+                  openStorage: Effect.tryPromise({
+                    try: () => openNodeSqliteStorage(database),
+                    catch: (cause) => durableError("open the durable storage", cause),
+                  }),
+                }),
+              ),
+              Layer.provideMerge(recoveryBackend),
+            ),
           );
           const runtime = Context.get(services, AttemptRuntime);
           const attached =
@@ -273,6 +317,7 @@ for (const [recovery, blocker] of [
               "missing-session",
               "invalid-session",
               "harness-changed",
+              "harness-changed-stop-fails",
               "worker-gone",
               "worker-gone-then-replacement",
               "machine-gone",
@@ -318,7 +363,7 @@ for (const [recovery, blocker] of [
             yield* replacement.reply("The replacement child's report.");
           }
           const report = yield* Fiber.join(execution).pipe(Effect.result);
-          if (recovery === "harness-changed") {
+          if (harnessChanged) {
             const stopped = yield* Context.get(services, StubChildren).stopped;
             assert.strictEqual(stopped.session.id, first.session.id);
             assert.strictEqual(stopped.session.brain.harness, "codex");
@@ -413,6 +458,10 @@ for (const [recovery, blocker] of [
       if (!succeeds) assert.include(jsonKey(result.output), "interrupted");
       if (recovery === "harness-changed")
         assert.include(jsonKey(result.output), "harness mismatch (saved codex, current claude)");
+      if (recovery === "harness-changed-stop-fails") {
+        assert.include(jsonKey(result.output), "saved child may still be running");
+        assert.include(jsonKey(result.output), "SSH connection unavailable");
+      }
       if (recovery === "invalid-session")
         assert.include(jsonKey(result.output), "the saved conversation no longer decodes");
       assertAdmitted(request.spec.attemptId, recording.outbound());

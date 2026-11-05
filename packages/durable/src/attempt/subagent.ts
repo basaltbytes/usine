@@ -349,7 +349,7 @@ export const subagentTool = (services: ExtensionServices) => {
       }),
     });
     if (Option.isSome(saved) && saved.value.session.brain.harness !== spec.agent.brain.harness) {
-      yield* services.backend.stop(childRequest).pipe(
+      const stopped = yield* services.backend.stop(childRequest).pipe(
         Effect.provideService(ChildSessionLifecycle, lifecycle),
         Effect.tapError((error) =>
           Effect.logError("Could not stop the saved child before refusing continuation", {
@@ -358,7 +358,12 @@ export const subagentTool = (services: ExtensionServices) => {
             message: error.message,
           }),
         ),
+        Effect.result,
       );
+      if (Result.isFailure(stopped))
+        return yield* interrupted(
+          `the saved child may still be running because stopping it before the harness change failed: ${stopped.failure.message}`,
+        );
       const mismatch = ContinuationMismatchError.make({
         sessionId,
         field: "harness",
