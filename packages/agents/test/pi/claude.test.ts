@@ -12,8 +12,6 @@ import {
   HarnessSessionId,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
-  TokenCount,
-  UsdAmount,
   sessionPool,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
@@ -34,12 +32,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
-import {
-  Interrupt,
-  type InterventionState,
-  OperatorMessage,
-  Release,
-} from "@usine/core/attempt/channel";
+import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -50,12 +43,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CHILD_STOP_SCRIPT,
   type ChildHost,
   LocalProcess,
   RemoteShell,
   SSH_FAILURE,
-  sshArguments,
 } from "../../src/child-host/child-host.ts";
 import {
   AgentResultError,
@@ -74,7 +65,6 @@ import {
   claudeChildLayer,
   type ClaudeQuery,
   type ClaudeQueryOptions,
-  type ClaudeUserMessage,
 } from "../../src/harness/claude/claude.ts";
 
 /** A single login lock for all Workers, since each test launches its children on one Worker. */
@@ -336,63 +326,6 @@ const droppedLaunch = (onDrop: () => void = () => {}) => {
 };
 
 describe("Claude child backend", () => {
-  it.effect("continues the saved conversation supplied by a restarted durable call", () => {
-    const saved = HarnessSession.make({
-      id: HarnessSessionId.make("saved-claude"),
-      cwd: request().cwd,
-      home: Option.some("/worker/attempt/claude"),
-    });
-    const sdk = Layer.succeed(ClaudeSdk)({
-      open: (_input, options) => {
-        assert.strictEqual(options.resume, saved.id);
-        assert.strictEqual(options.env?.CLAUDE_CONFIG_DIR, "/worker/attempt/claude");
-        return scripted(
-          [
-            {
-              type: "result",
-              subtype: "success",
-              result: "Continued.",
-              modelUsage: {
-                model: {
-                  inputTokens: 400,
-                  outputTokens: 100,
-                  cacheCreationInputTokens: 0,
-                  costUSD: 0.125,
-                },
-              },
-            },
-          ],
-          undefined,
-          saved.id,
-        );
-      },
-    });
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const running = yield* (yield* ChildBackend).launch(
-          ChildRequest.make({
-            ...request(),
-            resume: Option.some(saved),
-            usage: Option.some({
-              totalTokens: TokenCount.make(1000),
-              costUsd: Option.some(UsdAmount.make(0.25)),
-            }),
-          }),
-        );
-        const events = yield* Effect.forkChild(Stream.runCollect(running.events));
-        assert.strictEqual((yield* running.result).message, "Continued.");
-        const transcript = yield* Fiber.join(events);
-        const started = transcript.find((event) => event._tag === "SessionStarted");
-        assert(started !== undefined);
-        assert.deepStrictEqual(started.harnessSession, Option.some(saved));
-        const usage = transcript.filter((event) => event._tag === "SessionTokensUpdated").at(-1);
-        assert(usage !== undefined);
-        assert.strictEqual(usage.totalTokens, 1500);
-        assert.deepStrictEqual(usage.costUsd, Option.some(0.375));
-      }),
-    ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
-  });
-
   for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
     it.effect(`restores a ${supervision} Claude child without starting a turn`, () =>
       Effect.gen(function* () {
@@ -974,161 +907,6 @@ describe("Claude child backend", () => {
     },
   );
 
-  it.effect("reports a message sent during a turn read once no queued turn holds it", () =>
-    Effect.gen(function* () {
-      const messages = yield* Queue.make<Schema.Json, Cause.Done>();
-      // A launch returns after the first rate-limit event confirms the login.
-      yield* Queue.offer(messages, rateLimitEvent);
-      const context = yield* Effect.context<never>();
-      const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
-      const sdk = Layer.succeed(ClaudeSdk)({
-        open: () => ({
-          close: () => {
-            Effect.runForkWith(context)(Queue.end(messages));
-          },
-          interrupt: () => Promise.resolve(),
-          usesApiKey: () => Promise.resolve(false),
-          supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
-          [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
-        }),
-      });
-      yield* Effect.gen(function* () {
-        const running = yield* (yield* ChildBackend).launch(request());
-        const reads: Array<Option.Option<InterventionState>> = [];
-        const state = yield* running.intervene(
-          OperatorMessage.make({ message: "Review with me" }),
-          (delivered) =>
-            Effect.sync(() => {
-              reads.push(delivered);
-            }),
-        );
-        assert.deepStrictEqual([state.held, state.queued], [true, true]);
-        yield* Queue.offer(messages, { type: "system", subtype: "init", session_id: "claude-1" });
-        yield* Queue.offer(messages, {
-          type: "result",
-          subtype: "success",
-          result: "First answer",
-          queued_turn_count: 1,
-        });
-        yield* Queue.offer(messages, {
-          type: "result",
-          subtype: "success",
-          result: "Reviewed answer",
-          queued_turn_count: 0,
-        });
-        for (let spin = 0; reads.length === 0; spin += 1) {
-          if (spin > 1_000) return assert.fail("the read was never reported");
-          yield* Effect.yieldNow;
-        }
-        const [read] = reads;
-        assert(read !== undefined && Option.isSome(read));
-        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("keeps a held Claude conversation open until release and records one launch", () =>
-    Effect.gen(function* () {
-      const messages = yield* Queue.make<Schema.Json, Cause.Done>();
-      // A launch returns after the first rate-limit event confirms the login.
-      yield* Queue.offer(messages, rateLimitEvent);
-      const idle = yield* Queue.make<void>();
-      const context = yield* Effect.context<never>();
-      const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
-      let input: AsyncIterator<ClaudeUserMessage> | undefined;
-      const sdk = Layer.succeed(ClaudeSdk)({
-        open: (stream) => {
-          input = stream[Symbol.asyncIterator]();
-          return {
-            close: () => {
-              Effect.runForkWith(context)(Queue.end(messages));
-            },
-            interrupt: () => Promise.resolve(),
-            usesApiKey: () => Promise.resolve(false),
-            supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
-            [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
-          };
-        },
-      });
-      yield* Effect.gen(function* () {
-        const running = yield* (yield* ChildBackend).launch(request());
-        const result = yield* Effect.forkScoped(running.result);
-        const seen: Array<string> = [];
-        yield* Effect.forkScoped(
-          running.events.pipe(
-            Stream.runForEach((event) => {
-              seen.push(event._tag);
-              return event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void;
-            }),
-          ),
-        );
-        assert(input !== undefined);
-        const entered = input;
-        yield* Effect.promise(() => entered.next());
-        yield* running.intervene(OperatorMessage.make({ message: "Review with me" }), noDelivery);
-
-        assert.strictEqual(
-          (yield* Effect.promise(() => entered.next())).value?.message.content,
-          "Review with me",
-        );
-        // The CLI sends `init` with the same session ID before every turn.
-        const init = { type: "system", subtype: "init", session_id: "claude-session-1" };
-        yield* Queue.offer(messages, init);
-        yield* Queue.offer(messages, {
-          type: "system",
-          subtype: "session_state_changed",
-          state: "running",
-        });
-        yield* Queue.offer(messages, {
-          type: "result",
-          subtype: "success",
-          result: "First answer",
-        });
-        yield* Queue.offer(messages, {
-          type: "system",
-          subtype: "session_state_changed",
-          state: "idle",
-        });
-        yield* Queue.take(idle);
-        assert.strictEqual(result.pollUnsafe(), undefined);
-        yield* running.intervene(
-          OperatorMessage.make({ message: "One more adjustment" }),
-          noDelivery,
-        );
-
-        assert.strictEqual(
-          (yield* Effect.promise(() => entered.next())).value?.message.content,
-          "One more adjustment",
-        );
-        yield* Queue.offer(messages, init);
-        yield* Queue.offer(messages, {
-          type: "system",
-          subtype: "session_state_changed",
-          state: "running",
-        });
-        yield* Queue.offer(messages, {
-          type: "result",
-          subtype: "success",
-          result: "Adjusted answer",
-        });
-        yield* Queue.offer(messages, {
-          type: "system",
-          subtype: "session_state_changed",
-          state: "idle",
-        });
-        yield* Queue.take(idle);
-        yield* running.intervene(Release.make(), noDelivery);
-
-        assert.strictEqual((yield* Fiber.join(result)).message, "Adjusted answer");
-
-        assert.strictEqual((yield* Effect.promise(() => entered.next())).done, true);
-        assert.deepStrictEqual(
-          seen.filter((tag) => tag === "SessionStarted"),
-          ["SessionStarted"],
-        );
-      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))));
-    }).pipe(Effect.scoped),
-  );
   it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
@@ -1182,63 +960,6 @@ describe("Claude child backend", () => {
       assert.strictEqual(responseBody, "interrupted");
     }).pipe(Effect.scoped),
   );
-
-  it.effect("streams normalized session events and runs headlessly with the declared model", () => {
-    let input: AsyncIterable<ClaudeUserMessage> | undefined;
-    let options: ClaudeQueryOptions | undefined;
-    const sdk = Layer.succeed(ClaudeSdk)({
-      open: (foundInput, foundOptions) => {
-        input = foundInput;
-        options = foundOptions;
-        return scripted([
-          {
-            type: "stream_event",
-            event: {
-              type: "content_block_delta",
-              delta: { type: "text_delta", text: "Child completed the edit." },
-            },
-          },
-          {
-            type: "assistant",
-            message: { content: [{ type: "text", text: "Child completed the edit." }] },
-          },
-          { type: "result", subtype: "success", result: "Child completed the edit." },
-        ]);
-      },
-    });
-
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const session = yield* backend.launch(request());
-        const [events, result] = yield* Effect.all([
-          Stream.runCollect(session.events),
-          session.result,
-        ]);
-        assert.strictEqual(result.message, "Child completed the edit.");
-        assert.deepStrictEqual(
-          events.map((event) => event._tag),
-          ["SessionStarted", "TextOutput", "SessionFinished"],
-        );
-        const started = events[0];
-        assert(started?._tag === "SessionStarted");
-        assert(Option.isSome(started.harnessSession));
-        assert.strictEqual(started.harnessSession.value.id, "claude-session-1");
-        assert.strictEqual(started.harnessSession.value.cwd, "/workspace/repo");
-        assert.strictEqual(options?.model, "claude-sonnet-4-6");
-        assert.strictEqual(options?.effort, "high");
-        assert.strictEqual(options?.permissionMode, "bypassPermissions");
-        assert.strictEqual(options?.pathToClaudeCodeExecutable, "claude");
-        assert.strictEqual(options?.allowDangerouslySkipPermissions, true);
-        assert.strictEqual(options?.persistSession, true);
-        assert.deepStrictEqual(options?.settingSources, ["user"]);
-        assert.deepStrictEqual(options?.env, request().environment);
-        assert.strictEqual(options?.spawnClaudeCodeProcess, undefined);
-        const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
-        assert.strictEqual(first.value?.message.content, "Implement the focused task.");
-      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
-    );
-  });
 
   it.effect("reports each API retry of a turn and the recovery when an answer arrives", () => {
     const retry = (attempt: number, status: number | null, error: string) => ({
@@ -1383,49 +1104,6 @@ describe("Claude child backend", () => {
       Effect.provideService(ChildSessionLifecycle, { isStopping: Effect.sync(() => stopping) }),
       Effect.provide(Logger.layer([logger])),
       Effect.timeout("5 seconds"),
-      Effect.scoped,
-    );
-  });
-
-  it.effect("resumes a remote child's saved session after its SSH connection breaks", () => {
-    const { resumed, prompts, sdk } = droppedLaunch();
-    const worker = workerCommands(0, "/workspace/repo.child-1.pid stopped");
-    const host = exitingHost(SSH_FAILURE);
-    return Effect.gen(function* () {
-      const session = yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
-      const fiber = yield* Effect.forkChild(
-        Effect.all([Stream.runCollect(session.events), session.result]),
-      );
-      const [events, result] = yield* joinAdvancingClock(fiber);
-      assert.strictEqual(result.message, "Tests pass.", "the same child returns the answer");
-      assert.deepStrictEqual(resumed, ["claude-session-1"]);
-      assert.match(prompts[0] ?? "", /^usine lost its connection to this session/u);
-      assert.deepStrictEqual(worker.commands, [
-        [
-          host.ssh.command,
-          ...sshArguments(host, {
-            command: "sh",
-            args: ["-c", CHILD_STOP_SCRIPT, "sh", "/workspace/repo.child-1.pid"],
-          }),
-        ],
-      ]);
-      assert.deepStrictEqual(
-        events.flatMap((event) =>
-          event._tag === "ToolFinished" ? [[event.callId, event.isError]] : [],
-        ),
-        [["call-1", true]],
-        "the call that the broken process ran is closed",
-      );
-      assert.lengthOf(
-        events.filter((event) => event._tag === "SessionStarted"),
-        1,
-      );
-      const usage = events.filter((event) => event._tag === "SessionTokensUpdated").at(-1);
-      assert(usage?._tag === "SessionTokensUpdated");
-      assert.strictEqual(usage.totalTokens, 180, "usage carries over from the broken launch");
-      assert.deepStrictEqual(usage.costUsd, Option.some(0.5));
-    }).pipe(
-      Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provideMerge(sdk))),
       Effect.scoped,
     );
   });

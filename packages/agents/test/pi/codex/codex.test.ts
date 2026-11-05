@@ -142,59 +142,6 @@ const successfulResponses = (
   }) satisfies Readonly<Record<string, Schema.Json>>;
 
 describe("Codex child backend", () => {
-  it.effect("resumes the recorded thread and CODEX_HOME after a durable restart", () => {
-    const saved = HarnessSession.make({
-      id: HarnessSessionId.make("saved-codex"),
-      cwd: request().cwd,
-      home: Option.some("/worker/attempt/codex"),
-    });
-    const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
-    const clients: Array<CodexClient> = [];
-    const server = connectionLayer(
-      {
-        ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
-        "thread/resume": { thread: { id: saved.id, turns: [] } },
-      },
-      [
-        {
-          method: "item/completed",
-          params: {
-            threadId: saved.id,
-            turnId: "turn-1",
-            item: { type: "agentMessage", id: "report", text: "Continued." },
-          },
-        },
-        {
-          method: "turn/completed",
-          params: { turn: { id: "turn-1", status: "completed", error: null } },
-        },
-      ],
-      calls,
-      Effect.void,
-      clients,
-    );
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const running = yield* (yield* ChildBackend).launch(
-          ChildRequest.make({ ...request(), resume: Option.some(saved) }),
-        );
-        const events = yield* Effect.forkChild(Stream.runCollect(running.events));
-        assert.strictEqual((yield* running.result).message, "Continued.");
-        const transcript = yield* Fiber.join(events);
-        const started = transcript.find((event) => event._tag === "SessionStarted");
-        assert(started !== undefined);
-        assert.deepStrictEqual(started.harnessSession, Option.some(saved));
-        assert.strictEqual(clients[0]?.environment.CODEX_HOME, "/worker/attempt/codex");
-        assert.strictEqual(clients[0]?.transport, "replace");
-        assert(!calls.some(({ method }) => method === "thread/start"));
-        assert.include(
-          jsonKey(calls.find(({ method }) => method === "thread/resume")?.params),
-          saved.id,
-        );
-      }),
-    ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
-  });
-
   for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
     it.effect(`restores a ${supervision} Codex child without starting a turn`, () =>
       Effect.gen(function* () {
@@ -647,62 +594,6 @@ describe("Codex child backend", () => {
       }).pipe(Effect.scoped),
     );
   }
-
-  it.effect("reports a message steered into a running turn read once Codex records it", () =>
-    Effect.gen(function* () {
-      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
-      const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
-      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
-        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
-      ]);
-      const server = Layer.succeed(CodexAppServer)({
-        open: () =>
-          Effect.succeed({
-            notifications: Stream.fromQueue(notifications),
-            notify: () => Effect.void,
-            close: Queue.end(notifications),
-            request: (_operation, method, params) =>
-              Effect.sync(() => {
-                calls.push({ method, params });
-                return responses[method] ?? {};
-              }),
-          }),
-      });
-      yield* Effect.gen(function* () {
-        const running = yield* (yield* ChildBackend).launch(request());
-        const reads: Array<Option.Option<InterventionState>> = [];
-        const state = yield* running.intervene(
-          OperatorMessage.make({ message: "Run the linter too." }),
-          (delivered) =>
-            Effect.sync(() => {
-              reads.push(delivered);
-            }),
-        );
-        assert.deepStrictEqual([state.held, state.queued], [true, true]);
-        assert.strictEqual(calls.filter(({ method }) => method === "turn/steer").length, 1);
-        yield* Queue.offer(notifications, {
-          method: "item/started",
-          params: {
-            threadId: "thread-1",
-            turnId: "turn-1",
-            item: {
-              type: "userMessage",
-              id: "steered",
-              clientId: null,
-              content: [{ type: "text", text: "Run the linter too.", text_elements: [] }],
-            },
-          },
-        });
-        for (let spin = 0; reads.length === 0; spin += 1) {
-          if (spin > 1_000) return assert.fail("the read was never reported");
-          yield* Effect.yieldNow;
-        }
-        const [read] = reads;
-        assert(read !== undefined && Option.isSome(read));
-        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provideMerge(server))));
-    }).pipe(Effect.scoped),
-  );
 
   for (const status of ["completed", "interrupted"] as const) {
     it.effect(`waits for shutdown before publishing ${status} work`, () =>

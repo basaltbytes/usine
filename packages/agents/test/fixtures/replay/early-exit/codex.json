@@ -1,0 +1,71 @@
+{
+  "protocol": "codex-app-server",
+  "harnessVersion": "0.164.0",
+  "model": "gpt-5.6-terra",
+  "scenario": "early-exit",
+  "environment": {
+    "HOME": "$HOME",
+    "PATH": "$PATH",
+    "CODEX_HOME": "$CODEX_HOME",
+    "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
+    "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+  },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "process:1",
+      "payload": {
+        "command": "codex",
+        "args": [
+          "app-server",
+          "--stdio",
+          "-c",
+          "projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}",
+          "-c",
+          "features.multi_agent=false",
+          "-c",
+          "features.plugins=false",
+          "-c",
+          "features.remote_plugin=false",
+          "-c",
+          "features.apps=false",
+          "-c",
+          "check_for_update_on_startup=false",
+          "-c",
+          "analytics.enabled=false",
+          "-c",
+          "cli_auth_credentials_store=\"file\""
+        ],
+        "cwd": "/",
+        "env": {
+          "HOME": "$HOME",
+          "PATH": "$PATH",
+          "CODEX_HOME": "$CODEX_HOME",
+          "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
+          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "clientInfo": { "name": "usine", "title": "usine", "version": "0.0.1" },
+          "capabilities": null
+        }
+      }
+    },
+    { "type": "runtime_exit", "port": "process:1/stdout", "code": 0, "error": null },
+    {
+      "type": "runtime_exit",
+      "port": "process:1/exit",
+      "code": null,
+      "error": "Unknown: ChildProcess.exitCode (codex app-server --stdio -c projects={\"$WORKTREE\"={trust_level=\"untrusted\"}} -c features.multi_agent=false -c features.plugins=false -c features.remote_plugin=false -c features.apps=false -c check_for_update_on_startup=false -c analytics.enabled=false -c cli_auth_credentials_store=\"file\")"
+    }
+  ]
+}
