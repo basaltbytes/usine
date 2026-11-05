@@ -29,6 +29,7 @@ const prices = {
 
 export const codex = HarnessDescriptor.make({
   id: Harness.make("codex"),
+  capabilities: ["resume-session"],
   label: "Codex",
   worker: WorkerRequirements.make({
     install: [{ name: "@openai/codex", version: CODEX_CLI_VERSION }],

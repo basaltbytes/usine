@@ -17,6 +17,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Effort, ModelId } from "@usine/core/agent/brain";
+import { HarnessSession, HarnessSessionId } from "@usine/core/agent/session";
 import { Context, Effect, Exit, Layer, Option } from "effect";
 import {
   type PiAuthentication,
@@ -48,10 +49,18 @@ export interface PiSession {
   readonly dispose: () => void;
 }
 
+/** Session storage for a preflight probe, a new child, or a saved conversation. */
+export type PiSessionStorage =
+  | { readonly _tag: "InMemory" }
+  | { readonly _tag: "Create"; readonly directory: string }
+  | { readonly _tag: "Resume"; readonly directory: string; readonly id: HarnessSessionId };
+
 /** The checkout, model, and tool configuration used to start an in-process Pi session. */
 export interface PiStartOptions {
   /** The checkout directory used by repository tools and session settings. */
   readonly cwd: string;
+  /** The persistence policy; preflight probes use `InMemory`. */
+  readonly storage: PiSessionStorage;
   /** The complete environment of every command the bash tool runs; `None` inherits this process's environment. */
   readonly environment: Option.Option<Readonly<Record<string, string>>>;
   /** Trusted inline extensions to register, such as the operator pause gate. */
@@ -103,6 +112,8 @@ export type PiStartResult =
       readonly pool: PiPool;
       /** The live in-memory session owned by the caller. */
       readonly session: PiSession;
+      /** The saved conversation metadata, or `None` for an in-memory probe. */
+      readonly harnessSession: Option.Option<HarnessSession>;
       /** The names of the tools active in `session`. */
       readonly tools: ReadonlyArray<string>;
     };
@@ -153,7 +164,7 @@ export class PiSdk extends Context.Service<
   }
 >()("@usine/agents/harness/pi/sdk/PiSdk") {}
 
-/** Provides Pi sessions using the installed SDK and worker-user settings. Project extensions, skills, prompt templates, and themes are disabled; sessions are kept in memory. */
+/** Provides Pi sessions using the installed SDK and worker-user settings. Project extensions, skills, prompt templates, and themes are disabled. Child conversations persist according to their storage policy. */
 export const piSdkLive = Layer.succeed(PiSdk)({
   start: async (options) => {
     const modelRuntime = await ModelRuntime.create({ signal: options.signal });
@@ -178,13 +189,30 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       noThemes: true,
     });
     await resourceLoader.reload();
+    const storage = options.storage;
+    let sessionManager: SessionManager;
+    switch (storage._tag) {
+      case "InMemory":
+        sessionManager = SessionManager.inMemory(options.cwd);
+        break;
+      case "Create":
+        sessionManager = SessionManager.create(options.cwd, storage.directory);
+        break;
+      case "Resume": {
+        const path = SessionManager.findById(options.cwd, storage.id, storage.directory);
+        if (path === undefined)
+          throw new Error(`No saved Pi session "${storage.id}" in ${storage.directory}`);
+        sessionManager = SessionManager.open(path, storage.directory, options.cwd);
+        break;
+      }
+    }
     const { session } = await createAgentSession({
       ...piChildTools(options.cwd, options.environment),
       cwd: options.cwd,
       model: selected,
       modelRuntime,
       resourceLoader,
-      sessionManager: SessionManager.inMemory(options.cwd),
+      sessionManager,
       settingsManager,
       thinkingLevel: options.thinkingLevel,
     });
@@ -217,6 +245,16 @@ export const piSdkLive = Layer.succeed(PiSdk)({
         model,
         pool,
         session,
+        harnessSession:
+          storage._tag === "InMemory"
+            ? Option.none()
+            : Option.some(
+                HarnessSession.make({
+                  id: HarnessSessionId.make(sessionManager.getSessionId()),
+                  cwd: options.cwd,
+                  home: Option.some(storage.directory),
+                }),
+              ),
         tools: session.getActiveToolNames(),
       };
     } finally {

@@ -129,10 +129,13 @@ const delayedPiStart = () => {
     disposeCount: () => disposeCount,
     disposed,
     resolve: (
-      result: Omit<Extract<PiStartResult, { readonly _tag: "Started" }>, "session" | "tools">,
+      result: Omit<
+        Extract<PiStartResult, { readonly _tag: "Started" }>,
+        "session" | "tools" | "harnessSession"
+      >,
     ) => {
       assert(resolveStart !== undefined);
-      resolveStart({ ...result, session, tools: childTools });
+      resolveStart({ ...result, harnessSession: Option.none(), session, tools: childTools });
     },
     start: () => {
       announceStart?.();
@@ -176,6 +179,7 @@ describe("Pi child backend", () => {
           opens += 1;
           return Promise.resolve({
             _tag: "Started",
+            harnessSession: Option.none(),
             model: childRequest.session.brain.model,
             pool: "apiKeys",
             tools: childTools,
@@ -236,6 +240,7 @@ describe("Pi child backend", () => {
         start: () =>
           Promise.resolve({
             _tag: "Started",
+            harnessSession: Option.none(),
             model: childRequest.session.brain.model,
             pool: "apiKeys",
             tools: childTools,
@@ -345,6 +350,7 @@ describe("Pi child backend", () => {
         options = found;
         return Promise.resolve({
           _tag: "Started",
+          harnessSession: Option.none(),
           model: effectiveModel,
           pool,
           session,
@@ -431,6 +437,7 @@ describe("Pi child backend", () => {
       start: () =>
         Promise.resolve({
           _tag: "Started",
+          harnessSession: Option.none(),
           model: childRequest.session.brain.model,
           pool: "apiKeys",
           session,
@@ -733,6 +740,7 @@ describe("Pi child backend", () => {
           start: () =>
             Promise.resolve({
               _tag: "Started",
+              harnessSession: Option.none(),
               model: ModelId.make(`${faux.provider.id}/${faux.getModel().id}`),
               pool: "apiKeys",
               session,

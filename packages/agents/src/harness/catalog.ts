@@ -25,6 +25,7 @@ export const harnessPresentations = catalog.descriptors.map((descriptor) =>
 );
 
 export {
+  HarnessCapability,
   HarnessCredential,
   HarnessCatalog,
   HarnessDescriptor,
