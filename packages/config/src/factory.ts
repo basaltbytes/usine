@@ -230,6 +230,14 @@ export class HetznerProvisioner extends Schema.Class<
   ),
 }) {}
 
+/** Gateway routing for a long-lived SSH machine already on the tailnet. */
+export class SshTailnet extends Schema.Class<
+  SshTailnet,
+  Brand.Brand<"@usine/config/factory/SshTailnet">
+>("@usine/config/SshTailnet")({
+  gatewayAddress: TailnetAddress,
+}) {}
+
 /** The gateway address and OAuth client variables for a Boat sandbox's tailnet join. */
 export class BoatTailnet extends Schema.Class<
   BoatTailnet,
@@ -337,6 +345,10 @@ export class SshWorker extends Schema.Class<
       }),
     ),
   ),
+  /** Gateway routing for a long-lived machine already on the tailnet. */
+  tailnet: Schema.OptionFromOptionalKey(
+    SshTailnet.pipe(Schema.encodeKeys({ gatewayAddress: "gateway_address" })),
+  ),
   /** The attempt image and resource limits; decoding defaults to executor-selected values. */
   container: WorkerContainer.pipe(
     Schema.encodeKeys({
@@ -351,6 +363,12 @@ export class SshWorker extends Schema.Class<
 /** Returns the reason an SSH worker's machine settings conflict, or `undefined` if they don't. */
 const sshMachineConflict = (worker: SshWorker): string | undefined => {
   const provisioner = Option.getOrUndefined(worker.provisioner);
+  if (Option.isSome(worker.tailnet)) {
+    if (Option.isNone(worker.gateway))
+      return `SSH worker "${worker.name}" sets tailnet without a gateway`;
+    if (provisioner !== undefined)
+      return `SSH worker "${worker.name}" sets tailnet with a provisioner; worker-level tailnet requires a long-lived destination`;
+  }
   if (provisioner === undefined)
     return Option.isNone(worker.destination)
       ? `SSH worker "${worker.name}" needs a destination or a provisioner`

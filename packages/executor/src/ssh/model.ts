@@ -97,9 +97,13 @@ export interface HetznerProvisioner {
   readonly reuse: Option.Option<ProvisionerReuse>;
 }
 
-/** Credentials for creating single-use auth keys tagged tag:usine-attempt. */
-export interface BoatTailnet {
+/** Gateway routing for a machine on the tailnet. */
+export interface SshTailnet {
   readonly gatewayAddress: TailnetAddress;
+}
+
+/** Credentials for creating single-use auth keys tagged tag:usine-attempt. */
+export interface BoatTailnet extends SshTailnet {
   readonly clientId: Redacted.Redacted<string>;
   readonly clientSecret: Redacted.Redacted<string>;
 }
@@ -125,6 +129,7 @@ export type SshWorkerMachine =
       readonly _tag: "Fixed";
       /** The `ssh` destination: `user@host` or a Host alias. */
       readonly destination: SshDestination;
+      readonly tailnet: Option.Option<SshTailnet>;
     }
   | { readonly _tag: "Provisioned"; readonly provisioner: SshProvisioner };
 
@@ -218,3 +223,7 @@ export const boatTailnetOf = (address: SshWorkerAddress): Option.Option<BoatTail
   address.machine._tag === "Provisioned" && address.machine.provisioner.provider === "boat"
     ? address.machine.provisioner.tailnet
     : Option.none();
+
+/** Returns the gateway routing for a fixed or Boat machine on the tailnet. */
+export const tailnetOf = (address: SshWorkerAddress): Option.Option<SshTailnet> =>
+  address.machine._tag === "Fixed" ? address.machine.tailnet : boatTailnetOf(address);

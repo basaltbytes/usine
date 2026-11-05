@@ -273,6 +273,21 @@ describe("ConfigParser", () => {
         "destination: root@203.0.113.30",
         "admin_token_env: GATEWAY_TOKEN",
       ];
+      const withTailnet = yield* parse([
+        ...gatewayOf(valid),
+        "    tailnet: { gateway_address: 100.64.0.2 }",
+      ]);
+      const [tailnetWorker] = withTailnet.workers;
+      assert(tailnetWorker?.kind === "ssh");
+      expect(Option.map(tailnetWorker.tailnet, ({ gatewayAddress }) => gatewayAddress)).toEqual(
+        Option.some("100.64.0.2"),
+      );
+      const tailnetEncoded = yield* Schema.encodeEffect(UsineConfig)(withTailnet);
+      const reloadedTailnet = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        jsonKey(tailnetEncoded),
+      );
+      expect(reloadedTailnet).toEqual(withTailnet);
       const withDefaults = yield* parse(gatewayOf(valid));
       const [only] = withDefaults.workers;
       expect(
@@ -294,6 +309,18 @@ describe("ConfigParser", () => {
         gatewayOf([...valid, "admin_port: 0"]),
         gatewayOf([...valid.slice(0, 2), "admin_token_env: sk-ant-0123"]),
         gatewayOf([...valid, "admin_token: secret"]),
+        ...[
+          "{ gateway_address: 192.168.1.2 }",
+          "{ gateway_address: 100.64.0.2, client_id_env: TS_CLIENT }",
+          "{ gatewayAddress: 100.64.0.2 }",
+          "{}",
+        ].map((tailnet) => [...gatewayOf(valid), `    tailnet: ${tailnet}`]),
+        [...gatewayOf(valid).slice(0, 4), "    tailnet: { gateway_address: 100.64.0.2 }"],
+        [
+          ...gatewayOf(valid).filter((line) => !line.includes("destination: eu")),
+          "    tailnet: { gateway_address: 100.64.0.2 }",
+          "    provisioner: { provider: hetzner, token_env: HCLOUD_TOKEN, server_type: cx33, location: nbg1, image: usine-worker, network: usine-gateway }",
+        ],
         ["  - name: here", "    kind: local", "    root: /srv/usine"],
         ["  - name: eu", "    kind: ssh", "    root: /srv/usine"],
         ["  - name: eu", "    kind: ssh", "    destination: -oProxyCommand=sh", "    root: /srv"],
