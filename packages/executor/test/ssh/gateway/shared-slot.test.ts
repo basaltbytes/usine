@@ -60,11 +60,11 @@ it.effect(
       assert(given !== undefined && Schema.is(RemoteShell)(given.host));
       const token = given.host.sshEnvironment.SHARED_GATEWAY_TOKEN;
       assert(token !== undefined);
-      assert.strictEqual(token, given.host.sshEnvironment.USINE_GATEWAY_TOKEN);
+      assert.notProperty(given.host.sshEnvironment, "USINE_GATEWAY_TOKEN");
       assert.include(given.host.ssh.args.join(" "), "SHARED_GATEWAY_TOKEN");
       const home = `${WORKER_ROOT}/shared-client/remote-run_execute_1`;
       assert.strictEqual(given.environment.SHARED_HOME, home);
-      assert.strictEqual(given.environment.CODEX_HOME, `${WORKER_ROOT}/codex/remote-run_execute_1`);
+      assert.notProperty(given.environment, "CODEX_HOME");
       const config = machine.state.files.get(`${home}/client.json`);
       assert(config !== undefined);
       assert.include(config, '"base_url":"http://llm.gw.test/openai-responses/v1"');

@@ -15,7 +15,15 @@ export const claude = HarnessDescriptor.make({
   worker: WorkerRequirements.make({
     install: [{ name: "@anthropic-ai/claude-code", version: "2.1.311" }],
     versions: [],
-    login: { mounted: [".claude/.credentials.json"], seeded: [".claude.json"] },
+    login: {
+      environment: [
+        "CLAUDE_CONFIG_DIR",
+        "ENABLE_CLAUDEAI_MCP_SERVERS",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      ],
+      mounted: [".claude/.credentials.json"],
+      seeded: [".claude.json"],
+    },
     credential: Option.some(
       HarnessCredential.make({
         provider: "anthropic",

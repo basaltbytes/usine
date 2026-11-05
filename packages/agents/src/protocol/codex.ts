@@ -121,6 +121,7 @@ export const ThreadStartResponse = Schema.Struct({
 });
 /** The saved items needed to check whether the resumed thread contains its original task. */
 export const ThreadResumeResponse = Schema.Struct({
+  modelProvider: EndpointName,
   thread: Schema.Struct({
     id: HarnessSessionId,
     turns: Schema.Array(

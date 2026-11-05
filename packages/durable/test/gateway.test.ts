@@ -383,8 +383,8 @@ it.effect(
         credential: () => Effect.succeedSome("subscription"),
         request: () => Effect.sync(() => response()),
       });
-      assert.strictEqual(access.credentials._tag, "Gateway");
-      if (access.credentials._tag !== "Gateway") return;
+      assert.strictEqual(access.credentials.route, "gateway");
+      if (access.credentials.route !== "gateway") return;
       for (const provider of ["anthropic", "openai", "google"]) {
         const authentication = yield* access.credentials.authentication(provider);
         assert.isUndefined(authentication);

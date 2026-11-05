@@ -9,7 +9,12 @@ export class SavedChild extends Schema.Class<
   SavedChild,
   Brand.Brand<"@usine/durable/attempt/SavedChild">
 >("@usine/durable/SavedChild")({
-  session: ChildSession,
+  session: Schema.Struct({
+    id: ChildSession.fields.id,
+    parentId: ChildSession.fields.parentId,
+    agent: ChildSession.fields.agent,
+    brain: ChildSession.fields.brain,
+  }),
   usage: ChildRequest.fields.usage,
   harnessSession: HarnessSession,
   worker: WorkerName,

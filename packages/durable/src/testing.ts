@@ -79,7 +79,7 @@ export const answer = (text: string): AssistantMessage => fauxAssistantMessage([
 
 /** A scripted model runtime and its default parent model. */
 export interface FauxParent {
-  readonly credentials: { readonly _tag: "HostLogin" };
+  readonly credentials: { readonly route: "host-login" };
   readonly models: MutableModels;
   readonly defaultModel: Option.Option<ModelRef>;
 }
@@ -94,7 +94,7 @@ export const fauxParent = (steps: ReadonlyArray<ParentStep>): FauxParent => {
   models.setProvider(faux.provider);
   faux.setResponses([...steps]);
   const defaultModel: ModelRef = { provider: faux.provider.id, modelId: "faux-1" };
-  return { models, defaultModel: Option.some(defaultModel), credentials: { _tag: "HostLogin" } };
+  return { models, defaultModel: Option.some(defaultModel), credentials: { route: "host-login" } };
 };
 
 /** A child launched by the stub backend and finished by the test. */

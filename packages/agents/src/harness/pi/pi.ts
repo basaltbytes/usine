@@ -1,3 +1,4 @@
+import { checkContinuationHome } from "../continuation.ts";
 import { HarnessCatalog } from "../harness.ts";
 import { admitChild } from "../launch.ts";
 import { piPreflight } from "./preflight.ts";
@@ -221,19 +222,24 @@ const makePiChild = Effect.gen(function* () {
       ),
   );
   const directory = (request: ChildRequest) => `${request.cwd}/.usine/pi/sessions`;
-  const launch = Effect.fn("PiRuntime.launch")((request: ChildRequest) =>
-    start(
+  const launch = Effect.fn("PiRuntime.launch")(function* (request: ChildRequest) {
+    yield* checkContinuationHome(
+      request,
+      Option.some(directory(request)),
+      Option.some(directory(request)),
+    );
+    return yield* start(
       request,
       Option.match(request.resume, {
         onNone: () => ({ _tag: "Create" as const, directory: directory(request) }),
         onSome: (saved) => ({
           _tag: "Resume" as const,
-          directory: Option.getOrElse(saved.home, () => directory(request)),
+          directory: directory(request),
           id: saved.id,
         }),
       }),
-    ),
-  );
+    );
+  });
   const resume = Effect.fn("PiRuntime.resume")((request: ChildRequest, id: HarnessSessionId) =>
     start(request, { _tag: "Resume", directory: directory(request), id }),
   );

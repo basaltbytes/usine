@@ -48054,6 +48054,10 @@
               "home": {
                 "type": "string",
                 "minLength": 1
+              },
+              "modelProvider": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": [

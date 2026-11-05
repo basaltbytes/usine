@@ -84,6 +84,7 @@ it.live(
             ),
           );
         const { exported, sent } = gatewayEnvironment({
+          harness: Option.none(),
           catalog,
           domain,
           llmProviders: [],

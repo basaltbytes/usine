@@ -369,6 +369,7 @@ Each step leaves the system working and ships as one pull request. "Agent" means
 | 9 | OpenCode: spike the transport and the two unverified behaviors, then add the adapter and run the contract suite. | A new folder, 2 registration lines, 1 install entry | Medium | Decision (question 7), then agent |
 | 10 | The supervisor's runtime launches through `Harnesses` with the `supervisor` role. | Part of #799 | Medium | Decision (question 10) |
 | 11 | Optional: a journaled coordinator decorator for a vendor harness. | 4 to 6 pull requests | High | Decision (question 2) |
+| 15 | Scope process environments to the launched harness; save continuation identity separately from credentials; resolve and admit the current route at every launch. Refuse changed homes and Codex provider IDs. See [#1008](https://github.com/basaltbytes/usine/issues/1008) and the [Codex probe](./t3code-harness-encapsulation.md#codex-provider-continuation-probe-2026-11-05). | ~20 implementation files plus tests and docs | High: credentials and restart recovery | Agent, after #1000; dogfood after merge |
 
 Steps 1 to 5 deliver the main goal: after them, adding a child harness is a folder, two registration lines, and an image entry. Steps 6 to 8 remove the remaining per-harness edits in infrastructure and credentials.
 

@@ -373,6 +373,13 @@ describe("Claude child backend", () => {
           ChildRequest.make({
             ...request(),
             resume: Option.some(saved),
+            environment: {
+              ...request().environment,
+              ...Option.match(saved.home, {
+                onNone: () => ({}),
+                onSome: (home) => ({ CLAUDE_CONFIG_DIR: home }),
+              }),
+            },
             usage: Option.some({
               totalTokens: TokenCount.make(1000),
               costUsd: Option.some(UsdAmount.make(0.25)),
@@ -436,6 +443,13 @@ describe("Claude child backend", () => {
             ChildRequest.make({
               ...request(),
               resume: Option.some(saved),
+              environment: {
+                ...request().environment,
+                ...Option.match(saved.home, {
+                  onNone: () => ({}),
+                  onSome: (home) => ({ CLAUDE_CONFIG_DIR: home }),
+                }),
+              },
               held: supervision !== "paused",
               paused: supervision === "paused",
               idle: supervision === "paused" ? Option.none() : Option.some("Saved final report."),

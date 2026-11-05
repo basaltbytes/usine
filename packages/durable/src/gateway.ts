@@ -13,6 +13,7 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
+import type { CredentialRoute } from "@usine/agents/harness";
 import { type PiAuthentication } from "@usine/agents/pi/authentication";
 import type { GatewayCredentialKind, GatewayLlmProtocol } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
@@ -28,9 +29,9 @@ export class ParentCredentialError extends Schema.TaggedError<
 }) {}
 
 export type ParentCredentials =
-  | { readonly _tag: "HostLogin" }
+  | { readonly route: Extract<CredentialRoute, "host-login"> }
   | {
-      readonly _tag: "Gateway";
+      readonly route: Extract<CredentialRoute, "gateway">;
       readonly authentication: (
         provider: string,
       ) => Effect.Effect<PiAuthentication | undefined, ParentCredentialError>;
@@ -212,5 +213,5 @@ export const gatewayModelAccess: (
       }),
     );
   }
-  return { models, credentials: { _tag: "Gateway", authentication } } satisfies ParentModelAccess;
+  return { models, credentials: { route: "gateway", authentication } } satisfies ParentModelAccess;
 });

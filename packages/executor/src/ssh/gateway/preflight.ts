@@ -198,7 +198,8 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
   const { forward, settings } = gateway;
   const gitHost = `git.${settings.domain}`;
   yield* Effect.annotateCurrentSpan({ worker, domain: settings.domain, gateway: forward.gateway });
-  const { sent } = gatewayEnvironment({
+  const { sent: baseSent } = gatewayEnvironment({
+    harness: Option.none(),
     catalog,
     domain: settings.domain,
     llmProviders: settings.llmProviders,
@@ -206,6 +207,14 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
     homes: {},
     callerToken: PROBE_TOKEN,
   });
+  const sent = {
+    ...baseSent,
+    ...Object.fromEntries(
+      gatewaySentVariables(catalog)
+        .filter((name) => !(name in baseSent))
+        .map((name) => [name, PROBE_TOKEN]),
+    ),
+  };
   const received = yield* commands.run("preflight", sendingShell(machine.shell, sent), "sh", [
     "-c",
     SENT_VARIABLES_SCRIPT,

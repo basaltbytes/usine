@@ -1,3 +1,4 @@
+import { checkContinuationHome, environmentHome } from "../continuation.ts";
 import { claudePreflight } from "./preflight.ts";
 import { claude } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
@@ -150,13 +151,7 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
     // Replaces the subprocess environment instead of extending this process's.
-    env: Option.match(
-      Option.flatMap(request.resume, (saved) => saved.home),
-      {
-        onNone: () => ({ ...request.environment }),
-        onSome: (home) => ({ ...request.environment, CLAUDE_CONFIG_DIR: home }),
-      },
-    ),
+    env: { ...request.environment },
     model: request.session.brain.model,
     // The Worker-provisioned binary that the readiness checks inspect.
     pathToClaudeCodeExecutable: "claude",
@@ -534,6 +529,12 @@ const makeClaudeChild = Effect.gen(function* () {
           PostToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
         },
       };
+      const { home, defaultHome } = environmentHome(
+        request.environment,
+        "CLAUDE_CONFIG_DIR",
+        ".claude",
+      );
+      yield* checkContinuationHome(request, home, defaultHome);
       const lifecycle = yield* ChildSessionLifecycle.current;
       if (Option.isSome(request.resume) && request.host._tag === "RemoteShell")
         yield* stopRemote(request, request.host);
@@ -699,9 +700,7 @@ const makeClaudeChild = Effect.gen(function* () {
             const harnessSession = HarnessSession.make({
               id: init.value.session_id,
               cwd: request.cwd,
-              home: Option.fromNullishOr(options.env?.CLAUDE_CONFIG_DIR).pipe(
-                Option.filter((home) => home.length > 0),
-              ),
+              home,
             });
             yield* channel.emit(
               SessionStarted.make({

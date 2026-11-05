@@ -220,7 +220,10 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       );
 
     /** Returns the variables that point git, gh, and the harnesses at the sandbox's outbound handlers. */
-    const sandboxEnvironment = (worker: CloudflareWorker) => harnessEnvironment(worker.providers);
+    const sandboxEnvironment = (
+      worker: CloudflareWorker,
+      harness: Option.Option<Harness> = Option.none(),
+    ) => harnessEnvironment(worker.providers, harness);
 
     /** Returns the credential kind the outbound handlers inject for `harness`. */
     const gatewayCredential = (
@@ -1057,7 +1060,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           host: shell,
           machine: Option.none(),
           environment: childEnvironment(
-            sandboxEnvironment(worker),
+            sandboxEnvironment(worker, Option.some(prepared.spec.agent.brain.harness)),
             request.commitAuthor,
             provisioned.gitHooks,
           ),

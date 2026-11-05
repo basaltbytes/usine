@@ -1,3 +1,4 @@
+import type { Harness } from "@usine/core/agent/brain";
 import type { HarnessCatalog } from "@usine/agents/harness";
 import { Harnesses } from "@usine/agents/harness/node";
 import { reclaimOnceFor } from "../../remote/reclaim.ts";
@@ -153,6 +154,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     machine: SshMachine,
     gateway: MachineGateway,
     operation: ExecutorOperation,
+    harness: Option.Option<Harness>,
   ) {
     const { admin, settings } = gateway;
     const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
@@ -304,6 +306,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       ),
     ).pipe(Effect.forkScoped);
     const { exported, sent } = gatewayEnvironment({
+      harness,
       catalog,
       domain: settings.domain,
       egress: settings.egress,

@@ -45,7 +45,7 @@ export const provisionedApiKey = (
   );
 };
 
-/** Adds provisioner API keys and writes each registered harness's attempt configuration. */
+/** Adds the selected harness's provisioner API key and attempt configuration. */
 export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
   catalog: HarnessCatalog,
   commands: RemoteCommands,
@@ -54,17 +54,20 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
   attemptId: AttemptId,
   access: RemoteAccess,
   operation: ExecutorOperation,
+  harness: Option.Option<Harness>,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId, worker: machine.address.name });
-  const keyed = catalog.descriptors.flatMap((descriptor) =>
-    Option.toArray(provisionedApiKey(catalog, machine, descriptor.id)).flatMap((key) =>
-      Option.toArray(descriptor.worker.credential).map((credential) => ({
-        descriptor,
-        credential,
-        key,
-      })),
-    ),
-  );
+  const keyed = catalog.descriptors
+    .filter(({ id }) => Option.contains(harness, id))
+    .flatMap((descriptor) =>
+      Option.toArray(provisionedApiKey(catalog, machine, descriptor.id)).flatMap((key) =>
+        Option.toArray(descriptor.worker.credential).map((credential) => ({
+          descriptor,
+          credential,
+          key,
+        })),
+      ),
+    );
   if (keyed.length === 0) {
     yield* Effect.logDebug("No attempt API keys to inject", {
       attemptId,

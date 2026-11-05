@@ -2,6 +2,7 @@
 // @effect-diagnostics asyncFunction:off
 import { assert, it } from "@effect/vitest";
 import {
+  ChildSession,
   HarnessSession,
   HarnessSessionId,
   SessionStarted,
@@ -33,6 +34,7 @@ for (const [recovery, blocker] of [
   ["resume-crashes-then-replacement", { kind: "infra", child: 1 }],
   ["worker-gone-then-replacement", { kind: "infra", child: 1 }],
   ["credential-changed", null],
+  ["harness-changed", null],
   ["invalid-session", null],
   ["extra-saved-fields", null],
   ["missing-session", null],
@@ -50,6 +52,7 @@ for (const [recovery, blocker] of [
       const failsRecovery = [
         "missing-session",
         "invalid-session",
+        "harness-changed",
         "worker-gone",
         "machine-gone",
         "checkout-gone",
@@ -116,7 +119,10 @@ for (const [recovery, blocker] of [
             if (recovery !== "missing-session")
               yield* child.emit(
                 SessionStarted.make({
-                  session: child.request.session,
+                  session: ChildSession.make({
+                    ...child.request.session,
+                    pool: Option.some("claudePlan"),
+                  }),
                   harnessSession: Option.some(saved),
                 }),
               );
@@ -145,7 +151,12 @@ for (const [recovery, blocker] of [
                   }),
                 );
             }
-            if (recovery === "invalid-session" || recovery === "extra-saved-fields")
+            if (
+              recovery === "invalid-session" ||
+              recovery === "extra-saved-fields" ||
+              recovery === "harness-changed" ||
+              recovery === "credential-changed"
+            )
               yield* Context.get(services, DurableHarness).use(
                 "restore saved data from a different version",
                 (opened, context) =>
@@ -158,7 +169,13 @@ for (const [recovery, blocker] of [
                     assert(record.saved !== null);
                     if (recovery === "invalid-session")
                       Object.assign(record.saved.session.brain, { effort: "retired-effort" });
-                    else {
+                    else if (recovery === "harness-changed")
+                      Object.assign(record.saved.session.brain, { harness: "codex" });
+                    else if (recovery === "credential-changed") {
+                      assert.notProperty(record.saved.session, "gatewayCredential");
+                      assert.notProperty(record.saved.session, "pool");
+                      assert.notProperty(record.saved.session, "endpoint");
+                    } else {
                       Object.assign(record.saved, { newerField: true });
                       Object.assign(record.saved.session, { newerField: true });
                     }
@@ -255,6 +272,7 @@ for (const [recovery, blocker] of [
             ![
               "missing-session",
               "invalid-session",
+              "harness-changed",
               "worker-gone",
               "worker-gone-then-replacement",
               "machine-gone",
@@ -271,6 +289,7 @@ for (const [recovery, blocker] of [
                 costUsd: Option.some(UsdAmount.make(recovery === "resume-twice" ? 0.375 : 0.25)),
               }),
             );
+            assert(Option.isNone(child.request.session.pool));
             assert.strictEqual(child.request.cwd, first.cwd);
             assert.strictEqual(child.request.worker, first.worker);
             assert.include(child.request.prompt, request.spec.task);
@@ -385,6 +404,8 @@ for (const [recovery, blocker] of [
             : "Half way there.",
       );
       if (!succeeds) assert.include(jsonKey(result.output), "interrupted");
+      if (recovery === "harness-changed")
+        assert.include(jsonKey(result.output), "harness mismatch (saved codex, current claude)");
       if (recovery === "invalid-session")
         assert.include(jsonKey(result.output), "the saved conversation no longer decodes");
       assertAdmitted(request.spec.attemptId, recording.outbound());

@@ -13,6 +13,7 @@ import {
   AgentSessionError,
   ChildRequest,
   ChildSessionLifecycle,
+  ContinuationMismatchError,
   ChildSessionBudgetExceededError,
   SessionOperationError,
   reportText,
@@ -295,6 +296,14 @@ export const subagentTool = (services: ExtensionServices) => {
         Option.getOrNull(saved.value.machine) !== Option.getOrNull(request.machine))
     )
       return yield* interrupted("the original worker, machine, or checkout is unavailable");
+    if (Option.isSome(saved) && saved.value.session.brain.harness !== spec.agent.brain.harness) {
+      const mismatch = ContinuationMismatchError.make({
+        sessionId,
+        field: "harness",
+        message: `harness mismatch (saved ${saved.value.session.brain.harness}, current ${spec.agent.brain.harness})`,
+      });
+      return yield* interrupted(mismatch.message);
+    }
     // Read when each child starts, so a preflight that ran after the Attempt launched applies.
     const session = ChildSession.make({
       ...(Option.isSome(saved)
@@ -441,7 +450,12 @@ export const subagentTool = (services: ExtensionServices) => {
           ) {
             const recovery = yield* Schema.encodeEffect(SavedChild)(
               SavedChild.make({
-                session: event.session,
+                session: {
+                  id: event.session.id,
+                  parentId: event.session.parentId,
+                  agent: event.session.agent,
+                  brain: event.session.brain,
+                },
                 usage: cumulativeUsage,
                 harnessSession: event.harnessSession.value,
                 worker: request.worker,

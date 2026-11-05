@@ -48,7 +48,11 @@ export const codex = HarnessDescriptor.make({
   worker: WorkerRequirements.make({
     install: [{ name: "@openai/codex", version: CODEX_CLI_VERSION }],
     versions: [CODEX_CLI_VERSION, "0.159.0", "0.159.1", "0.159.2", "0.159.3"],
-    login: { mounted: [".codex/auth.json"], seeded: [".codex/config.toml"] },
+    login: {
+      environment: ["CODEX_HOME"],
+      mounted: [".codex/auth.json"],
+      seeded: [".codex/config.toml"],
+    },
     credential: Option.some(
       HarnessCredential.make({
         provider: "openai",
