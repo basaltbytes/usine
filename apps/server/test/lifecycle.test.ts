@@ -831,6 +831,42 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     }),
   );
 
+  it.live("unloads a launchd job during crash backoff and succeeds again once unloaded", () =>
+    Effect.gen(function* () {
+      const directory = instanceFolder();
+      const launch = yield* fixtureLaunch();
+      const environment = fakeLaunchctl(directory, launch);
+      writeFileSync(join(directory, "launchctl-failing"), "");
+      const state = yield* probeInstance(directory).pipe(Effect.provide(services));
+      assert.strictEqual(state._tag, "Stopped");
+
+      const stopped = yield* runCli(directory, ["stop"], environment);
+      assert.include(stopped, "usine stopped.");
+      assert.isTrue(existsSync(join(directory, "launchctl-unloaded")));
+      yield* runCli(directory, ["stop"], environment);
+      assert.deepStrictEqual(
+        readFileSync(join(directory, "launchctl.log"), "utf8").trim().split("\n"),
+        [`print ${LAUNCHD_SERVICE}`, `bootout ${LAUNCHD_SERVICE}`, `print ${LAUNCHD_SERVICE}`],
+      );
+    }),
+  );
+
+  it.live(
+    "reports launchctl denial during crash backoff instead of reporting a stopped instance",
+    () =>
+      Effect.gen(function* () {
+        const directory = instanceFolder();
+        const launch = yield* fixtureLaunch();
+        const environment = fakeLaunchctl(directory, launch);
+        writeFileSync(join(directory, "launchctl-failing"), "");
+        writeFileSync(join(directory, "launchctl-denied"), "");
+        const failed = yield* runCli(directory, ["stop"], environment).pipe(Effect.flip);
+        assert.include(failed.message, "launchctl print");
+        assert.include(failed.message, "Operation not permitted");
+        assert.isFalse(existsSync(join(directory, "launchctl-unloaded")));
+      }),
+  );
+
   it.live("reports launchctl denial without signaling the supervised process", () =>
     Effect.gen(function* () {
       const directory = instanceFolder();

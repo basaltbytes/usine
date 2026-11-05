@@ -6,6 +6,7 @@ import type { LifecycleOptions, Port } from "./cli.ts";
 import { type InstanceRecord, ProcessId } from "./instance/record.ts";
 import { gatewayTokenVariables, hasLiveAttempt, listRuns } from "./instance/operator-api.ts";
 import { probeInstance, processAlive, signalProcess } from "./instance/state.ts";
+import { configuredLaunchdService, launchdState } from "./instance/launchd.ts";
 import {
   ServiceUnit,
   supervisingService,
@@ -253,8 +254,24 @@ export const stop = Effect.fn("Cli.stop")(function* (
   directory: InstanceDirectory,
   options: LifecycleOptions,
 ) {
+  yield* Effect.annotateCurrentSpan({ instanceDirectory: directory });
   const state = yield* probeInstance(directory);
   if (state._tag === "Stopped") {
+    const service = yield* configuredLaunchdService;
+    if (Option.isSome(service)) {
+      yield* Effect.annotateCurrentSpan({ service: service.value });
+      const job = yield* launchdState(service.value);
+      if (Option.isSome(job)) {
+        yield* Console.log(`Stopping usine with ${serviceStopCommand(service.value)}.`);
+        yield* stopService(service.value);
+        yield* Effect.logInfo("Unloaded the launchd job while no process held the instance lock", {
+          instanceDirectory: directory,
+          service: service.value,
+        });
+        yield* Console.log("usine stopped.");
+        return;
+      }
+    }
     yield* Console.log(`usine is not running in ${directory}.`);
     return;
   }
