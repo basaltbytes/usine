@@ -45,12 +45,14 @@ export const processError = (target: ProcessTarget, message: string, cause: unkn
 const Frame = Schema.Union([
   Schema.Struct({ offset: Schema.Int, stdout: Schema.String }),
   Schema.Struct({ offset: Schema.Int, ack: Schema.Int }),
+  Schema.Struct({ offset: Schema.Int, checkpoint: Schema.Literal(true) }),
   Schema.Struct({ offset: Schema.Int, exitCode: Schema.Int, stderrTail: Schema.String }),
   Schema.Struct({
     offset: Schema.Int,
     ready: Schema.Literal(true),
     sequence: Schema.Int,
     retained: Schema.Boolean,
+    skip: Schema.optionalKey(Schema.Int),
   }),
 ]);
 const InputFrame = Schema.Union([
@@ -92,6 +94,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   command: ProcessCommand,
   input: Stream.Stream<Uint8Array>,
   transport?: "replace" | "resume",
+  acknowledgement: "received" | "handled" = "received",
 ) {
   const lifecycle = yield* ChildSessionLifecycle.current;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -101,8 +104,29 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   const history = new Map<number, string>();
   let sequence = 0;
   const ready = yield* Deferred.make<void, SessionOperationError>();
+  const checkpoint = yield* Deferred.make<void>();
   const generation = yield* Deferred.make<Option.Option<number>, SessionOperationError>();
   const offset = yield* Ref.make(0);
+  const delivered = yield* Ref.make({ offset: 0, skip: 0 });
+  const pending: Array<{ remaining: number; handled: number; start: number; offset: number }> = [];
+  const acknowledgeOutput = (bytes: number) =>
+    Effect.gen(function* () {
+      let remaining = bytes;
+      while (pending.length > 0) {
+        const frame = pending[0];
+        if (frame === undefined) break;
+        const handled = Math.min(remaining, frame.remaining);
+        frame.remaining -= handled;
+        frame.handled += handled;
+        remaining -= handled;
+        if (frame.remaining > 0) {
+          yield* Ref.set(delivered, { offset: frame.start, skip: frame.handled });
+          break;
+        }
+        pending.shift();
+        yield* Ref.set(delivered, { offset: frame.offset, skip: 0 });
+      }
+    });
   const pidFile = childPidFile(target.cwd, target.sessionId.value);
   const fields = { sessionId: target.sessionId.value };
   const environmentKeys = yield* Schema.encodeEffect(
@@ -127,20 +151,29 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
     Stream.runForEach((data) => send({ data: Base64.encode(data) })),
     Effect.andThen(
       Effect.gen(function* () {
-        if (yield* lifecycle.isStopping) {
-          const cursor = yield* Ref.get(offset);
-          yield* Queue.offer(outgoing, `{"heartbeat":true,"offset":${cursor}}`);
-        } else yield* send({ eof: true });
+        if (yield* lifecycle.isStopping) return;
+        yield* send({ eof: true });
+        yield* Queue.end(outgoing);
       }),
     ),
-    Effect.andThen(Queue.end(outgoing)),
     Effect.forkScoped,
   );
 
   let failures = 0;
+  let launched = false;
   const relay = Effect.fn("ChildHost.relay")(function* () {
     yield* Effect.annotateCurrentSpan(fields);
     const cursor = yield* Ref.get(offset);
+    const mode = (yield* Deferred.isDone(ready))
+      ? "attach"
+      : transport === "resume"
+        ? "resume"
+        : launched
+          ? "attach"
+          : "replace";
+    launched = true;
+    const relayReady = yield* Deferred.make<void>();
+    let skipped = 0;
     const replay = [...history.values()];
     const replayed = new Set(replay);
     const frames = Stream.concat(
@@ -156,7 +189,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
           args: [
             "-e",
             PROCESS_OWNER,
-            transport === "resume" && cursor === 0 ? "resume" : "attach",
+            mode,
             pidFile,
             String(cursor),
             String(PROCESS_LEASE_MS),
@@ -173,8 +206,12 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
             stream: Stream.merge(
               frames,
               Stream.tick("1 second").pipe(
-                Stream.mapEffect(() => Ref.get(offset)),
-                Stream.map((cursor) => `{"heartbeat":true,"offset":${cursor}}`),
+                Stream.mapEffect(() =>
+                  Deferred.await(relayReady).pipe(Effect.andThen(Ref.get(delivered))),
+                ),
+                Stream.map(
+                  (cursor) => `{"heartbeat":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,
+                ),
               ),
               { haltStrategy: "left" },
             ).pipe(Stream.map((line) => encoder.encode(`${line}\n`))),
@@ -196,7 +233,16 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
         Effect.gen(function* () {
           if (line.length === 0) return;
           const frame = yield* decodeFrame(line);
+          if ("checkpoint" in frame) {
+            yield* Deferred.succeed(checkpoint, undefined);
+            return;
+          }
           if ("ready" in frame) {
+            if (!(yield* Deferred.isDone(ready))) {
+              yield* Ref.set(delivered, { offset: frame.offset, skip: frame.skip ?? 0 });
+            }
+            skipped = frame.skip ?? 0;
+            yield* Deferred.succeed(relayReady, undefined);
             failures = 0;
             if (!(yield* Deferred.isDone(ready))) {
               sequence = frame.sequence;
@@ -212,17 +258,42 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
               retained: frame.retained,
             });
           } else if ("ack" in frame) {
+            if (acknowledgement === "handled")
+              pending.push({
+                remaining: 0,
+                handled: 0,
+                start: yield* Ref.get(offset),
+                offset: frame.offset,
+              });
             for (const id of history.keys()) if (id <= frame.ack) history.delete(id);
           } else if ("stdout" in frame) {
             const bytes = yield* Effect.fromResult(Base64.decode(frame.stdout));
+            if (acknowledgement === "handled")
+              pending.push({
+                remaining: bytes.length,
+                handled: skipped,
+                start: yield* Ref.get(offset),
+                offset: frame.offset,
+              });
+            skipped = 0;
             yield* Queue.offer(stdout, bytes);
           } else {
+            if (acknowledgement === "handled")
+              pending.push({
+                remaining: 0,
+                handled: 0,
+                start: yield* Ref.get(offset),
+                offset: frame.offset,
+              });
             yield* Deferred.succeed(
               exit,
               ChildProcessLost.make({ exitCode: frame.exitCode, stderrTail: frame.stderrTail }),
             );
           }
           yield* Ref.set(offset, frame.offset);
+          if (acknowledgement === "received")
+            yield* Ref.set(delivered, { offset: frame.offset, skip: 0 });
+          else yield* acknowledgeOutput(0);
         }),
       ),
     );
@@ -295,7 +366,34 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
     );
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
-      if (yield* lifecycle.isStopping) return;
+      if (yield* lifecycle.isStopping) {
+        if (!(yield* Deferred.isDone(ready))) {
+          yield* Effect.logInfo(
+            "Detached before the owner was ready; preserving its output checkpoint",
+            fields,
+          );
+          return;
+        }
+        yield* Effect.gen(function* () {
+          yield* Deferred.await(ready);
+          const cursor = yield* Ref.get(delivered);
+          yield* Queue.offer(
+            outgoing,
+            `{"heartbeat":true,"checkpoint":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,
+          );
+          yield* Deferred.await(checkpoint);
+        }).pipe(
+          Effect.timeout("5 seconds"),
+          Effect.tapError((cause) =>
+            Effect.logWarning("Could not save the child output checkpoint before detaching", {
+              ...fields,
+              cause,
+            }),
+          ),
+          Effect.ignore,
+        );
+        return;
+      }
       yield* kill().pipe(
         Effect.tapError((cause) =>
           Effect.logWarning("Could not stop the child process owner", { ...fields, cause }),
@@ -308,6 +406,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
     stdout: Stream.fromQueue(stdout),
     exit: Deferred.await(exit),
     generation: Deferred.await(generation),
+    acknowledgeOutput,
     kill,
   };
 });

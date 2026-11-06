@@ -20,7 +20,7 @@
         "args": [
           "recorded-worker",
           "--",
-          "cd '/' && export HOME='$HOME' PATH='$PATH' CODEX_HOME='$CODEX_HOME' ANTHROPIC_BASE_URL='$ANTHROPIC_BASE_URL' ANTHROPIC_AUTH_TOKEN='$USINE_GATEWAY_TOKEN' USINE_GATEWAY_TOKEN='$USINE_GATEWAY_TOKEN' && exec 'node' '-e' '$PROCESS_OWNER' 'attach' '$WORKTREE.child-1.pid' '0' '120000' '[\"ANTHROPIC_AUTH_TOKEN\",\"ANTHROPIC_BASE_URL\",\"CODEX_HOME\",\"HOME\",\"PATH\",\"USINE_GATEWAY_TOKEN\"]' 'codex' 'app-server' '--stdio' '-c' 'projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'"
+          "cd '/' && export HOME='$HOME' PATH='$PATH' CODEX_HOME='$CODEX_HOME' ANTHROPIC_BASE_URL='$ANTHROPIC_BASE_URL' ANTHROPIC_AUTH_TOKEN='$USINE_GATEWAY_TOKEN' USINE_GATEWAY_TOKEN='$USINE_GATEWAY_TOKEN' && exec 'node' '-e' '$PROCESS_OWNER' 'replace' '$WORKTREE.child-1.pid' '0' '120000' '[\"ANTHROPIC_AUTH_TOKEN\",\"ANTHROPIC_BASE_URL\",\"CODEX_HOME\",\"HOME\",\"PATH\",\"USINE_GATEWAY_TOKEN\"]' 'codex' 'app-server' '--stdio' '-c' 'projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'"
         ],
         "env": {
           "HOME": "$HOME",

@@ -26,7 +26,7 @@ for (const failure of [
   "resume-exit",
   "resume-zero-exit",
 ] as const)
-  it.live(
+  it.live.skipIf(process.platform !== "linux")(
     failure === "resume-exit" || failure === "resume-zero-exit"
       ? `fails after one thread resume when the app-server exits again (${failure})`
       : `finishes on one Codex thread after ${failure}`,

@@ -8,7 +8,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Context, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 
 // The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
@@ -150,3 +150,61 @@ export const userMessage = (content: string): ClaudeUserMessage => ({
   message: { role: "user", content },
   parent_tool_use_id: null,
 });
+
+const ControlMessage = Schema.Struct({ type: Schema.String });
+const MessageId = Schema.Struct({ uuid: Schema.String });
+const JsonObject = Schema.Record(Schema.String, Schema.Json);
+const decodeMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
+const messageKey = (message: Schema.Json): string => {
+  if (Schema.is(MessageId)(message)) return message.uuid;
+  if (Array.isArray(message)) return serializeVendorValue(message.map(messageKey));
+  if (Schema.is(JsonObject)(message))
+    return serializeVendorValue(
+      Object.entries(message)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => [key, messageKey(value)]),
+    );
+  return serializeVendorValue(message);
+};
+
+export const claudeOutputCheckpoint = () => {
+  let buffered = Buffer.alloc(0);
+  const pending: Array<{ key: string; bytes: number; handled: boolean; control: boolean }> = [];
+  const flush = () => {
+    let bytes = 0;
+    while (pending[0]?.handled === true) bytes += pending.shift()?.bytes ?? 0;
+    return bytes;
+  };
+  return {
+    read: (bytes: Uint8Array) =>
+      Effect.gen(function* () {
+        buffered = Buffer.concat([buffered, bytes]);
+        let end;
+        while ((end = buffered.indexOf(10)) >= 0) {
+          const message = yield* decodeMessage(buffered.subarray(0, end).toString());
+          const type = Schema.is(ControlMessage)(message) ? message.type : "";
+          pending.push({
+            key: messageKey(message),
+            bytes: end + 1,
+            handled: type === "control_response" || type === "keep_alive",
+            control: type === "control_request" || type === "control_cancel_request",
+          });
+          buffered = buffered.subarray(end + 1);
+        }
+      }),
+    handled: (message: Schema.Json) => {
+      const key = messageKey(message);
+      const index = pending.findIndex((entry) => !entry.handled && entry.key === key);
+      if (index < 0) return 0;
+      const entry = pending[index];
+      if (entry !== undefined) entry.handled = true;
+      // Hook callbacks remain replayable until the enclosing turn's result is handled.
+      if (Schema.is(ControlMessage)(message) && message.type === "result")
+        for (let i = 0; i < index; i++) {
+          const earlier = pending[i];
+          if (earlier?.control === true) earlier.handled = true;
+        }
+      return flush();
+    },
+  };
+};

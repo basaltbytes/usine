@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import type { AgentSessionEvent } from "@usine/core/agent/session";
-import { Release } from "@usine/core/attempt/channel";
+import { Interrupt, Release, Steer } from "@usine/core/attempt/channel";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import {
   Cause,
@@ -28,6 +28,10 @@ const fileWithLines = (file: string, count: number) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     for (;;) {
+      if (!(yield* fs.exists(file))) {
+        yield* Effect.sleep("10 millis");
+        continue;
+      }
       const text = yield* fs.readFileString(file);
       const lines = text.trim().split("\n");
       if (lines.length >= count) return lines;
@@ -38,7 +42,9 @@ const fileWithLines = (file: string, count: number) =>
 describe("recorded harness transports", () => {
   for (const provider of providers)
     for (const scenario of scenarios) {
-      it.live(
+      it.live.skipIf(
+        process.platform !== "linux" && provider === "claude" && scenario === "transport-loss",
+      )(
         `${provider}: ${scenario}`,
         () =>
           Effect.scoped(
@@ -213,9 +219,20 @@ it.live(
     }).pipe(Effect.timeout("2 seconds")),
 );
 
-for (const state of ["working", "idle"] as const)
-  it.live(
-    `Claude resumes its ${state} session by reattaching one owned process`,
+for (const state of [
+  "working",
+  "idle",
+  "hook",
+  "buffered-result",
+  "environment-changed",
+  "fresh",
+] as const)
+  it.live.skipIf(process.platform !== "linux")(
+    state === "fresh"
+      ? "Claude replaces the old owner on a launch without a saved session"
+      : state === "environment-changed"
+        ? "Claude resumes its environment-changed session through a replacement owner"
+        : `Claude resumes its ${state} session by reattaching one owned process`,
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -224,6 +241,8 @@ for (const state of ["working", "idle"] as const)
           const scope = yield* Scope.make();
           const stopping = yield* Ref.make(false);
           const events = yield* Queue.unbounded<AgentSessionEvent>();
+          if (state === "buffered-result")
+            yield* fs.writeFileString(`${fixture.cwd}/block-result`, "ready");
           const first = yield* Effect.gen(function* () {
             const running = yield* (yield* ChildBackend).launch(
               ChildRequest.make({ ...fixture.request, held: true }),
@@ -252,45 +271,100 @@ for (const state of ["working", "idle"] as const)
             yield* fixture.controls.releaseCommand;
             yield* until("SessionIdle");
           }
+          if (state === "hook") {
+            yield* first.intervene(Interrupt.make(), () => Effect.void);
+            yield* fs.writeFileString(`${fixture.cwd}/request-hook`, "ready");
+            while (!(yield* fs.exists(`${fixture.cwd}/hook-sent`)))
+              yield* Effect.sleep("10 millis");
+            yield* Effect.sleep("1100 millis");
+          }
           const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
           const pid = yield* fs.readFileString(pidFile);
+          if (state === "buffered-result") {
+            yield* fixture.controls.releaseCommand;
+            while (!(yield* fs.exists(`${fixture.cwd}/result-buffered`)))
+              yield* Effect.sleep("10 millis");
+          }
           yield* Ref.set(stopping, true);
+          if (state === "buffered-result") yield* fs.remove(`${fixture.cwd}/block-result`);
           yield* Scope.close(scope, Exit.void);
+          const checkpointBefore = yield* fs.readFileString(`${pidFile}.transport/delivered`);
+          assert.notStrictEqual(
+            checkpointBefore,
+            '{"offset":0,"skip":0}',
+            "handled output is checkpointed before detach",
+          );
           yield* Effect.scoped(
             Effect.gen(function* () {
               const resumed = yield* (yield* ChildBackend).launch(
                 ChildRequest.make({
                   ...fixture.request,
                   held: true,
-                  resume: started.harnessSession,
+                  resume: state === "fresh" ? Option.none() : started.harnessSession,
+                  environment:
+                    state === "environment-changed"
+                      ? { ...fixture.request.environment, REPLAY_ENVIRONMENT: "changed" }
+                      : fixture.request.environment,
+                  paused: state === "hook",
                   idle: state === "idle" ? Option.some("REPLAY_DONE") : Option.none(),
                 }),
               );
               const currentPid = yield* fs.readFileString(pidFile);
-              assert.strictEqual(currentPid, pid);
+              if (state === "environment-changed" || state === "fresh") {
+                assert.notStrictEqual(currentPid, pid);
+                const processes = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
+                assert.lengthOf(processes, 2);
+              } else {
+                assert.strictEqual(currentPid, pid);
+                const checkpointAfter = yield* fs.readFileString(`${pidFile}.transport/delivered`);
+                assert.notStrictEqual(
+                  checkpointAfter,
+                  '{"offset":0,"skip":0}',
+                  "the first heartbeat preserves the resume checkpoint",
+                );
+              }
+              if (state === "buffered-result") {
+                yield* resumed.intervene(Release.make(), () => Effect.void);
+                assert.include((yield* resumed.result).message, "REPLAY_DONE");
+                return;
+              }
+              if (state === "hook") {
+                const answered = yield* fs.exists(`${fixture.cwd}/hook-responses`);
+                assert.isFalse(answered);
+                yield* resumed.intervene(Release.make(), () => Effect.void);
+                yield* resumed.intervene(
+                  Steer.make({ message: "Continue after the paused hook" }),
+                  () => Effect.void,
+                );
+                yield* fileWithLines(`${fixture.cwd}/hook-responses`, 1);
+                yield* fixture.controls.releaseCommand;
+                assert.include((yield* resumed.result).message, "REPLAY_DONE");
+                return;
+              }
               // This message is a FIFO barrier after any input from the retained launch.
               const guidance = "Continue after reattachment";
               yield* resumed.steer(guidance);
-              const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, 2);
-              assert.lengthOf(inputs, 2, "reattachment sends no task or continuation prompt");
+              const count = state === "environment-changed" || state === "fresh" ? 3 : 2;
+              const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, count);
+              assert.lengthOf(inputs, count, "reattachment sends no task or continuation prompt");
               assert.include(inputs[0] ?? "", fixture.request.prompt);
-              assert.include(inputs[1] ?? "", guidance);
-              if (state === "working") yield* fixture.controls.releaseCommand;
+              assert.include(inputs[count - 1] ?? "", guidance);
+              if (state !== "idle") yield* fixture.controls.releaseCommand;
               yield* resumed.intervene(Release.make(), () => Effect.void);
               const result = yield* resumed.result;
               assert.include(result.message, "REPLAY_DONE");
             }).pipe(Effect.provide(fixture.backend)),
           );
-          yield* fixture.save;
+          if (state !== "fresh" && state !== "environment-changed") yield* fixture.save;
           assert.strictEqual(first.session.id, fixture.request.session.id);
         }),
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
     20_000,
   );
 
-for (const outcome of ["completed", "second-exit", "idle"] as const)
-  it.live(
-    `Claude resumes once after lease expiry: ${outcome}`,
+for (const outcome of ["completed", "second-exit", "idle", "two-outages"] as const)
+  it.live.skipIf(process.platform !== "linux")(
+    `Claude recovers after lease expiry: ${outcome}`,
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -322,10 +396,21 @@ for (const outcome of ["completed", "second-exit", "idle"] as const)
             const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
             const originalPid = yield* fs.readFileString(pidFile);
             // Simulate a heartbeat gap longer than the real two-minute lease.
+            if (outcome === "second-exit")
+              yield* fs.writeFileString(`${fixture.cwd}/exit-resume`, "ready");
             yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
             const launches = yield* fileWithLines(`${fixture.cwd}/launch-arguments`, 2);
             assert.lengthOf(launches, 2);
             assert.include(launches[1] ?? "", `"--resume=${saved.value}"`);
+            if (outcome === "second-exit") {
+              const failure = yield* running.result.pipe(Effect.flip);
+              assert.strictEqual(failure._tag, "SessionOperationError");
+              if (failure._tag === "SessionOperationError")
+                assert(Schema.is(ChildProcessLost)(failure.cause));
+              const processes = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
+              assert.lengthOf(processes, 2);
+              return;
+            }
             const replacementPid = yield* fs.readFileString(pidFile);
             assert.notStrictEqual(replacementPid, originalPid);
             if (outcome === "idle") {
@@ -340,20 +425,24 @@ for (const outcome of ["completed", "second-exit", "idle"] as const)
               inputs[1] ?? "",
               outcome === "idle" ? "Continue after idle recovery" : "check the worktree",
             );
-            if (outcome === "second-exit") {
+            if (outcome === "two-outages") {
+              for (;;) {
+                if ((yield* Queue.take(events))._tag === "ToolStarted") break;
+              }
               yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
-              const failure = yield* running.result.pipe(Effect.flip);
-              assert.strictEqual(failure._tag, "SessionOperationError");
-              if (failure._tag === "SessionOperationError")
-                assert(Schema.is(ChildProcessLost)(failure.cause));
-              const processes = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
-              assert.lengthOf(processes, 2);
-            } else {
-              yield* fixture.controls.releaseCommand;
-              yield* running.intervene(Release.make(), () => Effect.void);
-              assert.include((yield* running.result).message, "REPLAY_DONE");
-              assert.strictEqual(running.session.id, fixture.request.session.id);
+              const argumentsAfterRecovery = yield* fileWithLines(
+                `${fixture.cwd}/launch-arguments`,
+                3,
+              );
+              assert.lengthOf(argumentsAfterRecovery, 3);
+              yield* fileWithLines(`${fixture.cwd}/user-messages`, 3);
+              const recoveredPid = yield* fs.readFileString(pidFile);
+              assert.notStrictEqual(recoveredPid, replacementPid);
             }
+            yield* fixture.controls.releaseCommand;
+            yield* running.intervene(Release.make(), () => Effect.void);
+            assert.include((yield* running.result).message, "REPLAY_DONE");
+            assert.strictEqual(running.session.id, fixture.request.session.id);
           }).pipe(Effect.provide(fixture.backend), Effect.scoped);
           const retained = yield* fs.exists(childPidFile(fixture.cwd, fixture.request.session.id));
           assert.isFalse(retained);

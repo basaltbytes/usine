@@ -2,7 +2,7 @@
 import { EventEmitter } from "node:events";
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { PassThrough } from "node:stream";
-import { type Cause, Effect, Fiber, Option, Queue, Ref, Scope, Stream } from "effect";
+import { type Cause, Effect, Option, Queue, Ref, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { type ProcessTarget, processError } from "./process.ts";
 import { startChildProcess } from "./node.ts";
@@ -37,6 +37,7 @@ class SdkProcess extends EventEmitter {
 export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(function* (
   target: ProcessTarget,
   transport?: "replace" | "resume",
+  readOutput: (bytes: Uint8Array) => Effect.Effect<void, SessionOperationError> = () => Effect.void,
 ) {
   const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const lifecycle = yield* ChildSessionLifecycle.current;
@@ -44,6 +45,7 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
   const failure = yield* Ref.make(Option.none<SessionOperationError>());
   const retained = yield* Ref.make(false);
   const run = Effect.runForkWith(context);
+  let acknowledgeOutput = (_bytes: number): Effect.Effect<void> => Effect.void;
   const spawn = (options: SpawnOptions) => {
     const process = new SdkProcess(() => {
       run(stop);
@@ -65,7 +67,9 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
         { command: options.command, args: options.args, cwd: options.cwd ?? target.cwd },
         Stream.fromQueue(input),
         transport,
+        "handled",
       );
+      acknowledgeOutput = handle.acknowledgeOutput;
       const generation = yield* handle.generation;
       yield* Ref.set(retained, Option.isSome(generation));
       stop = Effect.gen(function* () {
@@ -80,16 +84,23 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
         ),
       );
       if (process.killed || options.signal.aborted) yield* stop;
-      const output = yield* handle.stdout.pipe(
-        Stream.runForEach((data) =>
-          Effect.sync(() => {
-            process.stdout.write(data);
-          }),
-        ),
-        Effect.forkScoped,
+      const [event] = yield* Effect.all(
+        [
+          handle.exit,
+          handle.stdout.pipe(
+            Stream.runForEach((data) =>
+              readOutput(data).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    process.stdout.write(data);
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ],
+        { concurrency: "unbounded" },
       );
-      const event = yield* handle.exit;
-      yield* Fiber.join(output);
       const error = processError(target, `Child process exited with code ${event.exitCode}`, event);
       yield* Ref.set(failure, Option.some(error));
       process.exitCode = event.exitCode;
@@ -117,6 +128,7 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
   return {
     spawn,
     retained: Ref.get(retained),
+    acknowledge: (bytes: number) => Effect.suspend(() => acknowledgeOutput(bytes)),
     diagnose: (error: SessionOperationError) =>
       Ref.get(failure).pipe(Effect.map(Option.getOrElse(() => error))),
   };

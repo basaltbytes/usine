@@ -127,6 +127,10 @@ if (mode === 'stop') {
   fs.writeFileSync(ready, '');
 } else {
   (async () => {
+  if (mode === 'replace') {
+    await stopOwner();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
   if (!fs.existsSync(root)) {
     await stopOwner();
     // Older installations used a second PID file for native session resume.
@@ -154,7 +158,9 @@ if (mode === 'stop') {
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
   }
-  let offset = mode === 'resume' && retained ? Number(fs.readFileSync(delivered, 'utf8')) : Number(cursor);
+  const checkpoint = mode === 'resume' && retained ? JSON.parse(fs.readFileSync(delivered, 'utf8')) : Number(cursor);
+  let offset = typeof checkpoint === 'number' ? checkpoint : checkpoint.offset;
+  let skip = typeof checkpoint === 'number' ? 0 : checkpoint.skip;
   const attachedAt = new Date();
   fs.utimesSync(heartbeat, attachedAt, attachedAt);
   let pending = Buffer.alloc(0);
@@ -168,7 +174,7 @@ if (mode === 'stop') {
     }
     if (!announced) {
       announced = true;
-      process.stdout.write(JSON.stringify({ ready: true, offset, sequence: fs.readFileSync(input, 'utf8').split('\n').filter(Boolean).reduce((highest, line) => Math.max(highest, JSON.parse(line).sequence), Number(fs.readFileSync(acknowledged, 'utf8'))), retained }) + '\n');
+      process.stdout.write(JSON.stringify({ ready: true, offset, skip, sequence: fs.readFileSync(input, 'utf8').split('\n').filter(Boolean).reduce((highest, line) => Math.max(highest, JSON.parse(line).sequence), Number(fs.readFileSync(acknowledged, 'utf8'))), retained }) + '\n');
     }
     const fd = fs.openSync(output, 'r');
     const data = Buffer.alloc(65536);
@@ -178,6 +184,10 @@ if (mode === 'stop') {
     let end;
     while ((end = pending.indexOf(10)) >= 0) {
       const frame = JSON.parse(pending.subarray(0, end).toString());
+      if (frame.stdout !== undefined && skip > 0) {
+        frame.stdout = Buffer.from(frame.stdout, 'base64').subarray(skip).toString('base64');
+        skip = 0;
+      }
       offset += end + 1;
       pending = pending.subarray(end + 1);
       process.stdout.write(JSON.stringify({ ...frame, offset }) + '\n');
@@ -205,7 +215,8 @@ if (mode === 'stop') {
       if (frame.heartbeat) {
         const now = new Date();
         fs.utimesSync(heartbeat, now, now);
-        fs.writeFileSync(delivered, String(frame.offset));
+        fs.writeFileSync(delivered, JSON.stringify({ offset: frame.offset, skip: frame.skip ?? 0 }));
+        if (frame.checkpoint) process.stdout.write(JSON.stringify({ checkpoint: true, offset: frame.offset }) + '\n');
       } else fs.appendFileSync(input, line);
     }
   });

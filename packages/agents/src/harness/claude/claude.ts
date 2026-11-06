@@ -69,6 +69,7 @@ import {
 import {
   AsyncInput,
   ClaudeSdk,
+  claudeOutputCheckpoint,
   type ClaudeModelInfo,
   type ClaudeQuery,
   type ClaudeQueryOptions,
@@ -164,6 +165,7 @@ interface ClaudeLaunch {
    */
   readonly login: Exclude<LoginCheck, "waiting"> | "undecided";
   readonly retained: boolean;
+  readonly acknowledge: (message: Schema.Json) => Effect.Effect<void>;
   /** The scope of the launch's process, input, and output reader. */
   readonly scope: Scope.Closeable;
 }
@@ -249,6 +251,7 @@ const makeClaudeChild = Effect.gen(function* () {
     const release = yield* holdLogin(request);
     return yield* Effect.gen(function* () {
       const input = new AsyncInput();
+      const checkpoint = claudeOutputCheckpoint();
       const owner = yield* sdkProcessSpawner(
         {
           host: request.host,
@@ -257,6 +260,14 @@ const makeClaudeChild = Effect.gen(function* () {
           environment: request.environment,
         },
         transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
+        (bytes) =>
+          checkpoint
+            .read(bytes)
+            .pipe(
+              Effect.mapError((cause) =>
+                operationError("stream", request, "Claude returned malformed JSON", cause),
+              ),
+            ),
       ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
       const query = sdk.open(input, { ...options, spawnClaudeCodeProcess: owner.spawn });
       const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
@@ -309,7 +320,16 @@ const makeClaudeChild = Effect.gen(function* () {
         login,
         messages: read.length,
       });
-      return { input, query, read, output, login, retained } satisfies Omit<ClaudeLaunch, "scope">;
+      return {
+        input,
+        query,
+        read,
+        output,
+        login,
+        retained,
+        acknowledge: (message: Schema.Json) =>
+          Effect.sync(() => checkpoint.handled(message)).pipe(Effect.flatMap(owner.acknowledge)),
+      } satisfies Omit<ClaudeLaunch, "scope">;
     }).pipe(Effect.ensuring(release));
   });
 
@@ -385,12 +405,13 @@ const makeClaudeChild = Effect.gen(function* () {
       yield* Effect.logInfo("Launching Claude child session");
       const context = yield* Effect.context<never>();
       const scope = yield* Effect.scope;
+      const boundaryReady = yield* Deferred.make<void>();
       let boundary = Effect.void;
       const pauseAtBoundary: HookCallback = async (_input, _id, options) => {
         await Effect.runPromiseWith(context)(
           Effect.acquireUseRelease(
             Effect.forkIn(
-              Effect.suspend(() => boundary),
+              Deferred.await(boundaryReady).pipe(Effect.andThen(Effect.suspend(() => boundary))),
               scope,
             ),
             Fiber.join,
@@ -464,6 +485,7 @@ const makeClaudeChild = Effect.gen(function* () {
         beforeFinish: Effect.void,
       });
       boundary = conversation.awaitUnpaused;
+      yield* Deferred.succeed(boundaryReady, undefined);
       const tools = new Map<string, string>();
       const usage = claudeSessionMeter(Option.getOrUndefined(request.usage));
       const readRateLimits = claudeRateLimits(session);
@@ -517,6 +539,8 @@ const makeClaudeChild = Effect.gen(function* () {
       });
 
       let providerFailure = Option.none<AgentCapacityError | AgentResultError>();
+
+      let resumed = false;
 
       /** Applies one message from Claude to the session. */
       const handle = (message: Schema.Json) =>
@@ -653,7 +677,15 @@ const makeClaudeChild = Effect.gen(function* () {
             ),
             Stream.runForEach(
               Result.match({
-                onSuccess: (message) => handle(message),
+                onSuccess: (message) =>
+                  handle(message).pipe(
+                    Effect.andThen(launch.acknowledge(message)),
+                    Effect.tap(() =>
+                      Effect.sync(() => {
+                        resumed = false;
+                      }),
+                    ),
+                  ),
                 onFailure: (error) =>
                   Effect.sync(() => {
                     broken = Option.some(error);
@@ -664,7 +696,6 @@ const makeClaudeChild = Effect.gen(function* () {
           return broken;
         });
 
-      let resumed = false;
       const resume = Effect.fn("ClaudeRuntime.resume")(function* (error: SessionOperationError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, worker: request.worker });
         if (

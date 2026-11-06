@@ -48,6 +48,7 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
   command: ProcessCommand,
   input: Stream.Stream<Uint8Array>,
   transport?: "replace" | "resume",
+  acknowledgement: "received" | "handled" = "received",
 ) {
   yield* Effect.annotateCurrentSpan({ sessionId: Option.getOrUndefined(target.sessionId) });
   if (target.host._tag === "RemoteShell" && Option.isSome(target.sessionId))
@@ -56,6 +57,7 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
       command,
       input,
       transport,
+      acknowledgement,
     );
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const handle = yield* spawner
@@ -90,6 +92,7 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
     ),
     exit: Deferred.await(exit),
     generation: Effect.succeed(Option.none<number>()),
+    acknowledgeOutput: (_bytes: number) => Effect.void,
     kill: () =>
       handle
         .kill({ forceKillAfter: "6 seconds" })
