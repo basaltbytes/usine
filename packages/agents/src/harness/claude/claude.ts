@@ -693,7 +693,6 @@ const makeClaudeChild = Effect.gen(function* () {
           !Schema.is(ChildProcessLost)(error.cause)
         )
           return yield* error;
-        resumed = true;
         yield* Effect.logWarning("Remote Claude process stopped; resuming its saved session", {
           sessionId: session.id,
           harnessSessionId: harnessSession.value.id,
@@ -721,6 +720,7 @@ const makeClaudeChild = Effect.gen(function* () {
         usage.restart();
         const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
         const messages = working ? [RESUME_PROMPT, ...(yield* conversation.unread)] : [];
+        resumed = working;
         current = yield* launchWithRetries(
           request,
           { ...options, resume: harnessSession.value.id },

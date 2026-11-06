@@ -383,6 +383,7 @@ for (const outcome of [
   "second-exit-after-init",
   "second-exit-after-tool-start",
   "idle",
+  "paused",
   "two-outages",
 ] as const)
   it.live.skipIf(process.platform !== "linux")(
@@ -409,12 +410,15 @@ for (const outcome of [
               if (event._tag === "ToolStarted") break;
             }
             assert(Option.isSome(saved));
+            const waitingForGuidance = outcome === "idle" || outcome === "paused";
             if (outcome === "idle") {
               yield* fixture.controls.releaseCommand;
               for (;;) {
                 if ((yield* Queue.take(events))._tag === "SessionIdle") break;
               }
+              yield* fs.remove(`${fixture.cwd}/release`);
             }
+            if (outcome === "paused") yield* running.intervene(Interrupt.make(), () => Effect.void);
             const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
             const originalPid = yield* fs.readFileString(pidFile);
             // Simulate a heartbeat gap longer than the real two-minute lease.
@@ -435,17 +439,30 @@ for (const outcome of [
             }
             const replacementPid = yield* fs.readFileString(pidFile);
             assert.notStrictEqual(replacementPid, originalPid);
-            if (outcome === "idle") {
-              // A deliberate steer proves the idle replacement has consumed all earlier input.
+            if (waitingForGuidance) {
+              yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
+              const argumentsAfterRecovery = yield* fileWithLines(
+                `${fixture.cwd}/launch-arguments`,
+                3,
+              );
+              assert.lengthOf(argumentsAfterRecovery, 3);
+              assert.include(argumentsAfterRecovery[2] ?? "", `"--resume=${saved.value}"`);
+              const recoveredPid = yield* fs.readFileString(pidFile);
+              assert.notStrictEqual(recoveredPid, replacementPid);
+              const inputsBeforeGuidance = yield* fileWithLines(`${fixture.cwd}/user-messages`, 1);
+              assert.lengthOf(inputsBeforeGuidance, 1);
               yield* running
-                .steer("Continue after idle recovery")
+                .intervene(
+                  Steer.make({ message: "Continue after waiting for guidance" }),
+                  () => Effect.void,
+                )
                 .pipe(Effect.retry({ times: 100, schedule: Schedule.spaced("10 millis") }));
             }
             const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, 2);
             assert.lengthOf(inputs, 2);
             assert.include(
               inputs[1] ?? "",
-              outcome === "idle" ? "Continue after idle recovery" : "check the worktree",
+              waitingForGuidance ? "Continue after waiting for guidance" : "check the worktree",
             );
             if (outcome === "two-outages") {
               for (;;) {
