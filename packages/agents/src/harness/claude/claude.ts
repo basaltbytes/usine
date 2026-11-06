@@ -732,6 +732,8 @@ const makeClaudeChild = Effect.gen(function* () {
         });
         yield* Scope.close(current.scope, Exit.void);
         if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
+        // Emitted before the launch, because a stop during the launch retains the replacement.
+        yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
         backgroundTasks = [];
         completedTurn = Option.none();
         reportsSessionState = false;
@@ -755,7 +757,6 @@ const makeClaudeChild = Effect.gen(function* () {
           send,
         );
         tools.clear();
-        yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
         yield* Effect.logInfo("Resumed the Claude child's session", {
           sessionId: session.id,
           harnessSessionId: reference.id,

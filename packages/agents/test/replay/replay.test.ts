@@ -308,10 +308,10 @@ for (const state of [
               assert(Option.isSome(reset.processUsage));
               assert.strictEqual(reset.processUsage.value.totalTokens, 0);
               assert.deepStrictEqual(reset.processUsage.value.costUsd, Option.none());
-              const replacementPid = yield* fs.readFileString(pidFile);
-              assert.notStrictEqual(replacementPid, originalPid);
               const launches = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
               assert.lengthOf(launches, 2);
+              const replacementPid = yield* fs.readFileString(pidFile);
+              assert.notStrictEqual(replacementPid, originalPid);
             }
             // SDK-only output arriving after the result must advance without another adapter event.
             yield* fs.writeFileString(`${fixture.cwd}/request-sdk-tail`, "ready");
@@ -485,6 +485,112 @@ for (const state of [
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
     20_000,
   );
+
+it.live.skipIf(process.platform !== "linux")(
+  "Claude keeps a replaced process's usage after a stop during the replacement launch",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* openFixture("claude", "transport-loss", "replay");
+        const fs = yield* FileSystem.FileSystem;
+        const stopping = yield* Ref.make(false);
+        const events = yield* Queue.unbounded<AgentSessionEvent>();
+        yield* fs.writeFileString(`${fixture.cwd}/cumulative-usage`, "ready");
+        const scope = yield* Scope.make();
+        const first = yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...fixture.request, held: true }),
+          );
+          yield* running.events.pipe(
+            Stream.runForEach((event) => Queue.offer(events, event)),
+            Effect.forkScoped,
+          );
+          return running;
+        }).pipe(
+          Effect.provide(fixture.backend),
+          Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+          Scope.provide(scope),
+        );
+        let committed = Option.none<SessionTokensUpdated>();
+        const until = (tag: AgentSessionEvent["_tag"]) =>
+          Effect.gen(function* () {
+            for (;;) {
+              const event = yield* Queue.take(events);
+              if (event._tag === "SessionTokensUpdated") committed = Option.some(event);
+              if (event._tag === tag) return event;
+            }
+          });
+        const started = yield* until("SessionStarted");
+        assert(started._tag === "SessionStarted");
+        yield* until("ToolStarted");
+        yield* fixture.controls.releaseCommand;
+        yield* until("SessionIdle");
+        assert(Option.isSome(committed));
+        const firstProcess = committed.value;
+        // The replacement process waits for its launch handshake until the orchestrator stops.
+        yield* fs.writeFileString(`${fixture.cwd}/hold-control`, "ready");
+        const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
+        const originalPid = yield* fs.readFileString(pidFile);
+        yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
+        yield* fileWithLines(`${fixture.cwd}/held-controls`, 1);
+        const replacementPid = yield* fs.readFileString(pidFile);
+        assert.notStrictEqual(replacementPid, originalPid);
+        yield* Ref.set(stopping, true);
+        yield* Scope.close(scope, Exit.void);
+        for (const event of yield* Queue.clear(events))
+          if (event._tag === "SessionTokensUpdated") committed = Option.some(event);
+        yield* fs.remove(`${fixture.cwd}/hold-control`);
+
+        yield* Effect.gen(function* () {
+          const resumed = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({
+              ...fixture.request,
+              held: true,
+              resume: started.harnessSession,
+              idle: Option.some("REPLAY_DONE"),
+              usage: committed,
+            }),
+          );
+          const currentPid = yield* fs.readFileString(pidFile);
+          assert.strictEqual(currentPid, replacementPid, "the replacement process is retained");
+          const resumedEvents = yield* Queue.unbounded<AgentSessionEvent>();
+          yield* resumed.events.pipe(
+            Stream.runForEach((event) => Queue.offer(resumedEvents, event)),
+            Effect.forkScoped,
+          );
+          for (;;) {
+            if ((yield* Queue.take(resumedEvents))._tag === "SessionIdle") break;
+          }
+          yield* resumed.intervene(
+            Steer.make({ message: "Continue after reattachment" }),
+            () => Effect.void,
+          );
+          let latest = Option.none<SessionTokensUpdated>();
+          for (;;) {
+            const event = yield* Queue.take(resumedEvents);
+            if (event._tag === "SessionTokensUpdated") latest = Option.some(event);
+            if (event._tag === "SessionIdle") break;
+          }
+          assert(Option.isSome(latest));
+          assert.strictEqual(
+            latest.value.totalTokens,
+            firstProcess.totalTokens * 2,
+            "the session total includes the replaced process's usage",
+          );
+          assert.deepStrictEqual(
+            latest.value.costUsd,
+            Option.map(firstProcess.costUsd, (cost) => cost * 2),
+          );
+          yield* resumed.intervene(Release.make(), () => Effect.void);
+          assert.include((yield* resumed.result).message, "REPLAY_DONE");
+        }).pipe(Effect.provide(fixture.backend), Effect.scoped);
+        const launches = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
+        assert.lengthOf(launches, 2, "reattachment retains the replacement process");
+        assert.strictEqual(first.session.id, fixture.request.session.id);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+  20_000,
+);
 
 it.live.skipIf(process.platform !== "linux")(
   "Claude sends the task to a retained process that stopped before its prompt",
