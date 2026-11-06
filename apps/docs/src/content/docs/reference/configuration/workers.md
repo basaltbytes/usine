@@ -77,6 +77,8 @@ Derived limits round down to a hundredth of a CPU, a MiB, and a process, with mi
 
 Containers mount the attempt checkout and credential directory, harness login files, and shared pnpm and Turbo volumes. Other attempts' checkouts and tokens are outside these mounts. Custom images must use the SSH user's UID with home `/home/usine`. Rootless Podman requires cgroup v2, delegated CPU, memory, and PID controllers, subordinate UID/GID ranges, and a lingering user manager. Preflight checks resource enforcement and pulls the image.
 
+Claude Code sessions in attempt containers persist in `<root>/workers/<name>/claude/<attempt>`, mounted writable at `/home/usine/.claude/projects`. This directory remains while the attempt checkout exists, so reattached children resume their saved conversations after an orchestrator restart recreates the container. Cleanup removes it after checkout removal; the sweep also removes orphan session directories that no attempt uses. Claude's credential file mount and seeded `.claude.json` remain separate. Shared-user SSH continues to use the SSH user's session directory.
+
 Shared `usine-pnpm-store` and `usine-turbo-cache` volumes survive containers on a fixed machine; provisioned-machine deletion removes them. Preflight logs pnpm disk usage but does not prune it. To reclaim a volume, pause the worker's loops, let attempts finish, remove containers referencing it, then run `podman volume rm usine-pnpm-store` or `podman volume rm usine-turbo-cache`. Use `docker` for Docker workers. Run preflight to recreate empty volumes.
 
 ## Gateway
@@ -130,7 +132,7 @@ For example, `reuse: { attempts: 5, max_age: 2h }` keeps a clean machine for up 
 
 Preflight checks provider credentials, available machine settings, and credentials for every rostered harness without creating a machine. Machine-dependent checks run on the first machine after startup and at the configured interval. Creation failures retry in the same attempt with exponential backoff; other workers continue. **Workers** shows the reason and next creation time.
 
-Reuse requires containers. Between attempts, usine removes the container, checkout, credentials, and attempt home and detaches gateway access, retaining the image and shared caches. Cleanup or preflight failure retires the machine. Retained salvage or reattachment prevents reuse. Idle machines retire at the age limit, worker removal, or orderly shutdown; active attempts can finish beyond the age limit. Reconciliation after recovery and every three minutes removes orphan machines. Stop the orchestrator before deleting machines manually.
+Reuse requires containers. Between attempts, usine removes the container, checkout, credentials, and attempt homes, including Claude project directories, and detaches gateway access, retaining the image and shared caches. Cleanup or preflight failure retires the machine. Retained salvage or reattachment prevents reuse. Idle machines retire at the age limit, worker removal, or orderly shutdown; active attempts can finish beyond the age limit. Reconciliation after recovery and every three minutes removes orphan machines. Stop the orchestrator before deleting machines manually.
 
 ## Hetzner provisioner
 

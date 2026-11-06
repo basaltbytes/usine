@@ -319,7 +319,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       secrets: sent,
       apiKeyHarnesses: new Set(),
       readOnlyPaths: [directories.ghConfigDirectory, GH_GATEWAY_SOCKET_DIRECTORY],
-      writablePaths: homes,
+      writableMounts: homes.map((home) => ({ source: home, destination: home })),
       environment: exported,
       gitEnvironment: exported,
       refresh: credential.refresh(),

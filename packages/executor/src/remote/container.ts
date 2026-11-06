@@ -124,6 +124,12 @@ export const containerCheckoutMarker = (workerDirectory: string, attemptId: Atte
 /** A script that creates the empty file `$1` and its directory. */
 const MARK_SCRIPT = 'mkdir -p "$(dirname "$1")" && : > "$1"';
 
+/** A machine directory mounted writable at a container path. */
+export interface WritableMount {
+  readonly source: string;
+  readonly destination: string;
+}
+
 /** One container to start on a machine. */
 export interface ContainerSpec {
   readonly name: string;
@@ -138,8 +144,8 @@ export interface ContainerSpec {
   readonly checkout: Option.Option<{ readonly path: string; readonly parent: string }>;
   /** Machine directories mounted read-only at their own paths. */
   readonly readOnly: ReadonlyArray<string>;
-  /** Machine directories of the Attempt mounted read-write at their own paths. */
-  readonly writable: ReadonlyArray<string>;
+  /** Machine directories of the Attempt mounted read-write. */
+  readonly writable: ReadonlyArray<WritableMount>;
   /** The harnesses whose login files the container gets. */
   readonly harnesses: ReadonlyArray<Harness>;
   /** Variables set in the container without secrets. */
@@ -390,7 +396,7 @@ export const containersFor = (commands: RemoteCommands) => {
       spec.name,
       String(spec.readOnly.length + spec.writable.length),
       ...spec.readOnly,
-      ...spec.writable,
+      ...spec.writable.map(({ source }) => source),
       ...logins.map(({ file }) => file),
     ])).split("\n");
     if (!home.startsWith("/"))
@@ -401,8 +407,10 @@ export const containersFor = (commands: RemoteCommands) => {
       });
     const found = logins.filter(({ file }) => present.includes(file));
     const readOnly = spec.readOnly.filter((path) => present.includes(path));
-    const writable = spec.writable.filter((path) => present.includes(path));
-    const missing = [...spec.readOnly, ...spec.writable].filter((path) => !present.includes(path));
+    const writable = spec.writable.filter(({ source }) => present.includes(source));
+    const missing = [...spec.readOnly, ...spec.writable.map(({ source }) => source)].filter(
+      (path) => !present.includes(path),
+    );
     if (missing.length > 0)
       yield* Effect.logWarning("The container doesn't mount these missing machine paths", {
         ...fields,
@@ -442,7 +450,7 @@ export const containersFor = (commands: RemoteCommands) => {
         ],
       }),
       ...readOnly.map((path) => bindMount(path, path, "readonly")),
-      ...writable.map((path) => bindMount(path, path, "writable")),
+      ...writable.map(({ source, destination }) => bindMount(source, destination, "writable")),
       ...found.map(({ file, mounted }) =>
         mounted
           ? bindMount(`${home}/${file}`, `${CONTAINER_HOME}/${file}`, "writable")

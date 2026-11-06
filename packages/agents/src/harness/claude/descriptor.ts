@@ -13,6 +13,7 @@ export const claude = HarnessDescriptor.make({
   id: Harness.make("claude"),
   label: "Claude Code",
   worker: WorkerRequirements.make({
+    sessionDirectory: Option.some(".claude/projects"),
     install: [{ name: "@anthropic-ai/claude-code", version: "2.1.311" }],
     versions: [],
     login: {

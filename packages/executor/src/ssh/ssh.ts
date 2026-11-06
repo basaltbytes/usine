@@ -206,7 +206,15 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
                   operation,
                   harness,
                 );
-            return yield* withApiKeys(
+            const isolation = yield* containers.isolation(machine);
+            const sessionMounts = yield* attemptHomes.mounts(
+              machine,
+              attemptId,
+              harness,
+              isolation,
+              operation,
+            );
+            const keyed = yield* withApiKeys(
               catalog,
               commands,
               attemptHomes.hold,
@@ -216,6 +224,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
               operation,
               harness,
             );
+            return { ...keyed, writableMounts: [...keyed.writableMounts, ...sessionMounts] };
           }),
       } satisfies RemoteGrant<SshMachine>);
 

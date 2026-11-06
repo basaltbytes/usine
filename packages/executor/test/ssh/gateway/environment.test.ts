@@ -4,6 +4,7 @@ import {
   HarnessCredential,
   HarnessDescriptor,
   CredentialWiring,
+  WorkerRequirements,
 } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
@@ -115,7 +116,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     const opencode = HarnessDescriptor.make({
       ...claude,
       id: Harness.make("opencode"),
-      worker: {
+      worker: WorkerRequirements.make({
         ...claude.worker,
         credential: Option.some(
           HarnessCredential.make({
@@ -128,7 +129,7 @@ describe("An Attempt's environment behind a Gateway", () => {
             }),
           }),
         ),
-      },
+      }),
     });
     const source = HarnessCatalog.make({ descriptors: [...catalog.descriptors, opencode] });
     const options = {
