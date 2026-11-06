@@ -33,11 +33,12 @@ class SdkProcess extends EventEmitter {
   }
 }
 
-/** Adapts synchronous SDK stream handles to the scoped process owner. */
+/** Adapts SDK stream handles to the scoped process owner; `readOutput` returns checkpointed bytes. */
 export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(function* (
   target: ProcessTarget,
   transport?: "replace" | "resume",
-  readOutput: (bytes: Uint8Array) => Effect.Effect<void, SessionOperationError> = () => Effect.void,
+  readOutput: (bytes: Uint8Array) => Effect.Effect<number, SessionOperationError> = () =>
+    Effect.succeed(0),
 ) {
   const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const lifecycle = yield* ChildSessionLifecycle.current;
@@ -90,6 +91,7 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
           handle.stdout.pipe(
             Stream.runForEach((data) =>
               readOutput(data).pipe(
+                Effect.flatMap(acknowledgeOutput),
                 Effect.andThen(
                   Effect.sync(() => {
                     process.stdout.write(data);

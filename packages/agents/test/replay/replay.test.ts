@@ -270,6 +270,10 @@ for (const state of [
           if (state === "idle") {
             yield* fixture.controls.releaseCommand;
             yield* until("SessionIdle");
+            // SDK-only output arriving after the result must advance without another adapter event.
+            yield* fs.writeFileString(`${fixture.cwd}/request-sdk-tail`, "ready");
+            yield* fileWithLines(`${fixture.cwd}/sdk-tail-sent`, 1);
+            yield* Effect.sleep("1100 millis");
           }
           if (state === "hook") {
             yield* first.intervene(Interrupt.make(), () => Effect.void);
@@ -294,6 +298,17 @@ for (const state of [
             '{"offset":0,"skip":0}',
             "handled output is checkpointed before detach",
           );
+          if (state !== "hook" && state !== "buffered-result") {
+            const checkpoint = yield* Schema.decodeEffect(
+              Schema.fromJsonString(Schema.Struct({ offset: Schema.Int, skip: Schema.Int })),
+            )(checkpointBefore);
+            const journal = yield* fs.stat(`${pidFile}.transport/output`);
+            assert.deepStrictEqual(
+              checkpoint,
+              { offset: Number(journal.size), skip: 0 },
+              "all handled output, including SDK-only frames, is checkpointed before detach",
+            );
+          }
           yield* Effect.scoped(
             Effect.gen(function* () {
               const resumed = yield* (yield* ChildBackend).launch(

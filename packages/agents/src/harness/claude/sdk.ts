@@ -152,6 +152,14 @@ export const userMessage = (content: string): ClaudeUserMessage => ({
 });
 
 const ControlMessage = Schema.Struct({ type: Schema.String });
+const SdkOnlyMessage = Schema.Union([
+  Schema.Struct({ type: Schema.Literals(["control_response", "keep_alive", "transcript_mirror"]) }),
+  Schema.Struct({
+    type: Schema.Literal("system"),
+    subtype: Schema.Literal("session_state_changed"),
+    sdk_host_only: Schema.Literal(true),
+  }),
+]);
 const MessageId = Schema.Struct({ uuid: Schema.String });
 const JsonObject = Schema.Record(Schema.String, Schema.Json);
 const decodeMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
@@ -186,11 +194,12 @@ export const claudeOutputCheckpoint = () => {
           pending.push({
             key: messageKey(message),
             bytes: end + 1,
-            handled: type === "control_response" || type === "keep_alive",
+            handled: Schema.is(SdkOnlyMessage)(message),
             control: type === "control_request" || type === "control_cancel_request",
           });
           buffered = buffered.subarray(end + 1);
         }
+        return flush();
       }),
     handled: (message: Schema.Json) => {
       const key = messageKey(message);

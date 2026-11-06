@@ -34,9 +34,17 @@ const messages = ${payload};
 fs.appendFileSync('launches', String(process.pid) + '\\n');
 fs.appendFileSync('launch-arguments', JSON.stringify(process.argv.slice(2)) + '\\n');
 const send = message => process.stdout.write(JSON.stringify(message) + '\\n');
+const sessionState = state => ({ type: 'system', subtype: 'session_state_changed', state,
+  sdk_host_only: true, session_id: messages[0].session_id, uuid: require('node:crypto').randomUUID() });
+const mirror = { type: 'transcript_mirror', filePath: '/replay/session.jsonl', entries: [] };
+const sendBatch = batch => process.stdout.write(batch.map(message => JSON.stringify(message) + '\\n').join(''));
 let waiting = false;
 let hookPending = false;
 const timer = setInterval(() => {
+  if (fs.existsSync('request-sdk-tail') && !fs.existsSync('sdk-tail-sent')) {
+    sendBatch([sessionState('idle'), mirror]);
+    fs.writeFileSync('sdk-tail-sent', 'ready\\n');
+  }
     if (waiting && !hookPending && !fs.existsSync('hook-sent') && fs.existsSync('request-hook')) {
       hookPending = true;
       send({ type: 'control_request', request_id: 'pending-hook', request: {
@@ -45,7 +53,7 @@ const timer = setInterval(() => {
       } });
       fs.writeFileSync('hook-sent', 'ready');
     }
-  if (waiting && !hookPending && fs.existsSync('release')) { waiting = false; for (const message of messages.slice(2)) send(message); }
+  if (waiting && !hookPending && fs.existsSync('release')) { waiting = false; sendBatch([...messages.slice(2), sessionState('idle'), mirror]); }
 }, 10);
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const message = JSON.parse(line);
@@ -62,7 +70,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     fs.appendFileSync('user-messages', JSON.stringify(message) + '\\n');
     if (fs.existsSync('exit-resume') && process.argv.some(arg => arg.startsWith('--resume'))) process.exit(1);
     // One write makes the checkpoint exercise multiple protocol messages in one owner frame.
-    process.stdout.write(messages.slice(0, 2).map(message => JSON.stringify(message) + '\\n').join(''));
+    sendBatch([sessionState('running'), mirror, ...messages.slice(0, 2)]);
     waiting = true;
   }
 }).on('close', () => { clearInterval(timer); });
