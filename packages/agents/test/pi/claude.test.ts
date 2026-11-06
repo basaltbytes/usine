@@ -36,7 +36,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
-import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
+import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
 import {
@@ -854,6 +854,79 @@ describe("Claude child backend", () => {
         const finalReceipts = yield* Queue.clear(receipts);
         assert.deepStrictEqual(finalReceipts, []);
       }).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps guidance unread when the result's receipts leave it out", () =>
+    Effect.gen(function* () {
+      const inputs = yield* Queue.make<ClaudeUserMessage>();
+      const output = yield* Queue.make<Schema.Json, Cause.Done>();
+      const idle = yield* Queue.make<void>();
+      const receipts = yield* Queue.make<string>();
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (input) => {
+          void (async () => {
+            for await (const message of input) {
+              Queue.offerUnsafe(inputs, message);
+              Queue.offerUnsafe(output, rateLimitEvent);
+            }
+          })();
+          return {
+            ...scripted([]),
+            close: () => Queue.endUnsafe(output),
+            [Symbol.asyncIterator]: () =>
+              Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+          };
+        },
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), held: true }),
+        );
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        yield* Queue.take(inputs);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Waiting",
+          queued_turn_count: 0,
+        });
+        yield* Queue.take(idle);
+        const read = OperatorMessage.make({ message: "Start the correction" });
+        const inTransit = Steer.make({ message: "Also check the tests" });
+        for (const action of [read, inTransit]) {
+          yield* running.intervene(action, (delivery) =>
+            Queue.offer(receipts, Option.isSome(delivery) ? action.id : "unread").pipe(
+              Effect.asVoid,
+            ),
+          );
+          const sent = yield* Queue.take(inputs);
+          assert.strictEqual(sent.uuid, action.id);
+        }
+        // The steer reached Claude after it wrote this result, which names only the first message.
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Corrected",
+          queued_turn_count: 0,
+          user_message_uuids: [read.id],
+        });
+        const readReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(readReceipt, read.id);
+        yield* Queue.take(idle);
+        const early = yield* Queue.clear(receipts);
+        assert.deepStrictEqual(early, []);
+        yield* running.intervene(Release.make(), noDelivery);
+        assert.strictEqual((yield* running.result).message, "Corrected");
+      }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+      const unread = yield* Queue.clear(receipts);
+      assert.deepStrictEqual(unread, ["unread"]);
     }).pipe(Effect.scoped),
   );
 

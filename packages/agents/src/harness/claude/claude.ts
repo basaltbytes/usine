@@ -653,7 +653,8 @@ const makeClaudeChild = Effect.gen(function* () {
           }
           providerFailure = Option.none();
           // Typed-prompt turns stamp only their first assistant frame, even after folding guidance.
-          if (message.queued_turn_count !== undefined) {
+          // A result that lists `user_message_uuids` already names every folded message.
+          if (message.queued_turn_count !== undefined && Option.isNone(acknowledged)) {
             const read = submitted.splice(
               0,
               Math.max(0, submitted.length - message.queued_turn_count),

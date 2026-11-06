@@ -48,6 +48,7 @@ import { piChildLayer } from "../../src/harness/pi/pi.ts";
 import {
   environmentBashTool,
   piChildTools,
+  type PiMessage,
   PiSdk,
   type PiSession,
   type PiSessionEvent,
@@ -346,6 +347,63 @@ describe("Pi child backend", () => {
         assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
       }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
     }).pipe(Effect.scoped),
+  );
+
+  it.effect("reports one read for a Pi message start that arrives twice", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const sdk = Layer.succeed(PiSdk)({
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            harnessSession: Option.none(),
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            tools: childTools,
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              steer: () => Promise.resolve("queued" as const),
+              prompt: () => new Promise<void>(() => {}),
+            },
+          }),
+      });
+      const reads: Array<string> = [];
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(childRequest);
+        for (const action of [
+          AttemptChannel.Steer.make({ message: "Run the tests." }),
+          AttemptChannel.Steer.make({ message: "Run the tests." }),
+        ])
+          yield* running.intervene(action, (delivered) =>
+            Effect.sync(() => {
+              reads.push(`${Option.isSome(delivered) ? "read" : "unread"} ${action.id}`);
+            }),
+          );
+        const message: PiMessage = {
+          role: "user",
+          content: [{ type: "text", text: "Run the tests." }],
+          timestamp: 0,
+        };
+        for (const listener of listeners) {
+          listener({ type: "message_start", message });
+          listener({ type: "message_start", message });
+        }
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        for (let spin = 0; spin < 100; spin += 1) yield* Effect.yieldNow;
+      }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+      assert.lengthOf(reads, 2);
+      assert.match(reads[0] ?? "", /^read /u);
+      assert.match(reads[1] ?? "", /^unread /u);
+    }),
   );
 
   it.effect.each([

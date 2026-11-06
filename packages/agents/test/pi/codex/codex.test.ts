@@ -268,6 +268,79 @@ describe("Codex child backend", () => {
       },
     );
 
+  it.effect("acknowledges one restored message for a repeated userMessage item", () => {
+    const original = request();
+    const unread = [
+      Steer.make({ message: "Check the diff" }),
+      Steer.make({ message: "Check the diff" }),
+    ];
+    const receipts: Array<string> = [];
+    const server = connectionLayer(
+      {
+        ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        "thread/resume": {
+          modelProvider: "openai",
+          thread: {
+            id: "thread-1",
+            turns: [{ id: "active-turn", status: "inProgress", items: [] }],
+          },
+        },
+      },
+      [
+        ...["steer-1", "steer-1"].map((id) => ({
+          method: "item/started",
+          params: {
+            threadId: "thread-1",
+            turnId: "active-turn",
+            item: {
+              type: "userMessage",
+              id,
+              content: [{ type: "text", text: "Check the diff", text_elements: [] }],
+            },
+          },
+        })),
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread-1",
+            turnId: "active-turn",
+            item: { type: "agentMessage", id: "answer", text: "Checked", phase: "final_answer" },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "active-turn", status: "completed", error: null } },
+        },
+      ],
+    );
+    return Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({
+            ...original,
+            unread: unread.map(({ id, message }) => ({ id, message })),
+            resume: Option.some(
+              HarnessSession.make({ id: HarnessSessionId.make("thread-1"), cwd: original.cwd }),
+            ),
+          }),
+        );
+        assert.strictEqual((yield* running.result).message, "Checked");
+      }).pipe(Effect.scoped);
+      assert.deepStrictEqual(receipts, [`read ${unread[0]?.id}`, `unread ${unread[1]?.id}`]);
+    }).pipe(
+      Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+      Effect.provideService(ChildSessionJournal, {
+        started: () => Effect.void,
+        prompted: Effect.void,
+        continued: () => Effect.void,
+        delivered: (id, state) =>
+          Effect.sync(() => {
+            receipts.push(`${Option.isSome(state) ? "read" : "unread"} ${id}`);
+          }),
+      }),
+    );
+  });
+
   for (const field of ["home", "default-home", "model_provider"] as const) {
     it.effect(`refuses a saved Codex continuation after its ${field} changes`, () => {
       const original = request(
@@ -457,6 +530,13 @@ describe("Codex child backend", () => {
           jsonKey(calls.find(({ method }) => method === "thread/resume")?.params),
           saved.id,
         );
+        // A thread without turns never received its task, so recovery sends the task itself.
+        const turns = calls
+          .filter(({ method }) => method === "turn/start")
+          .map(({ params }) => jsonKey(params));
+        assert.lengthOf(turns, 1);
+        assert.include(turns[0], request().prompt);
+        assert.notInclude(turns[0], CONTINUATION_MESSAGE);
       }),
     ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
   });

@@ -21,7 +21,9 @@ import {
   AgentResultError,
   ChildRequest,
   ChildSessionBudgetExceededError,
+  ContinuationLimitError,
   PoolUnavailableError,
+  SessionInterruptedError,
   SessionOperationError,
   toAttemptFailure,
   UnknownModelError,
@@ -82,7 +84,19 @@ describe("agent runtime contract", () => {
     );
     assert.strictEqual(infra._tag, "InfraFailure");
 
+    const interrupted = toAttemptFailure(
+      SessionInterruptedError.make({
+        sessionId: AgentSessionId.make("child-1"),
+        message: "The saved native conversation could not be reopened",
+      }),
+    );
+    assert.strictEqual(interrupted._tag, "InfraFailure");
+
     const terminal = [
+      ContinuationLimitError.make({
+        sessionId: AgentSessionId.make("child-1"),
+        message: "The child reached its limit of three continuations within ten minutes",
+      }),
       UnknownModelError.make({
         harness: Harness.make("claude"),
         model: ModelId.make("claude-never-existed"),
