@@ -1,0 +1,2690 @@
+{
+  "protocol": "codex-app-server",
+  "harnessVersion": "0.164.0",
+  "model": "gpt-5.6-terra",
+  "scenario": "interrupt-guidance",
+  "environment": {
+    "HOME": "$HOME",
+    "PATH": "$PATH",
+    "CODEX_HOME": "$CODEX_HOME",
+    "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+  },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "process:1",
+      "payload": {
+        "command": "codex",
+        "args": [
+          "app-server",
+          "--stdio",
+          "-c",
+          "projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}",
+          "-c",
+          "features.multi_agent=false",
+          "-c",
+          "features.plugins=false",
+          "-c",
+          "features.remote_plugin=false",
+          "-c",
+          "features.apps=false",
+          "-c",
+          "check_for_update_on_startup=false",
+          "-c",
+          "analytics.enabled=false",
+          "-c",
+          "cli_auth_credentials_store=\"file\""
+        ],
+        "cwd": "/",
+        "env": {
+          "HOME": "$HOME",
+          "PATH": "$PATH",
+          "CODEX_HOME": "$CODEX_HOME",
+          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "clientInfo": { "name": "usine", "title": "usine", "version": "0.0.1" },
+          "capabilities": null
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 1,
+        "result": {
+          "userAgent": "usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)",
+          "codexHome": "$CODEX_HOME",
+          "platformFamily": "unix",
+          "platformOs": "linux"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "configWarning",
+        "params": {
+          "summary": "Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.",
+          "details": null
+        },
+        "emittedAtMs": 1793918108190
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "remoteControl/status/changed",
+        "params": {
+          "status": "disabled",
+          "serverName": "box-node-aac826fa7d07b85c",
+          "installationId": "7cc14233-e10d-40d9-8278-e8a4023f4780",
+          "environmentId": null
+        },
+        "emittedAtMs": 1793918108190
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": { "method": "initialized", "params": {} }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 2,
+        "method": "model/list",
+        "params": { "cursor": null, "limit": 100, "includeHidden": true }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 2,
+        "result": {
+          "data": [
+            {
+              "id": "gpt-6.1-sol",
+              "model": "gpt-6.1-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": {
+                "message": "Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost."
+              },
+              "displayName": "GPT-6.1-Sol",
+              "description": "Latest workhorse model for coding and everyday work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": true
+            },
+            {
+              "id": "gpt-6-astra",
+              "model": "gpt-6-astra",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Astra",
+              "description": "Frontier intelligence for the most demanding work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-sol",
+              "model": "gpt-6-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Sol",
+              "description": "Previous generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-luna",
+              "model": "gpt-6-luna",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Luna",
+              "description": "Fast and affordable model for easier tasks.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-sol",
+              "model": "gpt-5.6-sol",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Sol",
+              "description": "Older generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-terra",
+              "model": "gpt-5.6-terra",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Terra",
+              "description": "Older balanced model for straightforward work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-luna",
+              "model": "gpt-5.6-luna",
+              "upgrade": "gpt-6-luna",
+              "upgradeInfo": {
+                "model": "gpt-6-luna",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Luna\n\nOur latest Luna is significantly more efficient, so your usage limits go even further. Reach for it for any job that doesn't require frontier intelligence.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Luna",
+              "description": "Older fast and efficient model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-blue-latest",
+              "model": "gpt-daybreak-blue-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Blue",
+              "description": "Latest frontier agentic coding model for broad defensive cybersecurity work.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-red-latest",
+              "model": "gpt-daybreak-red-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Red",
+              "description": "Cyber-permissive variant of our latest frontier agentic coding model for advanced, authorized cybersecurity research.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.5",
+              "model": "gpt-5.5",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.5",
+              "description": "Legacy coding model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": null,
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "codex-auto-review",
+              "model": "codex-auto-review",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Codex Auto Review",
+              "description": "Automatic approval review model for Codex.",
+              "modelSpecialty": null,
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            }
+          ],
+          "nextCursor": null
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 3,
+        "method": "thread/start",
+        "params": {
+          "model": "gpt-5.6-terra",
+          "allowProviderModelFallback": false,
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "serviceName": "usine",
+          "ephemeral": false
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 3,
+        "result": {
+          "thread": {
+            "id": "01a1adda-023c-7463-9469-4b7098d676b9",
+            "environments": [
+              {
+                "environmentId": "local",
+                "cwd": "$WORKTREE",
+                "runtimeWorkspaceRoots": ["$WORKTREE"]
+              }
+            ],
+            "extra": null,
+            "sessionId": "01a1adda-023c-7463-9469-4b7098d676b9",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "usine-gateway",
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": null,
+            "createdAt": 1793918108,
+            "updatedAt": 1793918108,
+            "recencyAt": 1793918108,
+            "status": { "type": "idle" },
+            "path": "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T22-35-08-01a1adda-023c-7463-9469-4b7098d676b9.jsonl",
+            "cwd": "$WORKTREE",
+            "cliVersion": "0.164.0",
+            "originator": "usine",
+            "source": "vscode",
+            "canAcceptDirectInput": true,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          },
+          "model": "gpt-5.6-terra",
+          "modelProvider": "usine-gateway",
+          "serviceTier": null,
+          "disabledPluginIds": [],
+          "cwd": "$WORKTREE",
+          "runtimeWorkspaceRoots": ["$WORKTREE"],
+          "instructionSources": [],
+          "approvalPolicy": "never",
+          "approvalsReviewer": "user",
+          "sandbox": { "type": "dangerFullAccess" },
+          "activePermissionProfile": null,
+          "reasoningEffort": null,
+          "multiAgentMode": "explicitRequestOnly"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 4,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "input": [
+            {
+              "type": "text",
+              "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+              "text_elements": []
+            }
+          ],
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandboxPolicy": { "type": "dangerFullAccess" },
+          "effort": "low"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/started",
+        "params": {
+          "thread": {
+            "id": "01a1adda-023c-7463-9469-4b7098d676b9",
+            "environments": [
+              {
+                "environmentId": "local",
+                "cwd": "$WORKTREE",
+                "runtimeWorkspaceRoots": ["$WORKTREE"]
+              }
+            ],
+            "extra": null,
+            "sessionId": "01a1adda-023c-7463-9469-4b7098d676b9",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "usine-gateway",
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": null,
+            "createdAt": 1793918108,
+            "updatedAt": 1793918108,
+            "recencyAt": 1793918108,
+            "status": { "type": "idle" },
+            "path": "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T22-35-08-01a1adda-023c-7463-9469-4b7098d676b9.jsonl",
+            "cwd": "$WORKTREE",
+            "cliVersion": "0.164.0",
+            "originator": "usine",
+            "source": "vscode",
+            "canAcceptDirectInput": true,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          }
+        },
+        "emittedAtMs": 1793918108245
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 4,
+        "result": {
+          "turn": {
+            "id": "01a1adda-025c-7142-861d-ff998ceacd89",
+            "rootTurnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": null,
+            "completedAt": null,
+            "durationMs": null
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "status": { "type": "active", "activeFlags": [] }
+        },
+        "emittedAtMs": 1793918108290
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turn": {
+            "id": "01a1adda-025c-7142-861d-ff998ceacd89",
+            "rootTurnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": 1793918108,
+            "completedAt": null,
+            "durationMs": null
+          }
+        },
+        "emittedAtMs": 1793918108290
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1adda-028e-7212-b215-7fed832400a7",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "startedAtMs": 1793918108305
+        },
+        "emittedAtMs": 1793918108305
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1adda-028e-7212-b215-7fed832400a7",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "completedAtMs": 1793918108305
+        },
+        "emittedAtMs": 1793918108313
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_01d1dd4ebed91184016aed049e2e8487d29ff9663f0aab1183",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "startedAtMs": 1793918110377
+        },
+        "emittedAtMs": 1793918110377
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_01d1dd4ebed91184016aed049e2e8487d29ff9663f0aab1183",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "completedAtMs": 1793918110409
+        },
+        "emittedAtMs": 1793918110414
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+            "text": "",
+            "phase": "commentary",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "startedAtMs": 1793918110414
+        },
+        "emittedAtMs": 1793918110414
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": "Running"
+        },
+        "emittedAtMs": 1793918110414
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " the"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " requested"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " command"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " and"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " waiting"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " for"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " it"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " to"
+        },
+        "emittedAtMs": 1793918110629
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": " complete"
+        },
+        "emittedAtMs": 1793918110721
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "itemId": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+          "delta": "."
+        },
+        "emittedAtMs": 1793918110721
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_01d1dd4ebed91184016aed049e54f087d2a014abc0474ac951",
+            "text": "Running the requested command and waiting for it to complete.",
+            "phase": "commentary",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "completedAtMs": 1793918110914
+        },
+        "emittedAtMs": 1793918110915
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "commandExecution",
+            "id": "exec-27527703-eefd-4c29-b194-9fb42d78ad42",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/bash -lc 'node wait.cjs'",
+            "cwd": "$WORKTREE",
+            "processId": "59767",
+            "source": "unifiedExecStartup",
+            "status": "inProgress",
+            "commandActions": [{ "type": "unknown", "command": "node wait.cjs" }],
+            "aggregatedOutput": null,
+            "exitCode": null,
+            "durationMs": null
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "startedAtMs": 1793918112229
+        },
+        "emittedAtMs": 1793918112230
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/scenario",
+      "payload": { "method": "release-command" }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "commandExecution",
+            "id": "exec-27527703-eefd-4c29-b194-9fb42d78ad42",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/bash -lc 'node wait.cjs'",
+            "cwd": "$WORKTREE",
+            "processId": "59767",
+            "source": "unifiedExecStartup",
+            "status": "completed",
+            "commandActions": [{ "type": "unknown", "command": "node wait.cjs" }],
+            "aggregatedOutput": null,
+            "exitCode": 0,
+            "durationMs": 12
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "completedAtMs": 1793918112242
+        },
+        "emittedAtMs": 1793918112243
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 5,
+        "method": "turn/interrupt",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 9605,
+              "inputTokens": 9514,
+              "cachedInputTokens": 8960,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 91,
+              "reasoningOutputTokens": 14
+            },
+            "last": {
+              "totalTokens": 9605,
+              "inputTokens": 9514,
+              "cachedInputTokens": 8960,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 91,
+              "reasoningOutputTokens": 14
+            },
+            "modelContextWindow": 258400
+          }
+        },
+        "emittedAtMs": 1793918112245
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "normalModelSlug": null,
+            "primary": { "usedPercent": 68, "windowDurationMins": 10080, "resetsAt": 1794314556 },
+            "secondary": null,
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "62717.5395687500" },
+            "individualLimit": null,
+            "spendControlReached": null,
+            "planType": null,
+            "rateLimitReachedType": null
+          }
+        },
+        "emittedAtMs": 1793918112245
+      }
+    },
+    { "type": "emit_inbound", "port": "process:1/stdout", "payload": { "id": 5, "result": {} } },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "status": { "type": "idle" }
+        },
+        "emittedAtMs": 1793918112247
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turn": {
+            "id": "01a1adda-025c-7142-861d-ff998ceacd89",
+            "rootTurnId": "01a1adda-025c-7142-861d-ff998ceacd89",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "interrupted",
+            "error": null,
+            "startedAt": 1793918108,
+            "completedAt": 1793918112,
+            "durationMs": 3991
+          }
+        },
+        "emittedAtMs": 1793918112247
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 6,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "input": [
+            {
+              "type": "text",
+              "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools.",
+              "text_elements": []
+            }
+          ],
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandboxPolicy": { "type": "dangerFullAccess" },
+          "effort": "low"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 6,
+        "result": {
+          "turn": {
+            "id": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+            "rootTurnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": null,
+            "completedAt": null,
+            "durationMs": null
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "status": { "type": "active", "activeFlags": [] }
+        },
+        "emittedAtMs": 1793918112254
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turn": {
+            "id": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+            "rootTurnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": 1793918112,
+            "completedAt": null,
+            "durationMs": null
+          }
+        },
+        "emittedAtMs": 1793918112254
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1adda-1200-7812-922b-98c5f33e4d89",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "startedAtMs": 1793918112256
+        },
+        "emittedAtMs": 1793918112256
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1adda-1200-7812-922b-98c5f33e4d89",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "completedAtMs": 1793918112256
+        },
+        "emittedAtMs": 1793918112381
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_01d1dd4ebed91184016aed04a1c36087d29a69879ac86c69a5",
+            "text": "",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "startedAtMs": 1793918113814
+        },
+        "emittedAtMs": 1793918113814
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "itemId": "msg_01d1dd4ebed91184016aed04a1c36087d29a69879ac86c69a5",
+          "delta": "RE"
+        },
+        "emittedAtMs": 1793918113814
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "itemId": "msg_01d1dd4ebed91184016aed04a1c36087d29a69879ac86c69a5",
+          "delta": "PLAY"
+        },
+        "emittedAtMs": 1793918113814
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "itemId": "msg_01d1dd4ebed91184016aed04a1c36087d29a69879ac86c69a5",
+          "delta": "_GUID"
+        },
+        "emittedAtMs": 1793918113814
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "itemId": "msg_01d1dd4ebed91184016aed04a1c36087d29a69879ac86c69a5",
+          "delta": "ED"
+        },
+        "emittedAtMs": 1793918113814
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_01d1dd4ebed91184016aed04a1c36087d29a69879ac86c69a5",
+            "text": "REPLAY_GUIDED",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          },
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "completedAtMs": 1793918113875
+        },
+        "emittedAtMs": 1793918113906
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 19309,
+              "inputTokens": 19210,
+              "cachedInputTokens": 17920,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 99,
+              "reasoningOutputTokens": 14
+            },
+            "last": {
+              "totalTokens": 9704,
+              "inputTokens": 9696,
+              "cachedInputTokens": 8960,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 8,
+              "reasoningOutputTokens": 0
+            },
+            "modelContextWindow": 258400
+          }
+        },
+        "emittedAtMs": 1793918113922
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "normalModelSlug": null,
+            "primary": { "usedPercent": 68, "windowDurationMins": 10080, "resetsAt": 1794314556 },
+            "secondary": null,
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "62717.5395687500" },
+            "individualLimit": null,
+            "spendControlReached": null,
+            "planType": null,
+            "rateLimitReachedType": null
+          }
+        },
+        "emittedAtMs": 1793918113922
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "status": { "type": "idle" }
+        },
+        "emittedAtMs": 1793918113924
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "01a1adda-023c-7463-9469-4b7098d676b9",
+          "turn": {
+            "id": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+            "rootTurnId": "01a1adda-11fc-7e92-adf1-8bb81989a95b",
+            "items": [
+              {
+                "type": "agentMessage",
+                "id": "msg_01d1dd4ebed91184016aed04a1c36087d29a69879ac86c69a5",
+                "text": "REPLAY_GUIDED",
+                "phase": "final_answer",
+                "memoryCitation": null,
+                "delivery": null,
+                "questions": null
+              }
+            ],
+            "itemsView": "summary",
+            "status": "completed",
+            "error": null,
+            "startedAt": 1793918112,
+            "completedAt": 1793918113,
+            "durationMs": 1669
+          }
+        },
+        "emittedAtMs": 1793918113924
+      }
+    },
+    { "type": "expect_outbound", "port": "process:1/stdin", "payload": { "eof": true } },
+    { "type": "runtime_exit", "port": "process:1/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:1/exit", "code": 0, "error": null },
+    {
+      "type": "expect_outbound",
+      "port": "process:2",
+      "payload": {
+        "command": "codex",
+        "args": [
+          "app-server",
+          "--stdio",
+          "-c",
+          "projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}",
+          "-c",
+          "features.multi_agent=false",
+          "-c",
+          "features.plugins=false",
+          "-c",
+          "features.remote_plugin=false",
+          "-c",
+          "features.apps=false",
+          "-c",
+          "check_for_update_on_startup=false",
+          "-c",
+          "analytics.enabled=false",
+          "-c",
+          "cli_auth_credentials_store=\"file\""
+        ],
+        "cwd": "/",
+        "env": {
+          "HOME": "$HOME",
+          "PATH": "$PATH",
+          "CODEX_HOME": "$CODEX_HOME",
+          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "clientInfo": { "name": "usine", "title": "usine", "version": "0.0.1" },
+          "capabilities": null
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 1,
+        "result": {
+          "userAgent": "usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)",
+          "codexHome": "$CODEX_HOME",
+          "platformFamily": "unix",
+          "platformOs": "linux"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": { "method": "initialized", "params": {} }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 2,
+        "method": "model/list",
+        "params": { "cursor": null, "limit": 100, "includeHidden": true }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "configWarning",
+        "params": {
+          "summary": "Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.",
+          "details": null
+        },
+        "emittedAtMs": 1793918114028
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "remoteControl/status/changed",
+        "params": {
+          "status": "disabled",
+          "serverName": "box-node-aac826fa7d07b85c",
+          "installationId": "7cc14233-e10d-40d9-8278-e8a4023f4780",
+          "environmentId": null
+        },
+        "emittedAtMs": 1793918114028
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 2,
+        "result": {
+          "data": [
+            {
+              "id": "gpt-6.1-sol",
+              "model": "gpt-6.1-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": {
+                "message": "Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost."
+              },
+              "displayName": "GPT-6.1-Sol",
+              "description": "Latest workhorse model for coding and everyday work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": true
+            },
+            {
+              "id": "gpt-6-astra",
+              "model": "gpt-6-astra",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Astra",
+              "description": "Frontier intelligence for the most demanding work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-sol",
+              "model": "gpt-6-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Sol",
+              "description": "Previous generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-luna",
+              "model": "gpt-6-luna",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Luna",
+              "description": "Fast and affordable model for easier tasks.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-sol",
+              "model": "gpt-5.6-sol",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Sol",
+              "description": "Older generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-terra",
+              "model": "gpt-5.6-terra",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Terra",
+              "description": "Older balanced model for straightforward work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-luna",
+              "model": "gpt-5.6-luna",
+              "upgrade": "gpt-6-luna",
+              "upgradeInfo": {
+                "model": "gpt-6-luna",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Luna\n\nOur latest Luna is significantly more efficient, so your usage limits go even further. Reach for it for any job that doesn't require frontier intelligence.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Luna",
+              "description": "Older fast and efficient model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-blue-latest",
+              "model": "gpt-daybreak-blue-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Blue",
+              "description": "Latest frontier agentic coding model for broad defensive cybersecurity work.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-red-latest",
+              "model": "gpt-daybreak-red-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Red",
+              "description": "Cyber-permissive variant of our latest frontier agentic coding model for advanced, authorized cybersecurity research.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.5",
+              "model": "gpt-5.5",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.5",
+              "description": "Legacy coding model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": null,
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "codex-auto-review",
+              "model": "codex-auto-review",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Codex Auto Review",
+              "description": "Automatic approval review model for Codex.",
+              "modelSpecialty": null,
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            }
+          ],
+          "nextCursor": null
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 3,
+        "method": "thread/start",
+        "params": {
+          "model": "gpt-5.6-terra",
+          "allowProviderModelFallback": false,
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "serviceName": "usine",
+          "ephemeral": false
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 3,
+        "result": {
+          "thread": {
+            "id": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+            "environments": [
+              {
+                "environmentId": "local",
+                "cwd": "$WORKTREE",
+                "runtimeWorkspaceRoots": ["$WORKTREE"]
+              }
+            ],
+            "extra": null,
+            "sessionId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "usine-gateway",
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": null,
+            "createdAt": 1793918114,
+            "updatedAt": 1793918114,
+            "recencyAt": 1793918114,
+            "status": { "type": "idle" },
+            "path": "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T22-35-14-01a1adda-18f0-7e53-872d-9fc617986e9e.jsonl",
+            "cwd": "$WORKTREE",
+            "cliVersion": "0.164.0",
+            "originator": "usine",
+            "source": "vscode",
+            "canAcceptDirectInput": true,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          },
+          "model": "gpt-5.6-terra",
+          "modelProvider": "usine-gateway",
+          "serviceTier": null,
+          "disabledPluginIds": [],
+          "cwd": "$WORKTREE",
+          "runtimeWorkspaceRoots": ["$WORKTREE"],
+          "instructionSources": [],
+          "approvalPolicy": "never",
+          "approvalsReviewer": "user",
+          "sandbox": { "type": "dangerFullAccess" },
+          "activePermissionProfile": null,
+          "reasoningEffort": null,
+          "multiAgentMode": "explicitRequestOnly"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 4,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "input": [
+            {
+              "type": "text",
+              "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+              "text_elements": []
+            }
+          ],
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandboxPolicy": { "type": "dangerFullAccess" },
+          "effort": "low"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/started",
+        "params": {
+          "thread": {
+            "id": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+            "environments": [
+              {
+                "environmentId": "local",
+                "cwd": "$WORKTREE",
+                "runtimeWorkspaceRoots": ["$WORKTREE"]
+              }
+            ],
+            "extra": null,
+            "sessionId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "usine-gateway",
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": null,
+            "createdAt": 1793918114,
+            "updatedAt": 1793918114,
+            "recencyAt": 1793918114,
+            "status": { "type": "idle" },
+            "path": "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T22-35-14-01a1adda-18f0-7e53-872d-9fc617986e9e.jsonl",
+            "cwd": "$WORKTREE",
+            "cliVersion": "0.164.0",
+            "originator": "usine",
+            "source": "vscode",
+            "canAcceptDirectInput": true,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          }
+        },
+        "emittedAtMs": 1793918114039
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 4,
+        "result": {
+          "turn": {
+            "id": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+            "rootTurnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": null,
+            "completedAt": null,
+            "durationMs": null
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "status": { "type": "active", "activeFlags": [] }
+        },
+        "emittedAtMs": 1793918114048
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turn": {
+            "id": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+            "rootTurnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": 1793918114,
+            "completedAt": null,
+            "durationMs": null
+          }
+        },
+        "emittedAtMs": 1793918114048
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1adda-1904-7242-a389-36cbd74448c6",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+          "startedAtMs": 1793918114052
+        },
+        "emittedAtMs": 1793918114052
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1adda-1904-7242-a389-36cbd74448c6",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+          "completedAtMs": 1793918114052
+        },
+        "emittedAtMs": 1793918114054
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_0e744db59267d202016aed04a4be4c87d2848c20c9b02f5a16",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+          "startedAtMs": 1793918116808
+        },
+        "emittedAtMs": 1793918116808
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_0e744db59267d202016aed04a4be4c87d2848c20c9b02f5a16",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+          "completedAtMs": 1793918116991
+        },
+        "emittedAtMs": 1793918116996
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "commandExecution",
+            "id": "exec-57e4c38f-1d1e-445c-96fc-647e5f6f58ec",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/bash -lc 'node wait.cjs'",
+            "cwd": "$WORKTREE",
+            "processId": "73060",
+            "source": "unifiedExecStartup",
+            "status": "inProgress",
+            "commandActions": [{ "type": "unknown", "command": "node wait.cjs" }],
+            "aggregatedOutput": null,
+            "exitCode": null,
+            "durationMs": null
+          },
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+          "startedAtMs": 1793918117971
+        },
+        "emittedAtMs": 1793918117983
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 5,
+        "method": "turn/interrupt",
+        "params": {
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 9622,
+              "inputTokens": 9514,
+              "cachedInputTokens": 8960,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 108,
+              "reasoningOutputTokens": 49
+            },
+            "last": {
+              "totalTokens": 9622,
+              "inputTokens": 9514,
+              "cachedInputTokens": 8960,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 108,
+              "reasoningOutputTokens": 49
+            },
+            "modelContextWindow": 258400
+          }
+        },
+        "emittedAtMs": 1793918117989
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "normalModelSlug": null,
+            "primary": { "usedPercent": 68, "windowDurationMins": 10080, "resetsAt": 1794314556 },
+            "secondary": null,
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "62717.5395687500" },
+            "individualLimit": null,
+            "spendControlReached": null,
+            "planType": null,
+            "rateLimitReachedType": null
+          }
+        },
+        "emittedAtMs": 1793918117989
+      }
+    },
+    { "type": "emit_inbound", "port": "process:2/stdout", "payload": { "id": 5, "result": {} } },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "status": { "type": "idle" }
+        },
+        "emittedAtMs": 1793918117993
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "01a1adda-18f0-7e53-872d-9fc617986e9e",
+          "turn": {
+            "id": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+            "rootTurnId": "01a1adda-18fa-7cd3-a7ed-d4765f29431f",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "interrupted",
+            "error": null,
+            "startedAt": 1793918114,
+            "completedAt": 1793918117,
+            "durationMs": 3948
+          }
+        },
+        "emittedAtMs": 1793918117993
+      }
+    },
+    { "type": "expect_outbound", "port": "process:2/stdin", "payload": { "eof": true } },
+    { "type": "runtime_exit", "port": "process:2/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:2/exit", "code": 0, "error": null }
+  ]
+}

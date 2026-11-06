@@ -130,7 +130,7 @@ Claude children save sessions, and Codex threads aren't ephemeral. `SessionStart
 
 Pi children save conversations in `<checkout>/.usine/pi/sessions`. Their `SessionStarted.harnessSession` records the Pi ID, checkout as `cwd`, and session directory as `home`. Keep the checkout and this directory to continue the conversation after the process exits. From `/pi`, build `piRuntime` with `PiSdk` and call `runtime.resume(request, saved.id)` in a scope. Set `request.cwd` to the saved checkout and `request.prompt` to the continuation message; await `RunningSession.result` before closing the scope. Resume uses the same tools, authentication checks, events, and operator controls as launch. An unknown ID fails with `SessionOperationError` instead of starting a new conversation. Preflight uses in-memory sessions.
 
-The durable parent's `subagent` call resumes saved Pi conversations after an orchestrator restart. An incompatible continuation returns an interrupted call with its committed output.
+The durable parent's `subagent` tool resumes saved child conversations after an orchestrator restart in the retained checkout. An incompatible continuation returns an interrupted call with its committed output. Explicit Pi runtime callers can also use `resume`.
 
 ## Preflight
 
@@ -138,15 +138,31 @@ The durable parent's `subagent` call resumes saved Pi conversations after an orc
 
 It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3 for one release)** (`supportedCodexVersions`; `unsupportedCodexVersion` returns the error for other `codex --version` output) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key or `openai-codex` ChatGPT login through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
 
-## Live contract tests
+## Transport replay tests
 
-The opt-in live contracts, in disposable directories, steer a child during a waiting command, checking the response and event framing, and interrupt another; Codex also needs a real rate-window snapshot. Claude and Codex cases also run through `test/fixtures/ssh-shim.sh`, an SSH stand-in that runs the remote command locally, to check it, its environment, and its pid file with the real CLIs.
+`pnpm --filter @usine/agents test` replays recorded Claude SDK messages and Codex app-server JSON-RPC traffic through the real adapters, conversation controls, and session channels. CI runs this suite on every pull request. The fixtures cover simple turns, steering, messages queued during a tool call, interrupt and guidance, holds and release, transport loss and recovery, and a process that exits before its first message.
 
-They need a supported Codex CLI with a ChatGPT login, a Claude CLI with a subscription login, an API key or ChatGPT login for the Pi provider, and explicit models:
+`pnpm --filter @usine/durable test` also replays restart and credential-kind-change fixtures through `AttemptRuntime.execute`, the durable `subagent` tool, and SQLite. Each case closes the first runtime during a tool call, opens another runtime on the same database, and checks the child's events and the final report.
+
+The shared fixture format in `test/fixtures/replay/` contains protocol, harness version, model, scenario, and redacted environment metadata. Its entries are `expect_outbound`, `emit_inbound`, and `runtime_exit`. Replay matches outbound requests in order within each connection and requires every entry to be consumed. Independent connections can interleave. Tool hooks and operator release actions preserve ordering at tool boundaries. A request mismatch stops the replay immediately and reports the transcript entry and changed payload, including during initialization and resume. Temporary paths and credential values use placeholders; supervisor frames contain decoded base64 bytes so redaction also applies to their payloads. Frames that split a UTF-8 character use a byte string that preserves each byte.
+
+Record fresh fixtures with Claude Code 2.1.311 and Codex 0.164.0 installed, working harness credentials or gateway configuration, and explicit models:
 
 ```sh
 USINE_CLAUDE_INTEGRATION_MODEL=claude-sonnet-5-5 pnpm --filter @usine/agents test:integration:claude
 USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/agents test:integration:codex
+USINE_CLAUDE_INTEGRATION_MODEL=claude-sonnet-5-5 USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/durable exec vitest run test/integration/replay.test.ts
+```
+
+The interrupt-and-guidance fixture waits at the tool boundary before sending guidance. Claude records and replays the SDK tool hooks and checks that the post-tool hook stays blocked until guidance arrives. Codex interrupts the first turn, waits for the interrupted completion and idle event, and starts a new turn with the guidance. Both check the guided reply and include a separate command interrupted through the harness cancellation API. Restart fixtures retain the harness home and assert that the child resumes with the same saved home. Credential-change fixtures require `USINE_GATEWAY_TOKEN` and add the API-key auth variable on resume, checking the child environment as well as its billing pool.
+
+The recorder runs in disposable directories and writes fixtures only after the scenario passes. Review fixture diffs before committing them. Transport-loss recordings use an SSH shim that runs real processes locally and a PID file to terminate the active relay while the Codex supervisor and app-server keep running; replay uses recorded traffic and needs neither harness credentials nor model access. Early-exit recordings terminate the real harness before it sends a protocol message. Recorder tests stay outside `pnpm test` and CI, and skip when their model variables are unset.
+
+Hand-scripted fixtures remain for cases that require traffic a working binary cannot produce on demand, such as malformed responses, unavailable models, refresh-lock failures, provider retries, and shutdown races. A focused remote-resume test checks that a saved Codex thread replaces the old supervisor transport. Focused usage tests also verify seeded token and cost totals and the closure of an open tool call after SSH loss.
+
+Pi's in-process SDK retains its opt-in live contract:
+
+```sh
 USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agents test:integration:pi
 ```
 

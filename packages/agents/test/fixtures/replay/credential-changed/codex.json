@@ -1,0 +1,2274 @@
+{
+  "protocol": "codex-app-server",
+  "harnessVersion": "0.164.0",
+  "model": "gpt-5.6-terra",
+  "scenario": "credential-changed",
+  "environment": {
+    "HOME": "$HOME",
+    "PATH": "$PATH",
+    "CODEX_HOME": "$CODEX_HOME",
+    "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
+    "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+  },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "process:1",
+      "payload": {
+        "command": "codex",
+        "args": [
+          "app-server",
+          "--stdio",
+          "-c",
+          "projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}",
+          "-c",
+          "features.multi_agent=false",
+          "-c",
+          "features.plugins=false",
+          "-c",
+          "features.remote_plugin=false",
+          "-c",
+          "features.apps=false",
+          "-c",
+          "check_for_update_on_startup=false",
+          "-c",
+          "analytics.enabled=false",
+          "-c",
+          "cli_auth_credentials_store=\"file\""
+        ],
+        "cwd": "/",
+        "env": {
+          "HOME": "$HOME",
+          "PATH": "$PATH",
+          "CODEX_HOME": "$CODEX_HOME",
+          "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
+          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "clientInfo": { "name": "usine", "title": "usine", "version": "0.0.1" },
+          "capabilities": null
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 1,
+        "result": {
+          "userAgent": "usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)",
+          "codexHome": "$CODEX_HOME",
+          "platformFamily": "unix",
+          "platformOs": "linux"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": { "method": "initialized", "params": {} }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 2,
+        "method": "model/list",
+        "params": { "cursor": null, "limit": 100, "includeHidden": true }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "configWarning",
+        "params": {
+          "summary": "Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.",
+          "details": null
+        },
+        "emittedAtMs": 1793906934320
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "remoteControl/status/changed",
+        "params": {
+          "status": "disabled",
+          "serverName": "usine-worker-1",
+          "installationId": "c29e70b3-22c3-4081-a4a1-04748493899f",
+          "environmentId": null
+        },
+        "emittedAtMs": 1793906934320
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 2,
+        "result": {
+          "data": [
+            {
+              "id": "gpt-6.1-sol",
+              "model": "gpt-6.1-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": {
+                "message": "Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost."
+              },
+              "displayName": "GPT-6.1-Sol",
+              "description": "Latest workhorse model for coding and everyday work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": true
+            },
+            {
+              "id": "gpt-6-astra",
+              "model": "gpt-6-astra",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Astra",
+              "description": "Frontier intelligence for the most demanding work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-sol",
+              "model": "gpt-6-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Sol",
+              "description": "Previous generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-luna",
+              "model": "gpt-6-luna",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Luna",
+              "description": "Fast and affordable model for easier tasks.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-sol",
+              "model": "gpt-5.6-sol",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Sol",
+              "description": "Older generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-terra",
+              "model": "gpt-5.6-terra",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Terra",
+              "description": "Older balanced model for straightforward work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-luna",
+              "model": "gpt-5.6-luna",
+              "upgrade": "gpt-6-luna",
+              "upgradeInfo": {
+                "model": "gpt-6-luna",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Luna\n\nOur latest Luna is significantly more efficient, so your usage limits go even further. Reach for it for any job that doesn't require frontier intelligence.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Luna",
+              "description": "Older fast and efficient model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-blue-latest",
+              "model": "gpt-daybreak-blue-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Blue",
+              "description": "Latest frontier agentic coding model for broad defensive cybersecurity work.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-red-latest",
+              "model": "gpt-daybreak-red-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Red",
+              "description": "Cyber-permissive variant of our latest frontier agentic coding model for advanced, authorized cybersecurity research.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.5",
+              "model": "gpt-5.5",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.5",
+              "description": "Legacy coding model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": null,
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "codex-auto-review",
+              "model": "codex-auto-review",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Codex Auto Review",
+              "description": "Automatic approval review model for Codex.",
+              "modelSpecialty": null,
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            }
+          ],
+          "nextCursor": null
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 3,
+        "method": "thread/start",
+        "params": {
+          "model": "gpt-5.6-terra",
+          "allowProviderModelFallback": false,
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "serviceName": "usine",
+          "ephemeral": false
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 3,
+        "result": {
+          "thread": {
+            "id": "01a1ad2f-823a-7c82-b297-a84216687888",
+            "environments": [
+              {
+                "environmentId": "local",
+                "cwd": "$WORKTREE",
+                "runtimeWorkspaceRoots": ["$WORKTREE"]
+              }
+            ],
+            "extra": null,
+            "sessionId": "01a1ad2f-823a-7c82-b297-a84216687888",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "usine-gateway",
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": null,
+            "createdAt": 1793906934,
+            "updatedAt": 1793906934,
+            "recencyAt": 1793906934,
+            "status": { "type": "idle" },
+            "path": "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-54-01a1ad2f-823a-7c82-b297-a84216687888.jsonl",
+            "cwd": "$WORKTREE",
+            "cliVersion": "0.164.0",
+            "originator": "usine",
+            "source": "vscode",
+            "canAcceptDirectInput": true,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          },
+          "model": "gpt-5.6-terra",
+          "modelProvider": "usine-gateway",
+          "serviceTier": null,
+          "disabledPluginIds": [],
+          "cwd": "$WORKTREE",
+          "runtimeWorkspaceRoots": ["$WORKTREE"],
+          "instructionSources": [],
+          "approvalPolicy": "never",
+          "approvalsReviewer": "user",
+          "sandbox": { "type": "dangerFullAccess" },
+          "activePermissionProfile": null,
+          "reasoningEffort": null,
+          "multiAgentMode": "explicitRequestOnly"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:1/stdin",
+      "payload": {
+        "id": 4,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "input": [
+            {
+              "type": "text",
+              "text": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+              "text_elements": []
+            }
+          ],
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandboxPolicy": { "type": "dangerFullAccess" },
+          "effort": "low"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/started",
+        "params": {
+          "thread": {
+            "id": "01a1ad2f-823a-7c82-b297-a84216687888",
+            "environments": [
+              {
+                "environmentId": "local",
+                "cwd": "$WORKTREE",
+                "runtimeWorkspaceRoots": ["$WORKTREE"]
+              }
+            ],
+            "extra": null,
+            "sessionId": "01a1ad2f-823a-7c82-b297-a84216687888",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "usine-gateway",
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": null,
+            "createdAt": 1793906934,
+            "updatedAt": 1793906934,
+            "recencyAt": 1793906934,
+            "status": { "type": "idle" },
+            "path": "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-54-01a1ad2f-823a-7c82-b297-a84216687888.jsonl",
+            "cwd": "$WORKTREE",
+            "cliVersion": "0.164.0",
+            "originator": "usine",
+            "source": "vscode",
+            "canAcceptDirectInput": true,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+          }
+        },
+        "emittedAtMs": 1793906934344
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "id": 4,
+        "result": {
+          "turn": {
+            "id": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+            "rootTurnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": null,
+            "completedAt": null,
+            "durationMs": null
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "status": { "type": "active", "activeFlags": [] }
+        },
+        "emittedAtMs": 1793906934362
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turn": {
+            "id": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+            "rootTurnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": 1793906934,
+            "completedAt": null,
+            "durationMs": null
+          }
+        },
+        "emittedAtMs": 1793906934362
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1ad2f-8267-70c0-9507-37c20a857c40",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+          "startedAtMs": 1793906934376
+        },
+        "emittedAtMs": 1793906934376
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1ad2f-8267-70c0-9507-37c20a857c40",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+          "completedAtMs": 1793906934376
+        },
+        "emittedAtMs": 1793906934380
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_0c47cf61c5fb6e95016aecd8f921b087d2929ecd8880c26d4f",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+          "startedAtMs": 1793906937155
+        },
+        "emittedAtMs": 1793906937155
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_0c47cf61c5fb6e95016aecd8f921b087d2929ecd8880c26d4f",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+          "completedAtMs": 1793906937365
+        },
+        "emittedAtMs": 1793906937369
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:1/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "commandExecution",
+            "id": "exec-c52d6b93-d5bb-4b8d-ad0a-eae4d14500a3",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/bash -lc 'node wait.cjs'",
+            "cwd": "$WORKTREE",
+            "processId": "40779",
+            "source": "unifiedExecStartup",
+            "status": "inProgress",
+            "commandActions": [{ "type": "unknown", "command": "node wait.cjs" }],
+            "aggregatedOutput": null,
+            "exitCode": null,
+            "durationMs": null
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+          "startedAtMs": 1793906938349
+        },
+        "emittedAtMs": 1793906938353
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2",
+      "payload": {
+        "command": "codex",
+        "args": [
+          "app-server",
+          "--stdio",
+          "-c",
+          "projects={\"$WORKTREE\"={trust_level=\"untrusted\"}}",
+          "-c",
+          "features.multi_agent=false",
+          "-c",
+          "features.plugins=false",
+          "-c",
+          "features.remote_plugin=false",
+          "-c",
+          "features.apps=false",
+          "-c",
+          "check_for_update_on_startup=false",
+          "-c",
+          "analytics.enabled=false",
+          "-c",
+          "cli_auth_credentials_store=\"file\""
+        ],
+        "cwd": "/",
+        "env": {
+          "HOME": "$HOME",
+          "PATH": "$PATH",
+          "CODEX_HOME": "$CODEX_HOME",
+          "ANTHROPIC_BASE_URL": "$ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN": "$USINE_GATEWAY_TOKEN",
+          "USINE_GATEWAY_TOKEN": "$USINE_GATEWAY_TOKEN",
+          "OPENAI_API_KEY": "$USINE_GATEWAY_TOKEN"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "clientInfo": { "name": "usine", "title": "usine", "version": "0.0.1" },
+          "capabilities": null
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 1,
+        "result": {
+          "userAgent": "usine/0.164.0 (Debian 13.0.0; x86_64) unknown (usine; 0.0.1)",
+          "codexHome": "$CODEX_HOME",
+          "platformFamily": "unix",
+          "platformOs": "linux"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": { "method": "initialized", "params": {} }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 2,
+        "method": "model/list",
+        "params": { "cursor": null, "limit": 100, "includeHidden": true }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "configWarning",
+        "params": {
+          "summary": "Codex's Linux sandbox uses bubblewrap and needs access to create user namespaces.",
+          "details": null
+        },
+        "emittedAtMs": 1793906938597
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "remoteControl/status/changed",
+        "params": {
+          "status": "disabled",
+          "serverName": "usine-worker-1",
+          "installationId": "c29e70b3-22c3-4081-a4a1-04748493899f",
+          "environmentId": null
+        },
+        "emittedAtMs": 1793906938597
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 2,
+        "result": {
+          "data": [
+            {
+              "id": "gpt-6.1-sol",
+              "model": "gpt-6.1-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": {
+                "message": "Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost."
+              },
+              "displayName": "GPT-6.1-Sol",
+              "description": "Latest workhorse model for coding and everyday work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": true
+            },
+            {
+              "id": "gpt-6-astra",
+              "model": "gpt-6-astra",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Astra",
+              "description": "Frontier intelligence for the most demanding work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "2x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-sol",
+              "model": "gpt-6-sol",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Sol",
+              "description": "Previous generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-6-luna",
+              "model": "gpt-6-luna",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "GPT-6-Luna",
+              "description": "Fast and affordable model for easier tasks.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [{ "id": "priority", "name": "Fast", "description": "1.5x speed" }],
+              "defaultServiceTier": "priority",
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-sol",
+              "model": "gpt-5.6-sol",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Sol",
+              "description": "Older generation workhorse model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-terra",
+              "model": "gpt-5.6-terra",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Terra",
+              "description": "Older balanced model for straightforward work.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.6-luna",
+              "model": "gpt-5.6-luna",
+              "upgrade": "gpt-6-luna",
+              "upgradeInfo": {
+                "model": "gpt-6-luna",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Luna\n\nOur latest Luna is significantly more efficient, so your usage limits go even further. Reach for it for any job that doesn't require frontier intelligence.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.6-Luna",
+              "description": "Older fast and efficient model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-blue-latest",
+              "model": "gpt-daybreak-blue-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Blue",
+              "description": "Latest frontier agentic coding model for broad defensive cybersecurity work.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-daybreak-red-latest",
+              "model": "gpt-daybreak-red-latest",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Daybreak Red",
+              "description": "Cyber-permissive variant of our latest frontier agentic coding model for advanced, authorized cybersecurity research.",
+              "modelSpecialty": "cyber",
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                },
+                {
+                  "reasoningEffort": "ultra",
+                  "description": "Maximum reasoning with automatic task delegation"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v2",
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "gpt-5.5",
+              "model": "gpt-5.5",
+              "upgrade": "gpt-6-sol",
+              "upgradeInfo": {
+                "model": "gpt-6-sol",
+                "upgradeCopy": null,
+                "modelLink": null,
+                "migrationMarkdown": "Meet GPT-6 Sol\n\nOur latest Sol is more intelligent and more efficient so your usage limits go further. This model is a great daily driver for complex tasks, especially coding.\n",
+                "retirementAt": null
+              },
+              "availabilityNux": null,
+              "displayName": "GPT-5.5",
+              "description": "Legacy coding model.",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": null,
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            },
+            {
+              "id": "codex-auto-review",
+              "model": "codex-auto-review",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "Codex Auto Review",
+              "description": "Automatic approval review model for Codex.",
+              "modelSpecialty": null,
+              "hidden": true,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": "Fast responses with lighter reasoning"
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Balances speed and reasoning depth for everyday tasks"
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": "Greater reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": "Extra high reasoning depth for complex problems"
+                },
+                {
+                  "reasoningEffort": "max",
+                  "description": "Maximum reasoning depth for the hardest problems"
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": ["text", "image"],
+              "supportsPersonality": false,
+              "multiAgentVersion": "v1",
+              "additionalSpeedTiers": ["fast"],
+              "serviceTiers": [
+                { "id": "priority", "name": "Fast", "description": "1.5x speed, increased usage" }
+              ],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            }
+          ],
+          "nextCursor": null
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 3,
+        "method": "thread/resume",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "model": "gpt-5.6-terra",
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandbox": "danger-full-access",
+          "excludeTurns": false
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "deprecationNotice",
+        "params": {
+          "summary": "Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`, then page with `thread/turns/list` and `thread/items/list`.",
+          "details": null
+        },
+        "emittedAtMs": 1793906938614
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "status": { "type": "idle" }
+        },
+        "emittedAtMs": 1793906938669
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 3,
+        "result": {
+          "thread": {
+            "id": "01a1ad2f-823a-7c82-b297-a84216687888",
+            "environments": [
+              {
+                "environmentId": "local",
+                "cwd": "$WORKTREE",
+                "runtimeWorkspaceRoots": ["$WORKTREE"]
+              }
+            ],
+            "extra": null,
+            "sessionId": "01a1ad2f-823a-7c82-b297-a84216687888",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+            "ephemeral": false,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "paginated",
+            "modelProvider": "usine-gateway",
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": null,
+            "createdAt": 1793906934,
+            "updatedAt": 1793906938,
+            "recencyAt": 1793906934,
+            "status": { "type": "idle" },
+            "path": "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T19-28-54-01a1ad2f-823a-7c82-b297-a84216687888.jsonl",
+            "cwd": "$WORKTREE",
+            "cliVersion": "0.164.0",
+            "originator": "usine",
+            "source": "vscode",
+            "canAcceptDirectInput": true,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": [
+              {
+                "id": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+                "rootTurnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+                "items": [
+                  {
+                    "type": "userMessage",
+                    "id": "01a1ad2f-8267-70c0-9507-37c20a857c40",
+                    "clientId": null,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+                        "text_elements": []
+                      }
+                    ]
+                  },
+                  {
+                    "type": "reasoning",
+                    "id": "rs_0c47cf61c5fb6e95016aecd8f921b087d2929ecd8880c26d4f",
+                    "summary": [],
+                    "content": []
+                  },
+                  {
+                    "type": "commandExecution",
+                    "id": "exec-c52d6b93-d5bb-4b8d-ad0a-eae4d14500a3",
+                    "pluginId": null,
+                    "scriptPath": null,
+                    "command": "/bin/bash -lc 'node wait.cjs'",
+                    "cwd": "$WORKTREE",
+                    "processId": "40779",
+                    "source": "unifiedExecStartup",
+                    "status": "failed",
+                    "commandActions": [{ "type": "unknown", "command": "node wait.cjs" }],
+                    "aggregatedOutput": null,
+                    "exitCode": -1,
+                    "durationMs": 47
+                  }
+                ],
+                "itemsView": "full",
+                "status": "interrupted",
+                "error": null,
+                "startedAt": 1793906934,
+                "completedAt": 1793906938,
+                "durationMs": 4035
+              }
+            ]
+          },
+          "model": "gpt-5.6-terra",
+          "modelProvider": "usine-gateway",
+          "serviceTier": null,
+          "disabledPluginIds": [],
+          "cwd": "$WORKTREE",
+          "runtimeWorkspaceRoots": ["$WORKTREE"],
+          "instructionSources": [],
+          "approvalPolicy": "never",
+          "approvalsReviewer": "user",
+          "sandbox": { "type": "dangerFullAccess" },
+          "activePermissionProfile": null,
+          "reasoningEffort": null,
+          "collaborationMode": {
+            "mode": "default",
+            "settings": {
+              "model": "gpt-5.6-terra",
+              "reasoning_effort": null,
+              "developer_instructions": null
+            }
+          },
+          "multiAgentMode": "explicitRequestOnly",
+          "initialTurnsPage": null,
+          "turnsBackwardsCursor": "{\"requestedThreadId\":\"01a1ad2f-823a-7c82-b297-a84216687888\",\"rolloutOrdinal\":1,\"includeAnchor\":true,\"scope\":{\"kind\":\"turns\"}}",
+          "itemsBackwardsCursor": "{\"requestedThreadId\":\"01a1ad2f-823a-7c82-b297-a84216687888\",\"rolloutOrdinal\":21,\"includeAnchor\":true,\"scope\":{\"kind\":\"itemsByCreatedAtOrdinal\"}}"
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "process:2/stdin",
+      "payload": {
+        "id": 4,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "input": [
+            {
+              "type": "text",
+              "text": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\nThe orchestrator restarted. Continue this saved conversation in the same checkout. Check the results of any interrupted commands before repeating work, then return the final report.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+              "text_elements": []
+            }
+          ],
+          "cwd": "$WORKTREE",
+          "approvalPolicy": "never",
+          "sandboxPolicy": { "type": "dangerFullAccess" },
+          "effort": "low"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-824e-7bc0-9100-7f0800779051",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 10324,
+              "inputTokens": 10245,
+              "cachedInputTokens": 7936,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 79,
+              "reasoningOutputTokens": 34
+            },
+            "last": {
+              "totalTokens": 10324,
+              "inputTokens": 10245,
+              "cachedInputTokens": 7936,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 79,
+              "reasoningOutputTokens": 34
+            },
+            "modelContextWindow": 258400
+          }
+        },
+        "emittedAtMs": 1793906938673
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/goal/cleared",
+        "params": { "threadId": "01a1ad2f-823a-7c82-b297-a84216687888" },
+        "emittedAtMs": 1793906938678
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "id": 4,
+        "result": {
+          "turn": {
+            "id": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+            "rootTurnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": null,
+            "completedAt": null,
+            "durationMs": null
+          }
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "status": { "type": "active", "activeFlags": [] }
+        },
+        "emittedAtMs": 1793906938737
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turn": {
+            "id": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+            "rootTurnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": 1793906938,
+            "completedAt": null,
+            "durationMs": null
+          }
+        },
+        "emittedAtMs": 1793906938737
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1ad2f-9383-70c2-80f4-7f48554e4c3d",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\nThe orchestrator restarted. Continue this saved conversation in the same checkout. Check the results of any interrupted commands before repeating work, then return the final report.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "startedAtMs": 1793906938756
+        },
+        "emittedAtMs": 1793906938756
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "01a1ad2f-9383-70c2-80f4-7f48554e4c3d",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "# Agent persona\n\nFollow the task exactly.\n\n# Parent context\n\nThe following context supplements the delegated task. Follow the delegated task as written if this context conflicts with it.\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\nThe orchestrator restarted. Continue this saved conversation in the same checkout. Check the results of any interrupted commands before repeating work, then return the final report.\n\n# Delegated task\n\nRun exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools.\n\n# Task completion\n\nTo return a step output, write .usine/outputs/<name>.json as { \"type\": \"your.type\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"content\": <JSON value> }. Use a lowercase file-name slug (letters, digits, hyphens, or underscores) and a non-empty type of at most 128 characters. The commit is optional; when set, it must equal 0123456789abcdef0123456789abcdef01234567, the pinned checkout base supplied by usine, even when HEAD resumes from salvage. Each file and its compact JSON content must be at most 8 MiB, with at most 10 outputs per attempt. Do not commit .usine/. Keep a child's outputs in place so usine can collect them after the parent returns.\n\nRun gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.\nDo not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.\nWhen the task configures a CI handoff, push the final head and return [usine:awaiting-ci] on its own line followed by the handoff JSON. Leave its completion labels for usine and relay a child handoff unchanged. The session ends and usine watches CI without an agent. Otherwise, a pending CI check remains unfinished work; wait for it before completing the task. For a genuine blocker, record it on the issue or pull request and report the incomplete work.\nFor an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.\nWhen the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.\n\n# GitHub identity\n\nAll factory Agents use the same GitHub App identity, including the Agent that opened a pull request.\nSubmit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.\nUse the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.\nAppend this signature to every GitHub comment, issue, pull request, or review you publish:\n— usine agent: developer",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "completedAtMs": 1793906938756
+        },
+        "emittedAtMs": 1793906938761
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_0c47cf61c5fb6e95016aecd8fcdbb087d2b1f182cc6ec312e5",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "startedAtMs": 1793906940883
+        },
+        "emittedAtMs": 1793906940883
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "reasoning",
+            "id": "rs_0c47cf61c5fb6e95016aecd8fcdbb087d2b1f182cc6ec312e5",
+            "summary": [],
+            "content": []
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "completedAtMs": 1793906941265
+        },
+        "emittedAtMs": 1793906941268
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "commandExecution",
+            "id": "exec-5510f668-9256-406c-9341-8cd3f2ce35bc",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/bash -lc 'node wait.cjs'",
+            "cwd": "$WORKTREE",
+            "processId": "56245",
+            "source": "unifiedExecStartup",
+            "status": "inProgress",
+            "commandActions": [{ "type": "unknown", "command": "node wait.cjs" }],
+            "aggregatedOutput": null,
+            "exitCode": null,
+            "durationMs": null
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "startedAtMs": 1793906942121
+        },
+        "emittedAtMs": 1793906942123
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "commandExecution",
+            "id": "exec-5510f668-9256-406c-9341-8cd3f2ce35bc",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/bash -lc 'node wait.cjs'",
+            "cwd": "$WORKTREE",
+            "processId": "56245",
+            "source": "unifiedExecStartup",
+            "status": "completed",
+            "commandActions": [{ "type": "unknown", "command": "node wait.cjs" }],
+            "aggregatedOutput": null,
+            "exitCode": 0,
+            "durationMs": 0
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "completedAtMs": 1793906942121
+        },
+        "emittedAtMs": 1793906942124
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 21597,
+              "inputTokens": 21437,
+              "cachedInputTokens": 17920,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 160,
+              "reasoningOutputTokens": 70
+            },
+            "last": {
+              "totalTokens": 11273,
+              "inputTokens": 11192,
+              "cachedInputTokens": 9984,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 81,
+              "reasoningOutputTokens": 36
+            },
+            "modelContextWindow": 258400
+          }
+        },
+        "emittedAtMs": 1793906942140
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "normalModelSlug": null,
+            "primary": { "usedPercent": 67, "windowDurationMins": 10080, "resetsAt": 1794314556 },
+            "secondary": null,
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "62717.5395687500" },
+            "individualLimit": null,
+            "spendControlReached": null,
+            "planType": null,
+            "rateLimitReachedType": null
+          }
+        },
+        "emittedAtMs": 1793906942140
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_0c47cf61c5fb6e95016aecd900a46487d2a3380ecb51be6348",
+            "text": "",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "startedAtMs": 1793906944754
+        },
+        "emittedAtMs": 1793906944755
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "itemId": "msg_0c47cf61c5fb6e95016aecd900a46487d2a3380ecb51be6348",
+          "delta": "RE"
+        },
+        "emittedAtMs": 1793906944755
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "itemId": "msg_0c47cf61c5fb6e95016aecd900a46487d2a3380ecb51be6348",
+          "delta": "PLAY"
+        },
+        "emittedAtMs": 1793906944755
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "itemId": "msg_0c47cf61c5fb6e95016aecd900a46487d2a3380ecb51be6348",
+          "delta": "_DONE"
+        },
+        "emittedAtMs": 1793906944755
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_0c47cf61c5fb6e95016aecd900a46487d2a3380ecb51be6348",
+            "text": "REPLAY_DONE",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          },
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "completedAtMs": 1793906944814
+        },
+        "emittedAtMs": 1793906944819
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 32900,
+              "inputTokens": 32733,
+              "cachedInputTokens": 28928,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 167,
+              "reasoningOutputTokens": 70
+            },
+            "last": {
+              "totalTokens": 11303,
+              "inputTokens": 11296,
+              "cachedInputTokens": 11008,
+              "cacheWriteInputTokens": 0,
+              "outputTokens": 7,
+              "reasoningOutputTokens": 0
+            },
+            "modelContextWindow": 258400
+          }
+        },
+        "emittedAtMs": 1793906944865
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "normalModelSlug": null,
+            "primary": { "usedPercent": 67, "windowDurationMins": 10080, "resetsAt": 1794314556 },
+            "secondary": null,
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "62717.5395687500" },
+            "individualLimit": null,
+            "spendControlReached": null,
+            "planType": null,
+            "rateLimitReachedType": null
+          }
+        },
+        "emittedAtMs": 1793906944865
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "status": { "type": "idle" }
+        },
+        "emittedAtMs": 1793906944893
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "process:2/stdout",
+      "payload": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "01a1ad2f-823a-7c82-b297-a84216687888",
+          "turn": {
+            "id": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+            "rootTurnId": "01a1ad2f-9339-7ff1-a229-12a09dc66853",
+            "items": [
+              {
+                "type": "agentMessage",
+                "id": "msg_0c47cf61c5fb6e95016aecd900a46487d2a3380ecb51be6348",
+                "text": "REPLAY_DONE",
+                "phase": "final_answer",
+                "memoryCitation": null,
+                "delivery": null,
+                "questions": null
+              }
+            ],
+            "itemsView": "summary",
+            "status": "completed",
+            "error": null,
+            "startedAt": 1793906938,
+            "completedAt": 1793906944,
+            "durationMs": 6184
+          }
+        },
+        "emittedAtMs": 1793906944893
+      }
+    },
+    { "type": "expect_outbound", "port": "process:2/stdin", "payload": { "eof": true } },
+    { "type": "runtime_exit", "port": "process:2/stdout", "code": 0, "error": null },
+    { "type": "runtime_exit", "port": "process:2/exit", "code": 0, "error": null }
+  ]
+}

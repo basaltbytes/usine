@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { env } from "node:process";
 import { Config, Effect, Schema, Layer } from "effect";
 import { ChildBackend } from "../../src/runtime.ts";
 import { piChildLayer, piSdkLive } from "../../src/harness/pi/pi.ts";
@@ -17,7 +18,7 @@ const brain = Effect.gen(function* () {
 });
 
 describe("Pi child live contract", () => {
-  it.live(
+  it.live.skipIf(env.USINE_PI_INTEGRATION_MODEL === undefined)(
     "applies guidance during an active command and records the result",
     () =>
       Effect.gen(function* () {
@@ -33,7 +34,7 @@ describe("Pi child live contract", () => {
     210_000,
   );
 
-  it.live(
+  it.live.skipIf(env.USINE_PI_INTEGRATION_MODEL === undefined)(
     "interrupts an active command and settles the session",
     () =>
       Effect.gen(function* () {
