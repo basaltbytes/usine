@@ -157,16 +157,23 @@ it("addresses parent and child messages independently and exposes an explicit re
   await page.getByRole("button", { name: "Release child" }).click();
   await page.getByRole("button", { name: "Release parent" }).click();
   await expect.poll(async () => (await commands.recordedInterventions()).length).toBe(5);
+  const messageId = expect.stringMatching(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+  );
   expect((await commands.recordedInterventions()).map(({ body }) => body)).toEqual([
     {
       attemptId,
       target: { _tag: "Child", sessionId: "child-2" },
-      action: { _tag: "OperatorMessage", message: "Check the second approach with me" },
+      action: {
+        _tag: "OperatorMessage",
+        id: messageId,
+        message: "Check the second approach with me",
+      },
     },
     {
       attemptId,
       target: { _tag: "Parent" },
-      action: { _tag: "OperatorMessage", message: "Continue after the review" },
+      action: { _tag: "OperatorMessage", id: messageId, message: "Continue after the review" },
     },
     { attemptId, target: { _tag: "Child", sessionId: "child-2" }, action: { _tag: "Interrupt" } },
     { attemptId, target: { _tag: "Child", sessionId: "child-2" }, action: { _tag: "Release" } },

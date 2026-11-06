@@ -244,6 +244,8 @@ Committed revisions apply live. There is no reload control. **Pause** and **Resu
 
 A live attempt has a composer at the bottom of the reader for the parent, or for a child selected in the outline. **Pause session** waits for the next tool boundary; sending a message resumes. **Cancel run** asks for confirmation, then stops the whole attempt.
 
+Each operator message receives a UUID when sent, so identical messages have separate delivery receipts.
+
 Messaging a child places a hold: the child can answer and take more turns in the same conversation while the parent waits for its result. **Release child** lets the result return once the child is idle. Each child has its own hold, a paused parent doesn't block messaging its children, and held children stay reachable even if their last activity isn't in the loaded transcript page. Holds pause the attempt's elapsed-time budget, but reported tokens still count toward `settings.max_attempt_tokens` if set. A failed or canceled attempt shows the salvage branch with its unfinished work, or the retained worktree path if the push failed.
 
 **Retry** reuses the saved agent definition. Retry controls describe the saved harness and model; the drawer and run page show them beside the actions, with a notice if the loaded definition differs.

@@ -124,11 +124,25 @@ export class Interrupted extends Schema.TaggedClass<
   Brand.Brand<"@usine/core/attempt/channel/Interrupted">
 >("AttemptChannel/Interrupted")("Interrupted", {}) {}
 
+/** A stable identity for one operator message, including repeated text. */
+export const OperatorMessageId = Schema.String.check(Schema.isUUID()).pipe(
+  Schema.brand("OperatorMessageId"),
+);
+export type OperatorMessageId = typeof OperatorMessageId.Type;
+// Schema constructors assign IDs synchronously in browser and server callers.
+// @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off
+const newMessageId = Effect.sync(() => crypto.randomUUID());
+const messageId = OperatorMessageId.pipe(
+  Schema.withDecodingDefaultKey(newMessageId),
+  Schema.withConstructorDefault(newMessageId),
+);
+
 /** A message for the target session's next turn that does not place a hold. */
 export class Steer extends Schema.TaggedClass<
   Steer,
   Brand.Brand<"@usine/core/attempt/channel/Steer">
 >("AttemptChannel/Steer")("Steer", {
+  id: messageId,
   /** The text to deliver to the target session without placing a hold. */
   message: Schema.NonEmptyString,
 }) {}
@@ -150,6 +164,7 @@ export class OperatorMessage extends Schema.TaggedClass<
   OperatorMessage,
   Brand.Brand<"@usine/core/attempt/channel/OperatorMessage">
 >("AttemptChannel/OperatorMessage")("OperatorMessage", {
+  id: messageId,
   /** The operator's text to deliver while placing a hold on the target session. */
   message: Schema.NonEmptyString,
 }) {}
