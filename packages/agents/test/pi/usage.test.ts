@@ -40,8 +40,33 @@ describe("Claude query tokens", () => {
     assert.strictEqual(Option.getOrThrow(legacy.read(result(110, 1.1))).totalTokens, 110);
   });
 
+  it("does not count a retained process's replayed assistant messages again", () => {
+    const assistant = (id: string, output: number) => ({
+      type: "assistant",
+      message: { id, usage: { input_tokens: 10, output_tokens: output } },
+    });
+    const first = claudeSessionMeter();
+    first.read(assistant("one", 5));
+    first.covered();
+    const saved = first.read(assistant("two", 5));
+    assert(Option.isSome(saved));
+    assert(Option.isSome(saved.value.processUsage));
+    assert.deepStrictEqual(saved.value.processUsage.value.messages, { two: TokenCount.make(15) });
+    const retained = claudeSessionMeter(saved.value, true);
+    const replayed = retained.read(assistant("two", 5));
+    assert.strictEqual(Option.getOrThrow(replayed).totalTokens, 30);
+    assert.strictEqual(Option.getOrThrow(retained.read(assistant("two", 8))).totalTokens, 33);
+    const next = retained.read(assistant("three", 1));
+    assert.strictEqual(Option.getOrThrow(next).totalTokens, 44);
+    retained.covered();
+    const result = retained.read({ type: "result", modelUsage: {} });
+    assert(Option.isSome(result));
+    assert(Option.isSome(result.value.processUsage));
+    assert.isUndefined(result.value.processUsage.value.messages);
+  });
+
   it("counts output plus uncached input, reconciling repeated blocks and cumulative results", () => {
-    const read = claudeTokenMeter();
+    const { read } = claudeTokenMeter();
     const assistant = (id: string, output: number) =>
       read({
         type: "assistant",
@@ -78,7 +103,7 @@ describe("Claude query tokens", () => {
   });
 
   it("carries the SDK's estimated price from each result until the next one", () => {
-    const read = claudeTokenMeter();
+    const { read } = claudeTokenMeter();
     const assistant = read({
       type: "assistant",
       message: { id: "one", usage: { input_tokens: 10, output_tokens: 5 } },

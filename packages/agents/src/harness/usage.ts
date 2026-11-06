@@ -64,39 +64,60 @@ const ClaudeResultUsage = Schema.Struct({
 const decodeAssistant = Schema.decodeUnknownOption(ClaudeAssistantUsage);
 const decodeResult = Schema.decodeUnknownOption(ClaudeResultUsage);
 
+/** A Claude process's cumulative usage. */
+export interface ProcessUsage extends SessionUsage {
+  /** Tokens counted per assistant message ID that the output checkpoint doesn't cover yet. */
+  readonly messages?: Readonly<Record<string, TokenCount>>;
+}
+
 /**
  * Returns a Claude token meter: live message usage between results, reconciled with the cumulative
  * `modelUsage` at each result. Consumption is output plus input plus cache creation, because the
  * SDK's input counts exclude cache reads and writes; repeated blocks with one message ID count only
- * their added tokens. The cost is the SDK's `costUSD` estimate and changes only at a result.
+ * their added tokens, including blocks replayed after the `seed` was saved. The cost is the SDK's
+ * `costUSD` estimate and changes only at a result. `covered` reports that the output checkpoint
+ * covers every message read so far, so those messages are no longer saved with the usage.
  */
-export const claudeTokenMeter = (seed: SessionUsage = NO_USAGE) => {
+export const claudeTokenMeter = (seed: ProcessUsage = NO_USAGE) => {
   let total: number = seed.totalTokens;
   let cost = seed.costUsd;
-  const messages = new Map<string, number>();
-  return (message: Schema.Json): Option.Option<SessionUsage> => {
-    const assistant = decodeAssistant(message);
-    if (Option.isSome(assistant)) {
-      const { id, usage } = assistant.value.message;
-      const consumed =
-        usage.output_tokens + usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
-      const previous = messages.get(id) ?? 0;
-      total += Math.max(0, consumed - previous);
-      messages.set(id, Math.max(previous, consumed));
-      return Option.some({ totalTokens: TokenCount.make(total), costUsd: cost });
-    }
-    const result = decodeResult(message);
-    if (Option.isNone(result)) return Option.none();
-    const models = Object.values(result.value.modelUsage);
-    const consumed = models.reduce(
-      (sum, usage) => sum + usage.outputTokens + usage.inputTokens + usage.cacheCreationInputTokens,
-      0,
-    );
-    total = Math.max(total, consumed);
-    const priced = models.flatMap(({ costUSD }) => (costUSD === undefined ? [] : [costUSD]));
-    if (priced.length > 0)
-      cost = Option.some(UsdAmount.make(priced.reduce((sum, value) => sum + value, 0)));
-    return Option.some({ totalTokens: TokenCount.make(total), costUsd: cost });
+  const uncovered = new Map(Object.entries(seed.messages ?? {}));
+  const messages = new Map<string, number>(uncovered);
+  const usage = (): ProcessUsage => {
+    const counted = { totalTokens: TokenCount.make(total), costUsd: cost };
+    if (uncovered.size === 0) return counted;
+    return { ...counted, messages: Object.fromEntries(uncovered) };
+  };
+  return {
+    read: (message: Schema.Json): Option.Option<ProcessUsage> => {
+      const assistant = decodeAssistant(message);
+      if (Option.isSome(assistant)) {
+        const { id, usage: tokens } = assistant.value.message;
+        const consumed =
+          tokens.output_tokens + tokens.input_tokens + (tokens.cache_creation_input_tokens ?? 0);
+        const previous = messages.get(id) ?? 0;
+        total += Math.max(0, consumed - previous);
+        messages.set(id, Math.max(previous, consumed));
+        uncovered.set(id, TokenCount.make(Math.max(previous, consumed)));
+        return Option.some(usage());
+      }
+      const result = decodeResult(message);
+      if (Option.isNone(result)) return Option.none();
+      const models = Object.values(result.value.modelUsage);
+      const consumed = models.reduce(
+        (sum, model) =>
+          sum + model.outputTokens + model.inputTokens + model.cacheCreationInputTokens,
+        0,
+      );
+      total = Math.max(total, consumed);
+      const priced = models.flatMap(({ costUSD }) => (costUSD === undefined ? [] : [costUSD]));
+      if (priced.length > 0)
+        cost = Option.some(UsdAmount.make(priced.reduce((sum, value) => sum + value, 0)));
+      return Option.some(usage());
+    },
+    covered: () => {
+      uncovered.clear();
+    },
   };
 };
 
@@ -106,12 +127,13 @@ const NO_USAGE: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Optio
  * Returns a Claude token meter for a session that another process can resume. `read` returns the
  * session's usage: the current process's, as `claudeTokenMeter` reads it, plus the earlier
  * processes'. `restart` starts on a new process and returns the usage checkpoint to persist.
+ * `covered` works as in `claudeTokenMeter`.
  */
 export const claudeSessionMeter = (
-  seed: SessionUsage & { readonly processUsage?: Option.Option<SessionUsage> } = NO_USAGE,
+  seed: SessionUsage & { readonly processUsage?: Option.Option<ProcessUsage> } = NO_USAGE,
   retained = false,
 ) => {
-  let current = retained
+  let current: ProcessUsage = retained
     ? Option.getOrElse(seed.processUsage ?? Option.none(), () => seed)
     : NO_USAGE;
   let earlier: SessionUsage = {
@@ -124,8 +146,8 @@ export const claudeSessionMeter = (
   return {
     read: (
       message: Schema.Json,
-    ): Option.Option<SessionUsage & { readonly processUsage: Option.Option<SessionUsage> }> =>
-      Option.map(meter(message), (usage) => {
+    ): Option.Option<SessionUsage & { readonly processUsage: Option.Option<ProcessUsage> }> =>
+      Option.map(meter.read(message), (usage) => {
         current = usage;
         return { ...addUsage(earlier, usage), processUsage: Option.some(usage) };
       }),
@@ -135,6 +157,7 @@ export const claudeSessionMeter = (
       meter = claudeTokenMeter();
       return { ...earlier, processUsage: Option.some(current) };
     },
+    covered: () => meter.covered(),
   };
 };
 

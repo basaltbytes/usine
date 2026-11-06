@@ -250,7 +250,15 @@ export class SessionTokensUpdated extends Schema.TaggedClass<
   ),
   /** The current Claude process's cumulative usage, used when reattaching that process. */
   processUsage: Schema.OptionFromOptionalKey(
-    Schema.Struct({ totalTokens: TokenCount, costUsd: Schema.OptionFromNullOr(UsdAmount) }),
+    Schema.Struct({
+      totalTokens: TokenCount,
+      costUsd: Schema.OptionFromNullOr(UsdAmount),
+      /**
+       * Tokens counted per assistant message ID that the process's output checkpoint doesn't cover
+       * yet. A reattached process can replay these messages, and they are not counted again.
+       */
+      messages: Schema.optionalKey(Schema.Record(Schema.String, TokenCount)),
+    }),
   ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
 }) {}
 

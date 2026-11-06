@@ -168,7 +168,8 @@ interface ClaudeLaunch {
    */
   readonly login: Exclude<LoginCheck, "waiting"> | "undecided";
   readonly retained: boolean;
-  readonly acknowledge: (message: Schema.Json) => Effect.Effect<void>;
+  /** Checkpoints a handled message; returns whether the checkpoint covers all output read so far. */
+  readonly acknowledge: (message: Schema.Json) => Effect.Effect<boolean>;
   /** The scope of the launch's process, input, and output reader. */
   readonly scope: Scope.Closeable;
 }
@@ -233,7 +234,10 @@ const makeClaudeChild = Effect.gen(function* () {
       // The session reports a closed or failed output itself.
       if (Result.isFailure(next)) return "undecided" as const;
       read.push(next.success);
-      spentTokens ||= Option.exists(tokens(next.success), ({ totalTokens }) => totalTokens > 0);
+      spentTokens ||= Option.exists(
+        tokens.read(next.success),
+        ({ totalTokens }) => totalTokens > 0,
+      );
       const check = loginCheck(next.success, spentTokens);
       if (check !== "waiting") return check;
     }
@@ -341,7 +345,11 @@ const makeClaudeChild = Effect.gen(function* () {
         login,
         retained,
         acknowledge: (message: Schema.Json) =>
-          Effect.sync(() => checkpoint.handled(message)).pipe(Effect.flatMap(owner.acknowledge)),
+          Effect.sync(() => checkpoint.handled(message)).pipe(
+            Effect.flatMap(({ bytes, covered }) =>
+              owner.acknowledge(bytes).pipe(Effect.as(covered)),
+            ),
+          ),
       } satisfies Omit<ClaudeLaunch, "scope">;
     }).pipe(Effect.ensuring(release));
   });
@@ -710,7 +718,12 @@ const makeClaudeChild = Effect.gen(function* () {
             Stream.runForEach(
               Result.match({
                 onSuccess: (message) =>
-                  handle(message).pipe(Effect.andThen(launch.acknowledge(message))),
+                  handle(message).pipe(
+                    Effect.andThen(launch.acknowledge(message)),
+                    Effect.flatMap((covered) =>
+                      covered ? Effect.sync(() => usage.covered()) : Effect.void,
+                    ),
+                  ),
                 onFailure: (error) =>
                   Effect.sync(() => {
                     broken = Option.some(error);
