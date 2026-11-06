@@ -36,7 +36,7 @@ class SdkProcess extends EventEmitter {
 /** Adapts synchronous SDK stream handles to the scoped process owner. */
 export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(function* (
   target: ProcessTarget,
-  transport?: "resume",
+  transport?: "replace" | "resume",
 ) {
   const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const lifecycle = yield* ChildSessionLifecycle.current;

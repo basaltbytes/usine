@@ -3,7 +3,19 @@ import { assert, describe, it } from "@effect/vitest";
 import type { AgentSessionEvent } from "@usine/core/agent/session";
 import { Release } from "@usine/core/attempt/channel";
 import { childPidFile } from "../../src/child-host/child-host.ts";
-import { Cause, Effect, Exit, FileSystem, Option, Queue, Ref, Schema, Scope, Stream } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  FileSystem,
+  Option,
+  Queue,
+  Ref,
+  Schedule,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { openFixture, providers, scenarios, recordingPid } from "./fixture.ts";
 import { ChildProcessLost } from "../../src/child-host/process.ts";
 import { ChildBackend, ChildRequest, ChildSessionLifecycle } from "../../src/runtime.ts";
@@ -11,6 +23,17 @@ import { Tape } from "./transcript.ts";
 import { decodeWire, encodeWire } from "./process.ts";
 import { Base64 } from "effect/encoding";
 import { runScenario } from "./scenarios.ts";
+
+const fileWithLines = (file: string, count: number) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    for (;;) {
+      const text = yield* fs.readFileString(file);
+      const lines = text.trim().split("\n");
+      if (lines.length >= count) return lines;
+      yield* Effect.sleep("10 millis");
+    }
+  });
 
 describe("recorded harness transports", () => {
   for (const provider of providers)
@@ -245,6 +268,13 @@ for (const state of ["working", "idle"] as const)
               );
               const currentPid = yield* fs.readFileString(pidFile);
               assert.strictEqual(currentPid, pid);
+              // This message is a FIFO barrier after any input from the retained launch.
+              const guidance = "Continue after reattachment";
+              yield* resumed.steer(guidance);
+              const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, 2);
+              assert.lengthOf(inputs, 2, "reattachment sends no task or continuation prompt");
+              assert.include(inputs[0] ?? "", fixture.request.prompt);
+              assert.include(inputs[1] ?? "", guidance);
               if (state === "working") yield* fixture.controls.releaseCommand;
               yield* resumed.intervene(Release.make(), () => Effect.void);
               const result = yield* resumed.result;
@@ -253,6 +283,80 @@ for (const state of ["working", "idle"] as const)
           );
           yield* fixture.save;
           assert.strictEqual(first.session.id, fixture.request.session.id);
+        }),
+      ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+    20_000,
+  );
+
+for (const outcome of ["completed", "second-exit", "idle"] as const)
+  it.live(
+    `Claude resumes once after lease expiry: ${outcome}`,
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* openFixture("claude", "transport-loss", "replay");
+          const fs = yield* FileSystem.FileSystem;
+          yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({ ...fixture.request, held: true }),
+            );
+            const events = yield* Queue.unbounded<AgentSessionEvent>();
+            yield* running.events.pipe(
+              Stream.runForEach((event) => Queue.offer(events, event)),
+              Effect.forkScoped,
+            );
+            let saved = Option.none<string>();
+            for (;;) {
+              const event = yield* Queue.take(events);
+              if (event._tag === "SessionStarted")
+                saved = Option.map(event.harnessSession, (session) => session.id);
+              if (event._tag === "ToolStarted") break;
+            }
+            assert(Option.isSome(saved));
+            if (outcome === "idle") {
+              yield* fixture.controls.releaseCommand;
+              for (;;) {
+                if ((yield* Queue.take(events))._tag === "SessionIdle") break;
+              }
+            }
+            const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
+            const originalPid = yield* fs.readFileString(pidFile);
+            // Simulate a heartbeat gap longer than the real two-minute lease.
+            yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
+            const launches = yield* fileWithLines(`${fixture.cwd}/launch-arguments`, 2);
+            assert.lengthOf(launches, 2);
+            assert.include(launches[1] ?? "", `"--resume=${saved.value}"`);
+            const replacementPid = yield* fs.readFileString(pidFile);
+            assert.notStrictEqual(replacementPid, originalPid);
+            if (outcome === "idle") {
+              // A deliberate steer proves the idle replacement has consumed all earlier input.
+              yield* running
+                .steer("Continue after idle recovery")
+                .pipe(Effect.retry({ times: 100, schedule: Schedule.spaced("10 millis") }));
+            }
+            const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, 2);
+            assert.lengthOf(inputs, 2);
+            assert.include(
+              inputs[1] ?? "",
+              outcome === "idle" ? "Continue after idle recovery" : "check the worktree",
+            );
+            if (outcome === "second-exit") {
+              yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
+              const failure = yield* running.result.pipe(Effect.flip);
+              assert.strictEqual(failure._tag, "SessionOperationError");
+              if (failure._tag === "SessionOperationError")
+                assert(Schema.is(ChildProcessLost)(failure.cause));
+              const processes = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
+              assert.lengthOf(processes, 2);
+            } else {
+              yield* fixture.controls.releaseCommand;
+              yield* running.intervene(Release.make(), () => Effect.void);
+              assert.include((yield* running.result).message, "REPLAY_DONE");
+              assert.strictEqual(running.session.id, fixture.request.session.id);
+            }
+          }).pipe(Effect.provide(fixture.backend), Effect.scoped);
+          const retained = yield* fs.exists(childPidFile(fixture.cwd, fixture.request.session.id));
+          assert.isFalse(retained);
         }),
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
     20_000,

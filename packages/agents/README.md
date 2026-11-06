@@ -100,7 +100,7 @@ Orchestrator heartbeats renew a two-minute lease. A surviving worker relay canno
 
 The durable attempt runtime supplies `ChildSessionLifecycle`. Detaching an attempt channel marks it as stopping before transports and credentials close. The shared owner suppresses EOF, reconnect, stop, and journal removal during that shutdown, so restart can reattach the same remote process within its lease. Shutdown errors stay out of child failure reports. Direct callers can supply the same lifecycle service; ordinary scope closure stops the child when the lifecycle is active.
 
-An exited Codex app-server resumes its saved thread once through a replacement owner, after confirming the old group stopped. A paused or idle child waits for operator guidance. Other process exits reach the adapter with the recorded exit code and stderr tail.
+An exited remote Claude Code or Codex process resumes its saved conversation once through a replacement owner, after confirming the old group stopped. This includes lease expiry during an orchestrator pause. A working Claude child receives a continuation that checks interrupted work; a paused or idle child waits for operator guidance. A second process exit fails the child with the recorded exit code and stderr tail.
 
 ## Outcome markers
 

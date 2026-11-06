@@ -78,7 +78,7 @@ After an orchestrator restart, an active `subagent` call continues its saved chi
 
 Remote Claude Code and Codex children use one process owner per child on the worker. Node.js must be available on the worker command path. An SSH disconnect reattaches the same process and preserves its running turn. Orchestrator heartbeats renew a two-minute lease; if they stop, the owner terminates the harness process group, with forced termination after five seconds. An orderly orchestrator shutdown keeps the process available for reattachment within that lease. A changed child environment stops the old process before resuming its saved conversation. Local children terminate when their dedicated orchestrator pipe closes, including after a crash.
 
-If a remote Codex process exits after saving its thread, the child resumes that thread once. An exit before the first turn preserves the original task for the resumed thread.
+If a remote Claude Code or Codex process exits after saving its conversation, including after lease expiry, the child resumes that conversation once without spending another child-session budget slot. A working Claude child checks interrupted work before continuing; a paused or idle child waits for operator guidance. A second process exit fails the child. A Codex exit before the first turn preserves the original task for the resumed thread.
 
 Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, and Pi ignores project-local configuration. Repository agent instructions still apply.
 

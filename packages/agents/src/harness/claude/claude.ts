@@ -14,6 +14,7 @@ import {
   ProviderRetrying,
   SessionStarted,
   SessionTokensUpdated,
+  ToolFinished,
 } from "@usine/core/agent/session";
 import {
   type Cause,
@@ -43,7 +44,7 @@ import {
   SessionOperationError,
   UnknownModelError,
 } from "../../runtime.ts";
-import { stopChildProcess } from "../../child-host/process.ts";
+import { ChildProcessLost, stopChildProcess } from "../../child-host/process.ts";
 import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
@@ -146,6 +147,10 @@ const LOGIN_RETRY_DELAYS: ReadonlyArray<Duration.Duration> = [
  */
 const LOGIN_WINDOW = Duration.seconds(60);
 
+/** The message that continues interrupted work after the owned process exits. */
+const RESUME_PROMPT =
+  "usine lost its connection to this session and resumed it. Your last step may not have finished: check the worktree and any command you started before you go on. Then continue the task and end with your final answer. If the task is done, give your final answer again.";
+
 /** One Claude Code launch for a child. */
 interface ClaudeLaunch {
   readonly input: AsyncInput;
@@ -238,6 +243,7 @@ const makeClaudeChild = Effect.gen(function* () {
     request: ChildRequest,
     options: ClaudeQueryOptions,
     messages: ReadonlyArray<string>,
+    transport?: "replace" | "resume",
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
     const release = yield* holdLogin(request);
@@ -250,7 +256,7 @@ const makeClaudeChild = Effect.gen(function* () {
           sessionId: Option.some(request.session.id),
           environment: request.environment,
         },
-        Option.isSome(request.resume) ? "resume" : undefined,
+        transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
       ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
       const query = sdk.open(input, { ...options, spawnClaudeCodeProcess: owner.spawn });
       const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
@@ -318,12 +324,13 @@ const makeClaudeChild = Effect.gen(function* () {
     options: ClaudeQueryOptions,
     messages: ReadonlyArray<string>,
     scope: Scope.Scope,
+    transport?: "replace" | "resume",
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
     for (let retry = 0; ; retry += 1) {
       const launchScope = yield* Scope.fork(scope);
       const opened: ClaudeLaunch = {
-        ...(yield* launchOnce(request, options, messages).pipe(
+        ...(yield* launchOnce(request, options, messages, transport).pipe(
           Scope.provide(launchScope),
           Effect.onError((cause) => Scope.close(launchScope, Exit.failCause(cause))),
         )),
@@ -409,7 +416,7 @@ const makeClaudeChild = Effect.gen(function* () {
 
       yield* checkContinuationHome(request, home, defaultHome);
       // Login-lock retries finish before the session starts.
-      const current = yield* launchWithRetries(
+      let current = yield* launchWithRetries(
         request,
         options,
         request.paused || Option.isSome(request.idle) ? [] : [request.prompt],
@@ -460,6 +467,7 @@ const makeClaudeChild = Effect.gen(function* () {
       const tools = new Map<string, string>();
       const usage = claudeSessionMeter(Option.getOrUndefined(request.usage));
       const readRateLimits = claudeRateLimits(session);
+      let harnessSession = request.resume;
       let backgroundTasks: ReadonlyArray<string> = [];
       let reportsSessionState = false;
       let completedTurn = Option.none<string>();
@@ -563,24 +571,27 @@ const makeClaudeChild = Effect.gen(function* () {
             return;
           }
           const init = decodeClaudeInit(message);
-          if (Option.isSome(init) && !(yield* Ref.getAndSet(launched, true))) {
-            const harnessSession = HarnessSession.make({
+          if (Option.isSome(init)) {
+            const saved = HarnessSession.make({
               id: init.value.session_id,
               cwd: request.cwd,
               home,
             });
-            yield* channel.emit(
-              SessionStarted.make({
-                session,
-                harnessSession: Option.some(harnessSession),
-              }),
-            );
-            yield* Effect.logInfo("Claude child session saved", {
-              sessionId: session.id,
-              parentSessionId: session.parentId,
-              harnessSessionId: harnessSession.id,
-              cwd: harnessSession.cwd,
-            });
+            harnessSession = Option.some(saved);
+            if (!(yield* Ref.getAndSet(launched, true))) {
+              yield* channel.emit(
+                SessionStarted.make({
+                  session,
+                  harnessSession,
+                }),
+              );
+              yield* Effect.logInfo("Claude child session saved", {
+                sessionId: session.id,
+                parentSessionId: session.parentId,
+                harnessSessionId: saved.id,
+                cwd: saved.cwd,
+              });
+            }
           }
           const used = usage.read(message);
           if (Option.isSome(used))
@@ -653,19 +664,73 @@ const makeClaudeChild = Effect.gen(function* () {
           return broken;
         });
 
-      const consume = Effect.gen(function* () {
-        const broken = yield* drain(current);
+      let resumed = false;
+      const resume = Effect.fn("ClaudeRuntime.resume")(function* (error: SessionOperationError) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, worker: request.worker });
+        if (
+          resumed ||
+          request.host._tag !== "RemoteShell" ||
+          Option.isNone(harnessSession) ||
+          !Schema.is(ChildProcessLost)(error.cause)
+        )
+          return yield* error;
+        resumed = true;
+        yield* Effect.logWarning("Remote Claude process stopped; resuming its saved session", {
+          sessionId: session.id,
+          harnessSessionId: harnessSession.value.id,
+          exitCode: error.cause.exitCode,
+        });
+        yield* Scope.close(current.scope, Exit.void);
         if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
-        return yield* channel.fail(
-          Option.getOrElse(broken, () =>
+        backgroundTasks = [];
+        completedTurn = Option.none();
+        reportsSessionState = false;
+        providerFailure = Option.none();
+        retries = 0;
+        retrying = false;
+        for (const [callId, tool] of tools)
+          yield* channel.emit(
+            ToolFinished.make({
+              session,
+              callId,
+              tool,
+              output: "The Claude process stopped before this call returned",
+              isError: true,
+            }),
+          );
+        tools.clear();
+        usage.restart();
+        const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
+        const messages = working ? [RESUME_PROMPT, ...(yield* conversation.unread)] : [];
+        current = yield* launchWithRetries(
+          request,
+          { ...options, resume: harnessSession.value.id },
+          messages,
+          scope,
+          "replace",
+        );
+        yield* Effect.logInfo("Resumed the Claude child's session", {
+          sessionId: session.id,
+          harnessSessionId: harnessSession.value.id,
+          working,
+          messages: messages.length,
+        });
+      });
+
+      const consume = Effect.gen(function* () {
+        for (;;) {
+          const broken = yield* drain(current);
+          if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
+          const error = Option.getOrElse(broken, () =>
             operationError(
               "stream",
               request,
               "Claude output closed without a result",
               new Error("unexpected end of output"),
             ),
-          ),
-        );
+          );
+          yield* resume(error);
+        }
       }).pipe(Effect.catch((error) => channel.fail(error)));
       yield* Effect.forkScoped(consume);
 

@@ -30,6 +30,7 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 const messages = ${payload};
 fs.appendFileSync('launches', String(process.pid) + '\\n');
+fs.appendFileSync('launch-arguments', JSON.stringify(process.argv.slice(2)) + '\\n');
 const send = message => process.stdout.write(JSON.stringify(message) + '\\n');
 let waiting = false;
 const timer = setInterval(() => {
@@ -40,7 +41,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   if (message.type === 'control_request') send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {
     commands: [], agents: [], models: [{ value: ${model}, displayName: 'Replay', description: 'Recorded model' }], account: { apiKeySource: 'none' }, output_style: 'default', available_output_styles: ['default'],
   } } });
-  else if (message.type === 'user') { for (const message of messages.slice(0, 2)) send(message); waiting = true; }
+  else if (message.type === 'user') { fs.appendFileSync('user-messages', JSON.stringify(message) + '\\n'); for (const message of messages.slice(0, 2)) send(message); waiting = true; }
 }).on('close', () => { clearInterval(timer); });
 `;
   yield* fs.writeFileString(`${request.cwd}/claude`, `#!/usr/bin/env node\n${source}`);
