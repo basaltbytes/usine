@@ -105,6 +105,9 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   const offset = yield* Ref.make(0);
   const pidFile = childPidFile(target.cwd, target.sessionId.value);
   const fields = { sessionId: target.sessionId.value };
+  const environmentKeys = yield* Schema.encodeEffect(
+    Schema.fromJsonString(Schema.Array(Schema.String)),
+  )(Object.keys(target.environment).sort()).pipe(Effect.orDie);
   yield* Effect.annotateCurrentSpan(fields);
   if (transport === "replace") yield* stopChildProcess(target);
 
@@ -157,6 +160,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
             pidFile,
             String(cursor),
             String(PROCESS_LEASE_MS),
+            environmentKeys,
             command.command,
             ...command.args,
           ],
@@ -205,6 +209,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
             yield* Effect.logInfo("Connected to the child process owner", {
               ...fields,
               offset: cursor,
+              retained: frame.retained,
             });
           } else if ("ack" in frame) {
             for (const id of history.keys()) if (id <= frame.ack) history.delete(id);
@@ -258,7 +263,8 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
       yield* Effect.sleep(`${delaySeconds} seconds`);
     }
     yield* Queue.end(stdout);
-    yield* Effect.logInfo("Child process exited", fields);
+    const result = yield* Deferred.await(exit);
+    yield* Effect.logInfo("Child process exited", { ...fields, exitCode: result.exitCode });
   }).pipe(
     Effect.mapError((cause) =>
       Schema.is(SessionOperationError)(cause)

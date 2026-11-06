@@ -129,11 +129,21 @@ export const SSH_FAILURE = 255;
  * `<pidfile> stopped`, `killed`, or `absent`, and removes the file.
  */
 const STOP_PID_FILE = `
+  pid_alive() {
+    if [ -d "$pidfile.transport" ]; then
+      identity=$(cat "$pidfile.transport/identity" 2>/dev/null) || return 1
+      boot=$(cat /proc/sys/kernel/random/boot_id) || return 1
+      start=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '$1 != "Z" {print $20}')
+      test -n "$start" && test "$identity" = "$boot:$pid:$start"
+    else
+      kill -0 "$pid" 2>/dev/null
+    fi
+  }
   pid=$(cat "$pidfile" 2>/dev/null)
-  if [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null; then
+  if [ -n "$pid" ] && pid_alive && kill -TERM "$pid" 2>/dev/null; then
     n=0
-    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 20 ]; do sleep 0.5; n=$((n+1)); done
-    if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; echo "$pidfile killed"; else echo "$pidfile stopped"; fi
+    while pid_alive && [ "$n" -lt 20 ]; do sleep 0.5; n=$((n+1)); done
+    if pid_alive; then kill -KILL "$pid" 2>/dev/null; echo "$pidfile killed"; else echo "$pidfile stopped"; fi
   else
     echo "$pidfile absent"
   fi

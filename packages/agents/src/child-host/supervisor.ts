@@ -10,7 +10,7 @@ const source = String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const [mode, pidFile, cursor, lease, command, ...args] = process.argv.slice(1);
+const [mode, pidFile, cursor, lease, environmentKeys = '[]', command, ...args] = process.argv.slice(1);
 const root = pidFile + '.transport';
 const input = path.join(root, 'input');
 const output = path.join(root, 'output');
@@ -21,7 +21,7 @@ const delivered = path.join(root, 'delivered');
 const lifelinePid = path.join(root, 'process');
 const exitFile = path.join(root, 'exit');
 const environmentFile = path.join(root, 'environment');
-const environmentHash = require('node:crypto').createHash('sha256').update(JSON.stringify(Object.entries(process.env).filter(([key]) => !key.startsWith('SSH_') && !['_', 'SHLVL', 'PWD', 'OLDPWD'].includes(key)).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
+const environmentHash = require('node:crypto').createHash('sha256').update(JSON.stringify(JSON.parse(environmentKeys).sort().map(key => [key, process.env[key]]))).digest('hex');
 const append = frame => fs.appendFileSync(output, JSON.stringify(frame) + '\n');
 const signal = (pid, name) => {
   try { process.kill(pid, name); return true; }
@@ -32,11 +32,30 @@ const readPid = file => {
   if (!Number.isSafeInteger(pid) || pid === 0) throw new Error('Invalid child process PID');
   return pid;
 };
+const processIdentity = pid => {
+  try {
+    const stat = fs.readFileSync('/proc/' + pid + '/stat', 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    if (fields[0] === 'Z') return null;
+    return fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() + ':' + pid + ':' + fields[19];
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ESRCH') return null;
+    throw error;
+  }
+};
+const identityFile = file => file === pidFile ? path.join(root, 'identity') : file + '.identity';
+const ownerAlive = file => {
+  if (!fs.existsSync(file)) return false;
+  const pid = readPid(file);
+  if (!fs.existsSync(root)) return signal(pid, 0);
+  const identity = identityFile(file);
+  return fs.existsSync(identity) && fs.readFileSync(identity, 'utf8') === processIdentity(pid);
+};
 const stopOwner = async (file = pidFile) => {
-  if (!fs.existsSync(file)) return;
-  const target = readPid(file);
-  if (signal(target, 'SIGTERM')) {
-    for (let n = 0; signal(target, 0); n++) {
+  if (ownerAlive(file)) {
+    const target = readPid(file);
+    signal(target, 'SIGTERM');
+    for (let n = 0; ownerAlive(file); n++) {
       if (target > 0 && !fs.existsSync(file)) break;
       if (n === 240) signal(target, 'SIGKILL');
       if (n === 480) throw new Error('Child process did not stop');
@@ -45,19 +64,19 @@ const stopOwner = async (file = pidFile) => {
   }
   if (file === pidFile) await stopOwner(lifelinePid);
   fs.rmSync(file, { force: true });
+  fs.rmSync(identityFile(file), { force: true });
 };
 if (mode === 'stop') {
   stopOwner().catch(error => { console.error(error.message); process.exitCode = 1; });
 } else if (mode === 'remove') {
-  if (fs.existsSync(pidFile)) {
-    const target = readPid(pidFile);
-    if (signal(target, 0)) process.exit(1);
-  }
+  if (ownerAlive(pidFile) || ownerAlive(lifelinePid)) process.exit(1);
   fs.rmSync(pidFile, { force: true });
   fs.rmSync(root, { recursive: true, force: true });
 } else if (mode === 'supervise') {
   fs.writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
+  fs.writeFileSync(identityFile(pidFile), processIdentity(process.pid), { mode: 0o600 });
   const child = spawn(process.execPath, ['-e', null /* lifeline source */, lifelinePid, exitFile, command, ...args], { detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] });
+  if (child.pid !== undefined) fs.writeFileSync(identityFile(lifelinePid), processIdentity(child.pid), { mode: 0o600 });
   let killTimer;
   let stopped = false;
   const stop = () => {
@@ -113,7 +132,7 @@ if (mode === 'stop') {
     // Older installations used a second PID file for native session resume.
     await stopOwner(pidFile.replace(/\.pid$/, '-resume.pid'));
   }
-  if (mode === 'resume' && fs.existsSync(root) && (!fs.existsSync(pidFile) || !signal(readPid(pidFile), 0) || fs.readFileSync(environmentFile, 'utf8') !== environmentHash || Date.now() - fs.statSync(heartbeat).mtimeMs > Number(lease))) {
+  if (mode === 'resume' && fs.existsSync(root) && (!ownerAlive(pidFile) || fs.readFileSync(environmentFile, 'utf8') !== environmentHash || Date.now() - fs.statSync(heartbeat).mtimeMs > Number(lease))) {
     await stopOwner();
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -128,7 +147,7 @@ if (mode === 'stop') {
     fs.writeFileSync(input, '', { mode: 0o600 });
     fs.writeFileSync(output, '', { mode: 0o600 });
     fs.writeFileSync(heartbeat, '', { mode: 0o600 });
-    const supervisor = spawn(process.execPath, ['-e', null /* owner source */, 'supervise', pidFile, '0', lease, command, ...args], {
+    const supervisor = spawn(process.execPath, ['-e', null /* owner source */, 'supervise', pidFile, '0', lease, environmentKeys, command, ...args], {
       detached: true, stdio: 'ignore', env: process.env,
     });
     supervisor.unref();
@@ -164,8 +183,8 @@ if (mode === 'stop') {
       process.stdout.write(JSON.stringify({ ...frame, offset }) + '\n');
       if (frame.exitCode !== undefined) ending = true;
     }
-    if (!ending && fs.existsSync(pidFile) && !signal(readPid(pidFile), 0) && fs.existsSync(exitFile)) {
-      append(JSON.parse(fs.readFileSync(exitFile, 'utf8')));
+    if (!ending && !ownerAlive(pidFile)) {
+      append(fs.existsSync(exitFile) ? JSON.parse(fs.readFileSync(exitFile, 'utf8')) : { exitCode: 1, stderrTail: 'Child process owner disappeared without recording an exit; the worker may have restarted' });
       fs.rmSync(pidFile, { force: true });
       return;
     }

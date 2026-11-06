@@ -6,7 +6,7 @@ import { AgentSessionId } from "@usine/core/agent/session";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PROCESS_OWNER } from "../src/child-host/supervisor.ts";
 import { CHILD_LIFELINE } from "../src/child-host/node.ts";
@@ -219,6 +219,8 @@ const workerRelay = (
   lease: number,
   command: string,
   args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string>> = {},
+  loginEnvironment: Readonly<Record<string, string>> = {},
 ) => {
   const shim = join(mkdtempSync(join(tmpdir(), "usine-ssh-shim-")), "ssh");
   writeFileSync(shim, '#!/bin/sh\n[ "$2" = -- ] || exit 99\nexec sh -c "$3"\n', { mode: 0o755 });
@@ -231,9 +233,20 @@ const workerRelay = (
     shim,
     sshArguments(worker, {
       command: process.execPath,
-      args: ["-e", PROCESS_OWNER, mode, pidFile, String(cursor), String(lease), command, ...args],
+      args: [
+        "-e",
+        PROCESS_OWNER,
+        mode,
+        pidFile,
+        String(cursor),
+        String(lease),
+        encodeOwnerFrame(Object.keys(environment).sort()),
+        command,
+        ...args,
+      ],
+      environment,
     }),
-    { stdio: ["pipe", "pipe", "pipe"] },
+    { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...loginEnvironment } },
   );
   const frames: Array<{
     offset: number;
@@ -255,7 +268,147 @@ const workerRelay = (
   return { child, frames };
 };
 
-describe("worker process owner", () => {
+describe.skipIf(process.platform !== "linux")("worker process owner", () => {
+  it.live(
+    "retains the process across SSH login changes and replaces it when exported variables change",
+    () =>
+      Effect.gen(function* () {
+        const cwd = mkdtempSync(join(tmpdir(), "usine-owner-environment-"));
+        const pidFile = childPidFile(cwd, AgentSessionId.make("attempt:child:1"));
+        const command = ["-e", "process.stdout.write(process.env.EXPORTED);process.stdin.resume()"];
+        const first = workerRelay(
+          pidFile,
+          "attach",
+          0,
+          10_000,
+          process.execPath,
+          command,
+          { EXPORTED: "first" },
+          { XDG_SESSION_ID: "11" },
+        );
+        yield* eventually(() => first.frames.some((frame) => frame.stdout));
+        const owner = Number(readFileSync(pidFile, "utf8"));
+        first.child.stdin.end();
+        const resumed = workerRelay(
+          pidFile,
+          "resume",
+          0,
+          10_000,
+          process.execPath,
+          command,
+          { EXPORTED: "first" },
+          { XDG_SESSION_ID: "12", XDG_RUNTIME_DIR: "/run/changed" },
+        );
+        yield* eventually(() => resumed.frames.some((frame) => frame.ready));
+        assert.strictEqual(Number(readFileSync(pidFile, "utf8")), owner);
+        resumed.child.stdin.end();
+        const replacement = workerRelay(
+          pidFile,
+          "resume",
+          0,
+          10_000,
+          process.execPath,
+          command,
+          { EXPORTED: "second" },
+          { XDG_SESSION_ID: "13" },
+        );
+        yield* eventually(() => replacement.frames.some((frame) => frame.stdout));
+        assert.notStrictEqual(Number(readFileSync(pidFile, "utf8")), owner);
+        assert.isFalse(alive(owner));
+        assert.strictEqual(
+          Buffer.from(
+            replacement.frames.find((frame) => frame.stdout)?.stdout ?? "",
+            "base64",
+          ).toString(),
+          "second",
+        );
+        replacement.child.stdin.write(encodeOwnerFrame({ sequence: 1, eof: true }) + "\n");
+        yield* eventually(() => replacement.frames.some((frame) => frame.exitCode === 0));
+      }),
+    15_000,
+  );
+
+  for (const stale of ["dead", "missing", "reused", "rebooted"] as const) {
+    it.live(
+      `reports process loss after an owner crash with a ${stale} PID`,
+      () =>
+        Effect.gen(function* () {
+          const cwd = mkdtempSync(join(tmpdir(), "usine-owner-crash-"));
+          const pidFile = childPidFile(cwd, AgentSessionId.make("attempt:child:1"));
+          const relay = workerRelay(pidFile, "attach", 0, 10_000, process.execPath, [
+            "-e",
+            "process.stdout.write(String(process.pid));process.stdin.resume()",
+          ]);
+          yield* eventually(() => relay.frames.some((frame) => frame.stdout));
+          const owner = Number(readFileSync(pidFile, "utf8"));
+          const lifeline = Number(readFileSync(`${pidFile}.transport/process`, "utf8"));
+          const harness = Number(
+            Buffer.from(
+              relay.frames.find((frame) => frame.stdout)?.stdout ?? "",
+              "base64",
+            ).toString(),
+          );
+          relay.child.kill("SIGKILL");
+          process.kill(owner, "SIGSTOP");
+          process.kill(lifeline, "SIGKILL");
+          process.kill(harness, "SIGKILL");
+          process.kill(owner, "SIGKILL");
+          assert.isFalse(existsSync(`${pidFile}.transport/exit`));
+          const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+            stdio: "ignore",
+          });
+          assert(unrelated.pid !== undefined);
+          try {
+            if (stale === "missing") rmSync(pidFile);
+            if (stale === "reused" || stale === "rebooted") {
+              writeFileSync(pidFile, String(unrelated.pid));
+              const stat = readFileSync(`/proc/${unrelated.pid}/stat`, "utf8");
+              const start = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+              const boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+              writeFileSync(
+                `${pidFile}.transport/identity`,
+                stale === "rebooted"
+                  ? `previous-boot:${unrelated.pid}:${start}`
+                  : `${boot}:${unrelated.pid}:0`,
+              );
+            }
+            const reattached = workerRelay(pidFile, "attach", 0, 10_000, process.execPath, [
+              "-e",
+              "process.stdin.resume()",
+            ]);
+            yield* eventually(() => reattached.frames.some((frame) => frame.exitCode === 1));
+            assert.include(
+              reattached.frames.find((frame) => frame.exitCode === 1)?.stderrTail ?? "",
+              "owner disappeared",
+            );
+            assert(alive(unrelated.pid), "reattachment must not signal a reused PID");
+            if (stale === "reused" || stale === "rebooted") {
+              const identity = readFileSync(`${pidFile}.transport/identity`, "utf8");
+              writeFileSync(pidFile, String(unrelated.pid));
+              writeFileSync(`${pidFile}.transport/process`, String(unrelated.pid));
+              execFileSync(process.execPath, ["-e", PROCESS_OWNER, "stop", pidFile, "0", "10000"]);
+              assert(alive(unrelated.pid), "owner stop must not signal a reused PID");
+              writeFileSync(pidFile, String(unrelated.pid));
+              writeFileSync(`${pidFile}.transport/identity`, identity);
+              execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", cwd]);
+              assert(alive(unrelated.pid), "attempt cleanup must not signal a reused PID");
+            }
+            const recovered = workerRelay(pidFile, "resume", 0, 10_000, process.execPath, [
+              "-e",
+              "process.stdin.resume()",
+            ]);
+            yield* eventually(() => recovered.frames.some((frame) => frame.ready));
+            assert.notStrictEqual(Number(readFileSync(pidFile, "utf8")), owner);
+            recovered.child.stdin.write(encodeOwnerFrame({ sequence: 1, eof: true }) + "\n");
+            yield* eventually(() => recovered.frames.some((frame) => frame.exitCode === 0));
+          } finally {
+            unrelated.kill("SIGKILL");
+          }
+        }),
+      15_000,
+    );
+  }
+
   it.live(
     "reattaches one process and deduplicates replayed input after transport loss and restart",
     () =>
@@ -407,7 +560,9 @@ describe("worker process owner", () => {
       }),
     10_000,
   );
+});
 
+describe("local process lifeline", () => {
   it.live(
     "ends a local process group after an orchestrator is killed",
     () =>
