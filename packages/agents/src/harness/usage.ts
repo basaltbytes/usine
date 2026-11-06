@@ -42,6 +42,7 @@ export const addUsage = (total: SessionUsage, message: SessionUsage): SessionUsa
 
 const ClaudeAssistantUsage = Schema.Struct({
   type: Schema.Literal("assistant"),
+  parent_tool_use_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
   message: Schema.Struct({
     id: Schema.NonEmptyString,
     usage: Schema.Struct({
@@ -66,7 +67,7 @@ const decodeResult = Schema.decodeUnknownOption(ClaudeResultUsage);
 
 /** A Claude process's cumulative usage. */
 export interface ProcessUsage extends SessionUsage {
-  /** Tokens counted per assistant message ID that the output checkpoint doesn't cover yet. */
+  /** Tokens counted per assistant message ID that can recur or remain uncheckpointed. */
   readonly messages?: Readonly<Record<string, TokenCount>>;
 }
 
@@ -76,33 +77,42 @@ export interface ProcessUsage extends SessionUsage {
  * SDK's input counts exclude cache reads and writes; repeated blocks with one message ID count only
  * their added tokens, including blocks replayed after the `seed` was saved. The cost is the SDK's
  * `costUSD` estimate and changes only at a result. `covered` reports that the output checkpoint
- * covers every message read so far, so those messages are no longer saved with the usage.
+ * covers every message read so far. Superseded message IDs are then omitted from saved usage;
+ * the latest ID per parent tool remains until a later message in that stream or the turn result.
  */
 export const claudeTokenMeter = (seed: ProcessUsage = NO_USAGE) => {
   let total: number = seed.totalTokens;
   let cost = seed.costUsd;
-  const uncovered = new Map(Object.entries(seed.messages ?? {}));
-  const messages = new Map<string, number>(uncovered);
+  const replayable = new Map(Object.entries(seed.messages ?? {}));
+  const messages = new Map<string, number>(replayable);
+  const active = new Map<string | null, string>();
+  const superseded = new Set<string>();
   const usage = (): ProcessUsage => {
     const counted = { totalTokens: TokenCount.make(total), costUsd: cost };
-    if (uncovered.size === 0) return counted;
-    return { ...counted, messages: Object.fromEntries(uncovered) };
+    if (replayable.size === 0) return counted;
+    return { ...counted, messages: Object.fromEntries(replayable) };
   };
   return {
     read: (message: Schema.Json): Option.Option<ProcessUsage> => {
       const assistant = decodeAssistant(message);
       if (Option.isSome(assistant)) {
         const { id, usage: tokens } = assistant.value.message;
+        const parent = assistant.value.parent_tool_use_id ?? null;
+        const previousId = active.get(parent);
+        if (previousId !== undefined && previousId !== id) superseded.add(previousId);
+        active.set(parent, id);
         const consumed =
           tokens.output_tokens + tokens.input_tokens + (tokens.cache_creation_input_tokens ?? 0);
         const previous = messages.get(id) ?? 0;
         total += Math.max(0, consumed - previous);
         messages.set(id, Math.max(previous, consumed));
-        uncovered.set(id, TokenCount.make(Math.max(previous, consumed)));
+        replayable.set(id, TokenCount.make(Math.max(previous, consumed)));
         return Option.some(usage());
       }
       const result = decodeResult(message);
       if (Option.isNone(result)) return Option.none();
+      for (const id of replayable.keys()) superseded.add(id);
+      active.clear();
       const models = Object.values(result.value.modelUsage);
       const consumed = models.reduce(
         (sum, model) =>
@@ -116,7 +126,8 @@ export const claudeTokenMeter = (seed: ProcessUsage = NO_USAGE) => {
       return Option.some(usage());
     },
     covered: () => {
-      uncovered.clear();
+      for (const id of superseded) replayable.delete(id);
+      superseded.clear();
     },
   };
 };

@@ -254,8 +254,8 @@ export class SessionTokensUpdated extends Schema.TaggedClass<
       totalTokens: TokenCount,
       costUsd: Schema.OptionFromNullOr(UsdAmount),
       /**
-       * Tokens counted per assistant message ID that the process's output checkpoint doesn't cover
-       * yet. A reattached process can replay these messages, and they are not counted again.
+       * Tokens counted per assistant message ID that can recur or remain uncheckpointed.
+       * A reattached process can replay these messages, and they are not counted again.
        */
       messages: Schema.optionalKey(Schema.Record(Schema.String, TokenCount)),
     }),

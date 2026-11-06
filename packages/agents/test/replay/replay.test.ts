@@ -1,10 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import type {
-  AgentSessionEvent,
-  HarnessSession,
-  SessionTokensUpdated,
-} from "@usine/core/agent/session";
+import type { AgentSessionEvent, HarnessSession } from "@usine/core/agent/session";
+import { SessionTokensUpdated } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessageId, Release, Steer } from "@usine/core/attempt/channel";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import {
@@ -485,6 +482,105 @@ for (const state of [
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
     20_000,
   );
+
+it.live.skipIf(process.platform !== "linux")(
+  "Claude restores serialized usage before interleaved retained message blocks recur",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* openFixture("claude", "transport-loss", "replay");
+        const fs = yield* FileSystem.FileSystem;
+        const stopping = yield* Ref.make(false);
+        const scope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+        const events = yield* Queue.unbounded<AgentSessionEvent>();
+        const until = (tag: AgentSessionEvent["_tag"]) =>
+          Effect.gen(function* () {
+            for (;;) {
+              const event = yield* Queue.take(events);
+              if (event._tag === tag) return event;
+            }
+          });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({ ...fixture.request, held: true }),
+          );
+          yield* running.events.pipe(
+            Stream.runForEach((event) => Queue.offer(events, event)),
+            Effect.forkScoped,
+          );
+        }).pipe(
+          Effect.provide(fixture.backend),
+          Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+          Scope.provide(scope),
+        );
+        const started = yield* until("SessionStarted");
+        assert(started._tag === "SessionStarted");
+        yield* until("ToolStarted");
+        yield* fs.writeFileString(`${fixture.cwd}/request-usage-prefix`, "ready");
+        // old-x, x, and y are separate messages; x and y belong to parallel parent tools.
+        for (let i = 0; i < 2; i++) yield* until("SessionTokensUpdated");
+        const saved = yield* until("SessionTokensUpdated");
+        assert(saved._tag === "SessionTokensUpdated");
+        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(SessionTokensUpdated))(
+          saved,
+        );
+        const committed = yield* Schema.decodeEffect(Schema.fromJsonString(SessionTokensUpdated))(
+          encoded,
+        );
+        assert(Option.isSome(committed.processUsage));
+        assert.strictEqual(committed.processUsage.value.messages?.x, 1010);
+        assert.strictEqual(committed.processUsage.value.messages?.y, 1010);
+        assert.isUndefined(
+          committed.processUsage.value.messages?.["old-x"],
+          "the checkpoint discards superseded IDs while retaining active interleaved IDs",
+        );
+        const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
+        const pid = yield* fs.readFileString(pidFile);
+        yield* Ref.set(stopping, true);
+        yield* Scope.close(scope, Exit.void);
+        const delivered = yield* fs.readFileString(`${pidFile}.transport/delivered`);
+        const checkpoint = yield* Schema.decodeEffect(
+          Schema.fromJsonString(Schema.Struct({ offset: Schema.Int, skip: Schema.Int })),
+        )(delivered);
+        const journal = yield* fs.stat(`${pidFile}.transport/output`);
+        assert.deepStrictEqual(checkpoint, { offset: Number(journal.size), skip: 0 });
+        const usageSchema = Schema.fromJsonString(ChildRequest.fields.usage);
+        const serialized = yield* Schema.encodeEffect(usageSchema)(Option.some(committed));
+        const restored = yield* Schema.decodeEffect(usageSchema)(serialized);
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const resumed = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...fixture.request,
+                held: true,
+                resume: started.harnessSession,
+                usage: restored,
+              }),
+            );
+            const retainedPid = yield* fs.readFileString(pidFile);
+            assert.strictEqual(retainedPid, pid);
+            yield* resumed.events.pipe(
+              Stream.runForEach((event) => Queue.offer(events, event)),
+              Effect.forkScoped,
+            );
+            yield* fs.writeFileString(`${fixture.cwd}/request-usage-replay`, "ready");
+            const repeated = yield* until("SessionTokensUpdated");
+            assert(repeated._tag === "SessionTokensUpdated");
+            assert.strictEqual(repeated.totalTokens, committed.totalTokens);
+            const increased = yield* until("SessionTokensUpdated");
+            assert(increased._tag === "SessionTokensUpdated");
+            assert.strictEqual(increased.totalTokens, committed.totalTokens + 5);
+            yield* fixture.controls.releaseCommand;
+            yield* resumed.intervene(Release.make(), () => Effect.void);
+            assert.include((yield* resumed.result).message, "REPLAY_DONE");
+          }),
+        ).pipe(Effect.provide(fixture.backend));
+        yield* fixture.save;
+      }),
+    ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+  20_000,
+);
 
 it.live.skipIf(process.platform !== "linux")(
   "Claude keeps a replaced process's usage after a stop during the replacement launch",

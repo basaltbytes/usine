@@ -52,10 +52,25 @@ const sendBatch = batch => process.stdout.write(batch.map(message => {
   return JSON.stringify(message) + '\\n';
 }).join(''));
 const sendNoise = () => process.stdout.write('\\n \\t\\r\\nWarning: replay diagnostic on stdout\\n');
+const usageFrame = (id, parent, output = 10) => ({
+  ...messages.find(message => message.type === 'assistant'),
+  parent_tool_use_id: parent,
+  message: { id, type: 'message', role: 'assistant', model: ${model},
+    content: [{ type: 'text', text: 'Retained usage block' }],
+    usage: { input_tokens: 1000, output_tokens: output } },
+});
 let waiting = false;
 let hookPending = false;
 let toolFinished = false;
 const timer = setInterval(() => {
+  if (fs.existsSync('request-usage-prefix') && !fs.existsSync('usage-prefix-sent')) {
+    sendBatch([usageFrame('old-x', 'task-x'), usageFrame('x', 'task-x'), usageFrame('y', 'task-y')]);
+    fs.writeFileSync('usage-prefix-sent', 'ready');
+  }
+  if (fs.existsSync('request-usage-replay') && !fs.existsSync('usage-replay-sent')) {
+    sendBatch([usageFrame('x', 'task-x'), usageFrame('y', 'task-y', 15)]);
+    fs.writeFileSync('usage-replay-sent', 'ready');
+  }
   if (fs.existsSync('request-sdk-tail') && !fs.existsSync('sdk-tail-sent')) {
     sendBatch([sessionState('idle'), mirror]);
     sendNoise();

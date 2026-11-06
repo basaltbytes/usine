@@ -48,6 +48,8 @@ describe("Claude query tokens", () => {
     const first = claudeSessionMeter();
     first.read(assistant("one", 5));
     first.covered();
+    first.read(assistant("two", 5));
+    first.covered();
     const saved = first.read(assistant("two", 5));
     assert(Option.isSome(saved));
     assert(Option.isSome(saved.value.processUsage));
@@ -58,6 +60,7 @@ describe("Claude query tokens", () => {
     assert.strictEqual(Option.getOrThrow(retained.read(assistant("two", 8))).totalTokens, 33);
     const next = retained.read(assistant("three", 1));
     assert.strictEqual(Option.getOrThrow(next).totalTokens, 44);
+    retained.read({ type: "result", modelUsage: {} });
     retained.covered();
     const result = retained.read({ type: "result", modelUsage: {} });
     assert(Option.isSome(result));
