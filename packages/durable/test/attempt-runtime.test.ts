@@ -166,6 +166,7 @@ describe("durable AttemptRuntime", () => {
                 {
                   id,
                   launch: stub.launch,
+                  resume: () => Effect.succeedNone,
                   stop: stub.stop,
                   preflight: () => Effect.succeed(HarnessReady.make({ harness: id })),
                 },
@@ -980,19 +981,18 @@ describe("durable AttemptRuntime", () => {
           const recording = recordingSink();
           const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
           const child = yield* (yield* StubChildren).next;
+          const guidance = AttemptChannel.Steer.make({ message: "Use pnpm, not npm." });
           yield* runtime.intervene(
             request.spec.attemptId,
             AttemptChannel.Intervention.make({
               operator: "philippe",
               target: AttemptChannel.ParentTarget.make(),
-              action: AttemptChannel.Steer.make({ message: "Use pnpm, not npm." }),
+              action: guidance,
             }),
           );
           assert.deepStrictEqual(receipts(recording.outbound()), [["Steer", 1, "queued"]]);
           const currentInterventions = yield* child.interventions;
-          assert.deepStrictEqual(currentInterventions, [
-            AttemptChannel.Steer.make({ message: "Use pnpm, not npm." }),
-          ]);
+          assert.deepStrictEqual(currentInterventions, [guidance]);
           yield* child.readQueued;
           yield* child.reply("Child done.");
           const report = yield* Fiber.join(execution);

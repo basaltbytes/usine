@@ -39,7 +39,8 @@
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
             "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
           },
-          "spawnClaudeCodeProcess": true
+          "spawnClaudeCodeProcess": true,
+          "sessionId": "338cf3b0-966f-4575-83fd-c01afce51dfb"
         }
       }
     },
@@ -327,7 +328,8 @@
           "role": "user",
           "content": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_1"
       }
     },
     {
@@ -504,7 +506,8 @@
           "role": "user",
           "content": "Reply with exactly REPLAY_SECOND. Do not use tools."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_2"
       }
     },
     {

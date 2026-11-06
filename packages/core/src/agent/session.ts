@@ -93,7 +93,11 @@ export class HarnessSession extends Schema.Class<
   Brand.Brand<"@usine/core/agent/session/HarnessSession">
 >("Agent/HarnessSession")({
   /** The harness's own saved-conversation ID, distinct from the usine session ID. */
-  id: HarnessSessionId,
+  id: HarnessSessionId.pipe(
+    // Native references exist before an SDK has emitted any messages.
+    // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off
+    Schema.withConstructorDefault(Effect.sync(() => crypto.randomUUID())),
+  ),
   /** The worker checkout directory from which to resume the conversation. */
   cwd: Schema.NonEmptyString,
   /**

@@ -8,11 +8,13 @@ import {
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
   AgentSessionError,
   ChildRequest,
   ChildSessionLifecycle,
+  ChildSessionJournal,
   ContinuationMismatchError,
   ChildSessionBudgetExceededError,
   SessionOperationError,
@@ -33,7 +35,7 @@ import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Schema, Stream } 
 import { durableError, type DurableHarnessError } from "../harness.ts";
 import { AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
-import { parentSessionId } from "./parent.ts";
+import { childSessionId, parentSessionId } from "./parent.ts";
 import { storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { SavedChild, SubagentDoc } from "./child.ts";
@@ -134,6 +136,9 @@ export const subagentTool = (services: ExtensionServices) => {
             output: delegation.output,
             saved: copyJson(delegation.saved),
             idle: delegation.idle,
+            continuations: [...(delegation.continuations ?? [])],
+            inFlight: (delegation.inFlight ?? []).map(({ callId, tool }) => ({ callId, tool })),
+            prompted: delegation.prompted ?? true,
           };
           if (delegation.count !== null)
             return {
@@ -187,7 +192,7 @@ export const subagentTool = (services: ExtensionServices) => {
         message: `Attempt tried to spawn child ${attemptedChildren} after reaching its ${spec.maxChildren}-child budget`,
       });
     }
-    const sessionId = AgentSessionId.make(`${parentId}:child:${attemptedChildren}`);
+    const sessionId = childSessionId(spec.attemptId, attemptedChildren);
     const checkpoint = <A>(effect: Effect.Effect<A, DurableHarnessError>) =>
       effect.pipe(
         Effect.tapError((error) =>
@@ -240,6 +245,67 @@ export const subagentTool = (services: ExtensionServices) => {
           details: { childSessionId: sessionId },
         } satisfies ToolExecutionResult<SpawnDetails>),
       );
+    // The relay leaves the inputs of an unfinished call to that call. Registering them under the
+    // routing permit lets relay passes skip them without scanning the unfinished calls.
+    const restoredInputs = replayed
+      ? yield* hub.routing.withPermits(1)(
+          Effect.gen(function* () {
+            const record = yield* call("restore the child's operator inputs", () =>
+              api.snapshot(AttemptRecordDoc, spec.attemptId, context),
+            );
+            const decoded = yield* Effect.forEach(
+              (record?.queuedInputs ?? []).filter(
+                (input) => "child" in input && input.child === sessionId,
+              ),
+              (input) =>
+                Schema.decodeEffect(AttemptChannel.Intervention)(input.intervention).pipe(
+                  Effect.map((intervention) => ({
+                    inputSequence: AttemptChannel.Sequence.make(input.inputSequence),
+                    intervention,
+                  })),
+                ),
+            ).pipe(Effect.result);
+            if (Result.isSuccess(decoded))
+              for (const input of decoded.success) hub.childInputs.add(input.inputSequence);
+            return decoded;
+          }),
+        )
+      : Result.succeed([]);
+    const unsettled = new Map(
+      Result.isSuccess(restoredInputs)
+        ? restoredInputs.success.map((input) => [input.inputSequence, input] as const)
+        : [],
+    );
+    // Every exit settles the restored inputs that the child did not report.
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        for (const inputSequence of unsettled.keys()) hub.childInputs.delete(inputSequence);
+        if (unsettled.size === 0) return;
+        if (!(yield* Deferred.isDone(hub.attached))) {
+          yield* Effect.logInfo("Leaving restored operator inputs for the next relay", {
+            attemptId: spec.attemptId,
+            sessionId,
+            inputs: unsettled.size,
+          });
+          return;
+        }
+        yield* Effect.logInfo("The child call ended before it read its restored operator inputs", {
+          attemptId: spec.attemptId,
+          sessionId,
+          inputs: unsettled.size,
+        });
+        for (const input of unsettled.values())
+          yield* services.hubs.delivery(hub, {
+            _tag: "Delivery",
+            inputSequence: input.inputSequence,
+            intervention: input.intervention,
+            delivered: Option.none(),
+          });
+        unsettled.clear();
+      }),
+    );
+    if (Result.isFailure(restoredInputs))
+      return yield* interrupted("the saved operator messages no longer decode");
     if (replayed)
       yield* checkpoint(
         Effect.try({
@@ -310,6 +376,12 @@ export const subagentTool = (services: ExtensionServices) => {
         paused: hold?.pausedChildren?.includes(sessionId) ?? false,
       };
     });
+    const unread = restoredInputs.success.flatMap(({ intervention }) => {
+      const action = intervention.action;
+      return action._tag === "Steer" || action._tag === "OperatorMessage"
+        ? [{ id: action.id, message: action.message }]
+        : [];
+    });
     const idle = Option.fromNullishOr(previous.idle);
     if (held || paused || Option.isSome(idle))
       yield* Effect.logInfo("Restoring the child's operator supervision before launch", {
@@ -338,14 +410,16 @@ export const subagentTool = (services: ExtensionServices) => {
       held,
       paused,
       idle,
+      prompted: previous.prompted,
+      continuations: previous.continuations,
+      inFlight: previous.inFlight,
+      unread,
       prompt: assembleChildPrompt({
         baseCommit: spec.baseCommit,
         agent: spec.agent.name,
         persona: spec.agent.persona,
         task: spec.task,
-        context: replayed
-          ? `${task}\n\nThe orchestrator restarted. Continue this saved conversation in the same checkout. Check the results of any interrupted commands before repeating work, then return the final report.`
-          : task,
+        context: task,
       }),
     });
     if (Option.isSome(saved) && saved.value.session.brain.harness !== spec.agent.brain.harness) {
@@ -384,7 +458,8 @@ export const subagentTool = (services: ExtensionServices) => {
       },
     );
     const recordInfrastructureFailure = (error: AgentSessionError) =>
-      !replayed && error._tag === "SessionOperationError"
+      !replayed &&
+      (error._tag === "SessionOperationError" || error._tag === "SessionInterruptedError")
         ? call("record the child's infrastructure failure", () =>
             api.commit(async (tx) => {
               const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
@@ -409,6 +484,82 @@ export const subagentTool = (services: ExtensionServices) => {
             ),
           )
         : Effect.void;
+    const journalError = (cause: DurableHarnessError) =>
+      SessionOperationError.make({
+        operation: "launch",
+        sessionId: Option.some(sessionId),
+        message: cause.message,
+        cause,
+      });
+    const journal = ChildSessionJournal.of({
+      started: Effect.fn("Subagent.saveSession")(function* (reference) {
+        yield* Effect.annotateCurrentSpan({ sessionId });
+        const recovery = yield* Schema.encodeEffect(SavedChild)(
+          SavedChild.make({
+            session: {
+              id: session.id,
+              parentId: session.parentId,
+              agent: session.agent,
+              brain: session.brain,
+            },
+            usage: childRequest.usage,
+            harnessSession: reference,
+            worker: request.worker,
+            machine: request.machine,
+          }),
+        ).pipe(Effect.orDie);
+        yield* call("save the child before its first prompt", () =>
+          api.commit(async (tx) => {
+            const record = await tx.doc(SubagentDoc, api.taskId);
+            if (record.saved === null) record.prompted = false;
+            record.saved = recovery;
+          }, context),
+        ).pipe(Effect.mapError(journalError));
+      }),
+      prompted: Effect.gen(function* () {
+        yield* Effect.annotateCurrentSpan({ sessionId });
+        yield* call("save the child's prompt receipt", () =>
+          api.commit(async (tx) => {
+            const record = await tx.doc(SubagentDoc, api.taskId);
+            record.prompted = true;
+          }, context),
+        ).pipe(Effect.mapError(journalError));
+      }).pipe(Effect.withSpan("Subagent.savePrompted")),
+      continued: Effect.fn("Subagent.saveContinuations")(function* (timestamps) {
+        yield* Effect.annotateCurrentSpan({ sessionId });
+        yield* call("save the child's continuation history", () =>
+          api.commit(async (tx) => {
+            const record = await tx.doc(SubagentDoc, api.taskId);
+            record.continuations = [...timestamps];
+          }, context),
+        ).pipe(Effect.mapError(journalError));
+      }),
+      delivered: (id, delivered) =>
+        Effect.suspend(() => {
+          const input = [...unsettled.values()].find(
+            ({ intervention }) =>
+              (intervention.action._tag === "Steer" ||
+                intervention.action._tag === "OperatorMessage") &&
+              intervention.action.id === id,
+          );
+          if (input === undefined) return Effect.void;
+          unsettled.delete(input.inputSequence);
+          return services.hubs.delivery(hub, {
+            _tag: "Delivery",
+            inputSequence: input.inputSequence,
+            intervention: input.intervention,
+            delivered: Option.map(delivered, (state) =>
+              AttemptChannel.InterventionState.make({
+                ...state,
+                forwardedTo:
+                  input.intervention.target._tag === "Parent"
+                    ? Option.some(sessionId)
+                    : Option.none(),
+              }),
+            ),
+          });
+        }),
+    });
     const runChild = Effect.gen(function* () {
       // Annotate logs with the Attempt because this tool runs outside the Attempt's fiber. An abort
       // interrupts a launch that is still waiting through retry delays.
@@ -417,6 +568,7 @@ export const subagentTool = (services: ExtensionServices) => {
           .launch(childRequest)
           .pipe(
             Effect.provideService(ChildSessionLifecycle, lifecycle),
+            Effect.provideService(ChildSessionJournal, journal),
             Effect.tapError(recordInfrastructureFailure),
             Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }),
           ),
@@ -444,6 +596,21 @@ export const subagentTool = (services: ExtensionServices) => {
       let cumulativeUsage = childRequest.usage;
       const forward = (event: AgentSessionEvent) =>
         Effect.gen(function* () {
+          if (event._tag === "ToolStarted" || event._tag === "ToolFinished")
+            yield* checkpoint(
+              call("save the child's in-flight tool calls", () =>
+                api.commit(async (tx) => {
+                  const record = await tx.doc(SubagentDoc, api.taskId);
+                  const tools = (record.inFlight ?? []).filter(
+                    ({ callId }) => callId !== event.callId,
+                  );
+                  record.inFlight =
+                    event._tag === "ToolStarted"
+                      ? [...tools, { callId: event.callId, tool: event.tool }]
+                      : tools;
+                }, context),
+              ),
+            );
           if (
             event._tag === "SessionIdle" ||
             event._tag === "SessionResumed" ||
@@ -523,7 +690,7 @@ export const subagentTool = (services: ExtensionServices) => {
             );
           }
           const recorded =
-            event._tag === "SessionStarted"
+            event._tag === "SessionStarted" && !replayed
               ? SessionStarted.make({ ...event, prompt: Option.some(childRequest.prompt) })
               : event;
           yield* services.hubs.event(hub, recorded);

@@ -81,7 +81,7 @@ Custom `HarnessProbe` callbacks receive the brain and a second argument with the
 
 `prepare` repeats the assigned brain's probe before acquiring credentials or a checkout, to catch roster changes and logouts. A capability gap returns `WorkerCapabilityError`, which needs the operator. Transport failures, such as an SSH client that can't reach the VM, and probe timeouts are retryable infrastructure failures.
 
-Claude's host-login preflight holds its `HostLoginLock` (`@usine/agents/runtime`) until the check returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. On a provisioned worker, each harness and machine has its own login and lock, so attempts on different machines don't wait for each other. Build `harnessesLive` with `hostLoginLockLayer` once at the application root, then share the resulting `Harnesses` registry with the executor and the attempt runtime.
+Claude's host-login preflight holds its `HostLoginLock` (`@usine/agents/runtime`) until the check returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. On a provisioned worker, each harness and machine has its own login and lock, so attempts on different machines don't wait for each other. Build `harnessesLive` with `hostLoginLockLayer` once at the application root, then share the resulting `Harnesses` registry with the executor and the attempt runtime. Registered runtimes provide native `resume(request, reference)` as well as preflight, launch, and stop; preflight probes never reopen a child conversation.
 
 It replaces exe.dev's `HarnessLoginCheck` and `harnessLoginChecks` options.
 

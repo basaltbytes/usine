@@ -1,4 +1,11 @@
-import { checkContinuation, checkContinuationHome, environmentHome } from "../continuation.ts";
+import type { OperatorMessageId } from "@usine/core/attempt/channel";
+import {
+  childContinuation,
+  type ChildAdapter,
+  checkContinuation,
+  checkContinuationHome,
+  environmentHome,
+} from "../continuation.ts";
 import { codexPreflight } from "./preflight.ts";
 import { codex } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
@@ -53,7 +60,9 @@ import {
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
+  type InterruptedTool,
   ChildSessionLifecycle,
+  ChildSessionJournal,
   type RunningSession,
   UnknownModelError,
   UnsupportedEffortError,
@@ -62,7 +71,12 @@ import { ChildProcessLost } from "../../child-host/process.ts";
 import { sessionChannel } from "../session.ts";
 import { type MessageTaken, sessionConversation } from "../conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
-import { CodexAppServer, type CodexClient, operationError } from "./app-server.ts";
+import {
+  CodexAppServer,
+  type CodexClient,
+  type CodexConnection,
+  operationError,
+} from "./app-server.ts";
 import {
   codexChildAccount,
   codexPoolUnavailable,
@@ -85,11 +99,65 @@ const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
 const decodeRetry = Schema.decodeUnknownOption(ErrorNotification);
 const isTurnActivity = Schema.is(TurnActivity);
 
+const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
+  connection: CodexConnection,
+  client: CodexClient,
+  request: ChildRequest,
+  saved: HarnessSession,
+) {
+  const params: ThreadResumeParams = {
+    threadId: saved.id,
+    model: request.session.brain.model,
+    cwd: request.cwd,
+    approvalPolicy: "never",
+    sandbox: "danger-full-access",
+    excludeTurns: false,
+  };
+  const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(ThreadResumeParams))(params).pipe(
+    Effect.orDie,
+  );
+  const response = yield* connection.request("launch", "thread/resume", encoded);
+  const restored = yield* decodeResponse(
+    ThreadResumeResponse,
+    "launch",
+    client,
+    "thread resume response",
+    response,
+  );
+  if (restored.thread.id !== saved.id)
+    return yield* operationError(
+      "launch",
+      client,
+      "Codex resumed a different thread",
+      restored.thread.id,
+    );
+  if (Option.isSome(saved.modelProvider))
+    yield* checkContinuation(
+      request,
+      "model_provider",
+      saved.modelProvider,
+      Option.some(restored.modelProvider),
+    );
+  yield* Effect.logInfo("Resumed the saved Codex thread", {
+    sessionId: request.session.id,
+    threadId: saved.id,
+  });
+  return {
+    id: saved.id,
+    empty: restored.thread.turns.length === 0,
+    model: request.session.brain.model,
+    endpoint: Option.some(restored.modelProvider),
+    activeTurn: Option.fromUndefinedOr(
+      restored.thread.turns.find((turn) => turn.status === "inProgress"),
+    ),
+  };
+});
+
 const makeCodexChild = Effect.gen(function* () {
   const appServer = yield* CodexAppServer;
 
-  const launch: ChildBackend["Service"]["launch"] = Effect.fn("CodexRuntime.launch")(
-    function* (request) {
+  const open: ChildAdapter["open"] = Effect.fn("CodexRuntime.open")(
+    function* (request, prompt, policy) {
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
         effort: request.session.brain.effort,
@@ -192,59 +260,13 @@ const makeCodexChild = Effect.gen(function* () {
             );
             return {
               id: started.thread.id,
+              empty: true,
               model: started.model,
               endpoint: Option.some(started.modelProvider),
               activeTurn: Option.none<(typeof ThreadResumeResponse.Type.thread.turns)[number]>(),
             };
           }),
-        onSome: (saved) =>
-          Effect.gen(function* () {
-            const params: ThreadResumeParams = {
-              threadId: saved.id,
-              model: requestedModel,
-              cwd: request.cwd,
-              approvalPolicy: "never",
-              sandbox: "danger-full-access",
-              excludeTurns: false,
-            };
-            const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(ThreadResumeParams))(
-              params,
-            ).pipe(Effect.orDie);
-            const response = yield* connection.request("launch", "thread/resume", encoded);
-            const restored = yield* decodeResponse(
-              ThreadResumeResponse,
-              "launch",
-              client,
-              "thread resume response",
-              response,
-            );
-            if (restored.thread.id !== saved.id)
-              return yield* operationError(
-                "launch",
-                client,
-                "Codex resumed a different thread",
-                restored.thread.id,
-              );
-            if (Option.isSome(saved.modelProvider))
-              yield* checkContinuation(
-                request,
-                "model_provider",
-                saved.modelProvider,
-                Option.some(restored.modelProvider),
-              );
-            yield* Effect.logInfo("Resumed the saved Codex thread", {
-              sessionId: request.session.id,
-              threadId: saved.id,
-            });
-            return {
-              id: saved.id,
-              model: requestedModel,
-              endpoint: Option.some(restored.modelProvider),
-              activeTurn: Option.fromUndefinedOr(
-                restored.thread.turns.find((turn) => turn.status === "inProgress"),
-              ),
-            };
-          }),
+        onSome: (saved) => resumeThread(connection, client, request, saved),
       });
       const session = ChildSession.make({
         id: request.session.id,
@@ -270,6 +292,8 @@ const makeCodexChild = Effect.gen(function* () {
         // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
         home,
       });
+      const journal = yield* ChildSessionJournal.current;
+      yield* journal.started(harnessSession);
       yield* channel.emit(
         SessionStarted.make({ session, harnessSession: Option.some(harnessSession) }),
       );
@@ -293,22 +317,28 @@ const makeCodexChild = Effect.gen(function* () {
       let turnId = Option.match(thread.activeTurn, { onNone: () => "", onSome: (turn) => turn.id });
       let turnActive = Option.isSome(thread.activeTurn);
       let interrupting = false;
-      const toolsInFlight = new Set<string>(
+      const toolsInFlight = new Map<string, string>(
         Option.match(thread.activeTurn, {
           onNone: () => [],
           onSome: (turn) =>
             turn.items
               .filter(Schema.is(ToolItem))
               .filter((item) => item.status === "inProgress")
-              .map((item) => item.id),
+              .map((item): [string, string] => [item.id, toolName(item)]),
         }),
       );
-      const pendingMessages: string[] = [];
-      let replayedGuidance = Option.none<{
-        readonly turnId: string;
-        readonly text: string;
-        readonly count: number;
-      }>();
+      const pendingMessages: Array<{ message: string; id: OperatorMessageId | undefined }> = [];
+      const submitted: Array<{
+        message: string;
+        id: OperatorMessageId | undefined;
+        turnId: string | undefined;
+      }> = turnActive ? request.unread.map((message) => ({ ...message, turnId })) : [];
+      const forgetInput = (input: (typeof submitted)[number]) =>
+        Effect.sync(() => {
+          const index = submitted.indexOf(input);
+          if (index >= 0) submitted.splice(index, 1);
+        });
+      const observedItems = new Set<string>();
       const savedMessages = Option.match(thread.activeTurn, {
         onNone: () => [],
         onSome: (turn) =>
@@ -324,7 +354,10 @@ const makeCodexChild = Effect.gen(function* () {
       // Provider retries reported for the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
-      const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (message: string) {
+      const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (
+        message: string,
+        id?: OperatorMessageId,
+      ) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         const encodedTurnStartParams = yield* Schema.encodeEffect(
           Schema.toCodecJson(TurnStartParams),
@@ -332,7 +365,11 @@ const makeCodexChild = Effect.gen(function* () {
           ...turnParams,
           input: [{ type: "text", text: message, text_elements: [] }],
         }).pipe(Effect.orDie);
-        const response = yield* connection.request("stream", "turn/start", encodedTurnStartParams);
+        const input: (typeof submitted)[number] = { message, id, turnId: undefined };
+        submitted.push(input);
+        const response = yield* connection
+          .request("stream", "turn/start", encodedTurnStartParams)
+          .pipe(Effect.onError(() => forgetInput(input)));
         const started = yield* decodeResponse(
           TurnStartResponse,
           "stream",
@@ -340,8 +377,8 @@ const makeCodexChild = Effect.gen(function* () {
           "turn start response",
           response,
         );
-        replayedGuidance = Option.none();
         turnId = started.turn.id;
+        input.turnId = turnId;
         turnActive = true;
         lastText = undefined;
         finalText = undefined;
@@ -401,40 +438,49 @@ const makeCodexChild = Effect.gen(function* () {
           ),
         );
       });
-      const steer: (message: string) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn(
-        "CodexRuntime.steer",
-      )(function* (message) {
-        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-        if (interrupting) {
-          pendingMessages.push(message);
+      const steer: (
+        message: string,
+        id?: OperatorMessageId,
+      ) => Effect.Effect<MessageTaken, AgentSessionError> = Effect.fn("CodexRuntime.steer")(
+        function* (message, id) {
+          yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+          if (interrupting) {
+            pendingMessages.push({ message, id });
+            return "queued" as const;
+          }
+          if (!turnActive) {
+            const messages = [...pendingMessages.splice(0), { message, id }];
+            for (const input of messages) {
+              if (!turnActive) yield* startTurn(input.message, input.id);
+              else yield* steer(input.message, input.id);
+            }
+            return "queued" as const;
+          }
+          // Codex records steered input as a user message once the running turn reads it.
+          const encodedTurnSteerParams = yield* Schema.encodeEffect(
+            Schema.toCodecJson(TurnSteerParams),
+          )({
+            threadId: thread.id,
+            expectedTurnId: turnId,
+            input: [{ type: "text", text: message, text_elements: [] }],
+          }).pipe(Effect.orDie);
+          const input = { message, id, turnId };
+          submitted.push(input);
+          yield* connection
+            .request("steer", "turn/steer", encodedTurnSteerParams)
+            .pipe(Effect.onError(() => forgetInput(input)));
           return "queued" as const;
-        }
-        if (!turnActive) {
-          const unread = yield* conversation.unread;
-          const text = [...unread, message].join("\n\n");
-          yield* startTurn(text);
-          if (unread.length > 0)
-            replayedGuidance = Option.some({ turnId, text, count: unread.length });
-          return "read" as const;
-        }
-        // Codex records steered input as a user message once the running turn reads it.
-        const encodedTurnSteerParams = yield* Schema.encodeEffect(
-          Schema.toCodecJson(TurnSteerParams),
-        )({
-          threadId: thread.id,
-          expectedTurnId: turnId,
-          input: [{ type: "text", text: message, text_elements: [] }],
-        }).pipe(Effect.orDie);
-        yield* connection.request("steer", "turn/steer", encodedTurnSteerParams);
-        return "queued" as const;
-      });
+        },
+      );
       const conversation = yield* sessionConversation({
         session,
         channel,
         held: request.held,
         paused: request.paused,
         idle: request.idle,
-        send: steer,
+        unread: request.unread,
+        submitted: submitted.flatMap(({ id }) => (id === undefined ? [] : [id])),
+        send: (message, _activity, id) => steer(message, id),
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
         beforeFinish: Effect.suspend(() => connection.close),
       });
@@ -452,99 +498,47 @@ const makeCodexChild = Effect.gen(function* () {
         );
         yield* channel.fail(error);
       });
-      let resumed = false;
       const resume = Effect.fn("CodexRuntime.resume")(function* (error: AgentSessionError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.id });
         if (yield* lifecycle.isStopping) return yield* Effect.never;
         if (
-          resumed ||
           request.host._tag !== "RemoteShell" ||
           error._tag !== "SessionOperationError" ||
           !Schema.is(ChildProcessLost)(error.cause)
         )
           return yield* error;
-        resumed = true;
         yield* Effect.logWarning("Remote Codex app-server stopped; resuming its saved thread", {
           sessionId: session.id,
           threadId: thread.id,
         });
-        connection = yield* appServer.open({
-          ...client,
-          sessionId: Option.some(session.id),
-          transport: "replace",
-        });
-        yield* initializeCodex(connection);
-        billing = yield* codexChildAccount(
-          connection,
-          request.session.brain,
-          request.session.gatewayCredential,
+        const restored = yield* policy.reopen(
+          Effect.gen(function* () {
+            connection = yield* appServer.open({
+              ...client,
+              sessionId: Option.some(session.id),
+              transport: "replace",
+            });
+            yield* initializeCodex(connection);
+            billing = yield* codexChildAccount(
+              connection,
+              request.session.brain,
+              request.session.gatewayCredential,
+            );
+            return yield* resumeThread(connection, client, request, harnessSession);
+          }),
         );
-        const params: ThreadResumeParams = {
-          threadId: thread.id,
-          model: requestedModel,
-          cwd: request.cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          excludeTurns: false,
-        };
-        const encodedThreadResumeParams = yield* Schema.encodeEffect(
-          Schema.toCodecJson(ThreadResumeParams),
-        )(params).pipe(Effect.orDie);
-        const response = yield* connection.request(
-          "launch",
-          "thread/resume",
-          encodedThreadResumeParams,
-        );
-        const restored = yield* decodeResponse(
-          ThreadResumeResponse,
-          "launch",
-          client,
-          "thread resume response",
-          response,
-        );
-        if (restored.thread.id !== thread.id)
-          return yield* operationError(
-            "launch",
-            client,
-            "Codex resumed a different thread",
-            restored.thread.id,
-          );
+        const interruptedTools = [...toolsInFlight].map(([callId, tool]) => ({ callId, tool }));
         toolsInFlight.clear();
         pendingMessages.length = 0;
-        replayedGuidance = Option.none();
+        submitted.length = 0;
         turnActive = false;
         interrupting = false;
-        const paused = yield* conversation.isPaused;
-        const idle = yield* conversation.isIdle;
-        if (paused || idle) {
-          yield* Effect.logInfo("Restored Codex child waits for operator guidance", {
-            sessionId: session.id,
-            threadId: thread.id,
-            paused,
-            idle,
-          });
-          if (!idle) yield* conversation.finish(finalText ?? lastText ?? "Codex turn paused");
-          return;
-        }
-        const taskSaved = restored.thread.turns.some((turn) =>
-          turn.items.some((item) => item.type === "userMessage"),
+        yield* conversation.recover(
+          policy,
+          interruptedTools,
+          (message, id) => steer(message, id).pipe(Effect.asVoid),
+          restored.empty,
         );
-        const unread = yield* conversation.unread;
-        yield* Effect.logInfo("Restored Codex child starts a turn", {
-          sessionId: session.id,
-          threadId: thread.id,
-          taskSaved,
-          unreadMessages: unread.length,
-        });
-        yield* startTurn(
-          [
-            taskSaved
-              ? "Continue the interrupted task from this saved thread. Check the checkout and any command results before repeating work."
-              : request.prompt,
-            ...unread,
-          ].join("\n\n"),
-        );
-        yield* conversation.read(() => unread.length);
       });
       if (turnActive) {
         yield* Effect.logInfo("Reattached the active Codex turn", {
@@ -552,8 +546,8 @@ const makeCodexChild = Effect.gen(function* () {
           turnId,
         });
         if (request.paused && toolsInFlight.size === 0) yield* interruptTurn();
-      } else if (!request.paused && Option.isNone(request.idle))
-        yield* startTurn(request.prompt).pipe(Effect.catch(resume));
+      } else if (!request.paused && Option.isNone(request.idle) && Option.isSome(prompt))
+        yield* startTurn(prompt.value).pipe(Effect.catch(resume));
       const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {
@@ -592,20 +586,20 @@ const makeCodexChild = Effect.gen(function* () {
               );
               if (Option.isNone(notification)) return;
               const item = notification.value.item;
+              if (notification.value.threadId !== thread.id) return;
               if (Schema.is(UserMessageItem)(item)) {
                 const text = userMessageText(item);
-                return yield* conversation.read((queued) => {
-                  if (
-                    Option.isSome(replayedGuidance) &&
-                    replayedGuidance.value.turnId === notification.value.turnId &&
-                    replayedGuidance.value.text === text
-                  ) {
-                    const { count } = replayedGuidance.value;
-                    replayedGuidance = Option.none();
-                    return count;
-                  }
-                  return queued.indexOf(text) + 1;
-                });
+                if (observedItems.has(item.id)) return;
+                observedItems.add(item.id);
+                const index = submitted.findIndex(
+                  (input) =>
+                    (input.turnId === undefined || input.turnId === notification.value.turnId) &&
+                    input.message === text,
+                );
+                if (index < 0) return;
+                const [input] = submitted.splice(index, 1);
+                if (input?.id !== undefined) yield* conversation.read([input.id]);
+                return;
               }
               if (notification.value.turnId !== turnId) {
                 return yield* Effect.logDebug("Skipping a Codex item from another turn", {
@@ -614,7 +608,7 @@ const makeCodexChild = Effect.gen(function* () {
                 });
               }
               if (!Schema.is(ToolItem)(notification.value.item)) return;
-              toolsInFlight.add(notification.value.item.id);
+              toolsInFlight.set(notification.value.item.id, toolName(notification.value.item));
               return yield* channel.emit(
                 ToolStarted.make({
                   session,
@@ -733,17 +727,24 @@ const makeCodexChild = Effect.gen(function* () {
               const wasInterrupted = interrupting;
               interrupting = false;
               toolsInFlight.clear();
+              const hasNewGuidance = pendingMessages.length > 0;
+              const unread = submitted.splice(0).filter((input) => input.id !== undefined);
+              pendingMessages.unshift(...unread);
+              if (unread.length > 0)
+                yield* Effect.logInfo("Codex turn ended with unconsumed input", {
+                  sessionId: session.id,
+                  turnId,
+                  unread: unread.length,
+                });
               if (
                 completed.turn.status === "completed" ||
                 (completed.turn.status === "interrupted" &&
                   wasInterrupted &&
-                  ((yield* conversation.isPaused) || pendingMessages.length > 0))
+                  ((yield* conversation.isPaused) || hasNewGuidance))
               ) {
-                const nextMessage = pendingMessages.shift();
-                if (nextMessage !== undefined) {
-                  yield* startTurn(nextMessage);
-                  yield* conversation.read((queued) => queued.indexOf(nextMessage) + 1);
-                  for (const message of pendingMessages.splice(0)) yield* steer(message);
+                if (hasNewGuidance) {
+                  const nextMessage = pendingMessages.pop();
+                  if (nextMessage !== undefined) yield* steer(nextMessage.message, nextMessage.id);
                   return;
                 }
                 return yield* conversation.finish(finalText ?? lastText ?? "Codex turn paused");
@@ -771,43 +772,45 @@ const makeCodexChild = Effect.gen(function* () {
           }),
         ),
       );
-      const consume = consumeNotifications.pipe(
-        Effect.catch((error) => resume(error).pipe(Effect.andThen(consumeNotifications))),
-        Effect.flatMap(() =>
-          Effect.all([channel.isTerminal, conversation.isClosing]).pipe(
-            Effect.flatMap(([terminal, closing]) =>
-              terminal || closing
-                ? Effect.void
-                : channel.fail(
-                    operationError(
-                      "stream",
-                      client,
-                      "Codex notification stream closed without a result",
-                      new Error("unexpected end of notifications"),
-                    ),
-                  ),
-            ),
-          ),
-        ),
-        Effect.catch(fail),
-      );
+      const consume = Effect.gen(function* () {
+        for (;;) {
+          const consumed = yield* Effect.result(consumeNotifications);
+          if ((yield* channel.isTerminal) || (yield* conversation.isClosing)) return;
+          if (consumed._tag === "Success")
+            return yield* fail(
+              operationError(
+                "stream",
+                client,
+                "Codex notification stream closed without a result",
+                new Error("unexpected end of notifications"),
+              ),
+            );
+          yield* resume(consumed.failure);
+        }
+      }).pipe(Effect.catch(fail));
       yield* Effect.forkScoped(consume);
 
       const interrupt = interruptTurn();
-      return {
+      const running = {
         session,
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),
-        steer: (message: string) => steer(message).pipe(Effect.asVoid),
+        steer: (message: string, id?: OperatorMessageId) => steer(message, id).pipe(Effect.asVoid),
         intervene: conversation.intervene,
       } satisfies RunningSession;
+      return {
+        running,
+        active: turnActive,
+        recover: (tools: ReadonlyArray<InterruptedTool>) =>
+          conversation.recover(policy, tools, running.steer, thread.empty),
+      };
     },
   );
   const stop = Effect.fn("CodexRuntime.stop")((request: ChildRequest) =>
     appServer.stop({ ...request, sessionId: Option.some(request.session.id) }),
   );
-  return ChildBackend.of({ launch, stop });
+  return childContinuation({ open, stop });
 });
 
 /** Provides `ChildBackend` for local or remote children. Requires `CodexAppServer`; validates the model and authentication before starting the task. */
@@ -823,6 +826,7 @@ export const codexRuntime = Effect.gen(function* () {
     id: codex.id,
     preflight,
     launch: child.launch,
+    resume: child.resume,
     stop: child.stop,
   } satisfies HarnessRuntime;
 });

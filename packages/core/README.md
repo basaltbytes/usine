@@ -65,6 +65,8 @@ The harvest reads `AttemptWindows` (`own`, `overlapping`) through `AttemptWindow
 
 Outbound `SessionEvent` envelopes keep parent and first-level child session identity.
 
+`Steer` and `OperatorMessage` carry an `OperatorMessageId` UUID, assigned by usine when the action is constructed. Encoding preserves it across retries and restarts. Legacy actions without an ID receive one when decoded. `HarnessSession.make` assigns a UUID when no vendor ID is supplied; Claude uses this ID before its first prompt.
+
 An `InterventionApplied` receipt uses the original input sequence and intervention. Its state's `forwardedTo` is the child ID when a parent steer is forwarded, or `None` for direct delivery and older receipts. `queued` stays true until the receiving session reads the message. Later receipts update the same input's delivery status.
 
 `SessionTokensUpdated` has a session's cumulative `TokenCount` and, as `costUsd`, the `UsdAmount` its harness priced it at: Pi from its model catalog, Claude Code from the Agent SDK. Codex sets no price. Older transcripts decode it to `Option.none()`.

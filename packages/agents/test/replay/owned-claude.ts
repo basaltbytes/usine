@@ -77,6 +77,10 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   if (message.type === 'control_request' && fs.existsSync('exit-resume') &&
     process.argv.some(arg => arg.startsWith('--resume')) &&
     fs.readFileSync('exit-resume', 'utf8') === 'idle-handshake-exit') process.exit(1);
+  if (message.type === 'control_request' && fs.existsSync('hold-control')) {
+    fs.appendFileSync('held-controls', message.request_id + '\\n');
+    return;
+  }
   if (message.type === 'control_request') send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {
     commands: [], agents: [], models: [{ value: ${model}, displayName: 'Replay', description: 'Recorded model' }], account: { apiKeySource: 'none' }, output_style: 'default', available_output_styles: ['default'],
   } } });

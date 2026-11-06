@@ -28,7 +28,7 @@ for (const failure of [
 ] as const)
   it.live.skipIf(process.platform !== "linux")(
     failure === "resume-exit" || failure === "resume-zero-exit"
-      ? `fails after one thread resume when the app-server exits again (${failure})`
+      ? `refuses a fourth continuation when the app-server keeps exiting (${failure})`
       : `finishes on one Codex thread after ${failure}`,
     () =>
       Effect.scoped(
@@ -203,9 +203,13 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
           );
           if (failure === "resume-exit" || failure === "resume-zero-exit") {
             const error = yield* running.result.pipe(Effect.flip);
-            assert.strictEqual(error._tag, "SessionOperationError");
+            assert.strictEqual(error._tag, "ContinuationLimitError");
             const contents = yield* fs.readFileString(`${directory}/resumed`);
-            assert.strictEqual(contents, "thread-one\n");
+            assert.strictEqual(contents, "thread-one\n".repeat(4));
+            const saved = (yield* fs.readFileString(`${directory}/saved-inputs`))
+              .trim()
+              .split("\n");
+            assert.strictEqual(saved.length, failure === "resume-exit" ? 3 : 4);
             const currentContents = yield* fs.readFileString(`${directory}/threads`);
             assert.strictEqual(currentContents, "thread-one\n");
             return;

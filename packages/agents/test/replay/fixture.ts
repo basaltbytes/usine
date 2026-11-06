@@ -185,6 +185,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
         ),
         save: Effect.void,
         controls: {
+          nativeReceipts: true,
           drop: Effect.void,
           boundary: Effect.void,
           toolReady: Effect.void,
@@ -206,6 +207,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
         tape: idleTape,
         cwd,
         controls: {
+          nativeReceipts: false,
           drop: Effect.gen(function* () {
             const savedPid = yield* fs.readFileString(`${cwd}/drop.pid`);
             yield* fs.writeFileString(`${cwd}/drop`, "drop");
@@ -336,6 +338,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
       backend,
       request,
       controls: {
+        nativeReceipts: true,
         drop: drop.pipe(Effect.orDie),
         // Release must precede this connection's clean exit, independently of later launches.
         sessionReleased:

@@ -31,11 +31,33 @@ export const claudeTransport = (
     readonly started: Deferred.Deferred<void>;
     readonly released: Deferred.Deferred<void>;
   },
-) =>
-  Layer.succeed(ClaudeSdk)({
+) => {
+  const ids = new Map<string, string>();
+  return Layer.succeed(ClaudeSdk)({
     open: (input, options) => {
       const port = tape.port("claude");
       const serializedOptions = optionsJson(encode(options));
+      if (options.sessionId !== undefined) {
+        const source = tape.source;
+        const expected =
+          source === "record"
+            ? undefined
+            : source.entries.find(
+                (entry) =>
+                  entry.type === "expect_outbound" &&
+                  entry.port === port &&
+                  Schema.is(
+                    Schema.Struct({ options: Schema.Struct({ sessionId: Schema.String }) }),
+                  )(entry.payload),
+              );
+        const saved =
+          expected === undefined || expected.type !== "expect_outbound"
+            ? undefined
+            : Schema.decodeUnknownSync(
+                Schema.Struct({ options: Schema.Struct({ sessionId: Schema.String }) }),
+              )(expected.payload);
+        tape.bind(options.sessionId, saved?.options.sessionId ?? `$SESSION_${port.split(":")[1]}`);
+      }
       tape.outbound(port, {
         method: "open",
         options: {
@@ -45,6 +67,11 @@ export const claudeTransport = (
       });
       const wrappedInput = async function* () {
         for await (const message of input) {
+          if (message.uuid !== undefined) {
+            const placeholder = ids.get(message.uuid) ?? `$OPERATOR_${ids.size + 1}`;
+            ids.set(message.uuid, placeholder);
+            tape.bind(message.uuid, placeholder);
+          }
           tape.outbound(`${port}/input`, json(encode(message)));
           yield message;
         }
@@ -209,3 +236,4 @@ export const claudeTransport = (
       } satisfies ClaudeQuery;
     },
   });
+};

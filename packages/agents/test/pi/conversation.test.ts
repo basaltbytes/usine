@@ -177,20 +177,48 @@ describe("session supervision", () => {
         const currentEmitted = yield* session.emitted;
         assert.notInclude(currentEmitted, "SessionResumed");
         assert.deepStrictEqual(delivery.seen(), []);
-        yield* session.read((queued) => queued.indexOf("Use pnpm, not npm.") + 1);
+        const unread = yield* session.unread;
+        yield* session.read(unread.map(({ id }) => id));
         assert.deepStrictEqual(delivery.seen(), ["read, held"]);
         yield* session.finish("Done with pnpm.");
         assert.deepStrictEqual(delivery.seen(), ["read, held"], "a read is reported once");
       }),
   );
 
-  it.effect("reports queued messages read when the turn they joined ends", () =>
+  for (const stopped of ["paused", "idle"] as const) {
+    it.effect(
+      `does not resend native queued guidance when a ${stopped} child gets another steer`,
+      () =>
+        Effect.gen(function* () {
+          const session = yield* conversation(child(`queued-${stopped}`));
+          const first = Steer.make({ message: "A" });
+          const second = Steer.make({ message: "B" });
+          const delivery = deliveries();
+          yield* session.intervene(first, delivery.onDelivery);
+          yield* session.intervene(Interrupt.make(), noDelivery);
+          if (stopped === "idle") yield* session.finish("Paused turn");
+          yield* session.intervene(second, delivery.onDelivery);
+          assert.deepStrictEqual(
+            session.turns.map(({ message }) => message),
+            ["A", "B"],
+          );
+          assert.deepStrictEqual(
+            (yield* session.unread).map(({ id }) => id),
+            stopped === "idle" ? [first.id] : [first.id, second.id],
+          );
+          yield* session.read([first.id, second.id]);
+          assert.deepStrictEqual(delivery.seen(), stopped === "idle" ? ["read"] : ["read", "read"]);
+        }),
+    );
+  }
+
+  it.effect("keeps messages unread until the harness acknowledges their IDs", () =>
     Effect.gen(function* () {
       const session = yield* conversation(child("turn-end"));
       const delivery = deliveries();
       yield* session.intervene(Steer.make({ message: "Check the lockfile." }), delivery.onDelivery);
       yield* session.finish("Checked.");
-      assert.deepStrictEqual(delivery.seen(), ["read"]);
+      assert.deepStrictEqual(delivery.seen(), []);
       assert.strictEqual((yield* Fiber.join(session.result)).message, "Checked.");
     }),
   );
@@ -213,6 +241,7 @@ describe("session supervision", () => {
         OperatorMessage.make({ message: "Wait for my review." }),
         noDelivery,
       );
+      yield* session.read((yield* session.unread).map(({ id }) => id));
       yield* session.finish("Ready for review.");
       yield* session.emitted;
       const delivery = deliveries();
@@ -315,6 +344,7 @@ describe("session supervision", () => {
         yield* first.intervene(OperatorMessage.make({ message: "Check this" }), noDelivery);
         yield* second.intervene(OperatorMessage.make({ message: "Check that" }), noDelivery);
         yield* first.finish("First result");
+        yield* second.read((yield* second.unread).map(({ id }) => id));
         yield* second.finish("Second result");
         assert.strictEqual(first.result.pollUnsafe(), undefined);
         assert.strictEqual(second.result.pollUnsafe(), undefined);

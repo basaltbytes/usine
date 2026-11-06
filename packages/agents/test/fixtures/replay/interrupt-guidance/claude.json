@@ -39,7 +39,8 @@
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
             "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
           },
-          "spawnClaudeCodeProcess": true
+          "spawnClaudeCodeProcess": true,
+          "sessionId": "4938949d-5ee3-44dc-9a49-7622558f30b3"
         }
       }
     },
@@ -373,7 +374,8 @@
           "role": "user",
           "content": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_1"
       }
     },
     { "type": "expect_outbound", "port": "claude:1/hooks", "payload": {} },
@@ -570,7 +572,8 @@
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
             "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
           },
-          "spawnClaudeCodeProcess": true
+          "spawnClaudeCodeProcess": true,
+          "sessionId": "b8e5d1b9-1bd8-4c86-b459-15d573d4d09c"
         }
       }
     },

@@ -10,7 +10,7 @@ import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, Logger, Option, Schema, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { piRuntime, piSdkLive } from "../../src/harness/pi/pi.ts";
-import { ChildRequest, WorkingDirectory } from "../../src/runtime.ts";
+import { ChildRequest, WorkingDirectory, SessionOperationError } from "../../src/runtime.ts";
 
 const [cwd, id, mode] = process.argv.slice(2);
 const request = ChildRequest.make({
@@ -46,7 +46,21 @@ await Effect.runPromise(
                 resume: Option.some(HarnessSession.make({ id: HarnessSessionId.make(id), cwd })),
               }),
             )
-          : runtime.resume(request, HarnessSessionId.make(id));
+          : Effect.gen(function* () {
+              const reopened = yield* runtime.resume(
+                request,
+                HarnessSession.make({ id: HarnessSessionId.make(id), cwd }),
+              );
+              if (Option.isNone(reopened))
+                return yield* SessionOperationError.make({
+                  operation: "launch",
+                  sessionId: Option.some(request.session.id),
+                  message: "Pi session was not found",
+                  cause: "missing",
+                });
+              yield* reopened.value.running.steer(request.prompt);
+              return reopened.value.running;
+            });
       const events = yield* Effect.forkChild(Stream.runCollect(running.events));
       const result = yield* running.result;
       const transcript = yield* Fiber.join(events);

@@ -1,7 +1,19 @@
 import { ChildSession, SessionIdle, SessionResumed } from "@usine/core/agent/session";
-import { InterventionState, type OperatorAction } from "@usine/core/attempt/channel";
+import {
+  InterventionState,
+  type OperatorMessageId,
+  type OperatorAction,
+} from "@usine/core/attempt/channel";
 import { Deferred, Effect, Option, Semaphore } from "effect";
-import { type AgentSessionError, type OnDelivery, SessionOperationError } from "../runtime.ts";
+import {
+  ChildSessionJournal,
+  type AgentSessionError,
+  type OnDelivery,
+  type QueuedOperatorMessage,
+  type InterruptedTool,
+  SessionOperationError,
+} from "../runtime.ts";
+import type { ContinuationPolicy } from "./continuation.ts";
 import type { SessionChannel } from "./session.ts";
 
 /**
@@ -15,6 +27,9 @@ interface ConversationOptions {
   readonly channel: SessionChannel;
   readonly held: boolean;
   readonly paused: boolean;
+  readonly unread?: ReadonlyArray<QueuedOperatorMessage>;
+  /** Restored messages already submitted to a retained native process. */
+  readonly submitted?: ReadonlyArray<OperatorMessageId>;
   readonly idle: Option.Option<string>;
   /**
    * Queues a message during a turn, or starts another turn in an idle session. If it returns
@@ -23,6 +38,7 @@ interface ConversationOptions {
   readonly send: (
     message: string,
     activity: "running" | "idle",
+    id: OperatorMessageId,
   ) => Effect.Effect<MessageTaken, AgentSessionError>;
   /** Requests a pause at the harness's next boundary. */
   readonly pause: Effect.Effect<void, AgentSessionError>;
@@ -32,14 +48,15 @@ interface ConversationOptions {
 
 /** An operator message the harness queued, and the callback for when it is read or the session stops. */
 interface QueuedMessage {
+  readonly id: OperatorMessageId;
   readonly message: string;
   readonly onDelivery: OnDelivery;
 }
 
 /**
  * Keeps an idle child addressable while on Hold, and keeps an interrupted session waiting until
- * guidance arrives. Queued operator messages are reported as read when the harness reads them or the
- * turn ends, and as unread if the scope closes first.
+ * guidance arrives. Queued operator messages are reported as read when the harness acknowledges their IDs,
+ * and as unread if the scope closes first.
  */
 export const sessionConversation = Effect.fn("SessionConversation.make")(function* (
   options: ConversationOptions,
@@ -51,12 +68,30 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   let idle = Option.none<string>();
   let closing = false;
   let resume = yield* Deferred.make<void>();
-  const queued: Array<QueuedMessage> = [];
+  const journal = yield* ChildSessionJournal.current;
+  const queued: Array<QueuedMessage> = (options.unread ?? []).map((message) => ({
+    ...message,
+    onDelivery: (state) => journal.delivered(message.id, state),
+  }));
 
-  /** Reports the oldest `count` queued messages as read, with the current session state. */
-  const deliver = (count: number) =>
+  const unsent = new Set(
+    (options.unread ?? [])
+      .map(({ id }) => id)
+      .filter((id) => !(options.submitted ?? []).includes(id)),
+  );
+  const sent = (id: OperatorMessageId) =>
+    Effect.sync(() => {
+      unsent.delete(id);
+    });
+
+  /** Reports the identified messages as read, with the current session state. */
+  const deliver = (ids: ReadonlyArray<OperatorMessageId>) =>
     Effect.suspend(() => {
-      const read = queued.splice(0, Math.max(0, count));
+      const read = queued.filter(({ id }) => ids.includes(id));
+      for (let index = queued.length - 1; index >= 0; index -= 1) {
+        const message = queued[index];
+        if (message !== undefined && ids.includes(message.id)) queued.splice(index, 1);
+      }
       if (read.length === 0) return Effect.void;
       const state = InterventionState.make({ held, paused });
       return Effect.logInfo("The session read queued operator messages", {
@@ -92,8 +127,6 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   const finish = Effect.fn("SessionConversation.finish")(function* (message: string) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
     if (yield* channel.isTerminal) return;
-    // A completed turn has read every message queued into it; an interrupted turn may drop them.
-    if (!paused) yield* deliver(queued.length);
     if (held || paused) {
       idle = Option.some(message);
       yield* channel.emit(SessionIdle.make({ session, message: Option.some(message) }));
@@ -139,16 +172,25 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       }
     } else {
       const stopped = Option.isSome(idle) || paused;
-      const activity = Option.isSome(idle) ? "idle" : "running";
+      let activity: "idle" | "running" = Option.isSome(idle) ? "idle" : "running";
+      if (stopped) {
+        for (const message of queued.slice()) {
+          if (!unsent.has(message.id)) continue;
+          const replayed = yield* options.send(message.message, activity, message.id);
+          yield* sent(message.id);
+          if (replayed === "read") yield* deliver([message.id]);
+          activity = "running";
+        }
+      }
       // Completion takes the same lock, so an accepted message sets the Hold before a running turn
       // can return; a rejected message changes no state.
-      taken = yield* options.send(action.message, activity);
+      taken = yield* options.send(action.message, activity, action.id);
       if (action._tag === "OperatorMessage") held = true;
       paused = false;
       idle = Option.none();
       yield* Deferred.succeed(resume, undefined);
       resume = yield* Deferred.make<void>();
-      if (taken === "queued") queued.push({ message: action.message, onDelivery });
+      if (taken === "queued") queued.push({ id: action.id, message: action.message, onDelivery });
       if (stopped) yield* channel.emit(SessionResumed.make({ session }));
     }
     yield* Effect.logInfo("Session intervention applied", {
@@ -167,14 +209,31 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   return {
     finish: (message: string) => mutex.withPermits(1)(finish(message)),
     intervene,
-    /**
-     * Reports queued operator messages as read; `count` receives the queued messages oldest first and
-     * returns how many of the oldest were read.
-     */
-    read: (count: (messages: ReadonlyArray<string>) => number) =>
-      mutex.withPermits(1)(
-        Effect.suspend(() => deliver(count(queued.map(({ message }) => message)))),
-      ),
+    recover: Effect.fn("SessionConversation.recover")(function* (
+      policy: ContinuationPolicy,
+      tools: ReadonlyArray<InterruptedTool>,
+      send: (message: string, id?: OperatorMessageId) => Effect.Effect<void, AgentSessionError>,
+      empty = false,
+    ) {
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+      if (yield* channel.isTerminal)
+        return yield* Effect.logDebug("Skipping continuation of a terminal child", {
+          sessionId: session.id,
+        });
+      if ((held || paused) && Option.isNone(idle))
+        yield* finish("Session interrupted before its turn returned");
+      for (const { id } of queued) unsent.add(id);
+      yield* policy.recover(
+        { held, paused, idle: Option.isSome(idle), empty },
+        tools,
+        queued,
+        channel.emit,
+        (message, id) =>
+          send(message, id).pipe(Effect.andThen(id === undefined ? Effect.void : sent(id))),
+      );
+    }, mutex.withPermits(1)),
+    /** Acknowledges only the messages identified by the native harness. */
+    read: (ids: ReadonlyArray<OperatorMessageId>) => mutex.withPermits(1)(deliver(ids)),
     /** Waits until the session is not paused; harness hooks run it before each tool call or model request. */
     awaitUnpaused: Effect.suspend(() => (paused ? Deferred.await(resume) : Effect.void)),
     isPaused: Effect.sync(() => paused),
@@ -182,6 +241,6 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     isIdle: Effect.sync(() => Option.isSome(idle)),
     isClosing: Effect.sync(() => closing),
     /** The queued operator messages that the harness hasn't read, oldest first. */
-    unread: Effect.sync(() => queued.map(({ message }) => message)),
+    unread: Effect.sync(() => queued.map(({ id, message }) => ({ id, message }))),
   };
 });

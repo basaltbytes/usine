@@ -1,22 +1,14 @@
+import { OperatorMessageId } from "@usine/core/attempt/channel";
 import {
   type AgentSessionEvent,
   AgentSessionId,
   type ChildSession,
-  HarnessSessionId,
   TextOutput,
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
 import { Option, Schema } from "effect";
 import { AgentCapacityError, AgentResultError, harnessFailure } from "../../runtime.ts";
-
-export const decodeClaudeInit = Schema.decodeUnknownOption(
-  Schema.Struct({
-    type: Schema.Literal("system"),
-    subtype: Schema.Literal("init"),
-    session_id: HarnessSessionId,
-  }),
-);
 
 const ClaudeTextBlock = Schema.Struct({
   type: Schema.Literal("text"),
@@ -44,6 +36,10 @@ const decodeAssistantError = Schema.decodeUnknownOption(
     error: Schema.String,
     message: Schema.Struct({ content: Schema.Array(ClaudeTextBlock) }),
   }),
+);
+
+export const decodeMessageAcknowledgement = Schema.decodeUnknownOption(
+  Schema.Struct({ user_message_uuids: Schema.Array(OperatorMessageId) }),
 );
 
 export const ClaudeResultMessage = Schema.Struct({

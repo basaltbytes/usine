@@ -31,6 +31,7 @@ export const runScenario = (
     readonly toolReady: Effect.Effect<void>;
     readonly releaseCommand: Effect.Effect<void>;
     readonly sessionReleased: Effect.Effect<void>;
+    readonly nativeReceipts?: boolean;
   },
 ) =>
   Effect.scoped(
@@ -84,20 +85,29 @@ export const runScenario = (
         assert(state.queued);
         yield* releaseCommand;
         yield* until("SessionIdle");
-        const delivered = yield* Queue.take(delivery);
-        assert(Option.isSome(delivered));
-        assert(delivered.value.held);
-        assert(!delivered.value.queued);
+        if (controls?.nativeReceipts !== false) {
+          const delivered = yield* Queue.take(delivery);
+          assert(Option.isSome(delivered));
+          assert(delivered.value.held);
+          assert(!delivered.value.queued);
+        } else {
+          const reports = yield* Queue.clear(delivery);
+          assert.deepStrictEqual(reports, [], "legacy traffic contains no native receipts");
+        }
         assert(!events.some((event) => event._tag === "SessionFinished"));
         if (scenario === "hold-release") {
           yield* running.intervene(
             OperatorMessage.make({
               message: "Reply with exactly REPLAY_SECOND. Do not use tools.",
             }),
-            () => Effect.void,
+            (taken) => Queue.offer(delivery, taken).pipe(Effect.asVoid),
           );
           yield* until("SessionResumed");
           yield* until("SessionIdle");
+          const delivered = yield* Queue.take(delivery);
+          assert(Option.isSome(delivered));
+          assert(delivered.value.held);
+          assert(!delivered.value.queued);
         }
         yield* running.intervene(Release.make(), () => Effect.void);
         yield* control.sessionReleased;

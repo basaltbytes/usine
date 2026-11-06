@@ -139,3 +139,5 @@ Run `pnpm --filter @usine/durable check` after building dependencies to check Ty
 ## Step outputs
 
 `AttemptRuntime.recordResult` stores a `StepCompletion` containing the step result and full output documents. `finished` returns that completion after a restart, so the engine can persist bodies before recording success even after checkout cleanup. Durable records containing an older step result decode as completions with no output bodies.
+
+Child recovery checkpoints the native session reference before the first prompt and continuation timestamps before each recovery turn. In-flight tool calls and unread operator-message IDs restore from SQLite. The agents package supplies the same continuation policy for durable restart and live transport recovery: supervised children wait for guidance, working children receive one continuation followed by unread input, and a fourth continuation within ten minutes fails. Failed reopening returns the tool's committed output as interrupted without spending another child-session slot. A replacement child clears the superseded child's infrastructure blocker for every harness.

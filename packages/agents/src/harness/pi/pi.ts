@@ -1,21 +1,20 @@
-import { checkContinuationHome } from "../continuation.ts";
+import {
+  childContinuation,
+  checkContinuationHome,
+  type ContinuationPolicy,
+} from "../continuation.ts";
 import { HarnessCatalog } from "../harness.ts";
 import { admitChild } from "../launch.ts";
 import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 import { Harness, BrainSpec } from "@usine/core/agent/brain";
+import { ChildSession, EndpointName, SessionStarted } from "@usine/core/agent/session";
+import { Deferred, Effect, Layer, Match, Option, Stream } from "effect";
 import {
-  ChildSession,
-  EndpointName,
-  HarnessSessionId,
-  SessionStarted,
-} from "@usine/core/agent/session";
-import { Deferred, Effect, Layer, Match, Option, type Scope, Stream } from "effect";
-import {
-  type AgentSessionError,
   type ChildRequest,
   ChildBackend,
+  ChildSessionJournal,
   PoolUnavailableError,
   type RunningSession,
   SessionOperationError,
@@ -72,7 +71,12 @@ const makePiChild = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
   const start = Effect.fn("PiRuntime.start")(
-    function* (request: ChildRequest, storage: PiSessionStorage) {
+    function* (
+      request: ChildRequest,
+      storage: PiSessionStorage,
+      prompt: Option.Option<string>,
+      policy: ContinuationPolicy,
+    ) {
       yield* Effect.annotateCurrentSpan({
         agent: request.session.agent,
         effort: request.session.brain.effort,
@@ -173,6 +177,9 @@ const makePiChild = Effect.gen(function* () {
               label: "Pi child session",
               sessionId: session.id,
             });
+            const journal = yield* ChildSessionJournal.current;
+            if (Option.isSome(started.harnessSession))
+              yield* journal.started(started.harnessSession.value);
             yield* channel.emit(
               SessionStarted.make({ session, harnessSession: started.harnessSession }),
             );
@@ -192,20 +199,23 @@ const makePiChild = Effect.gen(function* () {
               held: request.held,
               paused: request.paused,
               idle: request.idle,
+              unread: request.unread,
               sdk: started.session,
               channel,
               gate,
-              prompt: request.prompt,
+              prompt,
+              policy,
               lastText: subscription.lastText,
               error: (operation, cause) =>
                 childError(operation, request, `Pi child ${operation} failed`, cause),
             });
-            return {
+            const running = {
               session,
               events: Stream.fromQueue(channel.events),
               ...controls,
               result: Deferred.await(channel.result),
             } satisfies RunningSession;
+            return { running, active: false, recover: controls.recover };
           }),
       );
     },
@@ -222,7 +232,11 @@ const makePiChild = Effect.gen(function* () {
       ),
   );
   const directory = (request: ChildRequest) => `${request.cwd}/.usine/pi/sessions`;
-  const launch = Effect.fn("PiRuntime.launch")(function* (request: ChildRequest) {
+  const open = Effect.fn("PiRuntime.open")(function* (
+    request: ChildRequest,
+    prompt: Option.Option<string>,
+    policy: ContinuationPolicy,
+  ) {
     yield* checkContinuationHome(
       request,
       Option.some(directory(request)),
@@ -238,25 +252,15 @@ const makePiChild = Effect.gen(function* () {
           id: saved.id,
         }),
       }),
+      prompt,
+      policy,
     );
   });
-  const resume = Effect.fn("PiRuntime.resume")((request: ChildRequest, id: HarnessSessionId) =>
-    start(request, { _tag: "Resume", directory: directory(request), id }),
-  );
-  return { launch, resume, stop: (_request: ChildRequest) => Effect.void };
+  return childContinuation({ open, stop: (_request: ChildRequest) => Effect.void });
 });
 
 /** Provides `ChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
 export const piChildLayer = Layer.effect(ChildBackend, makePiChild);
-
-/** The Pi runtime can continue a saved conversation in the same attempt checkout. */
-export interface PiRuntime extends HarnessRuntime {
-  /** Starts a continuation turn using `request.prompt`; a missing ID fails with `SessionOperationError`. */
-  readonly resume: (
-    request: ChildRequest,
-    id: HarnessSessionId,
-  ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
-}
 
 /** Combines preflight, scoped launch, and saved-conversation resume. */
 export const piRuntime = Effect.gen(function* () {
@@ -268,5 +272,5 @@ export const piRuntime = Effect.gen(function* () {
     launch: child.launch,
     resume: child.resume,
     stop: child.stop,
-  } satisfies PiRuntime;
+  } satisfies HarnessRuntime;
 });

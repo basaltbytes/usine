@@ -3,7 +3,15 @@
 import { assert, it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { ChildBackend, SessionOperationError } from "@usine/agents/runtime";
+import { childContinuation } from "@usine/agents/continuation";
+import { Agent } from "@usine/core/agent";
+import { BrainSpec, Harness } from "@usine/core/agent/brain";
+import {
+  ChildBackend,
+  ChildSessionJournal,
+  SessionInterruptedError,
+  SessionOperationError,
+} from "@usine/agents/runtime";
 import {
   ChildSession,
   HarnessSession,
@@ -34,7 +42,7 @@ import {
 } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-for (const [recovery, blocker] of [
+const recoveries = [
   ["resume", null],
   ["resume-twice", null],
   ["resume-after-infra", { kind: "infra", child: 1 }],
@@ -55,8 +63,13 @@ for (const [recovery, blocker] of [
   ["checkout-gone", null],
   ["resume-fails", null],
   ["home-gone-fallback", null],
-] as const) {
-  it.live(`recovers a durable child call after restart (${recovery})`, () =>
+] as const;
+for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocker]) =>
+  (recovery === "resume-crashes-then-replacement" ? ["claude", "codex", "pi"] : ["claude"]).map(
+    (harness) => [recovery, blocker, harness] as const,
+  ),
+)) {
+  it.live(`recovers a durable child call after restart (${recovery}, ${harness})`, () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const fs = yield* FileSystem.FileSystem;
@@ -87,8 +100,19 @@ for (const [recovery, blocker] of [
         "worker-gone-then-replacement",
       ].includes(recovery);
       const childCount = blocker?.child ?? 1;
+      const base = attemptRequest(
+        `recovery/${recovery}/${harness}`,
+        childCount + (replaces ? 1 : 0),
+      );
       const request = AttemptRequest.make({
-        ...attemptRequest(`recovery/${recovery}`, childCount + (replaces ? 1 : 0)),
+        ...base,
+        spec: AttemptChannel.RunSpec.make({
+          ...base.spec,
+          agent: Agent.make({
+            ...base.spec.agent,
+            brain: BrainSpec.make({ ...base.spec.agent.brain, harness: Harness.make(harness) }),
+          }),
+        }),
         gatewayCredential: Effect.succeedSome(GatewayCredentialKind.make("subscription")),
       });
       const recording = recordingSink();
@@ -244,6 +268,15 @@ for (const [recovery, blocker] of [
             Effect.gen(function* () {
               const services = yield* Effect.context<ChildBackend | StubChildren>();
               const backend = Context.get(services, ChildBackend);
+              const shared = childContinuation({
+                stop: backend.stop,
+                open: (request) =>
+                  Effect.gen(function* () {
+                    const running = yield* backend.launch(request);
+                    if (Option.isSome(request.resume)) yield* running.result;
+                    return { running, active: false, recover: () => Effect.void };
+                  }),
+              });
               return Context.add(services, ChildBackend, {
                 ...backend,
                 launch: (request) =>
@@ -259,7 +292,15 @@ for (const [recovery, blocker] of [
                         ),
                         Effect.andThen(backend.launch(request)),
                       )
-                    : backend.launch(request),
+                    : recovery === "resume-crashes-then-replacement"
+                      ? shared.launch(request).pipe(
+                          Effect.tapError((error) =>
+                            Effect.sync(() => {
+                              assert.strictEqual(error._tag, "SessionInterruptedError");
+                            }),
+                          ),
+                        )
+                      : backend.launch(request),
                 stop: (request) =>
                   backend.stop(request).pipe(
                     Effect.andThen(
@@ -507,3 +548,69 @@ for (const [recovery, blocker] of [
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer), Effect.timeout("20 seconds")),
   );
 }
+
+for (const acknowledged of [false, true])
+  it.live(`restores whether the saved child acknowledged its prompt (${acknowledged})`, () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = attemptRequest(`recovery/prompted-${acknowledged}`);
+      const restored: Array<boolean> = [];
+      const backend = Layer.effectContext(
+        Effect.gen(function* () {
+          const services = yield* Effect.context<ChildBackend | StubChildren>();
+          const stub = Context.get(services, ChildBackend);
+          return Context.add(services, ChildBackend, {
+            ...stub,
+            launch: (child) =>
+              Effect.gen(function* () {
+                if (Option.isSome(child.resume)) {
+                  restored.push(child.prompted);
+                  return yield* SessionInterruptedError.make({
+                    sessionId: child.session.id,
+                    message: "Native reopen failed",
+                  });
+                }
+                const journal = yield* ChildSessionJournal.current;
+                yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+                if (acknowledged) yield* journal.prompted;
+                return yield* stub.launch(child);
+              }),
+          });
+        }),
+      ).pipe(Layer.provide(stubChildBackendLayer));
+      const open = (parent: Parameters<typeof fauxParent>[0]) =>
+        runtimeLayer.pipe(
+          Layer.provideMerge(
+            harnessLayer({
+              ...fauxParent(parent),
+              openStorage: Effect.tryPromise({
+                try: () => openNodeSqliteStorage(database),
+                catch: (cause) => durableError("open recovery storage", cause),
+              }),
+            }),
+          ),
+          Layer.provideMerge(backend),
+        );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const services = yield* Layer.build(open([delegate("Fix the findings.")]));
+          const execution = yield* Effect.forkChild(
+            Context.get(services, AttemptRuntime).execute(request, recordingSink().sink),
+          );
+          yield* Context.get(services, StubChildren).next;
+          yield* Fiber.interrupt(execution);
+        }),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const services = yield* Layer.build(open([answer("Recovered.")]));
+          const result = yield* Context.get(services, AttemptRuntime).execute(
+            request,
+            recordingSink().sink,
+          );
+          assert.strictEqual(result.message, "Recovered.");
+        }),
+      );
+      assert.deepStrictEqual(restored, [acknowledged]);
+    }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+  );

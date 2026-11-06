@@ -1,3 +1,4 @@
+import type { ClaudeUserMessage } from "../../src/harness/claude/sdk.ts";
 import { jsonKey } from "@usine/core/json-key";
 // SDK streams and hooks require native Promises, including the test implementations.
 // @effect-diagnostics newPromise:off
@@ -19,6 +20,7 @@ import {
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
+  Deferred,
   Effect,
   Exit,
   Fiber,
@@ -34,7 +36,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
-import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
+import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
 import {
@@ -42,6 +44,7 @@ import {
   AgentCapacityError,
   ChildBackend,
   ChildRequest,
+  ChildSessionJournal,
   HostLoginLock,
   type OnDelivery,
   SessionOperationError,
@@ -171,10 +174,13 @@ const loginContended: ReadonlyArray<Schema.Json> = [
  * closed, as in Claude Code's streaming-input sessions.
  */
 const loginRace = (contended: number) => {
-  const launches: Array<{ closed: boolean }> = [];
+  const launches: Array<{ closed: boolean; id: string | undefined; resume: string | undefined }> =
+    [];
   const sdk = Layer.succeed(ClaudeSdk)({
-    open: () => {
-      const launch = { closed: false };
+    open: (_input, options) => {
+      if (options.sessionId !== undefined && launches.some(({ id }) => id === options.sessionId))
+        throw new Error(`Session ID ${options.sessionId} is already in use.`);
+      const launch = { closed: false, id: options.sessionId, resume: options.resume };
       launches.push(launch);
       const lostLock = launches.length <= contended;
       let endOutput = () => {};
@@ -275,6 +281,30 @@ describe("Claude child backend", () => {
       ).pipe(Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provide(sdk))));
     });
   }
+
+  it.effect("reports a failed native reopen as interrupted", () => {
+    const saved = HarnessSession.make({ cwd: request().cwd });
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (_input, options) => {
+        assert.strictEqual(options.resume, saved.id);
+        assert.isUndefined(options.sessionId);
+        return {
+          ...scripted([]),
+          supportedModels: async () => {
+            throw new Error("Saved conversation unavailable");
+          },
+        };
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const error = yield* (yield* ChildBackend)
+          .launch(ChildRequest.make({ ...request(), resume: Option.some(saved) }))
+          .pipe(Effect.flip);
+        assert.strictEqual(error._tag, "SessionInterruptedError");
+      }),
+    ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+  });
 
   it.effect("continues the saved conversation supplied by a restarted durable call", () => {
     const saved = HarnessSession.make({
@@ -655,6 +685,251 @@ describe("Claude child backend", () => {
     );
   }
 
+  it.effect(
+    "persists its assigned session before input and acknowledges identical guidance by UUID",
+    () =>
+      Effect.gen(function* () {
+        const inputs = yield* Queue.make<ClaudeUserMessage>();
+        const output = yield* Queue.make<Schema.Json, Cause.Done>();
+        const receipts = yield* Queue.make<string>();
+        let saved = Option.none<HarnessSession>();
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: (input, options) => {
+            assert(Option.isSome(saved), "the native reference is committed before SDK startup");
+            assert.strictEqual(options.sessionId, saved.value.id);
+            assert.match(options.sessionId ?? "", /^[0-9a-f-]{36}$/u);
+            void (async () => {
+              let first = true;
+              for await (const message of input) {
+                Queue.offerUnsafe(inputs, message);
+                if (first) {
+                  first = false;
+                  Queue.offerUnsafe(output, rateLimitEvent);
+                }
+              }
+            })();
+            return {
+              ...scripted([]),
+              close: () => {
+                Queue.endUnsafe(output);
+              },
+              [Symbol.asyncIterator]: () =>
+                Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+            };
+          },
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(request());
+          yield* Queue.take(inputs);
+          const first = OperatorMessage.make({ message: "Review the diff" });
+          const second = OperatorMessage.make({ message: "Review the diff" });
+          assert.notStrictEqual(first.id, second.id);
+          for (const action of [first, second]) {
+            const state = yield* running.intervene(action, (delivery) =>
+              Option.isSome(delivery)
+                ? Queue.offer(receipts, action.id).pipe(Effect.asVoid)
+                : Effect.void,
+            );
+            assert.isTrue(state.queued);
+            const sent = yield* Queue.take(inputs);
+            assert.strictEqual(sent.uuid, action.id);
+          }
+          yield* Queue.offer(output, { type: "assistant", user_message_uuids: [second.id] });
+          const secondReceipt = yield* Queue.take(receipts);
+          assert.strictEqual(
+            secondReceipt,
+            second.id,
+            "receipt order follows IDs, not queue position",
+          );
+          yield* Queue.offer(output, {
+            type: "assistant",
+            user_message_uuids: [second.id, first.id],
+          });
+          const firstReceipt = yield* Queue.take(receipts);
+          assert.strictEqual(firstReceipt, first.id);
+          yield* Queue.offer(output, { type: "result", subtype: "success", result: "Done" });
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* running.result).message, "Done");
+          const duplicate = yield* Queue.clear(receipts);
+          assert.deepStrictEqual(duplicate, []);
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))),
+          Effect.provideService(ChildSessionJournal, {
+            started: (reference) =>
+              Effect.sync(() => {
+                saved = Option.some(reference);
+              }),
+            prompted: Effect.void,
+            continued: () => Effect.void,
+            delivered: () => Effect.void,
+          }),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("acknowledges folded guidance on a typed turn while leaving pending sends queued", () =>
+    Effect.gen(function* () {
+      const inputs = yield* Queue.make<ClaudeUserMessage>();
+      const output = yield* Queue.make<Schema.Json, Cause.Done>();
+      const idle = yield* Deferred.make<void>();
+      const receipts = yield* Queue.make<string>();
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (input) => {
+          void (async () => {
+            for await (const message of input) {
+              Queue.offerUnsafe(inputs, message);
+              Queue.offerUnsafe(output, rateLimitEvent);
+            }
+          })();
+          return {
+            ...scripted([]),
+            close: () => Queue.endUnsafe(output),
+            [Symbol.asyncIterator]: () =>
+              Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+          };
+        },
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), held: true }),
+        );
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Deferred.succeed(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        yield* Queue.take(inputs);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Waiting",
+          queued_turn_count: 0,
+        });
+        yield* Deferred.await(idle);
+        const first = OperatorMessage.make({ message: "Start the correction" });
+        const folded = OperatorMessage.make({ message: "Review the diff" });
+        const pending = OperatorMessage.make({ message: "Review the diff" });
+        const send = (action: OperatorMessage) =>
+          running.intervene(action, (delivery) =>
+            Queue.offer(receipts, Option.isSome(delivery) ? action.id : "unread").pipe(
+              Effect.asVoid,
+            ),
+          );
+        yield* send(first);
+        assert.strictEqual((yield* Queue.take(inputs)).uuid, first.id);
+        yield* Queue.offer(output, { type: "assistant", user_message_uuids: [first.id] });
+        const firstReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(firstReceipt, first.id);
+        for (const action of [folded, pending]) {
+          yield* send(action);
+          assert.strictEqual((yield* Queue.take(inputs)).uuid, action.id);
+        }
+        // Typed-prompt turns do not stamp another assistant frame after folding guidance.
+        yield* Queue.offer(output, {
+          type: "assistant",
+          message: { content: [{ type: "text", text: "Corrected" }] },
+        });
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Corrected",
+          queued_turn_count: 1,
+        });
+        const foldedReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(foldedReceipt, folded.id);
+        const extraReceipts = yield* Queue.clear(receipts);
+        assert.deepStrictEqual(extraReceipts, []);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Reviewed",
+          queued_turn_count: 0,
+        });
+        const pendingReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(pendingReceipt, pending.id);
+        yield* running.intervene(Release.make(), noDelivery);
+        assert.strictEqual((yield* running.result).message, "Reviewed");
+        const finalReceipts = yield* Queue.clear(receipts);
+        assert.deepStrictEqual(finalReceipts, []);
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps guidance unread when the result's receipts leave it out", () =>
+    Effect.gen(function* () {
+      const inputs = yield* Queue.make<ClaudeUserMessage>();
+      const output = yield* Queue.make<Schema.Json, Cause.Done>();
+      const idle = yield* Queue.make<void>();
+      const receipts = yield* Queue.make<string>();
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (input) => {
+          void (async () => {
+            for await (const message of input) {
+              Queue.offerUnsafe(inputs, message);
+              Queue.offerUnsafe(output, rateLimitEvent);
+            }
+          })();
+          return {
+            ...scripted([]),
+            close: () => Queue.endUnsafe(output),
+            [Symbol.asyncIterator]: () =>
+              Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+          };
+        },
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), held: true }),
+        );
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        yield* Queue.take(inputs);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Waiting",
+          queued_turn_count: 0,
+        });
+        yield* Queue.take(idle);
+        const read = OperatorMessage.make({ message: "Start the correction" });
+        const inTransit = Steer.make({ message: "Also check the tests" });
+        for (const action of [read, inTransit]) {
+          yield* running.intervene(action, (delivery) =>
+            Queue.offer(receipts, Option.isSome(delivery) ? action.id : "unread").pipe(
+              Effect.asVoid,
+            ),
+          );
+          const sent = yield* Queue.take(inputs);
+          assert.strictEqual(sent.uuid, action.id);
+        }
+        // The steer reached Claude after it wrote this result, which names only the first message.
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Corrected",
+          queued_turn_count: 0,
+          user_message_uuids: [read.id],
+        });
+        const readReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(readReceipt, read.id);
+        yield* Queue.take(idle);
+        const early = yield* Queue.clear(receipts);
+        assert.deepStrictEqual(early, []);
+        yield* running.intervene(Release.make(), noDelivery);
+        assert.strictEqual((yield* running.result).message, "Corrected");
+      }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+      const unread = yield* Queue.clear(receipts);
+      assert.deepStrictEqual(unread, ["unread"]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
     Effect.gen(function* () {
       const { launches, sdk } = loginRace(1);
@@ -678,7 +953,15 @@ describe("Claude child backend", () => {
         );
         const started = events[0];
         assert(started?._tag === "SessionStarted" && Option.isSome(started.harnessSession));
-        assert.strictEqual(started.harnessSession.value.id, "claude-session-2");
+        assert.match(started.harnessSession.value.id, /^[0-9a-f-]{36}$/u);
+        const assignedId = started.harnessSession.value.id;
+        assert.deepStrictEqual(
+          launches.map(({ id, resume }) => ({ id, resume })),
+          [
+            { id: assignedId, resume: undefined },
+            { id: undefined, resume: assignedId },
+          ],
+        );
         assert.deepStrictEqual(
           launches.map(({ closed }) => closed),
           [true, false],
