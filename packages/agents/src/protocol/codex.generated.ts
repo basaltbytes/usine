@@ -15,7 +15,11 @@ export const GranularAskForApproval = Schema.Struct({
 
 export const AskForApproval = Schema.Union([Schema.String, GranularAskForApproval]);
 
+export const ApprovalsReviewerValues = ["user", "auto_review", "guardian_subagent"] as const;
+
 export const ApprovalsReviewer = Schema.String;
+
+export const ModeKindValues = ["plan", "default"] as const;
 
 export const ModeKind = Schema.String;
 
@@ -41,6 +45,8 @@ export const ReadOnlySandboxPolicy = Schema.Struct({
   networkAccess: Schema.optionalKey(Schema.Boolean),
   type: Schema.Literal("readOnly"),
 });
+
+export const NetworkAccessValues = ["restricted", "enabled"] as const;
 
 export const NetworkAccess = Schema.String;
 
@@ -69,6 +75,8 @@ export const GitInfo = Schema.Struct({
   originUrl: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   sha: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
 });
+
+export const ThreadHistoryModeValues = ["legacy", "paginated"] as const;
 
 export const ThreadHistoryMode = Schema.String;
 
@@ -121,6 +129,8 @@ export const IdleThreadStatus = Schema.Struct({ type: Schema.Literal("idle") });
 
 export const SystemErrorThreadStatus = Schema.Struct({ type: Schema.Literal("systemError") });
 
+export const ThreadActiveFlagValues = ["waitingOnApproval", "waitingOnUserInput"] as const;
+
 export const ThreadActiveFlag = Schema.String;
 
 export const ActiveThreadStatus = Schema.Struct({
@@ -160,6 +170,8 @@ export const ResponseTooManyFailedAttemptsCodexErrorInfo = Schema.Struct({
     httpStatusCode: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Null])),
   }),
 });
+
+export const NonSteerableTurnKindValues = ["review", "compact"] as const;
 
 export const NonSteerableTurnKind = Schema.String;
 
@@ -205,6 +217,8 @@ export const TextUserInput = Schema.Struct({
   text_elements: Schema.optionalKey(Schema.Array(TextElement)),
   type: Schema.Literal("text"),
 });
+
+export const ImageDetailValues = ["auto", "low", "high", "original"] as const;
 
 export const ImageDetail = Schema.String;
 
@@ -272,6 +286,8 @@ export const HookPromptThreadItem = Schema.Struct({
   type: Schema.Literal("hookPrompt"),
 });
 
+export const AgentMessageDeliveryValues = ["async"] as const;
+
 export const AgentMessageDelivery = Schema.String;
 
 export const MemoryCitationEntry = Schema.Struct({
@@ -285,6 +301,8 @@ export const MemoryCitation = Schema.Struct({
   entries: Schema.Array(MemoryCitationEntry),
   threadIds: Schema.Array(Schema.String),
 });
+
+export const MessagePhaseValues = ["commentary", "partial_answer", "final_answer"] as const;
 
 export const MessagePhase = Schema.String;
 
@@ -400,7 +418,21 @@ export const CommandAction = Schema.Union([
   UnknownCommandAction,
 ]);
 
+export const CommandExecutionSourceValues = [
+  "agent",
+  "userShell",
+  "unifiedExecStartup",
+  "unifiedExecInteraction",
+] as const;
+
 export const CommandExecutionSource = Schema.String;
+
+export const CommandExecutionStatusValues = [
+  "inProgress",
+  "completed",
+  "failed",
+  "declined",
+] as const;
 
 export const CommandExecutionStatus = Schema.String;
 
@@ -441,6 +473,8 @@ export const FileUpdateChange = Schema.Struct({
   path: Schema.String,
 });
 
+export const PatchApplyStatusValues = ["inProgress", "completed", "failed", "declined"] as const;
+
 export const PatchApplyStatus = Schema.String;
 
 export const FileChangeThreadItem = Schema.Struct({
@@ -460,6 +494,8 @@ export const McpToolCallAppContext = Schema.Struct({
 
 export const McpToolCallError = Schema.Struct({ message: Schema.String });
 
+export const McpAppDisplayModeValues = ["inline", "fullscreen"] as const;
+
 export const McpAppDisplayMode = Schema.String;
 
 export const McpAppUi = Schema.Struct({
@@ -472,6 +508,8 @@ export const McpToolCallResult = Schema.Struct({
   content: Schema.Array(Schema.Json),
   structuredContent: Schema.optionalKey(Schema.Json),
 });
+
+export const McpToolCallStatusValues = ["inProgress", "completed", "failed"] as const;
 
 export const McpToolCallStatus = Schema.String;
 
@@ -513,6 +551,8 @@ export const DynamicToolCallOutputContentItem = Schema.Union([
   InputAudioDynamicToolCallOutputContentItem,
 ]);
 
+export const DynamicToolCallStatusValues = ["inProgress", "completed", "failed"] as const;
+
 export const DynamicToolCallStatus = Schema.String;
 
 export const DynamicToolCallThreadItem = Schema.Struct({
@@ -529,6 +569,16 @@ export const DynamicToolCallThreadItem = Schema.Struct({
   type: Schema.Literal("dynamicToolCall"),
 });
 
+export const CollabAgentStatusValues = [
+  "pendingInit",
+  "running",
+  "interrupted",
+  "completed",
+  "errored",
+  "shutdown",
+  "notFound",
+] as const;
+
 export const CollabAgentStatus = Schema.String;
 
 export const CollabAgentState = Schema.Struct({
@@ -536,7 +586,26 @@ export const CollabAgentState = Schema.Struct({
   status: CollabAgentStatus,
 });
 
+export const CollabAgentToolCallStatusValues = [
+  "inProgress",
+  "completed",
+  "failed",
+  "interrupted",
+] as const;
+
 export const CollabAgentToolCallStatus = Schema.String;
+
+export const CollabAgentToolValues = [
+  "spawnAgent",
+  "sendInput",
+  "resumeAgent",
+  "wait",
+  "closeAgent",
+  "sendMessage",
+  "followupTask",
+  "interruptAgent",
+  "listAgents",
+] as const;
 
 export const CollabAgentTool = Schema.String;
 
@@ -552,6 +621,13 @@ export const CollabAgentToolCallThreadItem = Schema.Struct({
   tool: CollabAgentTool,
   type: Schema.Literal("collabAgentToolCall"),
 });
+
+export const SubAgentActivityKindValues = [
+  "started",
+  "interacted",
+  "interrupted",
+  "completed",
+] as const;
 
 export const SubAgentActivityKind = Schema.String;
 
@@ -689,7 +765,11 @@ export const ThreadItem = Schema.Union([
   ContextCompactionThreadItem,
 ]);
 
+export const TurnItemsViewValues = ["notLoaded", "summary", "full"] as const;
+
 export const TurnItemsView = Schema.String;
+
+export const TurnStatusValues = ["completed", "interrupted", "failed", "inProgress"] as const;
 
 export const TurnStatus = Schema.String;
 
@@ -819,6 +899,29 @@ export const SpendControlLimitSnapshot = Schema.Struct({
   used: Schema.String,
 });
 
+export const PlanTypeValues = [
+  "free",
+  "go",
+  "plus",
+  "pro",
+  "prolite",
+  "promax",
+  "team",
+  "self_serve_business_prolite",
+  "self_serve_business_usage_based",
+  "business",
+  "ent26",
+  "enterprise_cbp_automation",
+  "enterprise_cbp_usage_based",
+  "enterprise",
+  "edu",
+  "edu_plus",
+  "edu_pro",
+  "sci",
+  "sci_plus",
+  "unknown",
+] as const;
+
 export const PlanType = Schema.String;
 
 export const RateLimitWindow = Schema.Struct({
@@ -826,6 +929,14 @@ export const RateLimitWindow = Schema.Struct({
   usedPercent: Schema.Finite,
   windowDurationMins: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Null])),
 });
+
+export const RateLimitReachedTypeValues = [
+  "rate_limit_reached",
+  "workspace_owner_credits_depleted",
+  "workspace_member_credits_depleted",
+  "workspace_owner_usage_limit_reached",
+  "workspace_member_usage_limit_reached",
+] as const;
 
 export const RateLimitReachedType = Schema.String;
 
@@ -846,6 +957,17 @@ export const AccountRateLimitsUpdatedNotification = Schema.Struct({
   rateLimits: RateLimitSnapshot,
 });
 
+export const AuthModeValues = [
+  "apikey",
+  "chatgpt",
+  "chatgptAuthTokens",
+  "headers",
+  "agentIdentity",
+  "personalAccessToken",
+  "bedrockApiKey",
+  "bedrockAccessKeys",
+] as const;
+
 export const AuthMode = Schema.String;
 
 export const AccountUpdatedNotification = Schema.Struct({
@@ -862,11 +984,17 @@ export const ErrorNotification = Schema.Struct({
 
 export const ModelAvailabilityNux = Schema.Struct({ message: Schema.String });
 
+export const CyberAccessProgramValues = ["standard", "daybreakBlue", "daybreakRed"] as const;
+
 export const CyberAccessProgram = Schema.String;
 
 export const ModelAccessPrograms = Schema.Struct({ cyber: Schema.Array(CyberAccessProgram) });
 
+export const InputModalityValues = ["text", "image", "audio"] as const;
+
 export const InputModality = Schema.String;
+
+export const MultiAgentVersionValues = ["disabled", "v1", "v2"] as const;
 
 export const MultiAgentVersion = Schema.String;
 

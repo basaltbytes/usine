@@ -41,9 +41,19 @@ function reference(ref) {
   const schema = document.definitions.v2[name];
   assert(schema, `Missing upstream definition: ${name}`);
   const expression = emit(schema);
+  const values = enumValues(schema);
+  if (values) declarations.set(`${name}Values`, `${JSON.stringify(values)} as const`);
   declarations.set(name, expression);
   visiting.delete(name);
   return name;
+}
+
+function enumValues(schema) {
+  if (schema.enum) return schema.enum;
+  const alternatives = schema.oneOf ?? schema.anyOf;
+  if (!alternatives) return;
+  const values = alternatives.map(enumValues);
+  return values.every((value) => value !== undefined) ? values.flat() : undefined;
 }
 
 function union(members) {

@@ -180,6 +180,8 @@ USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agen
 
 Codex response and notification schemas are generated from the upstream app-server JSON schema. `src/protocol/codex-version.ts` records the release version and immutable upstream commit together; the harness descriptor uses that version as its preflight baseline. `src/protocol/codex.ts` selects the fields the adapter consumes and applies domain constraints. New status and phase strings decode without a protocol error; recognized tool kinds remain a closed set because the adapter maps each kind to a transcript tool.
 
+Generated `Values` tuples preserve known enum members. The adapter uses typed comparisons for turn and tool statuses, message phases, and authentication modes. Removing or renaming a compared value upstream causes `pnpm check` to fail after regeneration, while decoders continue to accept unknown strings.
+
 After updating the upstream pin, run `pnpm --filter @usine/agents codex:generate`, review `src/protocol/codex.generated.ts`, and run the conformance and replay tests. `pnpm --filter @usine/agents codex:check` fetches the pinned schema and compares the generated output without writing it. CI runs this check and rejects manual edits or stale generation. Both generation commands require access to `raw.githubusercontent.com`.
 
 The protocol conformance baseline is 0.164.0. Preflight retains 0.159.0 through 0.159.3 for one release so existing worker images can upgrade, and refuses 0.153.4. Install 0.164.0 for its updated TLS certificate roots. Other CLI builds need verification first.

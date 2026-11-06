@@ -6,8 +6,10 @@ import {
   AccountUpdatedNotification,
   AgentMessageDeltaNotification,
   AgentMessageThreadItem,
+  AuthModeValues,
   ChatgptAccount,
   CommandExecutionThreadItem,
+  CommandExecutionStatusValues,
   DynamicToolCallThreadItem,
   ErrorNotification as GeneratedErrorNotification,
   FileChangeThreadItem,
@@ -17,6 +19,7 @@ import {
   ItemStartedNotification,
   LegacyAppPathString,
   McpToolCallThreadItem,
+  MessagePhaseValues,
   Model,
   ModelListResponse as GeneratedModelListResponse,
   TextUserInput,
@@ -26,9 +29,20 @@ import {
   TurnCompletedNotification,
   TurnError,
   TurnStartResponse as GeneratedTurnStartResponse,
+  TurnStatusValues,
   UserMessageThreadItem,
   WebSearchThreadItem,
 } from "./codex.generated.ts";
+
+const matchesKnownValue =
+  <Values extends ReadonlyArray<string>>(_values: Values) =>
+  (value: string | null | undefined, expected: Values[number]) =>
+    value === expected;
+
+export const isTurnStatus = matchesKnownValue(TurnStatusValues);
+export const isToolStatus = matchesKnownValue(CommandExecutionStatusValues);
+export const isMessagePhase = matchesKnownValue(MessagePhaseValues);
+export const isAuthMode = matchesKnownValue(AuthModeValues);
 
 /** Request subsets and response selections for usine's Codex adapter. */
 export interface InitializeParams {

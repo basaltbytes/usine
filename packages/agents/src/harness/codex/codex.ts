@@ -31,6 +31,10 @@ import {
   CodexTokenUsage,
   ErrorNotification,
   ItemNotification,
+  isAuthMode,
+  isMessagePhase,
+  isToolStatus,
+  isTurnStatus,
   ModelListParams,
   ModelListResponse,
   RateLimitsUpdated,
@@ -148,7 +152,7 @@ const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
     model: request.session.brain.model,
     endpoint: Option.some(restored.modelProvider),
     activeTurn: Option.fromUndefinedOr(
-      restored.thread.turns.find((turn) => turn.status === "inProgress"),
+      restored.thread.turns.find((turn) => isTurnStatus(turn.status, "inProgress")),
     ),
   };
 });
@@ -323,7 +327,7 @@ const makeCodexChild = Effect.gen(function* () {
           onSome: (turn) =>
             turn.items
               .filter(Schema.is(ToolItem))
-              .filter((item) => item.status === "inProgress")
+              .filter((item) => isToolStatus(item.status, "inProgress"))
               .map((item): [string, string] => [item.id, toolName(item)]),
         }),
       );
@@ -348,7 +352,7 @@ const makeCodexChild = Effect.gen(function* () {
       });
       let lastText = savedMessages.at(-1)?.text.trim();
       let finalText = savedMessages
-        .filter((item) => item.phase === "final_answer")
+        .filter((item) => isMessagePhase(item.phase, "final_answer"))
         .at(-1)
         ?.text.trim();
       // Provider retries reported for the current turn, and whether the last retry is unresolved.
@@ -637,7 +641,7 @@ const makeCodexChild = Effect.gen(function* () {
                 const text = item.text.trim();
                 if (text.length === 0) return;
                 lastText = text;
-                if (item.phase === "final_answer") finalText = text;
+                if (isMessagePhase(item.phase, "final_answer")) finalText = text;
                 return yield* channel.emit(TextOutput.make({ session, text }));
               }
               if (!Schema.is(ToolItem)(item)) return;
@@ -649,8 +653,8 @@ const makeCodexChild = Effect.gen(function* () {
                   tool: toolName(item),
                   output: item,
                   isError:
-                    item.status === "failed" ||
-                    item.status === "declined" ||
+                    isToolStatus(item.status, "failed") ||
+                    isToolStatus(item.status, "declined") ||
                     item.success === false,
                 }),
               );
@@ -668,8 +672,11 @@ const makeCodexChild = Effect.gen(function* () {
                 Effect.mapError(() => codexPoolUnavailable(request.session.brain.model)),
               );
               if (
-                account.authMode !== (billing.pool === "apiKeys" ? "apikey" : "chatgpt") &&
-                !(billing.pool === "chatgptPlan" && account.authMode === "chatgptAuthTokens")
+                !isAuthMode(account.authMode, billing.pool === "apiKeys" ? "apikey" : "chatgpt") &&
+                !(
+                  billing.pool === "chatgptPlan" &&
+                  isAuthMode(account.authMode, "chatgptAuthTokens")
+                )
               ) {
                 yield* Effect.logError("Codex authentication changed during the session", {
                   sessionId: session.id,
@@ -722,7 +729,8 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: completed.turn.id,
                 });
               }
-              if (retrying && completed.turn.status === "completed") yield* reportRecovery();
+              if (retrying && isTurnStatus(completed.turn.status, "completed"))
+                yield* reportRecovery();
               turnActive = false;
               const wasInterrupted = interrupting;
               interrupting = false;
@@ -737,8 +745,8 @@ const makeCodexChild = Effect.gen(function* () {
                   unread: unread.length,
                 });
               if (
-                completed.turn.status === "completed" ||
-                (completed.turn.status === "interrupted" &&
+                isTurnStatus(completed.turn.status, "completed") ||
+                (isTurnStatus(completed.turn.status, "interrupted") &&
                   wasInterrupted &&
                   ((yield* conversation.isPaused) || hasNewGuidance))
               ) {
@@ -751,7 +759,7 @@ const makeCodexChild = Effect.gen(function* () {
               }
               const detail =
                 completed.turn.error?.message ??
-                (completed.turn.status === "interrupted"
+                (isTurnStatus(completed.turn.status, "interrupted")
                   ? "Codex child session was interrupted"
                   : "Codex child session failed");
               return yield* fail(turnFailure(session.id, completed.turn.error, detail));

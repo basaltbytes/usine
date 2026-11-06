@@ -9,13 +9,33 @@ import {
   ItemNotification,
   RateLimitsUpdated,
   CodexTokenUsage,
+  isTurnStatus,
+  isToolStatus,
+  isMessagePhase,
+  isAuthMode,
 } from "../src/protocol/codex.ts";
 import { CODEX_PROTOCOL } from "../src/protocol/codex-version.ts";
 import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
 import { ImageGenerationThreadItem } from "../src/protocol/codex.generated.ts";
+import { expectTypeOf } from "vitest";
 
 describe("generated Codex protocol selections", () => {
+  it("restricts comparison targets to generated enum values while allowing unknown input", () => {
+    expectTypeOf<"waitingForInput">().not.toExtend<Parameters<typeof isTurnStatus>[1]>();
+    expectTypeOf<"waitingForApproval">().not.toExtend<Parameters<typeof isToolStatus>[1]>();
+    expectTypeOf<"new_phase">().not.toExtend<Parameters<typeof isMessagePhase>[1]>();
+    expectTypeOf<"new_auth">().not.toExtend<Parameters<typeof isAuthMode>[1]>();
+    expect(isTurnStatus("waitingForInput", "completed")).toBe(false);
+    expect(isTurnStatus("completed", "completed")).toBe(true);
+    expect(isToolStatus(undefined, "failed")).toBe(false);
+    expect(isToolStatus("declined", "declined")).toBe(true);
+    expect(isMessagePhase("new_phase", "final_answer")).toBe(false);
+    expect(isMessagePhase("final_answer", "final_answer")).toBe(true);
+    expect(isAuthMode(null, "chatgpt")).toBe(false);
+    expect(isAuthMode("chatgpt", "chatgpt")).toBe(true);
+  });
+
   it.effect("keeps common fields on generated image payload alternatives", () =>
     Effect.gen(function* () {
       for (const payload of [{ fileId: "file" }, { result: "image-data" }]) {
