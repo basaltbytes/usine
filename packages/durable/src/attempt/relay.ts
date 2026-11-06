@@ -7,6 +7,7 @@ import {
   type EntryQuery,
   type EntryRecord,
   type Page,
+  type TaskId,
   type TaskRecord,
   UsageDoc,
   UserEntry,
@@ -35,11 +36,15 @@ import {
   type RelayItem,
   type RelayProgress,
 } from "./hubs.ts";
+import { SubagentDoc } from "./child.ts";
 import { settledOf } from "./outcome.ts";
-import { parentSession, parentSessionId } from "./parent.ts";
+import { childSessionId, parentSession, parentSessionId } from "./parent.ts";
 import { queueParentSteer } from "./steering.ts";
 
 const PAGE = 64;
+
+/** The kind of the durable task that runs one tool call of the parent. */
+const TOOL_TASK = "pi.tool";
 
 const unavailable = () =>
   AgentFailure.make({ message: "This attempt no longer has a live channel" });
@@ -310,6 +315,50 @@ const returnSteerToParent = Effect.fn("AttemptRelay.returnSteerToParent")(functi
 });
 
 /**
+ * Returns the child sessions whose `subagent` calls have not returned. A replayed call restores its
+ * child's queued inputs and settles them when it ends.
+ */
+const unfinishedChildren = Effect.fn("AttemptRelay.unfinishedChildren")(function* (
+  durable: DurableHarness["Service"],
+  hub: AttemptHub,
+) {
+  if (Option.isNone(hub.parent)) return new Set<string>();
+  const parent = hub.parent.value;
+  const children = yield* durable.use(
+    "read the unfinished child calls",
+    async (harness, context) => {
+      const tasks = await harness.commit(async (tx) => {
+        const found: Array<TaskId> = [];
+        let cursor: Cursor | undefined;
+        do {
+          const page = await tx.scanTasks(
+            { conversationId: parent, kind: TOOL_TASK },
+            PAGE,
+            cursor,
+          );
+          for (const task of page.items)
+            if (task.state.status !== "completing" && task.state.status !== "terminal")
+              found.push(task.id);
+          cursor = page.next;
+        } while (cursor !== undefined);
+        return found;
+      }, context);
+      const sessions = new Set<string>();
+      for (const task of tasks) {
+        const delegation = await harness.snapshot(SubagentDoc, task, context);
+        if (delegation !== undefined && delegation.count !== null)
+          sessions.add(childSessionId(hub.attemptId, delegation.count));
+      }
+      return sessions;
+    },
+  );
+  yield* Effect.logDebug("Read the children whose calls have not returned", {
+    sessionIds: [...children],
+  });
+  return children;
+});
+
+/**
  * Sends the second receipt for each resolved queued operator input, and rejects all unread ones if
  * `attempt` is `ended`. The caller must hold the hub's routing permit.
  */
@@ -319,10 +368,18 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
   attempt: "live" | "ended",
 ) {
   const queued = (yield* readRecord(durable, hub.attemptId))?.queuedInputs ?? [];
+  const unfinished = yield* Effect.cached(unfinishedChildren(durable, hub));
   for (const input of queued) {
     if ("child" in input) {
       if (attempt === "live" && hub.childInputs.has(input.inputSequence)) {
         yield* Effect.logDebug("A queued operator input still waits for its child", {
+          inputSequence: input.inputSequence,
+          sessionId: input.child,
+        });
+        continue;
+      }
+      if (attempt === "live" && (yield* unfinished).has(input.child)) {
+        yield* Effect.logDebug("A queued operator input waits for its child's replayed call", {
           inputSequence: input.inputSequence,
           sessionId: input.child,
         });

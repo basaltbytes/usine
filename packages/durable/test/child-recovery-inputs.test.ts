@@ -2,7 +2,7 @@
 // @effect-diagnostics asyncFunction:off
 import { assert, it } from "@effect/vitest";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { ChildBackend, SessionInterruptedError } from "@usine/agents/runtime";
+import { ChildBackend, ChildSessionJournal, SessionInterruptedError } from "@usine/agents/runtime";
 import { HarnessSession, SessionStarted, TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { jsonKey } from "@usine/core/json-key";
@@ -21,22 +21,28 @@ import {
 } from "../src/testing.ts";
 import { attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
 
-const failedReopen = Layer.effectContext(
-  Effect.gen(function* () {
-    const services = yield* Effect.context<ChildBackend | StubChildren>();
-    const backend = Context.get(services, ChildBackend);
-    return Context.add(services, ChildBackend, {
-      ...backend,
-      launch: (request) =>
-        Option.isSome(request.resume)
-          ? SessionInterruptedError.make({
-              sessionId: request.session.id,
-              message: "Native reopen failed",
-            })
-          : backend.launch(request),
-    });
-  }),
-).pipe(Layer.provide(stubChildBackendLayer));
+/** Fails every native reopen and records the unread messages each reopen received. */
+const failedReopen = (restored: Array<ReadonlyArray<string>>) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const services = yield* Effect.context<ChildBackend | StubChildren>();
+      const backend = Context.get(services, ChildBackend);
+      return Context.add(services, ChildBackend, {
+        ...backend,
+        launch: (request) =>
+          Option.isSome(request.resume)
+            ? Effect.sync(() => restored.push(request.unread.map(({ message }) => message))).pipe(
+                Effect.andThen(
+                  SessionInterruptedError.make({
+                    sessionId: request.session.id,
+                    message: "Native reopen failed",
+                  }),
+                ),
+              )
+            : backend.launch(request),
+      });
+    }),
+  ).pipe(Layer.provide(stubChildBackendLayer));
 
 for (const failure of ["harness-mismatch", "native-reopen"] as const) {
   it.live(`returns a restored forwarded steer to the parent after ${failure}`, () =>
@@ -44,6 +50,7 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
       const database = yield* temporaryDatabase;
       const request = attemptRequest(`steering/recovery/${failure}`);
       const recording = recordingSink();
+      const restored: Array<ReadonlyArray<string>> = [];
       yield* Effect.scoped(
         Effect.gen(function* () {
           const services = yield* Layer.build(
@@ -122,7 +129,7 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
                   }),
                 }),
               ),
-              Layer.provideMerge(failedReopen),
+              Layer.provideMerge(failedReopen(restored)),
             ),
           );
           const result = yield* Context.get(services, AttemptRuntime).execute(
@@ -136,6 +143,11 @@ for (const failure of ["harness-mismatch", "native-reopen"] as const) {
               payload._tag === "InterventionApplied" ? [payload.state.queued] : [],
             );
           assert.deepStrictEqual(receipts, [true, true, false]);
+          // The replayed call restores the steer before the relay can return it.
+          assert.deepStrictEqual(
+            restored,
+            failure === "native-reopen" ? [["Fix the third finding."]] : [],
+          );
         }),
       );
     }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
@@ -204,4 +216,125 @@ it.live(
         ),
       );
     }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+);
+
+it.live("reports a restored forwarded steer read by the resumed child", () =>
+  Effect.gen(function* () {
+    const database = yield* temporaryDatabase;
+    const request = attemptRequest("steering/recovery/read");
+    const recording = recordingSink();
+    let childSessionId = "";
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(
+          layer({ database, parent: [delegate("Fix the findings.")] }),
+        );
+        const runtime = Context.get(services, AttemptRuntime);
+        const committed = yield* Deferred.make<void>();
+        const execution = yield* Effect.forkChild(
+          runtime.execute(request, {
+            ...recording.sink,
+            append: (direction, envelope) =>
+              recording.sink
+                .append(direction, envelope)
+                .pipe(
+                  Effect.andThen(
+                    envelope._tag === "OutboundEnvelope" &&
+                      envelope.payload._tag === "SessionEvent" &&
+                      envelope.payload.event._tag === "TextOutput"
+                      ? Deferred.succeed(committed, undefined).pipe(Effect.asVoid)
+                      : Effect.void,
+                  ),
+                ),
+          }),
+        );
+        const child = yield* Context.get(services, StubChildren).next;
+        childSessionId = child.request.session.id;
+        yield* child.emit(
+          SessionStarted.make({
+            session: child.request.session,
+            harnessSession: Option.some(HarnessSession.make({ cwd: request.cwd })),
+          }),
+        );
+        yield* child.emit(
+          TextOutput.make({ session: child.request.session, text: "Partial progress" }),
+        );
+        yield* Deferred.await(committed);
+        yield* runtime.intervene(
+          request.spec.attemptId,
+          AttemptChannel.Intervention.make({
+            operator: "PhilDL",
+            target: AttemptChannel.ParentTarget.make(),
+            action: AttemptChannel.Steer.make({ message: "Fix the third finding." }),
+          }),
+        );
+        yield* Fiber.interrupt(execution);
+      }),
+    );
+    const beforeRestart = recording.outbound().length;
+    // The resumed child reads its restored message as soon as it starts.
+    const readOnReopen = Layer.effectContext(
+      Effect.gen(function* () {
+        const services = yield* Effect.context<ChildBackend | StubChildren>();
+        const backend = Context.get(services, ChildBackend);
+        return Context.add(services, ChildBackend, {
+          ...backend,
+          launch: (child) =>
+            Effect.gen(function* () {
+              const running = yield* backend.launch(child);
+              const journal = yield* ChildSessionJournal.current;
+              const state = AttemptChannel.InterventionState.make({ held: false, paused: false });
+              for (const { id } of child.unread) yield* journal.delivered(id, Option.some(state));
+              return running;
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(stubChildBackendLayer));
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(
+          runtimeLayer.pipe(
+            Layer.provideMerge(
+              harnessLayer({
+                ...fauxParent([answer("Handled the finding.")]),
+                openStorage: Effect.tryPromise({
+                  try: () => openNodeSqliteStorage(database),
+                  catch: (cause) => durableError("open recovery storage", cause),
+                }),
+              }),
+            ),
+            Layer.provideMerge(readOnReopen),
+          ),
+        );
+        const execution = yield* Effect.forkChild(
+          Context.get(services, AttemptRuntime).execute(request, recording.sink),
+        );
+        const resumed = yield* Context.get(services, StubChildren).next;
+        assert.deepStrictEqual(
+          resumed.request.unread.map(({ message }) => message),
+          ["Fix the third finding."],
+        );
+        yield* resumed.reply("Fixed the third finding.");
+        const result = yield* Fiber.join(execution);
+        assert.strictEqual(result.message, "Handled the finding.");
+        const afterRestart = recording.outbound().slice(beforeRestart);
+        const receipts = afterRestart.flatMap(({ payload }) =>
+          payload._tag === "InterventionApplied" ? [payload.state] : [],
+        );
+        assert.lengthOf(receipts, 1);
+        assert.isFalse(receipts[0]?.queued);
+        assert.deepStrictEqual(receipts[0]?.forwardedTo, Option.some(childSessionId));
+        // A replayed call does not send the task prompt again.
+        const started = afterRestart.flatMap(({ payload }) =>
+          payload._tag === "SessionEvent" &&
+          payload.event._tag === "SessionStarted" &&
+          payload.event.session.id === childSessionId
+            ? [payload.event]
+            : [],
+        );
+        assert.lengthOf(started, 1);
+        assert.deepStrictEqual(started[0]?.prompt, Option.none());
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
 );

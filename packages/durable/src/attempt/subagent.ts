@@ -35,7 +35,7 @@ import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Schema, Stream } 
 import { durableError, type DurableHarnessError } from "../harness.ts";
 import { AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
-import { parentSessionId } from "./parent.ts";
+import { childSessionId, parentSessionId } from "./parent.ts";
 import { storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { SavedChild, SubagentDoc } from "./child.ts";
@@ -192,7 +192,7 @@ export const subagentTool = (services: ExtensionServices) => {
         message: `Attempt tried to spawn child ${attemptedChildren} after reaching its ${spec.maxChildren}-child budget`,
       });
     }
-    const sessionId = AgentSessionId.make(`${parentId}:child:${attemptedChildren}`);
+    const sessionId = childSessionId(spec.attemptId, attemptedChildren);
     const checkpoint = <A>(effect: Effect.Effect<A, DurableHarnessError>) =>
       effect.pipe(
         Effect.tapError((error) =>
@@ -245,6 +245,67 @@ export const subagentTool = (services: ExtensionServices) => {
           details: { childSessionId: sessionId },
         } satisfies ToolExecutionResult<SpawnDetails>),
       );
+    // The relay leaves the inputs of an unfinished call to that call. Registering them under the
+    // routing permit lets relay passes skip them without scanning the unfinished calls.
+    const restoredInputs = replayed
+      ? yield* hub.routing.withPermits(1)(
+          Effect.gen(function* () {
+            const record = yield* call("restore the child's operator inputs", () =>
+              api.snapshot(AttemptRecordDoc, spec.attemptId, context),
+            );
+            const decoded = yield* Effect.forEach(
+              (record?.queuedInputs ?? []).filter(
+                (input) => "child" in input && input.child === sessionId,
+              ),
+              (input) =>
+                Schema.decodeEffect(AttemptChannel.Intervention)(input.intervention).pipe(
+                  Effect.map((intervention) => ({
+                    inputSequence: AttemptChannel.Sequence.make(input.inputSequence),
+                    intervention,
+                  })),
+                ),
+            ).pipe(Effect.result);
+            if (Result.isSuccess(decoded))
+              for (const input of decoded.success) hub.childInputs.add(input.inputSequence);
+            return decoded;
+          }),
+        )
+      : Result.succeed([]);
+    const unsettled = new Map(
+      Result.isSuccess(restoredInputs)
+        ? restoredInputs.success.map((input) => [input.inputSequence, input] as const)
+        : [],
+    );
+    // Every exit settles the restored inputs that the child did not report.
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        for (const inputSequence of unsettled.keys()) hub.childInputs.delete(inputSequence);
+        if (unsettled.size === 0) return;
+        if (!(yield* Deferred.isDone(hub.attached))) {
+          yield* Effect.logInfo("Leaving restored operator inputs for the next relay", {
+            attemptId: spec.attemptId,
+            sessionId,
+            inputs: unsettled.size,
+          });
+          return;
+        }
+        yield* Effect.logInfo("The child call ended before it read its restored operator inputs", {
+          attemptId: spec.attemptId,
+          sessionId,
+          inputs: unsettled.size,
+        });
+        for (const input of unsettled.values())
+          yield* services.hubs.delivery(hub, {
+            _tag: "Delivery",
+            inputSequence: input.inputSequence,
+            intervention: input.intervention,
+            delivered: Option.none(),
+          });
+        unsettled.clear();
+      }),
+    );
+    if (Result.isFailure(restoredInputs))
+      return yield* interrupted("the saved operator messages no longer decode");
     if (replayed)
       yield* checkpoint(
         Effect.try({
@@ -308,24 +369,13 @@ export const subagentTool = (services: ExtensionServices) => {
         : { id: sessionId, parentId, agent: spec.agent.name, brain: spec.agent.brain }),
       gatewayCredential: yield* request.gatewayCredential,
     });
-    const { held, paused, inputs } = yield* call("restore the child's supervision", async () => {
+    const { held, paused } = yield* call("restore the child's supervision", async () => {
       const hold = await api.snapshot(HoldDoc, owner.taskId, context);
-      const record = await api.snapshot(AttemptRecordDoc, spec.attemptId, context);
       return {
         held: hold?.held.includes(sessionId) ?? false,
         paused: hold?.pausedChildren?.includes(sessionId) ?? false,
-        inputs: (record?.queuedInputs ?? []).filter(
-          (input) => "child" in input && input.child === sessionId,
-        ),
       };
     });
-    const restoredInputs = yield* Effect.forEach(inputs, (input) =>
-      Schema.decodeEffect(AttemptChannel.Intervention)(input.intervention).pipe(
-        Effect.map((intervention) => ({ ...input, intervention })),
-      ),
-    ).pipe(Effect.result);
-    if (Result.isFailure(restoredInputs))
-      return yield* interrupted("the saved operator messages no longer decode");
     const unread = restoredInputs.success.flatMap(({ intervention }) => {
       const action = intervention.action;
       return action._tag === "Steer" || action._tag === "OperatorMessage"
@@ -484,33 +534,33 @@ export const subagentTool = (services: ExtensionServices) => {
           }, context),
         ).pipe(Effect.mapError(journalError));
       }),
-      delivered: (id, delivered) => {
-        const input = restoredInputs.success.find(
-          ({ intervention }) =>
-            (intervention.action._tag === "Steer" ||
-              intervention.action._tag === "OperatorMessage") &&
-            intervention.action.id === id,
-        );
-        return input === undefined
-          ? Effect.void
-          : services.hubs.delivery(hub, {
-              _tag: "Delivery",
-              inputSequence: AttemptChannel.Sequence.make(input.inputSequence),
-              intervention: input.intervention,
-              delivered: Option.map(delivered, (state) =>
-                AttemptChannel.InterventionState.make({
-                  ...state,
-                  forwardedTo:
-                    input.intervention.target._tag === "Parent"
-                      ? Option.some(sessionId)
-                      : Option.none(),
-                }),
-              ),
-            });
-      },
+      delivered: (id, delivered) =>
+        Effect.suspend(() => {
+          const input = [...unsettled.values()].find(
+            ({ intervention }) =>
+              (intervention.action._tag === "Steer" ||
+                intervention.action._tag === "OperatorMessage") &&
+              intervention.action.id === id,
+          );
+          if (input === undefined) return Effect.void;
+          unsettled.delete(input.inputSequence);
+          return services.hubs.delivery(hub, {
+            _tag: "Delivery",
+            inputSequence: input.inputSequence,
+            intervention: input.intervention,
+            delivered: Option.map(delivered, (state) =>
+              AttemptChannel.InterventionState.make({
+                ...state,
+                forwardedTo:
+                  input.intervention.target._tag === "Parent"
+                    ? Option.some(sessionId)
+                    : Option.none(),
+              }),
+            ),
+          });
+        }),
     });
     const runChild = Effect.gen(function* () {
-      for (const input of restoredInputs.success) hub.childInputs.add(input.inputSequence);
       // Annotate logs with the Attempt because this tool runs outside the Attempt's fiber. An abort
       // interrupts a launch that is still waiting through retry delays.
       const child = yield* untilAborted(
@@ -733,14 +783,7 @@ export const subagentTool = (services: ExtensionServices) => {
       return {
         output: [{ type: "text" as const, text }],
       } satisfies ToolExecutionResult<SpawnDetails>;
-    }).pipe(
-      Effect.scoped,
-      Effect.onError(() =>
-        Effect.sync(() => {
-          for (const input of restoredInputs.success) hub.childInputs.delete(input.inputSequence);
-        }),
-      ),
-    );
+    }).pipe(Effect.scoped);
     return yield* replayed
       ? runChild.pipe(
           Effect.catchIf(Schema.is(AgentSessionError), (error) => interrupted(error.message)),

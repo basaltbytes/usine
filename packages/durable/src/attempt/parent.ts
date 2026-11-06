@@ -34,6 +34,10 @@ interface ResolvedParent {
 export const parentSessionId = (attemptId: AttemptId): AgentSessionId =>
   AgentSessionId.make(`parent:${attemptId}`);
 
+/** Returns the session ID of the Attempt's `count`th child delegation. */
+export const childSessionId = (attemptId: AttemptId, count: number): AgentSessionId =>
+  AgentSessionId.make(`${parentSessionId(attemptId)}:child:${count}`);
+
 /** Returns the parent session with the rostered Agent and the resolved model. */
 export const parentSession = (
   spec: RunSpec,
