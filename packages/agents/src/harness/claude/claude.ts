@@ -622,6 +622,7 @@ const makeClaudeChild = Effect.gen(function* () {
             yield* channel.emit(SessionTokensUpdated.make({ session, ...used.value }));
           for (const event of sessionEventsFrom(message, session, tools)) {
             yield* channel.emit(event);
+            if (event._tag === "ToolFinished") resumed = false;
           }
           if (!Schema.is(ClaudeResultMessage)(message)) return;
           completedTurn = Option.none();
@@ -631,6 +632,7 @@ const makeClaudeChild = Effect.gen(function* () {
             yield* channel.fail(resultFailure(session.id, message, providerFailure));
             return;
           }
+          resumed = false;
           providerFailure = Option.none();
           const stillQueued = message.queued_turn_count;
           // Claude has read every queued message except those still queued as separate turns.
@@ -678,14 +680,7 @@ const makeClaudeChild = Effect.gen(function* () {
             Stream.runForEach(
               Result.match({
                 onSuccess: (message) =>
-                  handle(message).pipe(
-                    Effect.andThen(launch.acknowledge(message)),
-                    Effect.tap(() =>
-                      Effect.sync(() => {
-                        resumed = false;
-                      }),
-                    ),
-                  ),
+                  handle(message).pipe(Effect.andThen(launch.acknowledge(message))),
                 onFailure: (error) =>
                   Effect.sync(() => {
                     broken = Option.some(error);

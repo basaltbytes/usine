@@ -377,7 +377,14 @@ for (const state of [
     20_000,
   );
 
-for (const outcome of ["completed", "second-exit", "idle", "two-outages"] as const)
+for (const outcome of [
+  "completed",
+  "second-exit",
+  "second-exit-after-init",
+  "second-exit-after-tool-start",
+  "idle",
+  "two-outages",
+] as const)
   it.live.skipIf(process.platform !== "linux")(
     `Claude recovers after lease expiry: ${outcome}`,
     () =>
@@ -411,13 +418,13 @@ for (const outcome of ["completed", "second-exit", "idle", "two-outages"] as con
             const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
             const originalPid = yield* fs.readFileString(pidFile);
             // Simulate a heartbeat gap longer than the real two-minute lease.
-            if (outcome === "second-exit")
-              yield* fs.writeFileString(`${fixture.cwd}/exit-resume`, "ready");
+            const exitsAgain = outcome.startsWith("second-exit");
+            if (exitsAgain) yield* fs.writeFileString(`${fixture.cwd}/exit-resume`, outcome);
             yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
             const launches = yield* fileWithLines(`${fixture.cwd}/launch-arguments`, 2);
             assert.lengthOf(launches, 2);
             assert.include(launches[1] ?? "", `"--resume=${saved.value}"`);
-            if (outcome === "second-exit") {
+            if (exitsAgain) {
               const failure = yield* running.result.pipe(Effect.flip);
               assert.strictEqual(failure._tag, "SessionOperationError");
               if (failure._tag === "SessionOperationError")
@@ -443,6 +450,11 @@ for (const outcome of ["completed", "second-exit", "idle", "two-outages"] as con
             if (outcome === "two-outages") {
               for (;;) {
                 if ((yield* Queue.take(events))._tag === "ToolStarted") break;
+              }
+              yield* fs.writeFileString(`${fixture.cwd}/finish-tool`, "ready");
+              for (;;) {
+                const event = yield* Queue.take(events);
+                if (event._tag === "ToolFinished" && !event.isError) break;
               }
               yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
               const argumentsAfterRecovery = yield* fileWithLines(

@@ -40,6 +40,7 @@ const mirror = { type: 'transcript_mirror', filePath: '/replay/session.jsonl', e
 const sendBatch = batch => process.stdout.write(batch.map(message => JSON.stringify(message) + '\\n').join(''));
 let waiting = false;
 let hookPending = false;
+let toolFinished = false;
 const timer = setInterval(() => {
   if (fs.existsSync('request-sdk-tail') && !fs.existsSync('sdk-tail-sent')) {
     sendBatch([sessionState('idle'), mirror]);
@@ -53,7 +54,8 @@ const timer = setInterval(() => {
       } });
       fs.writeFileSync('hook-sent', 'ready');
     }
-  if (waiting && !hookPending && fs.existsSync('release')) { waiting = false; sendBatch([...messages.slice(2), sessionState('idle'), mirror]); }
+  if (waiting && !toolFinished && fs.existsSync('finish-tool')) { toolFinished = true; send(messages[2]); }
+  if (waiting && !hookPending && fs.existsSync('release')) { waiting = false; sendBatch([...messages.slice(toolFinished ? 3 : 2), sessionState('idle'), mirror]); }
 }, 10);
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const message = JSON.parse(line);
@@ -68,7 +70,13 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   }
   else if (message.type === 'user') {
     fs.appendFileSync('user-messages', JSON.stringify(message) + '\\n');
-    if (fs.existsSync('exit-resume') && process.argv.some(arg => arg.startsWith('--resume'))) process.exit(1);
+    if (fs.existsSync('exit-resume') && process.argv.some(arg => arg.startsWith('--resume'))) {
+      const fault = fs.readFileSync('exit-resume', 'utf8');
+      if (fault === 'second-exit') process.exit(1);
+      sendBatch([sessionState('running'), mirror, ...messages.slice(0, fault === 'second-exit-after-init' ? 1 : 2)]);
+      setTimeout(() => process.exit(1), 50);
+      return;
+    }
     // One write makes the checkpoint exercise multiple protocol messages in one owner frame.
     sendBatch([sessionState('running'), mirror, ...messages.slice(0, 2)]);
     waiting = true;
