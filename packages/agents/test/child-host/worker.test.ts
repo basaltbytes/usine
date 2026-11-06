@@ -303,6 +303,24 @@ describe("standalone worker owner", () => {
       writeFileSync(join(root, "identity"), `previous-boot:${pid}`);
       writeFileSync(join(root, "process"), String(pid));
       writeFileSync(join(root, "process.identity"), `test-boot:${pid}:previous-start`);
+      for (const [name, content] of Object.entries({
+        input: "",
+        output: "",
+        ready: "",
+        heartbeat: "",
+        sequence: "0",
+        delivered: "0",
+      }))
+        writeFileSync(join(root, name), content);
+      const relay = start(pidFile);
+      await eventually(() => exited(relay.frames));
+      expect(relay.frames.find((frame) => "exitCode" in frame)).toMatchObject({
+        exitCode: 1,
+        stderrTail: expect.stringContaining("owner disappeared"),
+      });
+      expect(await relay.closed, relay.stderr()).toBe(0);
+      expect(unrelated.kill(0)).toBe(true);
+      writeFileSync(pidFile, String(pid));
       for (const mode of ["stop", "remove"]) {
         const stopped = spawnSync(process.execPath, ["-e", program, mode, pidFile], {
           encoding: "utf8",

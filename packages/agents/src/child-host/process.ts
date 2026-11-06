@@ -16,6 +16,7 @@ import { ChildProcessSpawner } from "effect/process";
 import { childPidFile, type ChildHost, SSH_FAILURE } from "./child-host.ts";
 import { hostCommand, hostOutput } from "./command.ts";
 import { PROCESS_OWNER } from "./supervisor.ts";
+import { outputAcknowledgements } from "./output.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../runtime.ts";
 
 export class ChildProcessLost extends Schema.TaggedError<
@@ -102,32 +103,16 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   const stdout = yield* Queue.make<Uint8Array, SessionOperationError | Cause.Done>();
   const exit = yield* Deferred.make<ChildProcessLost, SessionOperationError>();
   const outgoing = yield* Queue.make<string, Cause.Done>();
-  const history = new Map<number, { line: string; data: Uint8Array }>();
-  let sequence = 0;
+  const history = yield* Ref.make<
+    ReadonlyMap<number, { readonly line: string; readonly data: Uint8Array }>
+  >(new Map());
+  const sequence = yield* Ref.make(0);
   const ready = yield* Deferred.make<void, SessionOperationError>();
   const checkpoint = yield* Deferred.make<void>();
   const generation = yield* Deferred.make<Option.Option<number>, SessionOperationError>();
   const offset = yield* Ref.make(0);
-  const delivered = yield* Ref.make({ offset: 0, skip: 0 });
-  const pending: Array<{ remaining: number; handled: number; start: number; offset: number }> = [];
-  const acknowledgeOutput = (bytes: number) =>
-    Effect.gen(function* () {
-      let remaining = bytes;
-      while (pending.length > 0) {
-        const frame = pending[0];
-        if (frame === undefined) break;
-        const handled = Math.min(remaining, frame.remaining);
-        frame.remaining -= handled;
-        frame.handled += handled;
-        remaining -= handled;
-        if (frame.remaining > 0) {
-          yield* Ref.set(delivered, { offset: frame.start, skip: frame.handled });
-          break;
-        }
-        pending.shift();
-        yield* Ref.set(delivered, { offset: frame.offset, skip: 0 });
-      }
-    });
+  const output = yield* outputAcknowledgements();
+  const acknowledgeOutput = output.acknowledge;
   const pidFile = childPidFile(target.cwd, target.sessionId.value);
   const fields = { sessionId: target.sessionId.value };
   const environmentKeys = yield* Schema.encodeEffect(
@@ -140,14 +125,14 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
     Effect.gen(function* () {
       if (yield* lifecycle.isStopping) return;
       yield* Deferred.await(ready);
-      sequence += 1;
+      const id = yield* Ref.updateAndGet(sequence, (value) => value + 1);
       const line = yield* Schema.encodeEffect(Schema.fromJsonString(InputFrame))({
         ...frame,
-        sequence,
+        sequence: id,
       }).pipe(Effect.orDie);
       const data =
         "data" in frame ? yield* Effect.fromResult(Base64.decode(frame.data)) : new Uint8Array();
-      history.set(sequence, { line, data });
+      yield* Ref.update(history, (entries) => new Map(entries).set(id, { line, data }));
       yield* Queue.offer(outgoing, line);
     });
   yield* input.pipe(
@@ -162,27 +147,30 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
     Effect.forkScoped,
   );
 
-  let failures = 0;
-  let launched = false;
-  const relay = Effect.fn("ChildHost.relay")(function* () {
+  const failures = yield* Ref.make(0);
+  const launched = yield* Ref.make(false);
+  const replay = Effect.fn("ChildHost.replay")(function* () {
+    yield* Effect.annotateCurrentSpan(fields);
+    const lines = [...(yield* Ref.get(history)).values()].map(({ line }) => line);
+    const replayed = new Set(lines);
+    return Stream.concat(
+      Stream.fromIterable(lines),
+      Stream.fromQueue(outgoing).pipe(Stream.filter((line) => !replayed.has(line))),
+    );
+  });
+  const connect = Effect.fn("ChildHost.connect")(function* () {
     yield* Effect.annotateCurrentSpan(fields);
     const cursor = yield* Ref.get(offset);
+    const wasLaunched = yield* Ref.getAndSet(launched, true);
     const mode = (yield* Deferred.isDone(ready))
       ? "attach"
       : transport === "resume"
         ? "resume"
-        : launched
+        : wasLaunched
           ? "attach"
           : "replace";
-    launched = true;
     const relayReady = yield* Deferred.make<void>();
-    let skipped = 0;
-    const replay = [...history.values()].map(({ line }) => line);
-    const replayed = new Set(replay);
-    const frames = Stream.concat(
-      Stream.fromIterable(replay),
-      Stream.fromQueue(outgoing).pipe(Stream.filter((line) => !replayed.has(line))),
-    );
+    const frames = yield* replay();
     const handle = yield* spawner.spawn(
       hostCommand(
         target.host,
@@ -210,7 +198,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
               frames,
               Stream.tick("1 second").pipe(
                 Stream.mapEffect(() =>
-                  Deferred.await(relayReady).pipe(Effect.andThen(Ref.get(delivered))),
+                  Deferred.await(relayReady).pipe(Effect.andThen(output.cursor)),
                 ),
                 Stream.map(
                   (cursor) => `{"heartbeat":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,
@@ -223,6 +211,19 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
         },
       ),
     );
+    return { handle, relayReady, cursor };
+  });
+  const stream = Effect.fn("ChildHost.stream")(function* ({
+    handle,
+    relayReady,
+    cursor,
+  }: {
+    readonly handle: ChildProcessSpawner.ChildProcessHandle;
+    readonly relayReady: Deferred.Deferred<void>;
+    readonly cursor: number;
+  }) {
+    yield* Effect.annotateCurrentSpan(fields);
+    const skipped = yield* Ref.make(0);
     const read = handle.stdout.pipe(
       Stream.decodeText(),
       Stream.mapAccum(
@@ -242,16 +243,16 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
           }
           if ("ready" in frame) {
             if (!(yield* Deferred.isDone(ready))) {
-              yield* Ref.set(delivered, { offset: frame.offset, skip: frame.skip ?? 0 });
+              yield* output.reset({ offset: frame.offset, skip: frame.skip ?? 0 });
             }
-            skipped = frame.skip ?? 0;
+            yield* Ref.set(skipped, frame.skip ?? 0);
             yield* Deferred.succeed(relayReady, undefined);
-            failures = 0;
+            yield* Ref.set(failures, 0);
             if (!(yield* Deferred.isDone(ready))) {
-              sequence = frame.sequence;
+              yield* Ref.set(sequence, frame.sequence);
               yield* Deferred.succeed(
                 generation,
-                frame.retained === true ? Option.some(sequence) : Option.none(),
+                frame.retained === true ? Option.some(frame.sequence) : Option.none(),
               );
               yield* Deferred.succeed(ready, undefined);
             }
@@ -262,32 +263,36 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
             });
           } else if ("ack" in frame) {
             if (acknowledgement === "handled")
-              pending.push({
+              yield* output.record({
                 remaining: 0,
                 handled: 0,
                 start: yield* Ref.get(offset),
                 offset: frame.offset,
               });
-            for (const [id, entry] of history)
+            for (const [id, entry] of yield* Ref.get(history))
               if (id <= frame.ack) {
-                history.delete(id);
+                yield* Ref.update(history, (entries) => {
+                  const remaining = new Map(entries);
+                  remaining.delete(id);
+                  return remaining;
+                });
                 const bytes = yield* onInputAcknowledged(entry.data);
                 yield* acknowledgeOutput(bytes);
               }
           } else if ("stdout" in frame) {
             const bytes = yield* Effect.fromResult(Base64.decode(frame.stdout));
             if (acknowledgement === "handled")
-              pending.push({
+              yield* output.record({
                 remaining: bytes.length,
-                handled: skipped,
+                handled: yield* Ref.get(skipped),
                 start: yield* Ref.get(offset),
                 offset: frame.offset,
               });
-            skipped = 0;
+            yield* Ref.set(skipped, 0);
             yield* Queue.offer(stdout, bytes);
           } else {
             if (acknowledgement === "handled")
-              pending.push({
+              yield* output.record({
                 remaining: 0,
                 handled: 0,
                 start: yield* Ref.get(offset),
@@ -300,46 +305,49 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
           }
           yield* Ref.set(offset, frame.offset);
           if (acknowledgement === "received")
-            yield* Ref.set(delivered, { offset: frame.offset, skip: 0 });
+            yield* output.reset({ offset: frame.offset, skip: 0 });
           else yield* acknowledgeOutput(0);
         }),
       ),
     );
-    let stderrTail = "";
+    const stderr = yield* Ref.make("");
     const diagnostics = handle.stderr.pipe(
       Stream.decodeText(),
-      Stream.runForEach((text) =>
-        Effect.sync(() => {
-          stderrTail = (stderrTail + text).slice(-8192);
-        }),
-      ),
+      Stream.runForEach((text) => Ref.update(stderr, (tail) => (tail + text).slice(-8192))),
     );
     const [, , code] = yield* Effect.all([read, diagnostics, handle.exitCode], {
       concurrency: "unbounded",
     });
-    return { code, stderrTail };
+    return { code, stderrTail: yield* Ref.get(stderr) };
+  });
+  const reattach = Effect.fn("ChildHost.reattach")(function* (
+    code: ChildProcessSpawner.ExitCode,
+    stderrTail: string,
+  ) {
+    yield* Effect.annotateCurrentSpan(fields);
+    if (code !== SSH_FAILURE)
+      return yield* processError(
+        target,
+        "The child process owner relay stopped without an exit event",
+        { relayExitCode: code, stderrTail },
+      );
+    const attempts = yield* Ref.updateAndGet(failures, (value) => value + 1);
+    const delaySeconds = Math.min(30, 2 ** Math.min(attempts - 1, 5));
+    yield* Effect.logWarning("SSH connection dropped; reattaching the child process owner", {
+      ...fields,
+      failures: attempts,
+      delaySeconds,
+      offset: yield* Ref.get(offset),
+    });
+    yield* Effect.sleep(`${delaySeconds} seconds`);
   });
   const monitor = yield* Effect.gen(function* () {
     while (!(yield* Deferred.isDone(exit))) {
       if (yield* lifecycle.isStopping) return yield* Effect.never;
-      const { code, stderrTail } = yield* Effect.scoped(relay());
+      const { code, stderrTail } = yield* Effect.scoped(connect().pipe(Effect.flatMap(stream)));
       if (yield* lifecycle.isStopping) return yield* Effect.never;
       if (yield* Deferred.isDone(exit)) break;
-      if (code !== SSH_FAILURE)
-        return yield* processError(
-          target,
-          "The child process owner relay stopped without an exit event",
-          { relayExitCode: code, stderrTail },
-        );
-      failures += 1;
-      const delaySeconds = Math.min(30, 2 ** Math.min(failures - 1, 5));
-      yield* Effect.logWarning("SSH connection dropped; reattaching the child process owner", {
-        ...fields,
-        failures,
-        delaySeconds,
-        offset: yield* Ref.get(offset),
-      });
-      yield* Effect.sleep(`${delaySeconds} seconds`);
+      yield* reattach(code, stderrTail);
     }
     yield* Queue.end(stdout);
     const result = yield* Deferred.await(exit);
@@ -384,7 +392,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
         }
         yield* Effect.gen(function* () {
           yield* Deferred.await(ready);
-          const cursor = yield* Ref.get(delivered);
+          const cursor = yield* output.cursor;
           yield* Queue.offer(
             outgoing,
             `{"heartbeat":true,"checkpoint":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,

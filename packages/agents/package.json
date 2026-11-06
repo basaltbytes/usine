@@ -79,9 +79,9 @@
     "build": "node build-worker.mjs && tsc -b",
     "check": "node build-worker.mjs && effect-tsgo tsc -p tsconfig.check.json && effect-tsgo tsc -p tsconfig.conformance.json",
     "test": "node build-worker.mjs && vitest run --exclude 'test/integration/**'",
-    "test:integration:claude": "vitest run test/integration/claude.test.ts",
-    "test:integration:codex": "vitest run test/integration/codex.test.ts",
-    "test:integration:pi": "vitest run test/integration/pi.test.ts"
+    "test:integration:claude": "node build-worker.mjs && vitest run test/integration/claude.test.ts",
+    "test:integration:codex": "node build-worker.mjs && vitest run test/integration/codex.test.ts",
+    "test:integration:pi": "node build-worker.mjs && vitest run test/integration/pi.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.311",
