@@ -60,6 +60,8 @@ export class ChildSessionJournal extends Context.Service<
   ChildSessionJournal,
   {
     readonly started: (reference: HarnessSession) => Effect.Effect<void, SessionOperationError>;
+    /** Records that the native process acknowledged the task prompt. */
+    readonly prompted: Effect.Effect<void, SessionOperationError>;
     readonly continued: (
       timestamps: ReadonlyArray<number>,
     ) => Effect.Effect<void, SessionOperationError>;
@@ -74,6 +76,7 @@ export class ChildSessionJournal extends Context.Service<
     Option.getOrElse(() =>
       ChildSessionJournal.of({
         started: () => Effect.void,
+        prompted: Effect.void,
         continued: () => Effect.void,
         delivered: () => Effect.void,
       }),
@@ -96,6 +99,12 @@ export class ChildRequest extends Schema.Class<
   resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
   ),
+  /**
+   * Whether the native process acknowledged the task prompt before the restart. Only Claude records
+   * it; Codex reads the thread's turns, and Pi saves a conversation only after its first user
+   * message.
+   */
+  prompted: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
   /** Continuation timestamps in milliseconds, retained across orchestrator restarts. */
   continuations: Schema.Array(Schema.Finite).pipe(
     Schema.withConstructorDefault(Effect.succeed([])),

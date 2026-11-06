@@ -196,6 +196,7 @@ describe("shared continuation policy", () => {
       }).pipe(
         Effect.provideService(ChildSessionJournal, {
           started: () => Effect.void,
+          prompted: Effect.void,
           continued: (timestamps) =>
             Effect.sync(() => {
               history.push(timestamps);

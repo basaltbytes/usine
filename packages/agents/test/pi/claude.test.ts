@@ -759,6 +759,7 @@ describe("Claude child backend", () => {
               Effect.sync(() => {
                 saved = Option.some(reference);
               }),
+            prompted: Effect.void,
             continued: () => Effect.void,
             delivered: () => Effect.void,
           }),

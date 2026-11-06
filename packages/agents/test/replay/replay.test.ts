@@ -1,13 +1,18 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import type { AgentSessionEvent, SessionTokensUpdated } from "@usine/core/agent/session";
-import { Interrupt, Release, Steer } from "@usine/core/attempt/channel";
+import type {
+  AgentSessionEvent,
+  HarnessSession,
+  SessionTokensUpdated,
+} from "@usine/core/agent/session";
+import { Interrupt, OperatorMessageId, Release, Steer } from "@usine/core/attempt/channel";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import {
   Cause,
   Effect,
   Exit,
   FileSystem,
+  Layer,
   Logger,
   Option,
   Queue,
@@ -19,7 +24,12 @@ import {
 } from "effect";
 import { openFixture, providers, scenarios, recordingPid } from "./fixture.ts";
 import { ChildProcessLost } from "../../src/child-host/process.ts";
-import { ChildBackend, ChildRequest, ChildSessionLifecycle } from "../../src/runtime.ts";
+import {
+  ChildBackend,
+  ChildRequest,
+  ChildSessionJournal,
+  ChildSessionLifecycle,
+} from "../../src/runtime.ts";
 import { Tape } from "./transcript.ts";
 import { decodeWire, encodeWire } from "./process.ts";
 import { Base64 } from "effect/encoding";
@@ -223,6 +233,7 @@ it.live(
 for (const state of [
   "working",
   "idle",
+  "idle-unread",
   "usage",
   "usage-after-recovery",
   "hook",
@@ -247,6 +258,12 @@ for (const state of [
           const events = yield* Queue.unbounded<AgentSessionEvent>();
           let committedUsage = Option.none<SessionTokensUpdated>();
           const tracksUsage = state === "usage" || state === "usage-after-recovery";
+          const idle = state === "idle" || state === "idle-unread";
+          // Guidance that reached the retained process before the restart, without a receipt.
+          const restored = {
+            id: OperatorMessageId.make("6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b"),
+            message: "Restored guidance",
+          };
           if (tracksUsage) yield* fs.writeFileString(`${fixture.cwd}/cumulative-usage`, "ready");
           if (state === "buffered-result")
             yield* fs.writeFileString(`${fixture.cwd}/block-result`, "ready");
@@ -275,7 +292,7 @@ for (const state of [
           const started = yield* until("SessionStarted");
           assert(started._tag === "SessionStarted");
           yield* until("ToolStarted");
-          if (state === "idle" || tracksUsage) {
+          if (idle || tracksUsage) {
             yield* fixture.controls.releaseCommand;
             yield* until("SessionIdle");
             if (state === "usage-after-recovery") {
@@ -353,8 +370,8 @@ for (const state of [
                       ? { ...fixture.request.environment, REPLAY_ENVIRONMENT: "changed" }
                       : fixture.request.environment,
                   paused: state === "hook",
-                  idle:
-                    state === "idle" || tracksUsage ? Option.some("REPLAY_DONE") : Option.none(),
+                  idle: idle || tracksUsage ? Option.some("REPLAY_DONE") : Option.none(),
+                  unread: state === "idle-unread" ? [restored] : [],
                   usage: tracksUsage ? committedUsage : Option.none(),
                 }),
               );
@@ -430,7 +447,7 @@ for (const state of [
               assert.lengthOf(inputs, count, "reattachment sends no task or continuation prompt");
               assert.include(inputs[0] ?? "", fixture.request.prompt);
               assert.include(inputs[count - 1] ?? "", guidance);
-              if (state !== "idle" && !tracksUsage) yield* fixture.controls.releaseCommand;
+              if (!idle && !tracksUsage) yield* fixture.controls.releaseCommand;
               if (tracksUsage) {
                 let latest = Option.none<SessionTokensUpdated>();
                 for (;;) {
@@ -468,6 +485,70 @@ for (const state of [
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
     20_000,
   );
+
+it.live.skipIf(process.platform !== "linux")(
+  "Claude sends the task to a retained process that stopped before its prompt",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* openFixture("claude", "transport-loss", "replay");
+        const fs = yield* FileSystem.FileSystem;
+        const stopping = yield* Ref.make(false);
+        const references = yield* Ref.make<ReadonlyArray<HarnessSession>>([]);
+        const prompted = yield* Ref.make(0);
+        const journal = Layer.succeed(ChildSessionJournal)({
+          started: (reference) => Ref.update(references, (saved) => [...saved, reference]),
+          prompted: Ref.update(prompted, (count) => count + 1),
+          continued: () => Effect.void,
+          delivered: () => Effect.void,
+        });
+        yield* fs.writeFileString(`${fixture.cwd}/hold-control`, "ready");
+        const scope = yield* Scope.make();
+        yield* Effect.gen(function* () {
+          yield* (yield* ChildBackend).launch(fixture.request);
+        }).pipe(
+          Effect.provide([fixture.backend, journal]),
+          Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+          Effect.forkIn(scope),
+        );
+        yield* fileWithLines(`${fixture.cwd}/held-controls`, 1);
+        const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
+        const pid = yield* fs.readFileString(pidFile);
+        const [reference] = yield* Ref.get(references);
+        assert(reference !== undefined, "the reference is saved before the prompt");
+        const receiptsBeforeStop = yield* Ref.get(prompted);
+        assert.strictEqual(receiptsBeforeStop, 0);
+        yield* Ref.set(stopping, true);
+        yield* Scope.close(scope, Exit.void);
+        const promptSent = yield* fs.exists(`${fixture.cwd}/user-messages`);
+        assert.isFalse(promptSent);
+        yield* fs.remove(`${fixture.cwd}/hold-control`);
+
+        yield* Effect.gen(function* () {
+          const resumed = yield* (yield* ChildBackend).launch(
+            ChildRequest.make({
+              ...fixture.request,
+              resume: Option.some(reference),
+              prompted: false,
+            }),
+          );
+          const currentPid = yield* fs.readFileString(pidFile);
+          assert.strictEqual(currentPid, pid);
+          const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, 1);
+          assert.lengthOf(inputs, 1);
+          assert.include(inputs[0] ?? "", fixture.request.prompt);
+          yield* fixture.controls.releaseCommand;
+          const result = yield* resumed.result;
+          assert.include(result.message, "REPLAY_DONE");
+          const receipts = yield* Ref.get(prompted);
+          assert.strictEqual(receipts, 1);
+          const launches = yield* fileWithLines(`${fixture.cwd}/launches`, 1);
+          assert.lengthOf(launches, 1, "the retained process receives the task");
+        }).pipe(Effect.provide([fixture.backend, journal]), Effect.scoped);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+  20_000,
+);
 
 for (const outcome of [
   "completed",

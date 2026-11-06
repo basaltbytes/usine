@@ -29,6 +29,8 @@ type SubagentRecord = {
   idle?: string | null;
   continuations?: Array<number>;
   inFlight?: Array<{ callId: string; tool: string }>;
+  /** Absent on older delegations, which saved the conversation only after the prompt. */
+  prompted?: boolean;
 };
 
 export const SubagentDoc = defineDoc<SubagentRecord>({

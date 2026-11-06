@@ -252,9 +252,25 @@ const makeClaudeChild = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
     const release = yield* holdLogin(request);
+    const journal = yield* ChildSessionJournal.current;
     return yield* Effect.gen(function* () {
       const input = new AsyncInput();
-      const checkpoint = claudeOutputCheckpoint();
+      const recordPrompt = yield* Effect.cached(
+        journal.prompted.pipe(
+          Effect.tap(() =>
+            Effect.logDebug("The Claude process owner acknowledged the first user message", {
+              sessionId: request.session.id,
+            }),
+          ),
+          Effect.catch((error) =>
+            Effect.logWarning(
+              "Could not record the Claude prompt receipt; a restart sends the task again",
+              { sessionId: request.session.id, message: error.message },
+            ),
+          ),
+        ),
+      );
+      const checkpoint = claudeOutputCheckpoint(recordPrompt);
       const owner = yield* sdkProcessSpawner(
         {
           host: request.host,
@@ -476,7 +492,14 @@ const makeClaudeChild = Effect.gen(function* () {
         current.input.end();
       });
       yield* channel.emit(SessionStarted.make({ session, harnessSession: Option.some(reference) }));
-      const submitted = current.retained ? request.unread.map(({ id }) => id) : [];
+      // A retained process that never acknowledged its task waits for input without a turn.
+      const unprompted = current.retained && !request.prompted;
+      if (unprompted)
+        yield* Effect.logWarning("The retained Claude process never received its task", {
+          sessionId: session.id,
+          harnessSessionId: reference.id,
+        });
+      const submitted = current.retained && !unprompted ? request.unread.map(({ id }) => id) : [];
       const send = Effect.fn("ClaudeRuntime.send")(function* (
         message: string,
         id?: OperatorMessageId,
@@ -782,9 +805,9 @@ const makeClaudeChild = Effect.gen(function* () {
       } satisfies RunningSession;
       return {
         running,
-        active: current.retained,
+        active: current.retained && !unprompted,
         recover: (tools: ReadonlyArray<InterruptedTool>) =>
-          conversation.recover(policy, tools, steer),
+          conversation.recover(policy, tools, steer, unprompted),
       };
     },
   );

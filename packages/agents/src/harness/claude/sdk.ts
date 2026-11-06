@@ -188,7 +188,13 @@ const messageKey = (message: Schema.Json): string => {
   return serializeVendorValue(message);
 };
 
-export const claudeOutputCheckpoint = () => {
+const UserInput = Schema.Struct({ type: Schema.Literal("user") });
+
+/**
+ * Tracks which Claude output messages the session handled. Runs `onUserInput` when the process
+ * owner acknowledges an input line that carries a user message.
+ */
+export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect.void) => {
   let buffered = Buffer.alloc(0);
   let input = Buffer.alloc(0);
   const answered = new Set<string>();
@@ -233,7 +239,12 @@ export const claudeOutputCheckpoint = () => {
         while ((end = input.indexOf(10)) >= 0) {
           const decoded = yield* Effect.result(decodeMessage(input.subarray(0, end).toString()));
           input = input.subarray(end + 1);
-          if (Result.isFailure(decoded) || !Schema.is(ControlResponse)(decoded.success)) continue;
+          if (Result.isFailure(decoded)) continue;
+          if (Schema.is(UserInput)(decoded.success)) {
+            yield* onUserInput;
+            continue;
+          }
+          if (!Schema.is(ControlResponse)(decoded.success)) continue;
           const id = decoded.success.response.request_id;
           const entry = pending.find((entry) => !entry.handled && entry.key === id);
           if (entry !== undefined) entry.handled = true;

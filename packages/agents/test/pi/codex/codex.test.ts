@@ -256,6 +256,7 @@ describe("Codex child backend", () => {
           Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
           Effect.provideService(ChildSessionJournal, {
             started: () => Effect.void,
+            prompted: Effect.void,
             continued: () => Effect.void,
             delivered: (id, state) =>
               Effect.sync(() => {
@@ -851,6 +852,7 @@ describe("Codex child backend", () => {
           Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
           Effect.provideService(ChildSessionJournal, {
             started: () => Effect.void,
+            prompted: Effect.void,
             continued: () => Effect.void,
             delivered: (id, state) =>
               Queue.offer(receipts, Option.isSome(state) ? id : "unread").pipe(Effect.asVoid),

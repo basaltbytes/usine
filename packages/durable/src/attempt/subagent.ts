@@ -138,6 +138,7 @@ export const subagentTool = (services: ExtensionServices) => {
             idle: delegation.idle,
             continuations: [...(delegation.continuations ?? [])],
             inFlight: (delegation.inFlight ?? []).map(({ callId, tool }) => ({ callId, tool })),
+            prompted: delegation.prompted ?? true,
           };
           if (delegation.count !== null)
             return {
@@ -359,6 +360,7 @@ export const subagentTool = (services: ExtensionServices) => {
       held,
       paused,
       idle,
+      prompted: previous.prompted,
       continuations: previous.continuations,
       inFlight: previous.inFlight,
       unread,
@@ -459,10 +461,20 @@ export const subagentTool = (services: ExtensionServices) => {
         yield* call("save the child before its first prompt", () =>
           api.commit(async (tx) => {
             const record = await tx.doc(SubagentDoc, api.taskId);
+            if (record.saved === null) record.prompted = false;
             record.saved = recovery;
           }, context),
         ).pipe(Effect.mapError(journalError));
       }),
+      prompted: Effect.gen(function* () {
+        yield* Effect.annotateCurrentSpan({ sessionId });
+        yield* call("save the child's prompt receipt", () =>
+          api.commit(async (tx) => {
+            const record = await tx.doc(SubagentDoc, api.taskId);
+            record.prompted = true;
+          }, context),
+        ).pipe(Effect.mapError(journalError));
+      }).pipe(Effect.withSpan("Subagent.savePrompted")),
       continued: Effect.fn("Subagent.saveContinuations")(function* (timestamps) {
         yield* Effect.annotateCurrentSpan({ sessionId });
         yield* call("save the child's continuation history", () =>
