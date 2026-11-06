@@ -483,104 +483,133 @@ for (const state of [
     20_000,
   );
 
-it.live.skipIf(process.platform !== "linux")(
-  "Claude restores serialized usage before interleaved retained message blocks recur",
-  () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* openFixture("claude", "transport-loss", "replay");
-        const fs = yield* FileSystem.FileSystem;
-        const stopping = yield* Ref.make(false);
-        const scope = yield* Scope.make();
-        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
-        const events = yield* Queue.unbounded<AgentSessionEvent>();
-        const until = (tag: AgentSessionEvent["_tag"]) =>
-          Effect.gen(function* () {
-            for (;;) {
-              const event = yield* Queue.take(events);
-              if (event._tag === tag) return event;
-            }
-          });
-        yield* Effect.gen(function* () {
-          const running = yield* (yield* ChildBackend).launch(
-            ChildRequest.make({ ...fixture.request, held: true }),
-          );
-          yield* running.events.pipe(
-            Stream.runForEach((event) => Queue.offer(events, event)),
-            Effect.forkScoped,
-          );
-        }).pipe(
-          Effect.provide(fixture.backend),
-          Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
-          Scope.provide(scope),
-        );
-        const started = yield* until("SessionStarted");
-        assert(started._tag === "SessionStarted");
-        yield* until("ToolStarted");
-        yield* fs.writeFileString(`${fixture.cwd}/request-usage-prefix`, "ready");
-        // x and y belong to parallel parent tools; save y's second block after its first is checkpointed.
-        for (let i = 0; i < 3; i++) yield* until("SessionTokensUpdated");
-        const saved = yield* until("SessionTokensUpdated");
-        assert(saved._tag === "SessionTokensUpdated");
-        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(SessionTokensUpdated))(
-          saved,
-        );
-        const committed = yield* Schema.decodeEffect(Schema.fromJsonString(SessionTokensUpdated))(
-          encoded,
-        );
-        assert(Option.isSome(committed.processUsage));
-        assert.strictEqual(committed.processUsage.value.messages?.x, 1010);
-        assert.strictEqual(committed.processUsage.value.messages?.y, 1010);
-        assert.isUndefined(
-          committed.processUsage.value.messages?.["old-x"],
-          "the checkpoint discards superseded IDs while retaining active interleaved IDs",
-        );
-        const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
-        const pid = yield* fs.readFileString(pidFile);
-        yield* Ref.set(stopping, true);
-        yield* Scope.close(scope, Exit.void);
-        const delivered = yield* fs.readFileString(`${pidFile}.transport/delivered`);
-        const checkpoint = yield* Schema.decodeEffect(
-          Schema.fromJsonString(Schema.Struct({ offset: Schema.Int, skip: Schema.Int })),
-        )(delivered);
-        const journal = yield* fs.stat(`${pidFile}.transport/output`);
-        assert.deepStrictEqual(checkpoint, { offset: Number(journal.size), skip: 0 });
-        const usageSchema = Schema.fromJsonString(ChildRequest.fields.usage);
-        const serialized = yield* Schema.encodeEffect(usageSchema)(Option.some(committed));
-        const restored = yield* Schema.decodeEffect(usageSchema)(serialized);
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const resumed = yield* (yield* ChildBackend).launch(
-              ChildRequest.make({
-                ...fixture.request,
-                held: true,
-                resume: started.harnessSession,
-                usage: restored,
-              }),
+for (const checkpointState of ["caught-up", "pending-hook"] as const)
+  it.live.skipIf(process.platform !== "linux")(
+    checkpointState === "caught-up"
+      ? "Claude restores serialized usage before interleaved retained message blocks recur"
+      : "Claude keeps superseded usage while a pending hook holds back the detach checkpoint",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* openFixture("claude", "transport-loss", "replay");
+          const fs = yield* FileSystem.FileSystem;
+          const stopping = yield* Ref.make(false);
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const events = yield* Queue.unbounded<AgentSessionEvent>();
+          const until = (tag: AgentSessionEvent["_tag"]) =>
+            Effect.gen(function* () {
+              for (;;) {
+                const event = yield* Queue.take(events);
+                if (event._tag === tag) return event;
+              }
+            });
+          const first = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({ ...fixture.request, held: true }),
             );
-            const retainedPid = yield* fs.readFileString(pidFile);
-            assert.strictEqual(retainedPid, pid);
-            yield* resumed.events.pipe(
+            yield* running.events.pipe(
               Stream.runForEach((event) => Queue.offer(events, event)),
               Effect.forkScoped,
             );
-            yield* fs.writeFileString(`${fixture.cwd}/request-usage-replay`, "ready");
-            const repeated = yield* until("SessionTokensUpdated");
-            assert(repeated._tag === "SessionTokensUpdated");
-            assert.strictEqual(repeated.totalTokens, committed.totalTokens);
-            const increased = yield* until("SessionTokensUpdated");
-            assert(increased._tag === "SessionTokensUpdated");
-            assert.strictEqual(increased.totalTokens, committed.totalTokens + 5);
-            yield* fixture.controls.releaseCommand;
-            yield* resumed.intervene(Release.make(), () => Effect.void);
-            assert.include((yield* resumed.result).message, "REPLAY_DONE");
-          }),
-        ).pipe(Effect.provide(fixture.backend));
-        yield* fixture.save;
-      }),
-    ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
-  20_000,
-);
+            return running;
+          }).pipe(
+            Effect.provide(fixture.backend),
+            Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+            Scope.provide(scope),
+          );
+          const started = yield* until("SessionStarted");
+          assert(started._tag === "SessionStarted");
+          yield* until("ToolStarted");
+          if (checkpointState === "pending-hook") {
+            yield* first.intervene(Interrupt.make(), () => Effect.void);
+            yield* fs.writeFileString(`${fixture.cwd}/request-hook`, "ready");
+            yield* fileWithLines(`${fixture.cwd}/hook-sent`, 1);
+          }
+          yield* fs.writeFileString(`${fixture.cwd}/request-usage-prefix`, "ready");
+          // Save y's second block after old-x has been superseded by x.
+          for (let i = 0; i < 3; i++) yield* until("SessionTokensUpdated");
+          const saved = yield* until("SessionTokensUpdated");
+          assert(saved._tag === "SessionTokensUpdated");
+          const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(SessionTokensUpdated))(
+            saved,
+          );
+          const committed = yield* Schema.decodeEffect(Schema.fromJsonString(SessionTokensUpdated))(
+            encoded,
+          );
+          assert(Option.isSome(committed.processUsage));
+          assert.strictEqual(committed.processUsage.value.messages?.x, 1010);
+          assert.strictEqual(committed.processUsage.value.messages?.y, 1010);
+          if (checkpointState === "caught-up")
+            assert.isUndefined(
+              committed.processUsage.value.messages?.["old-x"],
+              "the checkpoint discards superseded IDs while retaining active interleaved IDs",
+            );
+          const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
+          const pid = yield* fs.readFileString(pidFile);
+          yield* Ref.set(stopping, true);
+          yield* Scope.close(scope, Exit.void);
+          const delivered = yield* fs.readFileString(`${pidFile}.transport/delivered`);
+          const checkpoint = yield* Schema.decodeEffect(
+            Schema.fromJsonString(Schema.Struct({ offset: Schema.Int, skip: Schema.Int })),
+          )(delivered);
+          const journal = yield* fs.stat(`${pidFile}.transport/output`);
+          if (checkpointState === "pending-hook") {
+            assert.isBelow(checkpoint.offset, Number(journal.size));
+            const answered = yield* fs.exists(`${fixture.cwd}/hook-responses`);
+            assert.isFalse(answered);
+          } else assert.deepStrictEqual(checkpoint, { offset: Number(journal.size), skip: 0 });
+          const usageSchema = Schema.fromJsonString(ChildRequest.fields.usage);
+          const serialized = yield* Schema.encodeEffect(usageSchema)(Option.some(committed));
+          const restored = yield* Schema.decodeEffect(usageSchema)(serialized);
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const resumed = yield* (yield* ChildBackend).launch(
+                ChildRequest.make({
+                  ...fixture.request,
+                  held: true,
+                  paused: checkpointState === "pending-hook",
+                  resume: started.harnessSession,
+                  usage: restored,
+                }),
+              );
+              const retainedPid = yield* fs.readFileString(pidFile);
+              assert.strictEqual(retainedPid, pid);
+              yield* resumed.events.pipe(
+                Stream.runForEach((event) => Queue.offer(events, event)),
+                Effect.forkScoped,
+              );
+              if (checkpointState === "pending-hook") {
+                for (let i = 0; i < 4; i++) {
+                  const replayed = yield* until("SessionTokensUpdated");
+                  assert(replayed._tag === "SessionTokensUpdated");
+                  assert.strictEqual(replayed.totalTokens, committed.totalTokens);
+                }
+              }
+              yield* fs.writeFileString(`${fixture.cwd}/request-usage-replay`, "ready");
+              const repeated = yield* until("SessionTokensUpdated");
+              assert(repeated._tag === "SessionTokensUpdated");
+              assert.strictEqual(repeated.totalTokens, committed.totalTokens);
+              const increased = yield* until("SessionTokensUpdated");
+              assert(increased._tag === "SessionTokensUpdated");
+              assert.strictEqual(increased.totalTokens, committed.totalTokens + 5);
+              if (checkpointState === "pending-hook") {
+                yield* resumed.intervene(
+                  Steer.make({ message: "Continue after the pending hook replay" }),
+                  () => Effect.void,
+                );
+                yield* fileWithLines(`${fixture.cwd}/hook-responses`, 1);
+              }
+              yield* fixture.controls.releaseCommand;
+              yield* resumed.intervene(Release.make(), () => Effect.void);
+              assert.include((yield* resumed.result).message, "REPLAY_DONE");
+            }),
+          ).pipe(Effect.provide(fixture.backend));
+          yield* fixture.save;
+        }),
+      ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+    20_000,
+  );
 
 it.live.skipIf(process.platform !== "linux")(
   "Claude keeps a replaced process's usage after a stop during the replacement launch",
