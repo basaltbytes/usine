@@ -8,6 +8,7 @@ import {
   Effect,
   Exit,
   FileSystem,
+  Logger,
   Option,
   Queue,
   Ref,
@@ -382,6 +383,7 @@ for (const outcome of [
   "second-exit",
   "second-exit-after-init",
   "second-exit-after-tool-start",
+  "idle-handshake-exit",
   "idle",
   "paused",
   "two-outages",
@@ -393,6 +395,11 @@ for (const outcome of [
         Effect.gen(function* () {
           const fixture = yield* openFixture("claude", "transport-loss", "replay");
           const fs = yield* FileSystem.FileSystem;
+          const recoveries = yield* Queue.unbounded<void>();
+          const logger = Logger.make<unknown, void>(({ message }) => {
+            if (Array.isArray(message) && message.includes("Resumed the Claude child's session"))
+              Queue.offerUnsafe(recoveries, undefined);
+          });
           yield* Effect.gen(function* () {
             const running = yield* (yield* ChildBackend).launch(
               ChildRequest.make({ ...fixture.request, held: true }),
@@ -411,7 +418,7 @@ for (const outcome of [
             }
             assert(Option.isSome(saved));
             const waitingForGuidance = outcome === "idle" || outcome === "paused";
-            if (outcome === "idle") {
+            if (outcome === "idle" || outcome === "idle-handshake-exit") {
               yield* fixture.controls.releaseCommand;
               for (;;) {
                 if ((yield* Queue.take(events))._tag === "SessionIdle") break;
@@ -422,7 +429,8 @@ for (const outcome of [
             const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
             const originalPid = yield* fs.readFileString(pidFile);
             // Simulate a heartbeat gap longer than the real two-minute lease.
-            const exitsAgain = outcome.startsWith("second-exit");
+            const exitsAgain =
+              outcome.startsWith("second-exit") || outcome === "idle-handshake-exit";
             if (exitsAgain) yield* fs.writeFileString(`${fixture.cwd}/exit-resume`, outcome);
             yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
             const launches = yield* fileWithLines(`${fixture.cwd}/launch-arguments`, 2);
@@ -440,6 +448,7 @@ for (const outcome of [
             const replacementPid = yield* fs.readFileString(pidFile);
             assert.notStrictEqual(replacementPid, originalPid);
             if (waitingForGuidance) {
+              yield* Queue.take(recoveries);
               yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
               const argumentsAfterRecovery = yield* fileWithLines(
                 `${fixture.cwd}/launch-arguments`,
@@ -451,6 +460,7 @@ for (const outcome of [
               assert.notStrictEqual(recoveredPid, replacementPid);
               const inputsBeforeGuidance = yield* fileWithLines(`${fixture.cwd}/user-messages`, 1);
               assert.lengthOf(inputsBeforeGuidance, 1);
+              yield* Queue.take(recoveries);
               yield* running
                 .intervene(
                   Steer.make({ message: "Continue after waiting for guidance" }),
@@ -487,7 +497,10 @@ for (const outcome of [
             yield* running.intervene(Release.make(), () => Effect.void);
             assert.include((yield* running.result).message, "REPLAY_DONE");
             assert.strictEqual(running.session.id, fixture.request.session.id);
-          }).pipe(Effect.provide(fixture.backend), Effect.scoped);
+          }).pipe(
+            Effect.provide([fixture.backend, Logger.layer([logger], { mergeWithExisting: true })]),
+            Effect.scoped,
+          );
           const retained = yield* fs.exists(childPidFile(fixture.cwd, fixture.request.session.id));
           assert.isFalse(retained);
         }),

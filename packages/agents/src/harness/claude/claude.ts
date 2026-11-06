@@ -721,6 +721,8 @@ const makeClaudeChild = Effect.gen(function* () {
         const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
         const messages = working ? [RESUME_PROMPT, ...(yield* conversation.unread)] : [];
         resumed = working;
+        // A replacement that fails to launch ends the child, even while waiting for guidance.
+        // Only a completed launch can recover again; retrying launch failures could crash-loop.
         current = yield* launchWithRetries(
           request,
           { ...options, resume: harnessSession.value.id },
