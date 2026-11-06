@@ -59,3 +59,11 @@ This replaces the October rule that every in-flight child call ends as interrupt
 The delegation document also records the completed report from `SessionIdle` and clears it on `SessionResumed` or finish. Recovery restores an idle child without starting a turn, so Release returns its saved report and only operator guidance starts more work.
 
 Operator holds and child pauses persist separately in the task supervision document. Recovery restores both before the harness starts a turn, so a restart cannot resume work that the operator interrupted. A paused child remains idle until a steer or operator message supplies guidance; releasing a hold preserves its pause. The runaway guard restores surviving child holds from the transcript before counting unsupervised time. Claude Code and Pi initialize their usage meters from the committed totals because their SDK usage resets when the process restarts.
+
+## Amendment: shared child continuation policy (2026-11-06)
+
+Native `resume(request, reference)` reopens a saved conversation without sending a prompt. A shared policy above Claude Code, Codex, and Pi controls continuation for both live transport recovery and durable restart. Working children receive one continuation instruction and unread operator messages; supervised children wait for guidance. Interrupted tool calls close as errors. The journal persists the native reference before the first prompt and the rolling continuation history before each recovery turn. A fourth continuation within ten minutes fails with a typed error. Failed reopening returns interrupted and retains the original child budget slot.
+
+Claude's session UUID comes from usine before SDK startup. Operator messages carry UUIDs, with delivery acknowledged through Claude's `user_message_uuids` or correlated Codex native user-message items. Turn completion cannot prove delivery. These contracts replace adapter-specific prompts and queue-count inference, which gave restart and live recovery different behavior.
+
+If Codex native history confirms that the saved thread is empty, the shared policy sends the original task as its first input. A thread with saved work receives the continuation instruction.

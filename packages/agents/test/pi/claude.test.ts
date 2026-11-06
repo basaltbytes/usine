@@ -1,3 +1,4 @@
+import type { ClaudeUserMessage } from "../../src/harness/claude/sdk.ts";
 import { jsonKey } from "@usine/core/json-key";
 // SDK streams and hooks require native Promises, including the test implementations.
 // @effect-diagnostics newPromise:off
@@ -42,6 +43,7 @@ import {
   AgentCapacityError,
   ChildBackend,
   ChildRequest,
+  ChildSessionJournal,
   HostLoginLock,
   type OnDelivery,
   SessionOperationError,
@@ -171,10 +173,10 @@ const loginContended: ReadonlyArray<Schema.Json> = [
  * closed, as in Claude Code's streaming-input sessions.
  */
 const loginRace = (contended: number) => {
-  const launches: Array<{ closed: boolean }> = [];
+  const launches: Array<{ closed: boolean; id: string | undefined }> = [];
   const sdk = Layer.succeed(ClaudeSdk)({
-    open: () => {
-      const launch = { closed: false };
+    open: (_input, options) => {
+      const launch = { closed: false, id: options.sessionId };
       launches.push(launch);
       const lostLock = launches.length <= contended;
       let endOutput = () => {};
@@ -655,6 +657,87 @@ describe("Claude child backend", () => {
     );
   }
 
+  it.effect(
+    "persists its assigned session before input and acknowledges identical guidance by UUID",
+    () =>
+      Effect.gen(function* () {
+        const inputs = yield* Queue.make<ClaudeUserMessage>();
+        const output = yield* Queue.make<Schema.Json, Cause.Done>();
+        const receipts = yield* Queue.make<string>();
+        let saved = Option.none<HarnessSession>();
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: (input, options) => {
+            assert(Option.isSome(saved), "the native reference is committed before SDK startup");
+            assert.strictEqual(options.sessionId, saved.value.id);
+            assert.match(options.sessionId ?? "", /^[0-9a-f-]{36}$/u);
+            void (async () => {
+              let first = true;
+              for await (const message of input) {
+                Queue.offerUnsafe(inputs, message);
+                if (first) {
+                  first = false;
+                  Queue.offerUnsafe(output, rateLimitEvent);
+                }
+              }
+            })();
+            return {
+              ...scripted([]),
+              close: () => {
+                Queue.endUnsafe(output);
+              },
+              [Symbol.asyncIterator]: () =>
+                Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+            };
+          },
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(request());
+          yield* Queue.take(inputs);
+          const first = OperatorMessage.make({ message: "Review the diff" });
+          const second = OperatorMessage.make({ message: "Review the diff" });
+          assert.notStrictEqual(first.id, second.id);
+          for (const action of [first, second]) {
+            const state = yield* running.intervene(action, (delivery) =>
+              Option.isSome(delivery)
+                ? Queue.offer(receipts, action.id).pipe(Effect.asVoid)
+                : Effect.void,
+            );
+            assert.isTrue(state.queued);
+            const sent = yield* Queue.take(inputs);
+            assert.strictEqual(sent.uuid, action.id);
+          }
+          yield* Queue.offer(output, { type: "assistant", user_message_uuids: [second.id] });
+          const secondReceipt = yield* Queue.take(receipts);
+          assert.strictEqual(
+            secondReceipt,
+            second.id,
+            "receipt order follows IDs, not queue position",
+          );
+          yield* Queue.offer(output, {
+            type: "assistant",
+            user_message_uuids: [second.id, first.id],
+          });
+          const firstReceipt = yield* Queue.take(receipts);
+          assert.strictEqual(firstReceipt, first.id);
+          yield* Queue.offer(output, { type: "result", subtype: "success", result: "Done" });
+          yield* running.intervene(Release.make(), noDelivery);
+          assert.strictEqual((yield* running.result).message, "Done");
+          const duplicate = yield* Queue.clear(receipts);
+          assert.deepStrictEqual(duplicate, []);
+        }).pipe(
+          Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk))),
+          Effect.provideService(ChildSessionJournal, {
+            started: (reference) =>
+              Effect.sync(() => {
+                saved = Option.some(reference);
+              }),
+            continued: () => Effect.void,
+            delivered: () => Effect.void,
+          }),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
     Effect.gen(function* () {
       const { launches, sdk } = loginRace(1);
@@ -678,7 +761,9 @@ describe("Claude child backend", () => {
         );
         const started = events[0];
         assert(started?._tag === "SessionStarted" && Option.isSome(started.harnessSession));
-        assert.strictEqual(started.harnessSession.value.id, "claude-session-2");
+        assert.match(started.harnessSession.value.id, /^[0-9a-f-]{36}$/u);
+        const assignedId = started.harnessSession.value.id;
+        assert(launches.every(({ id }) => id === assignedId));
         assert.deepStrictEqual(
           launches.map(({ closed }) => closed),
           [true, false],

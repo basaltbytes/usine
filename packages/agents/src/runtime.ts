@@ -41,6 +41,46 @@ export class ChildSessionLifecycle extends Context.Service<
   );
 }
 
+/** An operator message retained until its native acknowledgement arrives. */
+export const QueuedOperatorMessage = Schema.Struct({
+  id: AttemptChannel.OperatorMessageId,
+  message: Schema.NonEmptyString,
+});
+export type QueuedOperatorMessage = typeof QueuedOperatorMessage.Type;
+
+/** A tool call whose result was not committed before recovery. */
+export const InterruptedTool = Schema.Struct({
+  callId: Schema.NonEmptyString,
+  tool: Schema.NonEmptyString,
+});
+export type InterruptedTool = typeof InterruptedTool.Type;
+
+/** Checkpoints that must precede a child prompt. */
+export class ChildSessionJournal extends Context.Service<
+  ChildSessionJournal,
+  {
+    readonly started: (reference: HarnessSession) => Effect.Effect<void, SessionOperationError>;
+    readonly continued: (
+      timestamps: ReadonlyArray<number>,
+    ) => Effect.Effect<void, SessionOperationError>;
+    readonly delivered: (
+      id: AttemptChannel.OperatorMessageId,
+      state: Option.Option<AttemptChannel.InterventionState>,
+    ) => Effect.Effect<void>;
+  }
+>()("@usine/agents/runtime/ChildSessionJournal") {
+  static readonly current = Effect.map(
+    Effect.serviceOption(ChildSessionJournal),
+    Option.getOrElse(() =>
+      ChildSessionJournal.of({
+        started: () => Effect.void,
+        continued: () => Effect.void,
+        delivered: () => Effect.void,
+      }),
+    ),
+  );
+}
+
 /** A task delegated to one child, with its session and the checkout it shares with the parent. */
 export class ChildRequest extends Schema.Class<
   ChildRequest,
@@ -55,6 +95,16 @@ export class ChildRequest extends Schema.Class<
   /** The saved conversation to continue in this checkout instead of starting a new one. */
   resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
+  ),
+  /** Continuation timestamps in milliseconds, retained across orchestrator restarts. */
+  continuations: Schema.Array(Schema.Finite).pipe(
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
+  /** Tool calls without a committed result at restart. */
+  inFlight: Schema.Array(InterruptedTool).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+  /** Operator messages without native delivery acknowledgements at restart. */
+  unread: Schema.Array(QueuedOperatorMessage).pipe(
+    Schema.withConstructorDefault(Effect.succeed([])),
   ),
   /** Cumulative usage committed before the orchestrator resumed this child. */
   usage: Schema.OptionFromOptionalKey(
@@ -267,10 +317,33 @@ export class ContinuationMismatchError extends Schema.TaggedError<
   message: Schema.NonEmptyString,
 }) {}
 
+/** Recovery could not reopen the saved native conversation. */
+export class SessionInterruptedError extends Schema.TaggedError<
+  SessionInterruptedError,
+  Brand.Brand<"@usine/agents/runtime/SessionInterruptedError">
+>("@usine/agents/SessionInterruptedError")("SessionInterruptedError", {
+  sessionId: AgentSessionId,
+  message: Schema.NonEmptyString,
+  cause: Schema.OptionFromOptionalKey(SessionOperationError).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+}) {}
+
+/** A child exhausted its continuation allowance within the recovery window. */
+export class ContinuationLimitError extends Schema.TaggedError<
+  ContinuationLimitError,
+  Brand.Brand<"@usine/agents/runtime/ContinuationLimitError">
+>("@usine/agents/ContinuationLimitError")("ContinuationLimitError", {
+  sessionId: AgentSessionId,
+  message: Schema.NonEmptyString,
+}) {}
+
 /** Any error that stops a session from starting, continuing, or finishing; the error type determines whether a retry needs the operator. */
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
   ContinuationMismatchError,
+  ContinuationLimitError,
+  SessionInterruptedError,
   PoolUnavailableError,
   UnsupportedEffortError,
   AgentResultError,
@@ -364,6 +437,8 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
       InfraFailure.make({ message: operation.message, cause: operation.cause }),
     UnknownModelError: ({ message }) => AgentFailure.make({ message }),
     ContinuationMismatchError: ({ message }) => AgentFailure.make({ message }),
+    ContinuationLimitError: ({ message }) => AgentFailure.make({ message }),
+    SessionInterruptedError: (error) => InfraFailure.make({ message: error.message, cause: error }),
     PoolUnavailableError: ({ message }) => AgentFailure.make({ message }),
     UnsupportedEffortError: ({ message }) => AgentFailure.make({ message }),
     AgentResultError: ({ message }) => AgentFailure.make({ message }),
@@ -383,7 +458,10 @@ export interface RunningSession {
   /** Waits for the session's final message, or fails with the error that ended it. */
   readonly result: Effect.Effect<SessionResult, AgentSessionError>;
   /** Adds operator guidance to the running session without creating a new attempt. */
-  readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
+  readonly steer: (
+    message: string,
+    id?: AttemptChannel.OperatorMessageId,
+  ) => Effect.Effect<void, AgentSessionError>;
   /** Requests that the session stop its current work. */
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
   /**

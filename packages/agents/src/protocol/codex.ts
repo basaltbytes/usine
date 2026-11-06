@@ -131,6 +131,7 @@ export const ItemNotification = Schema.Struct({
 });
 /** A user message recorded in the thread: a turn's input, or steered input once the running turn reads it. */
 export const UserMessageItem = Schema.Struct({
+  id: Schema.NonEmptyString,
   type: Schema.Literal("userMessage"),
   content: Schema.Array(Schema.Json),
 });

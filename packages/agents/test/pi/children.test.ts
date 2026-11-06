@@ -48,7 +48,8 @@ const request = (harness: Harness) =>
     prompt: "Implement the focused task.",
   });
 
-const backend = (selected: Harness): ChildBackendService => ({
+const backend = (selected: Harness): ChildBackendService & Pick<HarnessRuntime, "resume"> => ({
+  resume: () => Effect.succeedNone,
   stop: () => Effect.void,
   launch: (found) =>
     Effect.succeed({
@@ -81,6 +82,7 @@ describe("harness runtime registration", () => {
     const runtime: HarnessRuntime = {
       id: claude.id,
       stop: () => Effect.void,
+      resume: () => Effect.succeedNone,
       preflight: checkedPreflight(() => Effect.void),
       launch: (found) => {
         assert.deepStrictEqual(found.environment, {

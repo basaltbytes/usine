@@ -126,6 +126,17 @@ export const restartReplays = (mode: "record" | "replay"): void => {
                   ? [event]
                   : [],
               );
+              const interrupted = events.filter(
+                (event) =>
+                  event._tag === "ToolFinished" &&
+                  event.session._tag === "ChildSession" &&
+                  event.isError,
+              );
+              assert.lengthOf(
+                interrupted,
+                1,
+                "restart closes the child's interrupted native tool call",
+              );
               assert.lengthOf(starts, 2);
               assert.strictEqual(starts[0]?.session.id, starts[1]?.session.id);
               assert.deepStrictEqual(starts[0]?.harnessSession, starts[1]?.harnessSession);

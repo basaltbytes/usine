@@ -5,7 +5,12 @@ const readline = require("node:readline");
 
 const args = process.argv.slice(2);
 const resume = args.find((arg) => arg.startsWith("--resume="))?.slice("--resume=".length);
-const sessionId = "claude-session-one";
+const sessionFlag = args.indexOf("--session-id");
+const sessionId =
+  resume ??
+  args.find((arg) => arg.startsWith("--session-id="))?.slice("--session-id=".length) ??
+  (sessionFlag < 0 ? undefined : args[sessionFlag + 1]);
+if (!sessionId) throw new Error("Claude session ID was not assigned");
 const file = path.join(process.env.HOME, ".claude", "projects", "project", `${sessionId}.jsonl`);
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\n");
 

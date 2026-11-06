@@ -39,7 +39,8 @@
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
             "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
           },
-          "spawnClaudeCodeProcess": true
+          "spawnClaudeCodeProcess": true,
+          "sessionId": "0528e1d1-92b2-45db-81c0-a4088eb7cb51"
         }
       }
     },

@@ -27,6 +27,8 @@ type SubagentRecord = {
   output: string;
   /** Absent on older delegations; the child had no committed idle report. */
   idle?: string | null;
+  continuations?: Array<number>;
+  inFlight?: Array<{ callId: string; tool: string }>;
 };
 
 export const SubagentDoc = defineDoc<SubagentRecord>({

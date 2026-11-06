@@ -4,6 +4,9 @@ import {
   HarnessReady,
   HarnessUnavailableError,
 } from "@usine/core/agent/capability";
+import type { HarnessSession } from "@usine/core/agent/session";
+import type { Scope } from "effect";
+import type { AgentSessionError, ChildRequest, RunningSession } from "../runtime.ts";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
@@ -24,9 +27,20 @@ export class ProbeTarget extends Schema.Class<
   machine: Schema.Option(MachineId),
 }) {}
 
+/** A reopened conversation; an active retained process needs no new turn. */
+export interface ReopenedSession {
+  readonly running: RunningSession;
+  readonly active: boolean;
+}
+
 /** A harness's preflight and scoped session launch. */
 export interface HarnessRuntime extends ChildBackendService {
   readonly id: Harness;
+  /** Reopens a saved conversation without sending a prompt; `None` means it was unavailable. */
+  readonly resume: (
+    request: ChildRequest,
+    reference: HarnessSession,
+  ) => Effect.Effect<Option.Option<ReopenedSession>, AgentSessionError, Scope.Scope>;
   readonly preflight: (
     brain: BrainSpec,
     target: ProbeTarget,

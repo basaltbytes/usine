@@ -424,8 +424,8 @@ for (const state of [
                   if ((yield* Queue.take(resumedEvents))._tag === "SessionIdle") break;
                 }
               }
-              yield* resumed.steer(guidance);
-              const count = state === "environment-changed" || state === "fresh" ? 3 : 2;
+              yield* resumed.intervene(Steer.make({ message: guidance }), () => Effect.void);
+              const count = state === "fresh" ? 3 : 2;
               const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, count);
               assert.lengthOf(inputs, count, "reattachment sends no task or continuation prompt");
               assert.include(inputs[0] ?? "", fixture.request.prompt);
@@ -494,7 +494,10 @@ for (const outcome of [
           });
           yield* Effect.gen(function* () {
             const running = yield* (yield* ChildBackend).launch(
-              ChildRequest.make({ ...fixture.request, held: true }),
+              ChildRequest.make({
+                ...fixture.request,
+                held: outcome === "idle" || outcome === "idle-handshake-exit",
+              }),
             );
             const events = yield* Queue.unbounded<AgentSessionEvent>();
             yield* running.events.pipe(
@@ -533,11 +536,24 @@ for (const outcome of [
             assert.include(launches[1] ?? "", `"--resume=${saved.value}"`);
             if (exitsAgain) {
               const failure = yield* running.result.pipe(Effect.flip);
-              assert.strictEqual(failure._tag, "SessionOperationError");
-              if (failure._tag === "SessionOperationError")
-                assert(Schema.is(ChildProcessLost)(failure.cause));
-              const processes = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
-              assert.lengthOf(processes, 2);
+              assert.strictEqual(
+                failure._tag,
+                outcome === "idle-handshake-exit"
+                  ? "SessionInterruptedError"
+                  : "ContinuationLimitError",
+              );
+              if (failure._tag === "SessionInterruptedError") {
+                assert(Option.isSome(failure.cause));
+                assert(Schema.is(ChildProcessLost)(failure.cause.value.cause));
+              } else {
+                const messages = yield* fileWithLines(`${fixture.cwd}/user-messages`, 4);
+                assert.lengthOf(messages, 4, "the fourth continuation sends no input");
+              }
+              const processes = yield* fileWithLines(
+                `${fixture.cwd}/launches`,
+                outcome === "idle-handshake-exit" ? 2 : 5,
+              );
+              assert.lengthOf(processes, outcome === "idle-handshake-exit" ? 2 : 5);
               return;
             }
             const replacementPid = yield* fs.readFileString(pidFile);
@@ -577,7 +593,7 @@ for (const outcome of [
             assert.lengthOf(inputs, inputCount);
             assert.include(
               inputs[inputCount - 1] ?? "",
-              waitingForGuidance ? "Continue after waiting for guidance" : "check the worktree",
+              waitingForGuidance ? "Continue after waiting for guidance" : "Check the checkout",
             );
             if (outcome === "two-outages") {
               for (;;) {

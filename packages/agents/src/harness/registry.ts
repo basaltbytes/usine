@@ -62,6 +62,16 @@ export class Harnesses extends Context.Service<
           });
           return admitChild(catalog, scoped).pipe(Effect.andThen(() => runtime.launch(scoped)));
         },
+        resume: (request, reference) => {
+          const scoped = ChildRequest.make({
+            ...request,
+            resume: Option.some(reference),
+            environment: catalog.environmentFor(runtime.id, request.environment),
+          });
+          return admitChild(catalog, scoped).pipe(
+            Effect.andThen(() => runtime.resume(scoped, reference)),
+          );
+        },
         preflight: (brain, target) =>
           admitPreflight(catalog, brain, target).pipe(
             Effect.andThen(() => runtime.preflight(brain, target)),

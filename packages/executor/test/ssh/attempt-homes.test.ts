@@ -116,8 +116,7 @@ it.live.skipIf(process.platform !== "linux")(
           const error = yield* backend
             .launch(ChildRequest.make({ ...request, resume: Option.some(saved) }))
             .pipe(Effect.flip);
-          assert.strictEqual(error._tag, "SessionOperationError");
-          assert.include(error.message, "no rollout found for thread id thread-one");
+          assert.strictEqual(error._tag, "SessionInterruptedError");
           yield* fs.remove(checkout, { recursive: true });
         }),
       );
@@ -260,7 +259,7 @@ it.live.each(["docker", "podman"] as const)(
       assert.isFalse(removedContainer, "orchestrator shutdown removes the container");
       const restartedHomes = yield* attemptHomesFor(commands);
       yield* restartedHomes.sweep(machine);
-      const retained = yield* fs.readFileString(`${projects}/project/claude-session-one.jsonl`);
+      const retained = yield* fs.readFileString(`${projects}/project/${saved.id}.jsonl`);
       assert.strictEqual(retained, `${saved.id}\n`);
       yield* Effect.scoped(
         Effect.gen(function* () {

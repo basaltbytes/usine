@@ -27,6 +27,10 @@
       "types": "./dist/child-host/owner.d.ts",
       "default": "./dist/child-host/owner.js"
     },
+    "./continuation": {
+      "types": "./dist/harness/continuation.d.ts",
+      "default": "./dist/harness/continuation.js"
+    },
     "./children": {
       "types": "./dist/harness/children.d.ts",
       "default": "./dist/harness/children.js"

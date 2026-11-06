@@ -18,6 +18,7 @@ const serializeVendorValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unkn
 export interface ClaudeUserMessage {
   /** Identifies an input message rather than a harness output event. */
   readonly type: "user";
+  readonly uuid?: string;
   /** The user-role text to submit as a task or operator guidance. */
   readonly message: {
     /** The conversation role required by the SDK for input. */
@@ -41,6 +42,7 @@ export type ClaudeQueryOptions = Pick<
   | "permissionMode"
   | "persistSession"
   | "resume"
+  | "sessionId"
   | "settingSources"
   | "spawnClaudeCodeProcess"
   | "thinking"
@@ -145,11 +147,14 @@ export class AsyncInput implements AsyncIterable<ClaudeUserMessage> {
   }
 }
 
-export const userMessage = (content: string): ClaudeUserMessage => ({
-  type: "user",
-  message: { role: "user", content },
-  parent_tool_use_id: null,
-});
+export const userMessage = (content: string, uuid?: string): ClaudeUserMessage => {
+  const input: ClaudeUserMessage = {
+    type: "user",
+    message: { role: "user", content },
+    parent_tool_use_id: null,
+  };
+  return uuid === undefined ? input : { ...input, uuid };
+};
 
 const ControlMessage = Schema.Struct({ type: Schema.String });
 const ControlRequest = Schema.Struct({

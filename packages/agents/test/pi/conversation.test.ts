@@ -177,20 +177,21 @@ describe("session supervision", () => {
         const currentEmitted = yield* session.emitted;
         assert.notInclude(currentEmitted, "SessionResumed");
         assert.deepStrictEqual(delivery.seen(), []);
-        yield* session.read((queued) => queued.indexOf("Use pnpm, not npm.") + 1);
+        const unread = yield* session.unread;
+        yield* session.read(unread.map(({ id }) => id));
         assert.deepStrictEqual(delivery.seen(), ["read, held"]);
         yield* session.finish("Done with pnpm.");
         assert.deepStrictEqual(delivery.seen(), ["read, held"], "a read is reported once");
       }),
   );
 
-  it.effect("reports queued messages read when the turn they joined ends", () =>
+  it.effect("keeps messages unread until the harness acknowledges their IDs", () =>
     Effect.gen(function* () {
       const session = yield* conversation(child("turn-end"));
       const delivery = deliveries();
       yield* session.intervene(Steer.make({ message: "Check the lockfile." }), delivery.onDelivery);
       yield* session.finish("Checked.");
-      assert.deepStrictEqual(delivery.seen(), ["read"]);
+      assert.deepStrictEqual(delivery.seen(), []);
       assert.strictEqual((yield* Fiber.join(session.result)).message, "Checked.");
     }),
   );
@@ -213,6 +214,7 @@ describe("session supervision", () => {
         OperatorMessage.make({ message: "Wait for my review." }),
         noDelivery,
       );
+      yield* session.read((yield* session.unread).map(({ id }) => id));
       yield* session.finish("Ready for review.");
       yield* session.emitted;
       const delivery = deliveries();
@@ -315,6 +317,7 @@ describe("session supervision", () => {
         yield* first.intervene(OperatorMessage.make({ message: "Check this" }), noDelivery);
         yield* second.intervene(OperatorMessage.make({ message: "Check that" }), noDelivery);
         yield* first.finish("First result");
+        yield* second.read((yield* second.unread).map(({ id }) => id));
         yield* second.finish("Second result");
         assert.strictEqual(first.result.pollUnsafe(), undefined);
         assert.strictEqual(second.result.pollUnsafe(), undefined);

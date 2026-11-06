@@ -238,7 +238,7 @@ describe("Pi child backend", () => {
               dispose: () => {},
               abort: () => Promise.resolve(),
               subscribe: () => () => {},
-              steer: () => Promise.resolve(),
+              steer: () => Promise.resolve("handled" as const),
               prompt: (text) =>
                 new Promise<void>((complete) => {
                   fork(Queue.offer(turns, { text, complete }));

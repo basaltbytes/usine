@@ -18,6 +18,7 @@ import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from
 
 for (const supervision of [
   "held",
+  "held-unread",
   "paused",
   "held-paused",
   "held-idle",
@@ -52,6 +53,7 @@ for (const supervision of [
       const context = yield* Effect.context<never>();
       const run = Effect.runPromiseWith(context);
       let firstSession = Option.none<AgentSessionId>();
+      let unreadId = Option.none<AttemptChannel.OperatorMessageId>();
 
       for (const resumed of [false, true]) {
         yield* Effect.scoped(
@@ -114,7 +116,8 @@ for (const supervision of [
                         ),
                       );
                     },
-                    steer: async () => "handled",
+                    steer: async () =>
+                      supervision === "held-unread" && !resumed ? "queued" : "handled",
                     abort: () => run(Deferred.succeed(turn, undefined).pipe(Effect.asVoid)),
                     dispose: () => {},
                   },
@@ -177,10 +180,13 @@ for (const supervision of [
               firstSession = Option.some(sessionId);
               yield* Deferred.await(prompted);
               yield* Deferred.await(metered);
-              if (held)
-                yield* operator(
-                  AttemptChannel.OperatorMessage.make({ message: "Wait for my release." }),
-                );
+              if (held) {
+                const guidance = AttemptChannel.OperatorMessage.make({
+                  message: "Wait for my release.",
+                });
+                unreadId = Option.some(guidance.id);
+                yield* operator(guidance);
+              }
               if (paused || heldIdle) {
                 if (paused) yield* operator(AttemptChannel.Interrupt.make());
                 yield* Deferred.succeed(turn, undefined);
@@ -229,7 +235,25 @@ for (const supervision of [
               yield* Deferred.await(prompted);
               assert.deepStrictEqual(prompts, ["Continue with my correction."]);
             } else {
+              yield* Deferred.await(idle);
+              assert.deepStrictEqual(
+                prompts,
+                [],
+                "A held child must wait for guidance after restart",
+              );
+              yield* operator(
+                AttemptChannel.Steer.make({ message: "Continue with my correction." }),
+              );
               yield* Deferred.await(prompted);
+              assert.deepStrictEqual(
+                prompts,
+                [
+                  supervision === "held-unread"
+                    ? "Wait for my release."
+                    : "Continue with my correction.",
+                ],
+                "unread input precedes the new guidance",
+              );
             }
             yield* Deferred.succeed(turn, undefined);
             if (held && !paused) {
@@ -262,6 +286,22 @@ for (const supervision of [
         );
       }
       const outbound = recording.outbound();
+      if (supervision === "held-unread") {
+        assert(Option.isSome(unreadId));
+        const id = unreadId.value;
+        const deliveries = outbound.flatMap(({ payload }) =>
+          payload._tag === "InterventionApplied" &&
+          payload.intervention.action._tag === "OperatorMessage" &&
+          payload.intervention.action.id === id
+            ? [payload.state.queued]
+            : [],
+        );
+        assert.deepStrictEqual(
+          deliveries,
+          [true, false],
+          "the restored ID settles the original queued input",
+        );
+      }
       const usage = outbound.flatMap(({ payload }) =>
         payload._tag === "SessionEvent" &&
         payload.event._tag === "SessionTokensUpdated" &&
