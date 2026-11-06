@@ -1,4 +1,20 @@
-import { Effect, Clock, Duration, Deferred, Schema } from "effect";
+import {
+  type Cause,
+  Clock,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Option,
+  Predicate,
+  Queue,
+  Ref,
+  Schema,
+  Scope,
+  Sink,
+  Stream,
+} from "effect";
+import { ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
@@ -9,7 +25,9 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PROCESS_OWNER } from "../src/child-host/supervisor.ts";
-import { CHILD_LIFELINE } from "../src/child-host/node.ts";
+import { CHILD_LIFELINE, startChildProcess } from "../src/child-host/node.ts";
+import { claudeOutputCheckpoint } from "../src/harness/claude/sdk.ts";
+import { ChildSessionLifecycle } from "../src/runtime.ts";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
@@ -592,6 +610,137 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
     10_000,
   );
 });
+
+const decodeOwnerInput = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      sequence: Schema.optionalKey(Schema.Int),
+      data: Schema.optionalKey(Schema.String),
+      checkpoint: Schema.optionalKey(Schema.Boolean),
+      offset: Schema.optionalKey(Schema.Int),
+      skip: Schema.optionalKey(Schema.Int),
+    }),
+  ),
+);
+
+it.live(
+  "checkpoints output that input acknowledged while detaching releases",
+  () =>
+    Effect.gen(function* () {
+      const line = (message: Schema.Json) =>
+        Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(message).pipe(
+          Effect.map((text) => Buffer.from(`${text}\n`)),
+        );
+      const hook = yield* line({
+        type: "control_request",
+        request_id: "hook",
+        request: { subtype: "hook_callback" },
+      });
+      const response = yield* line({
+        type: "control_response",
+        response: { request_id: "hook", subtype: "success" },
+      });
+      const ownerOutput = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+      const frame = (value: Schema.Json) =>
+        Queue.offer(ownerOutput, Buffer.from(`${encodeOwnerFrame(value)}\n`));
+      const responseSent = yield* Deferred.make<void>();
+      const saved = yield* Deferred.make<{ readonly offset: number; readonly skip: number }>();
+      // An owner whose acknowledgement of the hook response arrives after the detach starts.
+      const spawner = ChildProcessSpawner.make((command) =>
+        Effect.gen(function* () {
+          assert(command._tag === "StandardCommand");
+          const stdin = command.options.stdin;
+          assert(Predicate.hasProperty(stdin, "stream") && Stream.isStream(stdin.stream));
+          yield* frame({ offset: 10, ready: true, sequence: 0, retained: false });
+          yield* frame({ offset: 20, stdout: hook.toString("base64") });
+          yield* stdin.stream.pipe(
+            Stream.decodeText(),
+            Stream.splitLines,
+            Stream.mapEffect((text) => decodeOwnerInput(text)),
+            Stream.runForEach((input) =>
+              Effect.gen(function* () {
+                if (input.data !== undefined && input.sequence !== undefined) {
+                  yield* Deferred.succeed(responseSent, undefined);
+                  yield* Effect.sleep("300 millis");
+                  yield* frame({ offset: 30, ack: input.sequence });
+                }
+                if (
+                  input.checkpoint === true &&
+                  input.offset !== undefined &&
+                  input.skip !== undefined
+                ) {
+                  yield* Deferred.succeed(saved, { offset: input.offset, skip: input.skip });
+                  yield* frame({ offset: 40, checkpoint: true });
+                }
+              }),
+            ),
+            Effect.orDie,
+            Effect.forkScoped,
+          );
+          return ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(4242),
+            exitCode: Effect.never,
+            isRunning: Effect.succeed(true),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.fromQueue(ownerOutput),
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void),
+          });
+        }),
+      );
+      const stopping = yield* Ref.make(false);
+      const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+      const hookRead = yield* Deferred.make<void>();
+      const checkpoint = claudeOutputCheckpoint();
+      const scope = yield* Scope.make();
+      yield* Effect.gen(function* () {
+        const owner = yield* startChildProcess(
+          {
+            host: RemoteShell.make({
+              ssh: { command: "ssh", args: [] },
+              sshEnvironment: {},
+              destination: "worker",
+            }),
+            cwd: "/worktree",
+            environment: {},
+            sessionId: Option.some(AgentSessionId.make("attempt:child:1")),
+          },
+          { command: "claude", args: [], cwd: "/worktree" },
+          Stream.fromQueue(input),
+          undefined,
+          "handled",
+          checkpoint.inputAcknowledged,
+        );
+        yield* owner.stdout.pipe(
+          Stream.runForEach((bytes) =>
+            checkpoint
+              .read(bytes)
+              .pipe(
+                Effect.flatMap(owner.acknowledgeOutput),
+                Effect.andThen(Deferred.succeed(hookRead, undefined)),
+              ),
+          ),
+          Effect.forkScoped,
+        );
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+        Scope.provide(scope),
+      );
+      yield* Deferred.await(hookRead);
+      yield* Queue.offer(input, response);
+      yield* Deferred.await(responseSent);
+      yield* Ref.set(stopping, true);
+      yield* Scope.close(scope, Exit.void);
+      const cursor = yield* Deferred.await(saved).pipe(Effect.timeout("1 second"));
+      assert.deepStrictEqual(cursor, { offset: 30, skip: 0 }, "the answered hook is not replayed");
+    }),
+  10_000,
+);
 
 describe("local process lifeline", () => {
   it.live(

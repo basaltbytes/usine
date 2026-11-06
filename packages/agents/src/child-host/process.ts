@@ -10,6 +10,7 @@ import {
   Ref,
   Schema,
   Stream,
+  SubscriptionRef,
 } from "effect";
 import { Base64 } from "effect/encoding";
 import { ChildProcessSpawner } from "effect/process";
@@ -102,7 +103,10 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   const stdout = yield* Queue.make<Uint8Array, SessionOperationError | Cause.Done>();
   const exit = yield* Deferred.make<ChildProcessLost, SessionOperationError>();
   const outgoing = yield* Queue.make<string, Cause.Done>();
-  const history = new Map<number, { line: string; data: Uint8Array }>();
+  // Input frames the owner has not acknowledged, by sequence.
+  const history = yield* SubscriptionRef.make<
+    ReadonlyMap<number, { readonly line: string; readonly data: Uint8Array }>
+  >(new Map());
   let sequence = 0;
   const ready = yield* Deferred.make<void, SessionOperationError>();
   const checkpoint = yield* Deferred.make<void>();
@@ -141,13 +145,14 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
       if (yield* lifecycle.isStopping) return;
       yield* Deferred.await(ready);
       sequence += 1;
+      const id = sequence;
       const line = yield* Schema.encodeEffect(Schema.fromJsonString(InputFrame))({
         ...frame,
-        sequence,
+        sequence: id,
       }).pipe(Effect.orDie);
       const data =
         "data" in frame ? yield* Effect.fromResult(Base64.decode(frame.data)) : new Uint8Array();
-      history.set(sequence, { line, data });
+      yield* SubscriptionRef.update(history, (entries) => new Map(entries).set(id, { line, data }));
       yield* Queue.offer(outgoing, line);
     });
   yield* input.pipe(
@@ -177,7 +182,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
     launched = true;
     const relayReady = yield* Deferred.make<void>();
     let skipped = 0;
-    const replay = [...history.values()].map(({ line }) => line);
+    const replay = [...(yield* SubscriptionRef.get(history)).values()].map(({ line }) => line);
     const replayed = new Set(replay);
     const frames = Stream.concat(
       Stream.fromIterable(replay),
@@ -268,12 +273,18 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
                 start: yield* Ref.get(offset),
                 offset: frame.offset,
               });
-            for (const [id, entry] of history)
-              if (id <= frame.ack) {
-                history.delete(id);
-                const bytes = yield* onInputAcknowledged(entry.data);
-                yield* acknowledgeOutput(bytes);
-              }
+            const acknowledged = [...(yield* SubscriptionRef.get(history))].filter(
+              ([id]) => id <= frame.ack,
+            );
+            for (const [, entry] of acknowledged) {
+              const bytes = yield* onInputAcknowledged(entry.data);
+              yield* acknowledgeOutput(bytes);
+            }
+            if (acknowledged.length > 0)
+              yield* SubscriptionRef.update(
+                history,
+                (entries) => new Map([...entries].filter(([id]) => id > frame.ack)),
+              );
           } else if ("stdout" in frame) {
             const bytes = yield* Effect.fromResult(Base64.decode(frame.stdout));
             if (acknowledgement === "handled")
@@ -384,6 +395,19 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
         }
         yield* Effect.gen(function* () {
           yield* Deferred.await(ready);
+          const unacknowledged = (yield* SubscriptionRef.get(history)).size;
+          if (unacknowledged > 0) {
+            yield* Effect.logDebug(
+              "Waiting for the owner to acknowledge input before the output checkpoint",
+              { ...fields, unacknowledged },
+            );
+            // An acknowledged response, such as a hook answer, can advance the checkpoint.
+            yield* SubscriptionRef.changes(history).pipe(
+              Stream.filter((entries) => entries.size === 0),
+              Stream.take(1),
+              Stream.runDrain,
+            );
+          }
           const cursor = yield* Ref.get(delivered);
           yield* Queue.offer(
             outgoing,
