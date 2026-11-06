@@ -119,16 +119,6 @@ export const ThreadStartResponse = Schema.Struct({
   model: Schema.NonEmptyString,
   instructionSources: Schema.Array(Schema.String),
 });
-/** The saved items needed to check whether the resumed thread contains its original task. */
-export const ThreadResumeResponse = Schema.Struct({
-  modelProvider: EndpointName,
-  thread: Schema.Struct({
-    id: HarnessSessionId,
-    turns: Schema.Array(
-      Schema.Struct({ items: Schema.Array(Schema.Struct({ type: Schema.String })) }),
-    ),
-  }),
-});
 /** The turn ID, needed to steer or interrupt the turn. */
 export const TurnStartResponse = Schema.Struct({
   turn: Schema.Struct({ id: Schema.NonEmptyString }),
@@ -167,6 +157,22 @@ export const ToolItem = Schema.Struct({
   id: Schema.NonEmptyString,
   status: Schema.optionalKey(Schema.String),
   success: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+});
+/** Saved turn state needed to reattach an active turn without starting another one. */
+export const ThreadResumeResponse = Schema.Struct({
+  modelProvider: EndpointName,
+  thread: Schema.Struct({
+    id: HarnessSessionId,
+    turns: Schema.Array(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        status: Schema.Literals(["completed", "interrupted", "failed", "inProgress"] as const),
+        items: Schema.Array(
+          Schema.Union([ToolItem, AgentMessageItem, Schema.Struct({ type: Schema.String })]),
+        ),
+      }),
+    ),
+  }),
 });
 /** The outcome of a turn, used to resume a conversation on Hold or report a session failure. */
 export const TurnCompleted = Schema.Struct({

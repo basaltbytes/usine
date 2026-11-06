@@ -53,7 +53,7 @@ import {
   type CodexConnection,
   type CodexNotification,
 } from "../../../src/harness/codex/app-server.ts";
-import { RemoteCodexProcessLost } from "../../../src/harness/codex/remote.ts";
+import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { codexChildLayer } from "../../../src/harness/codex/codex.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
@@ -90,6 +90,7 @@ const connectionLayer = (
   clients: Array<CodexClient> = [],
 ) =>
   Layer.succeed(CodexAppServer)({
+    stop: () => Effect.void,
     open: (client) =>
       Effect.sync(() => clients.push(client)).pipe(
         Effect.as({
@@ -143,6 +144,92 @@ const successfulResponses = (
   }) satisfies Readonly<Record<string, Schema.Json>>;
 
 describe("Codex child backend", () => {
+  for (const savedAnswer of [false, true])
+    it.effect(
+      `reattaches an active saved turn without starting a second turn (saved answer: ${savedAnswer})`,
+      () => {
+        const original = request();
+        const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+        const server = connectionLayer(
+          {
+            ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+            "thread/resume": {
+              modelProvider: "openai",
+              thread: {
+                id: "thread-1",
+                turns: [
+                  {
+                    id: "active-turn",
+                    status: "inProgress",
+                    items: [
+                      { type: "commandExecution", id: "tool-1", status: "inProgress" },
+                      ...(savedAnswer
+                        ? [
+                            {
+                              type: "agentMessage",
+                              id: "answer",
+                              text: "Original turn completed",
+                              phase: "final_answer",
+                            },
+                          ]
+                        : []),
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          [
+            {
+              method: "item/completed",
+              params: {
+                threadId: "thread-1",
+                turnId: "active-turn",
+                item: { type: "commandExecution", id: "tool-1", status: "completed" },
+              },
+            },
+            ...(!savedAnswer
+              ? [
+                  {
+                    method: "item/completed",
+                    params: {
+                      threadId: "thread-1",
+                      turnId: "active-turn",
+                      item: {
+                        type: "agentMessage",
+                        id: "answer",
+                        text: "Original turn completed",
+                        phase: "final_answer",
+                      },
+                    },
+                  },
+                ]
+              : []),
+            {
+              method: "turn/completed",
+              params: { turn: { id: "active-turn", status: "completed", error: null } },
+            },
+          ],
+          calls,
+        );
+        return Effect.scoped(
+          Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...original,
+                resume: Option.some(
+                  HarnessSession.make({ id: HarnessSessionId.make("thread-1"), cwd: original.cwd }),
+                ),
+              }),
+            );
+            const result = yield* running.result;
+            assert.strictEqual(result.message, "Original turn completed");
+            assert.isFalse(calls.some(({ method }) => method === "turn/start"));
+          }),
+        ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+      },
+    );
+
   for (const field of ["home", "default-home", "model_provider"] as const) {
     it.effect(`refuses a saved Codex continuation after its ${field} changes`, () => {
       const original = request(
@@ -215,7 +302,7 @@ describe("Codex child backend", () => {
           );
           assert(!calls.some(({ method }) => method === "turn/start"));
           assert.strictEqual(clients.length, 1, "the old transport is replaced before refusal");
-          assert.strictEqual(clients[0]?.transport, "replace");
+          assert.strictEqual(clients[0]?.transport, "resume");
           assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
         }),
       ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
@@ -234,27 +321,22 @@ describe("Codex child backend", () => {
     );
     const clients: Array<CodexClient> = [];
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
-    let closed = false;
-    const server = connectionLayer(
-      {},
-      [],
-      calls,
-      Effect.sync(() => {
-        closed = true;
-      }),
-      clients,
-    );
+    const server = Layer.succeed(CodexAppServer)({
+      stop: (client) =>
+        Effect.sync(() => {
+          clients.push(client);
+        }),
+      open: () => Effect.die("stop must not open a protocol connection"),
+    });
     return Effect.gen(function* () {
       yield* (yield* ChildBackend).stop(original);
-      assert.isTrue(closed);
       assert.strictEqual(clients.length, 1);
-      assert.strictEqual(clients[0]?.transport, "replace");
       assert.deepStrictEqual(clients[0]?.sessionId, Option.some(original.session.id));
       assert.deepStrictEqual(calls, []);
     }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
   });
 
-  it.effect("replaces the remote transport when resuming a saved Codex thread", () => {
+  it.effect("reattaches the remote owner when resuming a saved Codex thread", () => {
     const saved = HarnessSession.make({
       id: HarnessSessionId.make("saved-codex"),
       cwd: request().cwd,
@@ -310,7 +392,7 @@ describe("Codex child backend", () => {
         assert(started !== undefined);
         assert.deepStrictEqual(started.harnessSession, Option.some(saved));
         assert.strictEqual(clients[0]?.environment.CODEX_HOME, "/worker/attempt/codex");
-        assert.strictEqual(clients[0]?.transport, "replace");
+        assert.strictEqual(clients[0]?.transport, "resume");
         assert(!calls.some(({ method }) => method === "thread/start"));
         assert.include(
           jsonKey(calls.find(({ method }) => method === "thread/resume")?.params),
@@ -336,6 +418,7 @@ describe("Codex child backend", () => {
           }),
         );
         const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
           open: () =>
             Effect.succeed({
               notifications: Stream.fromQueue(notifications),
@@ -427,6 +510,7 @@ describe("Codex child backend", () => {
         let closes = 0;
         let pauseRefused = false;
         const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
           open: () =>
             Effect.succeed({
               notifications: Stream.fromQueue(notifications),
@@ -521,6 +605,7 @@ describe("Codex child backend", () => {
           { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
         ]);
         const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
           open: () =>
             Effect.sync(() => {
               opens += 1;
@@ -553,7 +638,7 @@ describe("Codex child backend", () => {
               operation: "stream",
               sessionId: Option.some(running.session.id),
               message: "The transport closed during shutdown",
-              cause: RemoteCodexProcessLost.make({ message: "relay exit code 143" }),
+              cause: ChildProcessLost.make({ exitCode: 143, stderrTail: "" }),
             }),
           );
           yield* TestClock.adjust(0);
@@ -590,6 +675,7 @@ describe("Codex child backend", () => {
         const reads: Array<Option.Option<InterventionState>> = [];
         let opens = 0;
         const server = Layer.succeed(CodexAppServer)({
+          stop: () => Effect.void,
           open: () =>
             Effect.sync(() => {
               const notifications =
@@ -615,7 +701,9 @@ describe("Codex child backend", () => {
                         modelProvider: "openai",
                         thread: {
                           id: "thread-1",
-                          turns: [{ items: [{ type: "userMessage" }] }],
+                          turns: [
+                            { id: "turn-1", status: "completed", items: [{ type: "userMessage" }] },
+                          ],
                         },
                       };
                     return responses[method] ?? {};
@@ -679,7 +767,7 @@ describe("Codex child backend", () => {
               operation: "stream",
               sessionId: Option.some(running.session.id),
               message: "App-server exited",
-              cause: RemoteCodexProcessLost.make({ message: "App-server exited" }),
+              cause: ChildProcessLost.make({ exitCode: 1, stderrTail: "App-server exited" }),
             }),
           );
           if (state === "working" || state === "queued") {
@@ -1383,6 +1471,7 @@ describe("Codex child backend", () => {
       };
       let accountReads = 0;
       const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
         open: () =>
           Effect.succeed({
             close: Effect.void,

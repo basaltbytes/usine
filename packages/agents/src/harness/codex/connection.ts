@@ -16,8 +16,8 @@ export interface CodexClient {
   readonly environment: Readonly<Record<string, string>>;
   /** The local or remote host on which to start the app-server process. */
   readonly host: ChildHost;
-  /** Replace the retained remote process and journals before resuming a saved thread. */
-  readonly transport?: "replace";
+  /** Reattach the retained process, or confirm its termination before replacement. */
+  readonly transport?: "replace" | "resume";
 }
 
 /** A server event received without a client request ID. */
@@ -59,6 +59,8 @@ export interface CodexConnection {
 export class CodexAppServer extends Context.Service<
   CodexAppServer,
   {
+    /** Stops the process retained for this child. */
+    readonly stop: (request: CodexClient) => Effect.Effect<void, SessionOperationError>;
     /**
      * Starts the app server on `request.host` with its environment and session identity. The
      * connection belongs to the calling scope; the caller initializes the JSON-RPC protocol.

@@ -16,8 +16,13 @@
       "type": "expect_outbound",
       "port": "process:1",
       "payload": {
-        "command": "codex",
+        "command": "$NODE",
         "args": [
+          "-e",
+          "$CHILD_LIFELINE",
+          "$WORKTREE.child-1.pid",
+          "",
+          "codex",
           "app-server",
           "--stdio",
           "-c",
@@ -976,8 +981,13 @@
       "type": "expect_outbound",
       "port": "process:2",
       "payload": {
-        "command": "codex",
+        "command": "$NODE",
         "args": [
+          "-e",
+          "$CHILD_LIFELINE",
+          "$WORKTREE.child-1.pid",
+          "",
+          "codex",
           "app-server",
           "--stdio",
           "-c",

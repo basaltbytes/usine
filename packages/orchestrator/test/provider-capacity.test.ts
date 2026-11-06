@@ -93,6 +93,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
       let calls = 0;
       let leased = false;
       const server = Layer.succeed(CodexAppServer)({
+        stop: () => Effect.void,
         open: () =>
           Effect.sync(() => {
             calls += 1;

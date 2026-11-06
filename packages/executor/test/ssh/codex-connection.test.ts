@@ -43,7 +43,7 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 process.stdout.on('error', () => {});
 if (['supervisor-exit', 'app-server-zero-exit'].includes('${failure}') && !fs.existsSync(process.env.CODEX_HOME + '/original-pids')) {
-  fs.writeFileSync(process.env.CODEX_HOME + '/original-pids', JSON.stringify([process.ppid, process.pid]));
+  fs.writeFileSync(process.env.CODEX_HOME + '/original-pids', JSON.stringify([Number(fs.readFileSync('${directory}.child-1.pid', 'utf8')), process.ppid, process.pid]));
   const command = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   fs.writeFileSync(process.env.CODEX_HOME + '/command-pid', String(command.pid));
   if ('${failure}' === 'supervisor-exit') {
@@ -76,7 +76,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     }
     fs.appendFileSync(process.env.CODEX_HOME + '/resumed', request.params.threadId + '\\n');
     const turns = fs.existsSync(process.env.CODEX_HOME + '/saved-inputs')
-      ? fs.readFileSync(process.env.CODEX_HOME + '/saved-inputs', 'utf8').trim().split('\\n').map(line => ({ items: [{ type: 'userMessage', content: JSON.parse(line) }] }))
+      ? fs.readFileSync(process.env.CODEX_HOME + '/saved-inputs', 'utf8').trim().split('\\n').map((line, index) => ({ id: 'saved-turn-' + index, status: 'completed', items: [{ type: 'userMessage', content: JSON.parse(line) }] }))
       : [];
     process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: 'thread-one', turns }, model: 'test-model', modelProvider: 'openai', instructionSources: [] } }) + '\\n');
   } else if (request.method === 'turn/start') {
@@ -90,7 +90,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     }
     process.stdout.write(JSON.stringify({ id: request.id, result: { turn: { id: 'turn-one' } } }) + '\\n');
     if ('${failure}' === 'supervisor-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed')) {
-      process.kill(process.ppid, 'SIGKILL');
+      process.kill(Number(fs.readFileSync('${directory}.child-1.pid', 'utf8')), 'SIGKILL');
       return;
     }
     if ('${failure}' === 'resume-zero-exit' || ('${failure}' === 'app-server-zero-exit' && !fs.existsSync(process.env.CODEX_HOME + '/resumed'))) {
@@ -267,6 +267,7 @@ relay.on('exit', code => { clearInterval(timer); process.exit(inputDropped ? 255
                     Effect.gen(function* () {
                       const server = yield* CodexAppServer;
                       return CodexAppServer.of({
+                        stop: () => Effect.void,
                         open: (client) =>
                           server.open(client).pipe(
                             Effect.map((connection) => ({

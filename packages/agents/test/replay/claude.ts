@@ -3,9 +3,6 @@
 // @effect-diagnostics asyncFunction:off
 // Recorded SDK responses are decoded synchronously at the transport boundary.
 // @effect-diagnostics schemaSync:off
-// The recorder terminates the real binary before its first protocol message.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { spawn } from "node:child_process";
 import { assert } from "@effect/vitest";
 import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { Deferred, Effect, Layer, Schema } from "effect";
@@ -52,34 +49,7 @@ export const claudeTransport = (
           yield message;
         }
       };
-      const spawnRemote = options.spawnClaudeCodeProcess;
-      if (live === undefined && spawnRemote !== undefined) {
-        void tape
-          .read(`${port}/ssh-exit`)
-          .then((entry) => {
-            if (entry.type !== "runtime_exit") throw new Error("expected SSH exit");
-            const settings: Parameters<typeof spawnRemote>[0] = {
-              command: "/bin/sh",
-              args: ["-c", `exit ${entry.code ?? 1}`],
-              env: {},
-              signal: new AbortController().signal,
-            };
-            if (options.cwd !== undefined) settings.cwd = options.cwd;
-            spawnRemote(settings);
-          })
-          .catch((cause: unknown) => tape.fail(cause));
-      }
-      const recordedOptions =
-        spawnRemote === undefined
-          ? options
-          : {
-              ...options,
-              spawnClaudeCodeProcess: (settings: Parameters<typeof spawnRemote>[0]) => {
-                const child = spawnRemote(settings);
-                child.once("exit", (code) => tape.exit(`${port}/ssh-exit`, code, null));
-                return child;
-              },
-            };
+      const recordedOptions = options;
       const hookFields = {
         session_id: Schema.String,
         transcript_path: Schema.String,
@@ -155,12 +125,9 @@ export const claudeTransport = (
           ? {
               ...options,
               spawnClaudeCodeProcess: (settings) => {
-                const child = spawn(settings.command, [...settings.args], {
-                  cwd: settings.cwd,
-                  env: settings.env,
-                  signal: settings.signal,
-                  stdio: ["pipe", "pipe", "pipe"],
-                });
+                const spawnOwned = options.spawnClaudeCodeProcess;
+                assert(spawnOwned !== undefined);
+                const child = spawnOwned(settings);
                 child.kill("SIGKILL");
                 return child;
               },

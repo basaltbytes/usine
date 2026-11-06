@@ -1,8 +1,12 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit, Option, Schema } from "effect";
+import type { AgentSessionEvent } from "@usine/core/agent/session";
+import { Release } from "@usine/core/attempt/channel";
+import { childPidFile } from "../../src/child-host/child-host.ts";
+import { Cause, Effect, Exit, FileSystem, Option, Queue, Ref, Schema, Scope, Stream } from "effect";
 import { openFixture, providers, scenarios, recordingPid } from "./fixture.ts";
-import { ChildRequest } from "../../src/runtime.ts";
+import { ChildProcessLost } from "../../src/child-host/process.ts";
+import { ChildBackend, ChildRequest, ChildSessionLifecycle } from "../../src/runtime.ts";
 import { Tape } from "./transcript.ts";
 import { decodeWire, encodeWire } from "./process.ts";
 import { Base64 } from "effect/encoding";
@@ -28,6 +32,27 @@ describe("recorded harness transports", () => {
       );
     }
 });
+
+for (const provider of providers) {
+  it.live(
+    `${provider}: early process exit preserves its code and stderr`,
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* openFixture(provider, "early-exit", "replay");
+          const failure = yield* Effect.gen(function* () {
+            return yield* (yield* ChildBackend).launch(fixture.request).pipe(Effect.flip);
+          }).pipe(Effect.provide(fixture.backend));
+          assert.strictEqual(failure._tag, "SessionOperationError");
+          if (failure._tag !== "SessionOperationError") return;
+          assert(Schema.is(ChildProcessLost)(failure.cause));
+          assert.strictEqual(failure.cause.exitCode, 7);
+          assert.include(failure.cause.stderrTail, "replayed early exit");
+        }),
+      ).pipe(Effect.provide(NodeServices.layer)),
+    10_000,
+  );
+}
 
 it.live("rejects a changed outbound request through the real adapter", () =>
   Effect.gen(function* () {
@@ -105,24 +130,12 @@ it.live(
       for (const provider of providers) {
         const outcome = yield* Effect.scoped(
           Effect.gen(function* () {
-            const scenario = provider === "claude" ? "transport-loss" : "simple";
+            const scenario = "simple";
             const fixture = yield* openFixture(provider, scenario, "replay");
-            if (provider === "codex") fixture.tape.bind("0.0.1", "$CHANGED_CLIENT_VERSION");
-            else {
-              assert(fixture.tape.source !== "record");
-              const resume = Schema.decodeUnknownOption(
-                Schema.Struct({ options: Schema.Struct({ resume: Schema.String }) }),
-              );
-              const saved = fixture.tape.source.entries.flatMap((entry) => {
-                if (entry.type !== "expect_outbound") return [];
-                const launch = resume(entry.payload);
-                return Option.isSome(launch) ? [launch.value.options.resume] : [];
-              });
-              assert.lengthOf(saved, 1);
-              const id = saved[0];
-              assert(id !== undefined);
-              fixture.tape.bind(id, "$CHANGED_RESUME_ID");
-            }
+            fixture.tape.bind(
+              provider === "codex" ? "0.0.1" : "supportedModels",
+              "$CHANGED_REQUEST",
+            );
             yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
               Effect.provide(fixture.backend),
               fixture.tape.guard,
@@ -132,10 +145,7 @@ it.live(
         assert(Exit.isFailure(outcome));
         const failure = Cause.pretty(outcome.cause);
         assert.include(failure, "outbound request differs at transcript entry");
-        assert.include(
-          failure,
-          provider === "claude" ? "$CHANGED_RESUME_ID" : "$CHANGED_CLIENT_VERSION",
-        );
+        assert.include(failure, "$CHANGED_REQUEST");
         assert.notInclude(failure, "TimeoutError");
       }
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -179,3 +189,71 @@ it.live(
       assert.throws(() => reordered.outbound("claude:1/input", "guidance"), /transcript entry 0/);
     }).pipe(Effect.timeout("2 seconds")),
 );
+
+for (const state of ["working", "idle"] as const)
+  it.live(
+    `Claude resumes its ${state} session by reattaching one owned process`,
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* openFixture("claude", "transport-loss", "replay");
+          const fs = yield* FileSystem.FileSystem;
+          const scope = yield* Scope.make();
+          const stopping = yield* Ref.make(false);
+          const events = yield* Queue.unbounded<AgentSessionEvent>();
+          const first = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({ ...fixture.request, held: true }),
+            );
+            yield* running.events.pipe(
+              Stream.runForEach((event) => Queue.offer(events, event)),
+              Effect.forkScoped,
+            );
+            return running;
+          }).pipe(
+            Effect.provide(fixture.backend),
+            Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+            Scope.provide(scope),
+          );
+          const until = (tag: AgentSessionEvent["_tag"]) =>
+            Effect.gen(function* () {
+              for (;;) {
+                const event = yield* Queue.take(events);
+                if (event._tag === tag) return event;
+              }
+            });
+          const started = yield* until("SessionStarted");
+          assert(started._tag === "SessionStarted");
+          yield* until("ToolStarted");
+          if (state === "idle") {
+            yield* fixture.controls.releaseCommand;
+            yield* until("SessionIdle");
+          }
+          const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
+          const pid = yield* fs.readFileString(pidFile);
+          yield* Ref.set(stopping, true);
+          yield* Scope.close(scope, Exit.void);
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const resumed = yield* (yield* ChildBackend).launch(
+                ChildRequest.make({
+                  ...fixture.request,
+                  held: true,
+                  resume: started.harnessSession,
+                  idle: state === "idle" ? Option.some("REPLAY_DONE") : Option.none(),
+                }),
+              );
+              const currentPid = yield* fs.readFileString(pidFile);
+              assert.strictEqual(currentPid, pid);
+              if (state === "working") yield* fixture.controls.releaseCommand;
+              yield* resumed.intervene(Release.make(), () => Effect.void);
+              const result = yield* resumed.result;
+              assert.include(result.message, "REPLAY_DONE");
+            }).pipe(Effect.provide(fixture.backend)),
+          );
+          yield* fixture.save;
+          assert.strictEqual(first.session.id, fixture.request.session.id);
+        }),
+      ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+    20_000,
+  );

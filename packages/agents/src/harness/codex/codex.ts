@@ -4,7 +4,6 @@ import { codex } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
-  AgentSessionId,
   ChildSession,
   PoolRateLimitsUpdated,
   ProviderRecovered,
@@ -59,7 +58,7 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
 } from "../../runtime.ts";
-import { RemoteCodexProcessLost } from "./remote.ts";
+import { ChildProcessLost } from "../../child-host/process.ts";
 import { sessionChannel } from "../session.ts";
 import { type MessageTaken, sessionConversation } from "../conversation.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
@@ -108,7 +107,7 @@ const makeCodexChild = Effect.gen(function* () {
         environment: request.environment,
         host: request.host,
       };
-      if (Option.isSome(request.resume)) client = { ...client, transport: "replace" };
+      if (Option.isSome(request.resume)) client = { ...client, transport: "resume" };
       let connection = yield* appServer.open(client);
       yield* checkContinuationHome(request, home, defaultHome);
       yield* initializeCodex(connection);
@@ -195,6 +194,7 @@ const makeCodexChild = Effect.gen(function* () {
               id: started.thread.id,
               model: started.model,
               endpoint: Option.some(started.modelProvider),
+              activeTurn: Option.none<(typeof ThreadResumeResponse.Type.thread.turns)[number]>(),
             };
           }),
         onSome: (saved) =>
@@ -240,6 +240,9 @@ const makeCodexChild = Effect.gen(function* () {
               id: saved.id,
               model: requestedModel,
               endpoint: Option.some(restored.modelProvider),
+              activeTurn: Option.fromUndefinedOr(
+                restored.thread.turns.find((turn) => turn.status === "inProgress"),
+              ),
             };
           }),
       });
@@ -287,18 +290,37 @@ const makeCodexChild = Effect.gen(function* () {
         sandboxPolicy: { type: "dangerFullAccess" },
         effort,
       };
-      let turnId = "";
-      let turnActive = false;
+      let turnId = Option.match(thread.activeTurn, { onNone: () => "", onSome: (turn) => turn.id });
+      let turnActive = Option.isSome(thread.activeTurn);
       let interrupting = false;
-      const toolsInFlight = new Set<string>();
+      const toolsInFlight = new Set<string>(
+        Option.match(thread.activeTurn, {
+          onNone: () => [],
+          onSome: (turn) =>
+            turn.items
+              .filter(Schema.is(ToolItem))
+              .filter((item) => item.status === "inProgress")
+              .map((item) => item.id),
+        }),
+      );
       const pendingMessages: string[] = [];
       let replayedGuidance = Option.none<{
         readonly turnId: string;
         readonly text: string;
         readonly count: number;
       }>();
-      let lastText: string | undefined;
-      let finalText: string | undefined;
+      const savedMessages = Option.match(thread.activeTurn, {
+        onNone: () => [],
+        onSome: (turn) =>
+          turn.items
+            .filter(Schema.is(AgentMessageItem))
+            .filter((item) => item.text.trim().length > 0),
+      });
+      let lastText = savedMessages.at(-1)?.text.trim();
+      let finalText = savedMessages
+        .filter((item) => item.phase === "final_answer")
+        .at(-1)
+        ?.text.trim();
       // Provider retries reported for the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
@@ -433,17 +455,12 @@ const makeCodexChild = Effect.gen(function* () {
       let resumed = false;
       const resume = Effect.fn("CodexRuntime.resume")(function* (error: AgentSessionError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.id });
-        if (yield* lifecycle.isStopping) {
-          yield* Effect.logInfo("Leaving the Codex child for reattachment", {
-            sessionId: session.id,
-          });
-          return yield* Effect.never;
-        }
+        if (yield* lifecycle.isStopping) return yield* Effect.never;
         if (
           resumed ||
           request.host._tag !== "RemoteShell" ||
           error._tag !== "SessionOperationError" ||
-          !Schema.is(RemoteCodexProcessLost)(error.cause)
+          !Schema.is(ChildProcessLost)(error.cause)
         )
           return yield* error;
         resumed = true;
@@ -453,7 +470,8 @@ const makeCodexChild = Effect.gen(function* () {
         });
         connection = yield* appServer.open({
           ...client,
-          sessionId: Option.some(AgentSessionId.make(`${session.id}-resume`)),
+          sessionId: Option.some(session.id),
+          transport: "replace",
         });
         yield* initializeCodex(connection);
         billing = yield* codexChildAccount(
@@ -528,7 +546,13 @@ const makeCodexChild = Effect.gen(function* () {
         );
         yield* conversation.read(() => unread.length);
       });
-      if (!request.paused && Option.isNone(request.idle))
+      if (turnActive) {
+        yield* Effect.logInfo("Reattached the active Codex turn", {
+          sessionId: session.id,
+          turnId,
+        });
+        if (request.paused && toolsInFlight.size === 0) yield* interruptTurn();
+      } else if (!request.paused && Option.isNone(request.idle))
         yield* startTurn(request.prompt).pipe(Effect.catch(resume));
       const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
         Stream.runForEach(({ method, params }) =>
@@ -781,19 +805,7 @@ const makeCodexChild = Effect.gen(function* () {
     },
   );
   const stop = Effect.fn("CodexRuntime.stop")((request: ChildRequest) =>
-    request.host._tag === "RemoteShell"
-      ? Effect.scoped(
-          appServer
-            .open({
-              cwd: request.cwd,
-              sessionId: Option.some(request.session.id),
-              environment: request.environment,
-              host: request.host,
-              transport: "replace",
-            })
-            .pipe(Effect.flatMap((connection) => connection.close)),
-        )
-      : Effect.void,
+    appServer.stop({ ...request, sessionId: Option.some(request.session.id) }),
   );
   return ChildBackend.of({ launch, stop });
 });
