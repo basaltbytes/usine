@@ -344,10 +344,11 @@ const makeClaudeChild = Effect.gen(function* () {
     transport?: "replace" | "resume",
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
+    let launchOptions = options;
     for (let retry = 0; ; retry += 1) {
       const launchScope = yield* Scope.fork(scope);
       const opened: ClaudeLaunch = {
-        ...(yield* launchOnce(request, options, messages, transport).pipe(
+        ...(yield* launchOnce(request, launchOptions, messages, transport).pipe(
           Scope.provide(launchScope),
           Effect.onError((cause) => Scope.close(launchScope, Exit.failCause(cause))),
         )),
@@ -376,6 +377,8 @@ const makeClaudeChild = Effect.gen(function* () {
         return opened;
       }
       yield* Scope.close(launchScope, Exit.void);
+      const { sessionId, ...remaining } = launchOptions;
+      if (sessionId !== undefined) launchOptions = { ...remaining, resume: sessionId };
       yield* Effect.logInfo("Claude child could not refresh its Claude login; launching it again", {
         sessionId: request.session.id,
         parentSessionId: request.session.parentId,

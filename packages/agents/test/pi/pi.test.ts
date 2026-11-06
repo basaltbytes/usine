@@ -21,7 +21,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession, sessionPool } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  ChildSession,
+  HarnessSession,
+  sessionPool,
+} from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, Layer, Logger, Option, Queue, Stream, Schema } from "effect";
@@ -704,6 +709,28 @@ describe("Pi child backend", () => {
         assert.strictEqual(delayed.disposeCount(), 1);
       }).pipe(Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk)))),
     );
+  });
+
+  it.effect("reports a failed native reopen as interrupted", () => {
+    const sdk = Layer.succeed(PiSdk)({
+      start: (options) => {
+        assert.strictEqual(options.storage._tag, "Resume");
+        return Promise.reject(new Error("Saved conversation unavailable"));
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const error = yield* (yield* ChildBackend)
+          .launch(
+            ChildRequest.make({
+              ...childRequest,
+              resume: Option.some(HarnessSession.make({ cwd: childRequest.cwd })),
+            }),
+          )
+          .pipe(Effect.flip);
+        assert.strictEqual(error._tag, "SessionInterruptedError");
+      }),
+    ).pipe(Effect.provide(piChildLayer.pipe(Layer.provide(sdk))));
   });
 
   it.effect("maps Pi SDK trouble to a session operation failure", () => {

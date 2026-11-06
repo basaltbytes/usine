@@ -288,7 +288,13 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
                         Effect.andThen(backend.launch(request)),
                       )
                     : recovery === "resume-crashes-then-replacement"
-                      ? shared.launch(request)
+                      ? shared.launch(request).pipe(
+                          Effect.tapError((error) =>
+                            Effect.sync(() => {
+                              assert.strictEqual(error._tag, "SessionInterruptedError");
+                            }),
+                          ),
+                        )
                       : backend.launch(request),
                 stop: (request) =>
                   backend.stop(request).pipe(

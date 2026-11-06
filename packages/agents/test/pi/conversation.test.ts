@@ -185,6 +185,33 @@ describe("session supervision", () => {
       }),
   );
 
+  for (const stopped of ["paused", "idle"] as const) {
+    it.effect(
+      `does not resend native queued guidance when a ${stopped} child gets another steer`,
+      () =>
+        Effect.gen(function* () {
+          const session = yield* conversation(child(`queued-${stopped}`));
+          const first = Steer.make({ message: "A" });
+          const second = Steer.make({ message: "B" });
+          const delivery = deliveries();
+          yield* session.intervene(first, delivery.onDelivery);
+          yield* session.intervene(Interrupt.make(), noDelivery);
+          if (stopped === "idle") yield* session.finish("Paused turn");
+          yield* session.intervene(second, delivery.onDelivery);
+          assert.deepStrictEqual(
+            session.turns.map(({ message }) => message),
+            ["A", "B"],
+          );
+          assert.deepStrictEqual(
+            (yield* session.unread).map(({ id }) => id),
+            stopped === "idle" ? [first.id] : [first.id, second.id],
+          );
+          yield* session.read([first.id, second.id]);
+          assert.deepStrictEqual(delivery.seen(), stopped === "idle" ? ["read"] : ["read", "read"]);
+        }),
+    );
+  }
+
   it.effect("keeps messages unread until the harness acknowledges their IDs", () =>
     Effect.gen(function* () {
       const session = yield* conversation(child("turn-end"));

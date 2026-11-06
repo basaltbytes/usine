@@ -311,6 +311,27 @@ describe("Codex child backend", () => {
     });
   }
 
+  it.effect("reports a failed native reopen as interrupted without starting a turn", () => {
+    const original = request();
+    const saved = HarnessSession.make({ cwd: original.cwd });
+    const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+    const server = connectionLayer(
+      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+      [],
+      calls,
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const error = yield* (yield* ChildBackend)
+          .launch(ChildRequest.make({ ...original, resume: Option.some(saved) }))
+          .pipe(Effect.flip);
+        assert.strictEqual(error._tag, "SessionInterruptedError");
+        assert(calls.some(({ method }) => method === "thread/resume"));
+        assert(!calls.some(({ method }) => method === "turn/start"));
+      }),
+    ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+  });
+
   it.effect("stops a retained remote child without resuming its conversation", () => {
     const original = request(
       "gpt-5.6-terra",

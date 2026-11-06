@@ -173,10 +173,13 @@ const loginContended: ReadonlyArray<Schema.Json> = [
  * closed, as in Claude Code's streaming-input sessions.
  */
 const loginRace = (contended: number) => {
-  const launches: Array<{ closed: boolean; id: string | undefined }> = [];
+  const launches: Array<{ closed: boolean; id: string | undefined; resume: string | undefined }> =
+    [];
   const sdk = Layer.succeed(ClaudeSdk)({
     open: (_input, options) => {
-      const launch = { closed: false, id: options.sessionId };
+      if (options.sessionId !== undefined && launches.some(({ id }) => id === options.sessionId))
+        throw new Error(`Session ID ${options.sessionId} is already in use.`);
+      const launch = { closed: false, id: options.sessionId, resume: options.resume };
       launches.push(launch);
       const lostLock = launches.length <= contended;
       let endOutput = () => {};
@@ -277,6 +280,30 @@ describe("Claude child backend", () => {
       ).pipe(Effect.provide(claudeChildWith(worker.layer).pipe(Layer.provide(sdk))));
     });
   }
+
+  it.effect("reports a failed native reopen as interrupted", () => {
+    const saved = HarnessSession.make({ cwd: request().cwd });
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (_input, options) => {
+        assert.strictEqual(options.resume, saved.id);
+        assert.isUndefined(options.sessionId);
+        return {
+          ...scripted([]),
+          supportedModels: async () => {
+            throw new Error("Saved conversation unavailable");
+          },
+        };
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const error = yield* (yield* ChildBackend)
+          .launch(ChildRequest.make({ ...request(), resume: Option.some(saved) }))
+          .pipe(Effect.flip);
+        assert.strictEqual(error._tag, "SessionInterruptedError");
+      }),
+    ).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+  });
 
   it.effect("continues the saved conversation supplied by a restarted durable call", () => {
     const saved = HarnessSession.make({
@@ -763,7 +790,13 @@ describe("Claude child backend", () => {
         assert(started?._tag === "SessionStarted" && Option.isSome(started.harnessSession));
         assert.match(started.harnessSession.value.id, /^[0-9a-f-]{36}$/u);
         const assignedId = started.harnessSession.value.id;
-        assert(launches.every(({ id }) => id === assignedId));
+        assert.deepStrictEqual(
+          launches.map(({ id, resume }) => ({ id, resume })),
+          [
+            { id: assignedId, resume: undefined },
+            { id: undefined, resume: assignedId },
+          ],
+        );
         assert.deepStrictEqual(
           launches.map(({ closed }) => closed),
           [true, false],

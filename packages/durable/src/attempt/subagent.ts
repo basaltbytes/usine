@@ -331,7 +331,6 @@ export const subagentTool = (services: ExtensionServices) => {
         ? [{ id: action.id, message: action.message }]
         : [];
     });
-    for (const input of restoredInputs.success) hub.childInputs.add(input.inputSequence);
     const idle = Option.fromNullishOr(previous.idle);
     if (held || paused || Option.isSome(idle))
       yield* Effect.logInfo("Restoring the child's operator supervision before launch", {
@@ -407,7 +406,8 @@ export const subagentTool = (services: ExtensionServices) => {
       },
     );
     const recordInfrastructureFailure = (error: AgentSessionError) =>
-      !replayed && error._tag === "SessionOperationError"
+      !replayed &&
+      (error._tag === "SessionOperationError" || error._tag === "SessionInterruptedError")
         ? call("record the child's infrastructure failure", () =>
             api.commit(async (tx) => {
               const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
@@ -498,6 +498,7 @@ export const subagentTool = (services: ExtensionServices) => {
       },
     });
     const runChild = Effect.gen(function* () {
+      for (const input of restoredInputs.success) hub.childInputs.add(input.inputSequence);
       // Annotate logs with the Attempt because this tool runs outside the Attempt's fiber. An abort
       // interrupts a launch that is still waiting through retry delays.
       const child = yield* untilAborted(
@@ -720,7 +721,14 @@ export const subagentTool = (services: ExtensionServices) => {
       return {
         output: [{ type: "text" as const, text }],
       } satisfies ToolExecutionResult<SpawnDetails>;
-    }).pipe(Effect.scoped);
+    }).pipe(
+      Effect.scoped,
+      Effect.onError(() =>
+        Effect.sync(() => {
+          for (const input of restoredInputs.success) hub.childInputs.delete(input.inputSequence);
+        }),
+      ),
+    );
     return yield* replayed
       ? runChild.pipe(
           Effect.catchIf(Schema.is(AgentSessionError), (error) => interrupted(error.message)),

@@ -504,19 +504,6 @@
         "type": "user",
         "message": {
           "role": "user",
-          "content": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
-        },
-        "parent_tool_use_id": null,
-        "uuid": "$OPERATOR_1"
-      }
-    },
-    {
-      "type": "expect_outbound",
-      "port": "claude:1/input",
-      "payload": {
-        "type": "user",
-        "message": {
-          "role": "user",
           "content": "Reply with exactly REPLAY_SECOND. Do not use tools."
         },
         "parent_tool_use_id": null,

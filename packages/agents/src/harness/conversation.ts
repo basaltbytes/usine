@@ -72,6 +72,12 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     onDelivery: (state) => journal.delivered(message.id, state),
   }));
 
+  const unsent = new Set((options.unread ?? []).map(({ id }) => id));
+  const sent = (id: OperatorMessageId) =>
+    Effect.sync(() => {
+      unsent.delete(id);
+    });
+
   /** Reports the identified messages as read, with the current session state. */
   const deliver = (ids: ReadonlyArray<OperatorMessageId>) =>
     Effect.suspend(() => {
@@ -163,7 +169,9 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       let activity: "idle" | "running" = Option.isSome(idle) ? "idle" : "running";
       if (stopped) {
         for (const message of queued.slice()) {
+          if (!unsent.has(message.id)) continue;
           const replayed = yield* options.send(message.message, activity, message.id);
+          yield* sent(message.id);
           if (replayed === "read") yield* deliver([message.id]);
           activity = "running";
         }
@@ -208,12 +216,14 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         });
       if ((held || paused) && Option.isNone(idle))
         yield* finish("Session interrupted before its turn returned");
+      for (const { id } of queued) unsent.add(id);
       yield* policy.recover(
         { held, paused, idle: Option.isSome(idle), empty },
         tools,
         queued,
         channel.emit,
-        send,
+        (message, id) =>
+          send(message, id).pipe(Effect.andThen(id === undefined ? Effect.void : sent(id))),
       );
     }, mutex.withPermits(1)),
     /** Acknowledges only the messages identified by the native harness. */
