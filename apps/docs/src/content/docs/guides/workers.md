@@ -5,6 +5,12 @@ description: Add capacity, connect gateways, and check or remove workers.
 
 Workers run the child sessions of attempts. Choose where they run, configure their connections, and verify their capabilities before assigning work.
 
+## Remote child recovery
+
+On Linux workers, Claude Code and Codex run under a shared process owner. An SSH interruption reconnects to the running child and replays unacknowledged input. The owner deduplicates that input and keeps output in journals beside the checkout. An environment change replaces the retained child after confirming that it stopped.
+
+Orchestrator heartbeats renew a two-minute lease. When the lease expires, the worker stops the child with TERM, then KILL if it has not exited within five seconds. Boot IDs and process start times prevent stale PID files from identifying an unrelated process after a worker restart. The worker programs ship with usine; workers need Node.js and their harness binaries.
+
 ## Add capacity
 
 1. [Add a local worker](/guides/add-a-worker/)
