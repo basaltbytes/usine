@@ -138,6 +138,10 @@ for (const [recovery, blocker] of [
                 Option.some({
                   totalTokens: TokenCount.make(1000),
                   costUsd: Option.some(UsdAmount.make(0.25)),
+                  processUsage: Option.some({
+                    totalTokens: TokenCount.make(400),
+                    costUsd: Option.some(UsdAmount.make(0.1)),
+                  }),
                 }),
               );
             }
@@ -156,6 +160,10 @@ for (const [recovery, blocker] of [
                 session: child.request.session,
                 totalTokens: TokenCount.make(parent.length === 0 ? 1500 : 1000),
                 costUsd: Option.some(UsdAmount.make(parent.length === 0 ? 0.375 : 0.25)),
+                processUsage: Option.some({
+                  totalTokens: TokenCount.make(parent.length === 0 ? 900 : 400),
+                  costUsd: Option.some(UsdAmount.make(parent.length === 0 ? 0.225 : 0.1)),
+                }),
               }),
             );
             yield* child.emit(TextOutput.make({ session: child.request.session, text }));
@@ -359,6 +367,10 @@ for (const [recovery, blocker] of [
               Option.some({
                 totalTokens: TokenCount.make(recovery === "resume-twice" ? 1500 : 1000),
                 costUsd: Option.some(UsdAmount.make(recovery === "resume-twice" ? 0.375 : 0.25)),
+                processUsage: Option.some({
+                  totalTokens: TokenCount.make(recovery === "resume-twice" ? 900 : 400),
+                  costUsd: Option.some(UsdAmount.make(recovery === "resume-twice" ? 0.225 : 0.1)),
+                }),
               }),
             );
             assert(Option.isNone(child.request.session.pool));

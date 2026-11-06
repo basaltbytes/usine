@@ -261,6 +261,7 @@ const makeClaudeChild = Effect.gen(function* () {
         },
         transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
         checkpoint.read,
+        checkpoint.inputAcknowledged,
       ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
       const query = sdk.open(input, { ...options, spawnClaudeCodeProcess: owner.spawn });
       const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
@@ -480,7 +481,7 @@ const makeClaudeChild = Effect.gen(function* () {
       boundary = conversation.awaitUnpaused;
       yield* Deferred.succeed(boundaryReady, undefined);
       const tools = new Map<string, string>();
-      const usage = claudeSessionMeter(Option.getOrUndefined(request.usage));
+      const usage = claudeSessionMeter(Option.getOrUndefined(request.usage), current.retained);
       const readRateLimits = claudeRateLimits(session);
       let harnessSession = request.resume;
       let backgroundTasks: ReadonlyArray<string> = [];
@@ -686,8 +687,9 @@ const makeClaudeChild = Effect.gen(function* () {
 
       const resume = Effect.fn("ClaudeRuntime.resume")(function* (error: SessionOperationError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, worker: request.worker });
+        const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
         if (
-          resumed ||
+          (resumed && working) ||
           request.host._tag !== "RemoteShell" ||
           Option.isNone(harnessSession) ||
           !Schema.is(ChildProcessLost)(error.cause)
@@ -718,7 +720,6 @@ const makeClaudeChild = Effect.gen(function* () {
           );
         tools.clear();
         usage.restart();
-        const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
         const messages = working ? [RESUME_PROMPT, ...(yield* conversation.unread)] : [];
         resumed = working;
         // A replacement that fails to launch ends the child, even while waiting for guidance.

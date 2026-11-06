@@ -8,6 +8,10 @@ const quoteSource = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 /** Detached worker process owner and replaceable, newline-framed relay. */
 const source = String.raw`
 const fs = require('node:fs');
+if (!fs.existsSync('/proc/self/stat')) {
+  console.error('The child process owner requires Linux /proc');
+  process.exit(1);
+}
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const [mode, pidFile, cursor, lease, environmentKeys = '[]', command, ...args] = process.argv.slice(1);

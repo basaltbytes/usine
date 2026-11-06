@@ -268,6 +268,37 @@ const workerRelay = (
   return { child, frames };
 };
 
+it.skipIf(process.platform === "linux")(
+  "rejects a worker without Linux /proc before spawning its owner",
+  () => {
+    const cwd = mkdtempSync(join(tmpdir(), "usine-owner-unsupported-"));
+    const pidFile = childPidFile(cwd, AgentSessionId.make("attempt:child:1"));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          PROCESS_OWNER,
+          "replace",
+          pidFile,
+          "0",
+          "120000",
+          "[]",
+          process.execPath,
+          "-e",
+          "process.stdin.resume()",
+        ],
+        { encoding: "utf8", timeout: 2000 },
+      );
+      assert.strictEqual(result.status, 1);
+      assert.include(result.stderr, "The child process owner requires Linux /proc");
+      assert.isFalse(existsSync(`${pidFile}.transport`));
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
 describe.skipIf(process.platform !== "linux")("worker process owner", () => {
   it.live(
     "retains the process across SSH login changes and replaces it when exported variables change",

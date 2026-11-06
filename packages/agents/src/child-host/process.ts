@@ -95,13 +95,14 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   input: Stream.Stream<Uint8Array>,
   transport?: "replace" | "resume",
   acknowledgement: "received" | "handled" = "received",
+  onInputAcknowledged: (bytes: Uint8Array) => Effect.Effect<number> = () => Effect.succeed(0),
 ) {
   const lifecycle = yield* ChildSessionLifecycle.current;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const stdout = yield* Queue.make<Uint8Array, SessionOperationError | Cause.Done>();
   const exit = yield* Deferred.make<ChildProcessLost, SessionOperationError>();
   const outgoing = yield* Queue.make<string, Cause.Done>();
-  const history = new Map<number, string>();
+  const history = new Map<number, { line: string; data: Uint8Array }>();
   let sequence = 0;
   const ready = yield* Deferred.make<void, SessionOperationError>();
   const checkpoint = yield* Deferred.make<void>();
@@ -144,7 +145,9 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
         ...frame,
         sequence,
       }).pipe(Effect.orDie);
-      history.set(sequence, line);
+      const data =
+        "data" in frame ? yield* Effect.fromResult(Base64.decode(frame.data)) : new Uint8Array();
+      history.set(sequence, { line, data });
       yield* Queue.offer(outgoing, line);
     });
   yield* input.pipe(
@@ -174,7 +177,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
     launched = true;
     const relayReady = yield* Deferred.make<void>();
     let skipped = 0;
-    const replay = [...history.values()];
+    const replay = [...history.values()].map(({ line }) => line);
     const replayed = new Set(replay);
     const frames = Stream.concat(
       Stream.fromIterable(replay),
@@ -265,7 +268,12 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
                 start: yield* Ref.get(offset),
                 offset: frame.offset,
               });
-            for (const id of history.keys()) if (id <= frame.ack) history.delete(id);
+            for (const [id, entry] of history)
+              if (id <= frame.ack) {
+                history.delete(id);
+                const bytes = yield* onInputAcknowledged(entry.data);
+                yield* acknowledgeOutput(bytes);
+              }
           } else if ("stdout" in frame) {
             const bytes = yield* Effect.fromResult(Base64.decode(frame.stdout));
             if (acknowledgement === "handled")

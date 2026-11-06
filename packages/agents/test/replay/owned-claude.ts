@@ -37,7 +37,20 @@ const send = message => process.stdout.write(JSON.stringify(message) + '\\n');
 const sessionState = state => ({ type: 'system', subtype: 'session_state_changed', state,
   sdk_host_only: true, session_id: messages[0].session_id, uuid: require('node:crypto').randomUUID() });
 const mirror = { type: 'transcript_mirror', filePath: '/replay/session.jsonl', entries: [] };
-const sendBatch = batch => process.stdout.write(batch.map(message => JSON.stringify(message) + '\\n').join(''));
+let turns = 0;
+let completedTurns = 0;
+const sendBatch = batch => process.stdout.write(batch.map(message => {
+  if (fs.existsSync('cumulative-usage')) {
+    message = structuredClone(message);
+    if (message.type === 'assistant') message.message.id += ':' + turns;
+    if (message.type === 'result') {
+      completedTurns++;
+      for (const usage of Object.values(message.modelUsage))
+        for (const key of ['inputTokens', 'outputTokens', 'cacheCreationInputTokens', 'costUSD']) usage[key] *= completedTurns;
+    }
+  }
+  return JSON.stringify(message) + '\\n';
+}).join(''));
 const sendNoise = () => process.stdout.write('\\n \\t\\r\\nWarning: replay diagnostic on stdout\\n');
 let waiting = false;
 let hookPending = false;
@@ -74,6 +87,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     }
   }
   else if (message.type === 'user') {
+    turns++;
     fs.appendFileSync('user-messages', JSON.stringify(message) + '\\n');
     if (fs.existsSync('exit-resume') && process.argv.some(arg => arg.startsWith('--resume'))) {
       const fault = fs.readFileSync('exit-resume', 'utf8');

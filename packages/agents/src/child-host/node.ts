@@ -49,6 +49,7 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
   input: Stream.Stream<Uint8Array>,
   transport?: "replace" | "resume",
   acknowledgement: "received" | "handled" = "received",
+  onInputAcknowledged?: (bytes: Uint8Array) => Effect.Effect<number>,
 ) {
   yield* Effect.annotateCurrentSpan({ sessionId: Option.getOrUndefined(target.sessionId) });
   if (target.host._tag === "RemoteShell" && Option.isSome(target.sessionId))
@@ -58,10 +59,16 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
       input,
       transport,
       acknowledgement,
+      onInputAcknowledged,
     );
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const handle = yield* spawner
-    .spawn(childProcessCommand(target, command, { stream: input, endOnDone: true }))
+    .spawn(
+      childProcessCommand(target, command, {
+        stream: input.pipe(Stream.tap((data) => onInputAcknowledged?.(data) ?? Effect.void)),
+        endOnDone: true,
+      }),
+    )
     .pipe(Effect.mapError((cause) => processError(target, "Child process failed to start", cause)));
   const stderr = yield* Ref.make("");
   const diagnostics = yield* handle.stderr.pipe(

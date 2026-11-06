@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import type { AgentSessionEvent } from "@usine/core/agent/session";
+import type { AgentSessionEvent, SessionTokensUpdated } from "@usine/core/agent/session";
 import { Interrupt, Release, Steer } from "@usine/core/attempt/channel";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import {
@@ -223,7 +223,9 @@ it.live(
 for (const state of [
   "working",
   "idle",
+  "usage",
   "hook",
+  "answered-hook",
   "buffered-result",
   "environment-changed",
   "fresh",
@@ -242,6 +244,9 @@ for (const state of [
           const scope = yield* Scope.make();
           const stopping = yield* Ref.make(false);
           const events = yield* Queue.unbounded<AgentSessionEvent>();
+          let committedUsage = Option.none<SessionTokensUpdated>();
+          if (state === "usage")
+            yield* fs.writeFileString(`${fixture.cwd}/cumulative-usage`, "ready");
           if (state === "buffered-result")
             yield* fs.writeFileString(`${fixture.cwd}/block-result`, "ready");
           const first = yield* Effect.gen(function* () {
@@ -262,13 +267,14 @@ for (const state of [
             Effect.gen(function* () {
               for (;;) {
                 const event = yield* Queue.take(events);
+                if (event._tag === "SessionTokensUpdated") committedUsage = Option.some(event);
                 if (event._tag === tag) return event;
               }
             });
           const started = yield* until("SessionStarted");
           assert(started._tag === "SessionStarted");
           yield* until("ToolStarted");
-          if (state === "idle") {
+          if (state === "idle" || state === "usage") {
             yield* fixture.controls.releaseCommand;
             yield* until("SessionIdle");
             // SDK-only output arriving after the result must advance without another adapter event.
@@ -282,6 +288,12 @@ for (const state of [
             while (!(yield* fs.exists(`${fixture.cwd}/hook-sent`)))
               yield* Effect.sleep("10 millis");
             yield* Effect.sleep("1100 millis");
+          }
+          if (state === "answered-hook") {
+            yield* fs.writeFileString(`${fixture.cwd}/request-hook`, "ready");
+            yield* fileWithLines(`${fixture.cwd}/hook-responses`, 1);
+            yield* fs.writeFileString(`${fixture.cwd}/finish-tool`, "ready");
+            yield* until("ToolFinished");
           }
           const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
           const pid = yield* fs.readFileString(pidFile);
@@ -322,7 +334,11 @@ for (const state of [
                       ? { ...fixture.request.environment, REPLAY_ENVIRONMENT: "changed" }
                       : fixture.request.environment,
                   paused: state === "hook",
-                  idle: state === "idle" ? Option.some("REPLAY_DONE") : Option.none(),
+                  idle:
+                    state === "idle" || state === "usage"
+                      ? Option.some("REPLAY_DONE")
+                      : Option.none(),
+                  usage: state === "usage" ? committedUsage : Option.none(),
                 }),
               );
               const currentPid = yield* fs.readFileString(pidFile);
@@ -357,15 +373,62 @@ for (const state of [
                 assert.include((yield* resumed.result).message, "REPLAY_DONE");
                 return;
               }
+              if (state === "answered-hook") {
+                const replayed = yield* Queue.unbounded<AgentSessionEvent>();
+                yield* resumed.events.pipe(
+                  Stream.runForEach((event) => Queue.offer(replayed, event)),
+                  Effect.forkScoped,
+                );
+                yield* fixture.controls.releaseCommand;
+                for (;;) {
+                  const event = yield* Queue.take(replayed);
+                  assert.notStrictEqual(
+                    event._tag,
+                    "ToolFinished",
+                    "the handled tool result is not replayed",
+                  );
+                  if (event._tag === "SessionIdle") break;
+                }
+                const responses = yield* fileWithLines(`${fixture.cwd}/hook-responses`, 1);
+                assert.lengthOf(responses, 1);
+                yield* resumed.intervene(Release.make(), () => Effect.void);
+                assert.include((yield* resumed.result).message, "REPLAY_DONE");
+                return;
+              }
               // This message is a FIFO barrier after any input from the retained launch.
               const guidance = "Continue after reattachment";
+              const resumedEvents = yield* Queue.unbounded<AgentSessionEvent>();
+              if (state === "usage") {
+                yield* resumed.events.pipe(
+                  Stream.runForEach((event) => Queue.offer(resumedEvents, event)),
+                  Effect.forkScoped,
+                );
+                for (;;) {
+                  if ((yield* Queue.take(resumedEvents))._tag === "SessionIdle") break;
+                }
+              }
               yield* resumed.steer(guidance);
               const count = state === "environment-changed" || state === "fresh" ? 3 : 2;
               const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, count);
               assert.lengthOf(inputs, count, "reattachment sends no task or continuation prompt");
               assert.include(inputs[0] ?? "", fixture.request.prompt);
               assert.include(inputs[count - 1] ?? "", guidance);
-              if (state !== "idle") yield* fixture.controls.releaseCommand;
+              if (state !== "idle" && state !== "usage") yield* fixture.controls.releaseCommand;
+              if (state === "usage") {
+                let latest = Option.none<SessionTokensUpdated>();
+                for (;;) {
+                  const event = yield* Queue.take(resumedEvents);
+                  if (event._tag === "SessionTokensUpdated") latest = Option.some(event);
+                  if (event._tag === "SessionIdle") break;
+                }
+                assert(Option.isSome(committedUsage));
+                assert(Option.isSome(latest));
+                assert.strictEqual(latest.value.totalTokens, committedUsage.value.totalTokens * 2);
+                assert.deepStrictEqual(
+                  latest.value.costUsd,
+                  Option.map(committedUsage.value.costUsd, (cost) => cost * 2),
+                );
+              }
               yield* resumed.intervene(Release.make(), () => Effect.void);
               const result = yield* resumed.result;
               assert.include(result.message, "REPLAY_DONE");
@@ -386,6 +449,7 @@ for (const outcome of [
   "idle-handshake-exit",
   "idle",
   "paused",
+  "paused-after-working-resume",
   "two-outages",
 ] as const)
   it.live.skipIf(process.platform !== "linux")(
@@ -417,7 +481,10 @@ for (const outcome of [
               if (event._tag === "ToolStarted") break;
             }
             assert(Option.isSome(saved));
-            const waitingForGuidance = outcome === "idle" || outcome === "paused";
+            const waitingForGuidance =
+              outcome === "idle" ||
+              outcome === "paused" ||
+              outcome === "paused-after-working-resume";
             if (outcome === "idle" || outcome === "idle-handshake-exit") {
               yield* fixture.controls.releaseCommand;
               for (;;) {
@@ -449,6 +516,12 @@ for (const outcome of [
             assert.notStrictEqual(replacementPid, originalPid);
             if (waitingForGuidance) {
               yield* Queue.take(recoveries);
+              if (outcome === "paused-after-working-resume") {
+                for (;;) {
+                  if ((yield* Queue.take(events))._tag === "ToolStarted") break;
+                }
+                yield* running.intervene(Interrupt.make(), () => Effect.void);
+              }
               yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
               const argumentsAfterRecovery = yield* fileWithLines(
                 `${fixture.cwd}/launch-arguments`,
@@ -459,7 +532,10 @@ for (const outcome of [
               const recoveredPid = yield* fs.readFileString(pidFile);
               assert.notStrictEqual(recoveredPid, replacementPid);
               const inputsBeforeGuidance = yield* fileWithLines(`${fixture.cwd}/user-messages`, 1);
-              assert.lengthOf(inputsBeforeGuidance, 1);
+              assert.lengthOf(
+                inputsBeforeGuidance,
+                outcome === "paused-after-working-resume" ? 2 : 1,
+              );
               yield* Queue.take(recoveries);
               yield* running
                 .intervene(
@@ -468,10 +544,11 @@ for (const outcome of [
                 )
                 .pipe(Effect.retry({ times: 100, schedule: Schedule.spaced("10 millis") }));
             }
-            const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, 2);
-            assert.lengthOf(inputs, 2);
+            const inputCount = outcome === "paused-after-working-resume" ? 3 : 2;
+            const inputs = yield* fileWithLines(`${fixture.cwd}/user-messages`, inputCount);
+            assert.lengthOf(inputs, inputCount);
             assert.include(
-              inputs[1] ?? "",
+              inputs[inputCount - 1] ?? "",
               waitingForGuidance ? "Continue after waiting for guidance" : "check the worktree",
             );
             if (outcome === "two-outages") {

@@ -39,6 +39,7 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
   transport?: "replace" | "resume",
   readOutput: (bytes: Uint8Array) => Effect.Effect<number, SessionOperationError> = () =>
     Effect.succeed(0),
+  onInputAcknowledged?: (bytes: Uint8Array) => Effect.Effect<number>,
 ) {
   const context = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const lifecycle = yield* ChildSessionLifecycle.current;
@@ -69,6 +70,7 @@ export const sdkProcessSpawner = Effect.fn("ChildHost.sdkProcessSpawner")(functi
         Stream.fromQueue(input),
         transport,
         "handled",
+        onInputAcknowledged,
       );
       acknowledgeOutput = handle.acknowledgeOutput;
       const generation = yield* handle.generation;

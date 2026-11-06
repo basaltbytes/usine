@@ -8,6 +8,7 @@ import {
   ChildSessionBudget,
   ChildSessionCount,
   HarnessSession,
+  SessionTokensUpdated,
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
@@ -57,7 +58,11 @@ export class ChildRequest extends Schema.Class<
   ),
   /** Cumulative usage committed before the orchestrator resumed this child. */
   usage: Schema.OptionFromOptionalKey(
-    Schema.Struct({ totalTokens: TokenCount, costUsd: Schema.OptionFromNullOr(UsdAmount) }),
+    Schema.Struct({
+      totalTokens: TokenCount,
+      costUsd: Schema.OptionFromNullOr(UsdAmount),
+      processUsage: Schema.optionalKey(SessionTokensUpdated.fields.processUsage),
+    }),
   ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
   /** Keeps the child addressable after a turn until the operator releases its persisted Hold. */
   held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),

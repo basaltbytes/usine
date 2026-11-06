@@ -152,6 +152,14 @@ export const userMessage = (content: string): ClaudeUserMessage => ({
 });
 
 const ControlMessage = Schema.Struct({ type: Schema.String });
+const ControlRequest = Schema.Struct({
+  type: Schema.Literal("control_request"),
+  request_id: Schema.String,
+});
+const ControlResponse = Schema.Struct({
+  type: Schema.Literal("control_response"),
+  response: Schema.Struct({ request_id: Schema.String }),
+});
 const SdkOnlyMessage = Schema.Union([
   Schema.Struct({ type: Schema.Literals(["control_response", "keep_alive", "transcript_mirror"]) }),
   Schema.Struct({
@@ -177,6 +185,8 @@ const messageKey = (message: Schema.Json): string => {
 
 export const claudeOutputCheckpoint = () => {
   let buffered = Buffer.alloc(0);
+  let input = Buffer.alloc(0);
+  const answered = new Set<string>();
   const pending: Array<{ key: string; bytes: number; handled: boolean; control: boolean }> = [];
   const flush = () => {
     let bytes = 0;
@@ -199,12 +209,30 @@ export const claudeOutputCheckpoint = () => {
           }
           const message = decoded.success;
           const type = Schema.is(ControlMessage)(message) ? message.type : "";
+          const request = Schema.is(ControlRequest)(message);
           pending.push({
-            key: messageKey(message),
+            key: request ? message.request_id : messageKey(message),
             bytes: end + 1,
-            handled: Schema.is(SdkOnlyMessage)(message),
-            control: type === "control_request" || type === "control_cancel_request",
+            handled:
+              Schema.is(SdkOnlyMessage)(message) ||
+              (request && answered.delete(message.request_id)),
+            control: type === "control_cancel_request",
           });
+        }
+        return flush();
+      }),
+    inputAcknowledged: (bytes: Uint8Array) =>
+      Effect.gen(function* () {
+        input = Buffer.concat([input, bytes]);
+        let end;
+        while ((end = input.indexOf(10)) >= 0) {
+          const decoded = yield* Effect.result(decodeMessage(input.subarray(0, end).toString()));
+          input = input.subarray(end + 1);
+          if (Result.isFailure(decoded) || !Schema.is(ControlResponse)(decoded.success)) continue;
+          const id = decoded.success.response.request_id;
+          const entry = pending.find((entry) => !entry.handled && entry.key === id);
+          if (entry !== undefined) entry.handled = true;
+          else answered.add(id);
         }
         return flush();
       }),
@@ -214,7 +242,7 @@ export const claudeOutputCheckpoint = () => {
       if (index < 0) return 0;
       const entry = pending[index];
       if (entry !== undefined) entry.handled = true;
-      // Hook callbacks remain replayable until the enclosing turn's result is handled.
+      // Cancellation has no response; the turn result confirms that it was applied.
       if (Schema.is(ControlMessage)(message) && message.type === "result")
         for (let i = 0; i < index; i++) {
           const earlier = pending[i];
