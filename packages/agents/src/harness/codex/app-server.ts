@@ -1,22 +1,8 @@
 import { Harness } from "@usine/core/agent/brain";
-import {
-  Cause,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Option,
-  type PlatformError,
-  Queue,
-  Ref,
-  Schema,
-  Scope,
-  Stream,
-} from "effect";
+import { Cause, Deferred, Effect, Fiber, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
-import { childPidFile } from "../../child-host/child-host.ts";
-import { RemoteCodexProcessLost, remoteCodexProcess } from "./remote.ts";
-import { hostCommand } from "../../child-host/command.ts";
+import { startChildProcess, childProcessCommand } from "../../child-host/node.ts";
+import { processError, stopChildProcess } from "../../child-host/process.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
 
 import {
@@ -36,11 +22,11 @@ export {
 } from "./connection.ts";
 
 const RpcSuccessResponse = Schema.Struct({
-  id: Schema.Int,
+  id: Schema.Union([Schema.Int, Schema.String]),
   result: Schema.Json,
 });
 const RpcErrorResponse = Schema.Struct({
-  id: Schema.Int,
+  id: Schema.Union([Schema.Int, Schema.String]),
   error: Schema.Struct({
     code: Schema.Finite,
     message: Schema.String,
@@ -57,7 +43,6 @@ const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json)
 const encoder = new TextEncoder();
 
 const RPC_TIMEOUT = "60 seconds";
-const STDERR_TAIL_LINES = 5;
 const preview = (line: string): string => (line.length > 200 ? `${line.slice(0, 200)}…` : line);
 
 interface PendingRequest {
@@ -95,39 +80,19 @@ const appServerArgs = (cwd: string) => [
 export const codexAppServerCommand = (
   client: CodexClient,
   stdin?: ChildProcess.CommandOptions["stdin"],
-): ChildProcess.Command => {
-  const lifetime: ChildProcess.CommandOptions = {
-    // Not detached, so killing the launching process group also kills the app server; SIGTERM is
-    // followed by SIGKILL after 5 seconds (ADR 0006).
-    detached: false,
-    forceKillAfter: "5 seconds",
-  };
-  return hostCommand(
-    client.host,
+): ChildProcess.Command =>
+  childProcessCommand(
+    client,
     {
       cwd: "/",
-      environment: client.environment,
-      pidFile: Option.getOrUndefined(
-        Option.map(client.sessionId, (sessionId) => childPidFile(client.cwd, sessionId)),
-      ),
       command: "codex",
       args: [
         ...appServerArgs(client.cwd),
         ...(client.host._tag === "LocalProcess" ? ["-c", 'cli_auth_credentials_store="file"'] : []),
       ],
     },
-    stdin === undefined ? lifetime : { ...lifetime, stdin },
+    stdin,
   );
-};
-
-interface CodexProcess {
-  readonly stdout: Stream.Stream<Uint8Array, SessionOperationError | PlatformError.PlatformError>;
-  readonly stderr: Stream.Stream<Uint8Array, SessionOperationError | PlatformError.PlatformError>;
-  readonly exitCode: Effect.Effect<number, SessionOperationError | PlatformError.PlatformError>;
-  readonly kill: (
-    options?: Parameters<ChildProcessSpawner.ChildProcessHandle["kill"]>[0],
-  ) => Effect.Effect<void, SessionOperationError | PlatformError.PlatformError>;
-}
 
 const makeCodexAppServer = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -144,32 +109,26 @@ const makeCodexAppServer = Effect.gen(function* () {
         CodexNotification,
         SessionOperationError | Cause.Done
       >();
-      const pending = yield* Ref.make(new Map<number, PendingRequest>());
+      const pending = yield* Ref.make(new Map<number | string, PendingRequest>());
       const nextId = yield* Ref.make(1);
       const closing = yield* Ref.make(false);
       const failure = yield* Ref.make(Option.none<SessionOperationError>());
-      const stderrTail = yield* Ref.make<ReadonlyArray<string>>([]);
-      const process: Effect.Effect<
-        CodexProcess,
-        PlatformError.PlatformError | SessionOperationError,
-        Scope.Scope
-      > = Effect.gen(function* () {
-        if (request.host._tag === "RemoteShell" && Option.isSome(request.sessionId)) {
-          return yield* remoteCodexProcess(
-            { ...request, host: request.host },
-            request.sessionId.value,
-            appServerArgs(request.cwd),
-            Stream.fromQueue(input),
-          ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
-        }
-        return yield* spawner.spawn(
-          codexAppServerCommand(request, {
-            stream: Stream.fromQueue(input),
-            endOnDone: true,
-          }),
-        );
-      });
-      const handle = yield* process.pipe(
+      const handle = yield* startChildProcess(
+        request,
+        {
+          cwd: "/",
+          command: "codex",
+          args: [
+            ...appServerArgs(request.cwd),
+            ...(request.host._tag === "LocalProcess"
+              ? ["-c", 'cli_auth_credentials_store="file"']
+              : []),
+          ],
+        },
+        Stream.fromQueue(input),
+        request.transport,
+      ).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.mapError((cause) =>
           operationError("launch", request, "Codex app-server failed to start", cause),
         ),
@@ -284,7 +243,7 @@ const makeCodexAppServer = Effect.gen(function* () {
             Effect.flatMap((closed) =>
               closed
                 ? Effect.void
-                : handle.exitCode.pipe(
+                : handle.exit.pipe(
                     // If the process exits within 5 seconds, its exit monitor reports the error;
                     // otherwise a running process that closed stdout fails here.
                     Effect.timeout("5 seconds"),
@@ -313,56 +272,24 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.forkScoped,
       );
-      const stderrReader = yield* handle.stderr.pipe(
-        Stream.decodeText(),
-        Stream.splitLines,
-        Stream.runForEach((line) =>
-          line.trim().length === 0
-            ? Effect.void
-            : Effect.logDebug("Codex app-server stderr", {
-                line: preview(line),
-                sessionId: Option.getOrUndefined(request.sessionId),
-              }).pipe(
-                Effect.andThen(
-                  Ref.update(stderrTail, (tail) => [...tail, line].slice(-STDERR_TAIL_LINES)),
-                ),
-              ),
-        ),
-        Effect.catch((cause) =>
-          failAll(
-            Schema.is(SessionOperationError)(cause)
-              ? cause
-              : operationError("stream", request, "Can't read Codex app-server diagnostics", cause),
-          ),
-        ),
-        Effect.forkScoped,
-      );
-      yield* handle.exitCode.pipe(
-        Effect.flatMap((exitCode) =>
-          Effect.all([Ref.get(closing), Ref.get(stderrTail)]).pipe(
-            Effect.flatMap(([closed, stderr]) =>
+      yield* handle.exit.pipe(
+        Effect.tap(() => Fiber.join(stdoutReader)),
+        Effect.flatMap((event) =>
+          Ref.get(closing).pipe(
+            Effect.flatMap((closed) =>
               closed
                 ? Effect.void
                 : failAll(
-                    operationError(
-                      "stream",
+                    processError(
                       request,
-                      `Codex app-server exited with code ${String(exitCode)}`,
-                      request.host._tag === "RemoteShell" && Option.isSome(request.sessionId)
-                        ? RemoteCodexProcessLost.make({ message: `exit code ${exitCode}` })
-                        : { exitCode, stderr },
+                      `Child process exited with code ${event.exitCode}`,
+                      event,
                     ),
                   ),
             ),
           ),
         ),
-        Effect.catch((cause) =>
-          failAll(
-            Schema.is(SessionOperationError)(cause)
-              ? cause
-              : operationError("stream", request, "Can't monitor Codex app-server", cause),
-          ),
-        ),
+        Effect.catch(failAll),
         Effect.forkScoped,
       );
       // Closing stdin runs Codex's thread shutdown, including background commands; SIGTERM skips it
@@ -388,19 +315,11 @@ const makeCodexAppServer = Effect.gen(function* () {
             sessionId: Option.getOrUndefined(request.sessionId),
           });
           yield* Ref.set(closing, true);
-          if (yield* lifecycle.isStopping) {
-            yield* Effect.logInfo("Leaving the Codex app-server for reattachment", {
-              sessionId: Option.getOrUndefined(request.sessionId),
-            });
-            return;
-          }
+          if (yield* lifecycle.isStopping) return;
           yield* Queue.end(input);
-          const [exitCode] = yield* Effect.all(
-            [handle.exitCode, Fiber.join(stdoutReader), Fiber.join(stderrReader)],
-            {
-              concurrency: "unbounded",
-            },
-          ).pipe(
+          const [event] = yield* Effect.all([handle.exit, Fiber.join(stdoutReader)], {
+            concurrency: "unbounded",
+          }).pipe(
             Effect.timeout("15 seconds"),
             Effect.mapError((cause) =>
               operationError(
@@ -412,13 +331,14 @@ const makeCodexAppServer = Effect.gen(function* () {
             ),
             Effect.tapError(rejectPending),
           );
-          yield* rejectPending({ exitCode });
+          const { exitCode, stderrTail } = event;
+          yield* rejectPending(event);
           if (exitCode !== 0)
             return yield* operationError(
               "interrupt",
               request,
               `Codex app-server exited with code ${String(exitCode)} during shutdown`,
-              { exitCode, stderr: yield* Ref.get(stderrTail) },
+              { exitCode, stderrTail },
             );
           yield* Queue.end(notifications);
           yield* Effect.logDebug("Codex app-server shutdown completed", { exitCode });
@@ -441,7 +361,7 @@ const makeCodexAppServer = Effect.gen(function* () {
                       sessionId: Option.getOrUndefined(request.sessionId),
                     },
                   ).pipe(
-                    Effect.andThen(handle.kill({ forceKillAfter: "5 seconds" })),
+                    Effect.andThen(handle.kill()),
                     Effect.catch((cause) =>
                       Effect.logWarning("Could not force Codex app-server to stop", {
                         cause,
@@ -465,7 +385,12 @@ const makeCodexAppServer = Effect.gen(function* () {
             );
           const failed = yield* Ref.get(failure);
           if (Option.isSome(failed)) return yield* failed.value;
-          const id = yield* Ref.getAndUpdate(nextId, (current) => current + 1);
+          const generation = yield* handle.generation;
+          const sequence = yield* Ref.getAndUpdate(nextId, (current) => current + 1);
+          const id = Option.match(generation, {
+            onNone: () => sequence,
+            onSome: (epoch) => `${epoch}:${sequence}`,
+          });
           const response = yield* Deferred.make<Schema.Json, SessionOperationError>();
           yield* Ref.update(pending, (entries) =>
             new Map(entries).set(id, { operation, response }),
@@ -503,7 +428,11 @@ const makeCodexAppServer = Effect.gen(function* () {
       } satisfies CodexConnection;
     },
   );
-  return CodexAppServer.of({ open });
+  const stop: CodexAppServer["Service"]["stop"] = (target) =>
+    stopChildProcess(target).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
+  return CodexAppServer.of({ open, stop });
 });
 
 /** Provides `CodexAppServer` over process standard streams using `ChildProcessSpawner`. Scope cleanup closes stdin and force-stops the process if graceful shutdown fails. */

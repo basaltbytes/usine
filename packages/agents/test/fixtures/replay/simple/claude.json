@@ -39,7 +39,7 @@
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
             "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
           },
-          "spawnClaudeCodeProcess": false
+          "spawnClaudeCodeProcess": true
         }
       }
     },
@@ -295,8 +295,8 @@
             "cache_creation_input_tokens": 14435,
             "cache_read_input_tokens": 0,
             "cache_creation": {
-              "ephemeral_5m_input_tokens": 14435,
-              "ephemeral_1h_input_tokens": 0
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 14435
             },
             "output_tokens": 8,
             "service_tier": "standard",

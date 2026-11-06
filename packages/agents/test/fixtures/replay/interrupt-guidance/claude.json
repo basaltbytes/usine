@@ -39,7 +39,7 @@
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
             "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
           },
-          "spawnClaudeCodeProcess": false
+          "spawnClaudeCodeProcess": true
         }
       }
     },
@@ -570,7 +570,7 @@
             "PreToolUse": [{ "hooks": [null], "timeout": 86400 }],
             "PostToolUse": [{ "hooks": [null], "timeout": 86400 }]
           },
-          "spawnClaudeCodeProcess": false
+          "spawnClaudeCodeProcess": true
         }
       }
     },
@@ -835,7 +835,7 @@
             "input_tokens": 2,
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 14474,
-            "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 },
+            "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
             "output_tokens": 16,
             "service_tier": "standard",
             "inference_geo": "global",

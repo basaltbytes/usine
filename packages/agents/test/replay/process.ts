@@ -13,6 +13,8 @@ import {
 } from "effect";
 import { Base64 } from "effect/encoding";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { CHILD_LIFELINE } from "../../src/child-host/node.ts";
+import { PROCESS_OWNER } from "../../src/child-host/supervisor.ts";
 import { Tape } from "./transcript.ts";
 
 const isJsonObject = (value: Schema.Json): value is { readonly [key: string]: Schema.Json } =>
@@ -79,6 +81,9 @@ export const processTransport = (
       Effect.gen(function* () {
         assert(command._tag === "StandardCommand");
         const port = tape.port("process");
+        tape.bind(process.execPath, "$NODE");
+        tape.bind(CHILD_LIFELINE, "$CHILD_LIFELINE");
+        tape.bind("'" + PROCESS_OWNER.replaceAll("'", `'"'"'`) + "'", "'$PROCESS_OWNER'");
         tape.outbound(
           port,
           parseCommandJson(
@@ -100,7 +105,10 @@ export const processTransport = (
                 decodeWire(line).pipe(
                   Effect.orDie,
                   Effect.tap((payload) =>
-                    Effect.sync(() => tape.outbound(`${port}/stdin`, payload)),
+                    Effect.sync(() => {
+                      if (!(isJsonObject(payload) && payload.heartbeat === true))
+                        tape.outbound(`${port}/stdin`, payload);
+                    }),
                   ),
                   Effect.as(encoder.encode(`${line}\n`)),
                 ),

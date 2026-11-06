@@ -296,7 +296,7 @@ const remoteLine = (command: ChildProcess.StandardCommand): string => {
 const quote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
 
 /** Returns the unquoted words of a remote command line: `exec 'sh' '-c' ...` gives `sh`, `-c`, .... */
-const remoteWords = (line: string): Array<string> =>
+export const remoteWords = (line: string): Array<string> =>
   [...line.matchAll(/'((?:[^']|'"'"')*)'/gu)].map(([, word]) =>
     (word ?? "").replaceAll(`'"'"'`, "'"),
   );

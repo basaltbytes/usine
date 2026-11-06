@@ -129,6 +129,7 @@ const account = (response: Effect.Effect<Schema.Json>) => {
   let opened = 0;
   let closed = 0;
   const layer = Layer.succeed(CodexAppServer)({
+    stop: () => Effect.void,
     open: () =>
       Effect.acquireRelease(
         Effect.sync(() => {
@@ -591,6 +592,7 @@ describe("worker harness readiness", () => {
       }).pipe(
         Effect.provide(
           commands({
+            [overSsh("exec 'node' '--version'")]: { stdout: "v22.0.0", exitCode: 0 },
             [overSsh("exec 'claude' '--version'")]: {
               stdout: `${(yield* claudeVersion).claudeCodeVersion} (Claude Code)`,
               exitCode: 0,
@@ -622,7 +624,7 @@ describe("worker harness readiness", () => {
         assert.strictEqual(error._tag, "SessionOperationError");
       }).pipe(
         Effect.provide(
-          commands({ [overSsh("exec 'claude' '--version'")]: { stdout: "", exitCode: 255 } }).pipe(
+          commands({ [overSsh("exec 'node' '--version'")]: { stdout: "", exitCode: 255 } }).pipe(
             Layer.provideMerge(account(Effect.succeed(null)).layer),
             Layer.provideMerge(unusedPi),
           ),

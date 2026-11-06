@@ -18,7 +18,18 @@ export const initializeCodex = Effect.fn("Codex.initialize")(function* (
     clientInfo: { name: "usine", title: "usine", version: "0.0.1" },
     capabilities: null,
   } satisfies InitializeParams;
-  yield* connection.request("launch", "initialize", params);
+  yield* connection.request("launch", "initialize", params).pipe(
+    Effect.catchTag("SessionOperationError", (error) =>
+      Schema.is(
+        Schema.Struct({
+          code: Schema.Literal(-32600),
+          message: Schema.Literal("Already initialized"),
+        }),
+      )(error.cause)
+        ? Effect.logDebug("Attached to an initialized Codex app-server")
+        : Effect.fail(error),
+    ),
+  );
   yield* connection.notify("launch", "initialized", {});
 });
 

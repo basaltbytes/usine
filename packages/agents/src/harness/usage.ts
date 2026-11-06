@@ -70,9 +70,9 @@ const decodeResult = Schema.decodeUnknownOption(ClaudeResultUsage);
  * SDK's input counts exclude cache reads and writes; repeated blocks with one message ID count only
  * their added tokens. The cost is the SDK's `costUSD` estimate and changes only at a result.
  */
-export const claudeTokenMeter = () => {
-  let total = 0;
-  let cost = Option.none<UsdAmount>();
+export const claudeTokenMeter = (seed: SessionUsage = NO_USAGE) => {
+  let total: number = seed.totalTokens;
+  let cost = seed.costUsd;
   const messages = new Map<string, number>();
   return (message: Schema.Json): Option.Option<SessionUsage> => {
     const assistant = decodeAssistant(message);
@@ -105,22 +105,35 @@ const NO_USAGE: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Optio
 /**
  * Returns a Claude token meter for a session that another process can resume. `read` returns the
  * session's usage: the current process's, as `claudeTokenMeter` reads it, plus the earlier
- * processes'. `restart` starts on a new process, which Claude counts from zero.
+ * processes'. `restart` starts on a new process and returns the usage checkpoint to persist.
  */
-export const claudeSessionMeter = (seed: SessionUsage = NO_USAGE) => {
-  let earlier = seed;
-  let current = NO_USAGE;
-  let meter = claudeTokenMeter();
+export const claudeSessionMeter = (
+  seed: SessionUsage & { readonly processUsage?: Option.Option<SessionUsage> } = NO_USAGE,
+  retained = false,
+) => {
+  let current = retained
+    ? Option.getOrElse(seed.processUsage ?? Option.none(), () => seed)
+    : NO_USAGE;
+  let earlier: SessionUsage = {
+    totalTokens: TokenCount.make(Math.max(0, seed.totalTokens - current.totalTokens)),
+    costUsd: Option.map(seed.costUsd, (cost) =>
+      UsdAmount.make(Math.max(0, cost - Option.getOrElse(current.costUsd, () => 0))),
+    ),
+  };
+  let meter = claudeTokenMeter(current);
   return {
-    read: (message: Schema.Json): Option.Option<SessionUsage> =>
+    read: (
+      message: Schema.Json,
+    ): Option.Option<SessionUsage & { readonly processUsage: Option.Option<SessionUsage> }> =>
       Option.map(meter(message), (usage) => {
         current = usage;
-        return addUsage(earlier, usage);
+        return { ...addUsage(earlier, usage), processUsage: Option.some(usage) };
       }),
     restart: () => {
       earlier = addUsage(earlier, current);
       current = NO_USAGE;
       meter = claudeTokenMeter();
+      return { ...earlier, processUsage: Option.some(current) };
     },
   };
 };

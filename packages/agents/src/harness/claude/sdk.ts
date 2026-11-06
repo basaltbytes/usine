@@ -8,7 +8,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Context, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Result, Schema } from "effect";
 
 // The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
@@ -150,3 +150,105 @@ export const userMessage = (content: string): ClaudeUserMessage => ({
   message: { role: "user", content },
   parent_tool_use_id: null,
 });
+
+const ControlMessage = Schema.Struct({ type: Schema.String });
+const ControlRequest = Schema.Struct({
+  type: Schema.Literal("control_request"),
+  request_id: Schema.String,
+});
+const ControlResponse = Schema.Struct({
+  type: Schema.Literal("control_response"),
+  response: Schema.Struct({ request_id: Schema.String }),
+});
+const SdkOnlyMessage = Schema.Union([
+  Schema.Struct({ type: Schema.Literals(["control_response", "keep_alive", "transcript_mirror"]) }),
+  Schema.Struct({
+    type: Schema.Literal("system"),
+    subtype: Schema.Literal("session_state_changed"),
+    sdk_host_only: Schema.Literal(true),
+  }),
+]);
+const MessageId = Schema.Struct({ uuid: Schema.String });
+const JsonObject = Schema.Record(Schema.String, Schema.Json);
+const decodeMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
+const messageKey = (message: Schema.Json): string => {
+  if (Schema.is(MessageId)(message)) return message.uuid;
+  if (Array.isArray(message)) return serializeVendorValue(message.map(messageKey));
+  if (Schema.is(JsonObject)(message))
+    return serializeVendorValue(
+      Object.entries(message)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => [key, messageKey(value)]),
+    );
+  return serializeVendorValue(message);
+};
+
+export const claudeOutputCheckpoint = () => {
+  let buffered = Buffer.alloc(0);
+  let input = Buffer.alloc(0);
+  const answered = new Set<string>();
+  const pending: Array<{ key: string; bytes: number; handled: boolean; control: boolean }> = [];
+  const flush = () => {
+    let bytes = 0;
+    while (pending[0]?.handled === true) bytes += pending.shift()?.bytes ?? 0;
+    return bytes;
+  };
+  return {
+    read: (bytes: Uint8Array) =>
+      Effect.gen(function* () {
+        buffered = Buffer.concat([buffered, bytes]);
+        let end;
+        while ((end = buffered.indexOf(10)) >= 0) {
+          const line = buffered.subarray(0, end).toString();
+          const decoded = yield* Effect.result(decodeMessage(line));
+          buffered = buffered.subarray(end + 1);
+          if (Result.isFailure(decoded)) {
+            yield* Effect.logDebug("Ignoring non-JSON Claude stdout", { bytes: end + 1 });
+            pending.push({ key: line, bytes: end + 1, handled: true, control: false });
+            continue;
+          }
+          const message = decoded.success;
+          const type = Schema.is(ControlMessage)(message) ? message.type : "";
+          const request = Schema.is(ControlRequest)(message);
+          pending.push({
+            key: request ? message.request_id : messageKey(message),
+            bytes: end + 1,
+            handled:
+              Schema.is(SdkOnlyMessage)(message) ||
+              (request && answered.delete(message.request_id)),
+            control: type === "control_cancel_request",
+          });
+        }
+        return flush();
+      }),
+    inputAcknowledged: (bytes: Uint8Array) =>
+      Effect.gen(function* () {
+        input = Buffer.concat([input, bytes]);
+        let end;
+        while ((end = input.indexOf(10)) >= 0) {
+          const decoded = yield* Effect.result(decodeMessage(input.subarray(0, end).toString()));
+          input = input.subarray(end + 1);
+          if (Result.isFailure(decoded) || !Schema.is(ControlResponse)(decoded.success)) continue;
+          const id = decoded.success.response.request_id;
+          const entry = pending.find((entry) => !entry.handled && entry.key === id);
+          if (entry !== undefined) entry.handled = true;
+          else answered.add(id);
+        }
+        return flush();
+      }),
+    handled: (message: Schema.Json) => {
+      const key = messageKey(message);
+      const index = pending.findIndex((entry) => !entry.handled && entry.key === key);
+      if (index < 0) return 0;
+      const entry = pending[index];
+      if (entry !== undefined) entry.handled = true;
+      // Cancellation has no response; the turn result confirms that it was applied.
+      if (Schema.is(ControlMessage)(message) && message.type === "result")
+        for (let i = 0; i < index; i++) {
+          const earlier = pending[i];
+          if (earlier?.control === true) earlier.handled = true;
+        }
+      return flush();
+    },
+  };
+};

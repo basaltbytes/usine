@@ -4,14 +4,7 @@ import { claude } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
-import {
-  type HookCallback,
-  type SpawnedProcess,
-  type SpawnOptions,
-} from "@anthropic-ai/claude-agent-sdk";
-// The Node process boundary uses native process handles and synchronous subprocess operations.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { spawn } from "node:child_process";
+import { type HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
   ChildSession,
@@ -51,14 +44,8 @@ import {
   SessionOperationError,
   UnknownModelError,
 } from "../../runtime.ts";
-import {
-  CHILD_STOP_SCRIPT,
-  childPidFile,
-  type RemoteShell,
-  SSH_FAILURE,
-  sshArguments,
-} from "../../child-host/child-host.ts";
-import { hostOutput } from "../../child-host/command.ts";
+import { ChildProcessLost, stopChildProcess } from "../../child-host/process.ts";
+import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { claudeSessionMeter, claudeTokenMeter } from "../usage.ts";
@@ -82,6 +69,7 @@ import {
 import {
   AsyncInput,
   ClaudeSdk,
+  claudeOutputCheckpoint,
   type ClaudeModelInfo,
   type ClaudeQuery,
   type ClaudeQueryOptions,
@@ -110,41 +98,7 @@ const operationError = (
     cause,
   });
 
-/**
- * Returns a spawner that runs Claude Code on the remote host as one SSH command, with the SDK's
- * command, arguments, working directory, and environment in the remote command line. The abort
- * signal stops the SSH client; `onExit` gets its exit code, or `null` if a signal stopped it.
- */
-const sshSpawner =
-  (
-    host: RemoteShell,
-    pidFile: string,
-    onStderr: (text: string) => void,
-    onExit: (code: number | null) => void,
-  ) =>
-  (options: SpawnOptions): SpawnedProcess => {
-    const child = spawn(
-      host.ssh.command,
-      sshArguments(host, {
-        cwd: options.cwd,
-        environment: options.env,
-        pidFile,
-        command: options.command,
-        args: options.args,
-      }),
-      {
-        env: { ...host.sshEnvironment },
-        signal: options.signal,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      },
-    );
-    child.stderr.setEncoding("utf8").on("data", onStderr);
-    child.once("exit", (code) => onExit(code));
-    return child;
-  };
-
-/** Returns the options of every launch for `request`; each launch adds its remote spawner. */
+/** Returns the SDK options; each launch supplies the shared process callback. */
 const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
   const effort = request.session.brain.effort;
   const shared: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
@@ -194,27 +148,7 @@ const LOGIN_RETRY_DELAYS: ReadonlyArray<Duration.Duration> = [
  */
 const LOGIN_WINDOW = Duration.seconds(60);
 
-/**
- * The delays before each try to resume a remote child whose SSH connection broke, such as when the
- * orchestrator's machine slept. A message from Claude resets the count. When the delays run out,
- * the child fails with the broken connection's error (#603).
- */
-const RESUME_DELAYS: ReadonlyArray<Duration.Duration> = [
-  Duration.seconds(5),
-  Duration.seconds(15),
-  Duration.seconds(30),
-  Duration.minutes(1),
-  Duration.minutes(2),
-  Duration.minutes(5),
-];
-
-/** The time a broken launch waits for its SSH client's exit code before it gives up resuming. */
-const SSH_EXIT_WAIT = Duration.seconds(5);
-
-/** The time limit for stopping a broken launch's Claude process on the Worker. */
-const STOP_TIMEOUT = Duration.seconds(30);
-
-/** The message that starts the next turn of a resumed child that was working. */
+/** The message that continues interrupted work after the owned process exits. */
 const RESUME_PROMPT =
   "usine lost its connection to this session and resumed it. Your last step may not have finished: check the worktree and any command you started before you go on. Then continue the task and end with your final answer. If the task is done, give your final answer again.";
 
@@ -230,11 +164,8 @@ interface ClaudeLaunch {
    * failed, or nothing decided it in time.
    */
   readonly login: Exclude<LoginCheck, "waiting"> | "undecided";
-  /**
-   * Whether the launch's SSH client exited with `SSH_FAILURE`, which means that the connection to
-   * the Worker broke, not Claude. Always `false` on a local host.
-   */
-  readonly lostConnection: Effect.Effect<boolean>;
+  readonly retained: boolean;
+  readonly acknowledge: (message: Schema.Json) => Effect.Effect<void>;
   /** The scope of the launch's process, input, and output reader. */
   readonly scope: Scope.Closeable;
 }
@@ -243,43 +174,6 @@ const makeClaudeChild = Effect.gen(function* () {
   const sdk = yield* ClaudeSdk;
   const logins = yield* HostLoginLock;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-
-  /**
-   * Stops the Claude process of `request` on the remote `host` through its PID file, so that a
-   * resumed launch is the only process in the session. Fails with `SessionOperationError` if the
-   * Worker can't be reached or the stop fails.
-   */
-  const stopRemote = Effect.fn("ClaudeRuntime.stopRemote")(function* (
-    request: ChildRequest,
-    host: RemoteShell,
-  ) {
-    yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
-    const failed = (message: string, cause: unknown) =>
-      operationError("launch", request, message, cause);
-    const { stdout, exitCode } = yield* hostOutput(host, {
-      environment: {},
-      command: "sh",
-      args: ["-c", CHILD_STOP_SCRIPT, "sh", childPidFile(request.cwd, request.session.id)],
-    }).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.timeout(STOP_TIMEOUT),
-      Effect.mapError((cause) =>
-        failed(`Can't stop the Claude child on ${host.destination}`, cause),
-      ),
-    );
-    if (exitCode !== 0)
-      return yield* failed(
-        exitCode === SSH_FAILURE
-          ? `Can't reach ${host.destination} to stop the Claude child`
-          : `Stopping the Claude child on ${host.destination} exited with code ${exitCode}`,
-        new Error(`exit code ${exitCode}`),
-      );
-    yield* Effect.logInfo("Stopped what was left of the Claude child on its Worker", {
-      sessionId: request.session.id,
-      worker: request.worker,
-      outcome: stdout,
-    });
-  });
 
   /**
    * Acquires the request's Claude login lock in a fiber of the current scope and returns an effect
@@ -351,42 +245,35 @@ const makeClaudeChild = Effect.gen(function* () {
     request: ChildRequest,
     options: ClaudeQueryOptions,
     messages: ReadonlyArray<string>,
+    transport?: "replace" | "resume",
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
-    const context = yield* Effect.context<never>();
     const release = yield* holdLogin(request);
     return yield* Effect.gen(function* () {
       const input = new AsyncInput();
-      const sshExit = yield* Deferred.make<number | null>();
-      const query = sdk.open(
-        input,
-        request.host._tag === "RemoteShell"
-          ? {
-              ...options,
-              spawnClaudeCodeProcess: sshSpawner(
-                request.host,
-                childPidFile(request.cwd, request.session.id),
-                (text) => {
-                  Effect.runForkWith(context)(
-                    Effect.logDebug("Claude child stderr", {
-                      sessionId: request.session.id,
-                      text: text.trimEnd(),
-                    }),
-                  );
-                },
-                (code) => {
-                  Deferred.doneUnsafe(sshExit, Exit.succeed(code));
-                },
-              ),
-            }
-          : // On a local host, the SDK spawns the process itself.
-            options,
-      );
+      const checkpoint = claudeOutputCheckpoint();
+      const owner = yield* sdkProcessSpawner(
+        {
+          host: request.host,
+          cwd: request.cwd,
+          sessionId: Option.some(request.session.id),
+          environment: request.environment,
+        },
+        transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
+        checkpoint.read,
+        checkpoint.inputAcknowledged,
+      ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+      const query = sdk.open(input, { ...options, spawnClaudeCodeProcess: owner.spawn });
       const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
       yield* Effect.forkScoped(
         Stream.fromAsyncIterable(query, (cause) =>
           operationError("stream", request, "Claude output stream failed", cause),
-        ).pipe(Stream.runIntoQueue(output)),
+        ).pipe(
+          Stream.catch((error) =>
+            Stream.unwrap(owner.diagnose(error).pipe(Effect.map(Stream.fail))),
+          ),
+          Stream.runIntoQueue(output),
+        ),
       );
       // Finalizers run newest first, so this closes the query before the scope stops the output
       // reader. Stopping the reader waits for its pending read, and when Claude keeps a session
@@ -400,7 +287,7 @@ const makeClaudeChild = Effect.gen(function* () {
       const models = yield* Effect.tryPromise({
         try: () => query.supportedModels(),
         catch: (cause) => operationError("launch", request, "Claude model discovery failed", cause),
-      });
+      }).pipe(Effect.catch((error) => owner.diagnose(error).pipe(Effect.flatMap(Effect.fail))));
       if (!modelExists(models, request.session.brain.model)) {
         yield* Effect.logError("Claude child rejected an unknown model");
         return yield* UnknownModelError.make({
@@ -409,10 +296,15 @@ const makeClaudeChild = Effect.gen(function* () {
           message: `Claude has no model "${request.session.brain.model}"`,
         });
       }
-      for (const message of messages) input.offer(userMessage(message));
+      const retained = yield* owner.retained;
+      if (!retained) for (const message of messages) input.offer(userMessage(message));
+      else
+        yield* Effect.logInfo("Reattached the running Claude session", {
+          sessionId: request.session.id,
+        });
       const read: Array<Schema.Json> = [];
       const loginResult =
-        messages.length === 0
+        messages.length === 0 || retained
           ? Option.none()
           : yield* checkLogin(output, read).pipe(Effect.timeoutOption(LOGIN_WINDOW));
       const login = Option.getOrElse(loginResult, () => "undecided" as const);
@@ -422,17 +314,16 @@ const makeClaudeChild = Effect.gen(function* () {
         login,
         messages: read.length,
       });
-      const lostConnection =
-        request.host._tag === "RemoteShell"
-          ? Deferred.await(sshExit).pipe(
-              Effect.timeoutOption(SSH_EXIT_WAIT),
-              Effect.map((code) => Option.contains(code, SSH_FAILURE)),
-            )
-          : Effect.succeed(false);
-      return { input, query, read, output, login, lostConnection } satisfies Omit<
-        ClaudeLaunch,
-        "scope"
-      >;
+      return {
+        input,
+        query,
+        read,
+        output,
+        login,
+        retained,
+        acknowledge: (message: Schema.Json) =>
+          Effect.sync(() => checkpoint.handled(message)).pipe(Effect.flatMap(owner.acknowledge)),
+      } satisfies Omit<ClaudeLaunch, "scope">;
     }).pipe(Effect.ensuring(release));
   });
 
@@ -447,12 +338,13 @@ const makeClaudeChild = Effect.gen(function* () {
     options: ClaudeQueryOptions,
     messages: ReadonlyArray<string>,
     scope: Scope.Scope,
+    transport?: "replace" | "resume",
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
     for (let retry = 0; ; retry += 1) {
       const launchScope = yield* Scope.fork(scope);
       const opened: ClaudeLaunch = {
-        ...(yield* launchOnce(request, options, messages).pipe(
+        ...(yield* launchOnce(request, options, messages, transport).pipe(
           Scope.provide(launchScope),
           Effect.onError((cause) => Scope.close(launchScope, Exit.failCause(cause))),
         )),
@@ -507,12 +399,13 @@ const makeClaudeChild = Effect.gen(function* () {
       yield* Effect.logInfo("Launching Claude child session");
       const context = yield* Effect.context<never>();
       const scope = yield* Effect.scope;
+      const boundaryReady = yield* Deferred.make<void>();
       let boundary = Effect.void;
       const pauseAtBoundary: HookCallback = async (_input, _id, options) => {
         await Effect.runPromiseWith(context)(
           Effect.acquireUseRelease(
             Effect.forkIn(
-              Effect.suspend(() => boundary),
+              Deferred.await(boundaryReady).pipe(Effect.andThen(Effect.suspend(() => boundary))),
               scope,
             ),
             Fiber.join,
@@ -535,10 +428,9 @@ const makeClaudeChild = Effect.gen(function* () {
         ".claude",
       );
       const lifecycle = yield* ChildSessionLifecycle.current;
-      if (Option.isSome(request.resume) && request.host._tag === "RemoteShell")
-        yield* stopRemote(request, request.host);
+
       yield* checkContinuationHome(request, home, defaultHome);
-      // The launch that runs the session; a resume replaces it.
+      // Login-lock retries finish before the session starts.
       let current = yield* launchWithRetries(
         request,
         options,
@@ -568,7 +460,7 @@ const makeClaudeChild = Effect.gen(function* () {
       channel.onTerminal(() => {
         current.input.end();
       });
-      if (request.paused || Option.isSome(request.idle))
+      if (request.paused || Option.isSome(request.idle) || current.retained)
         yield* channel.emit(SessionStarted.make({ session, harnessSession: request.resume }));
       const conversation = yield* sessionConversation({
         session,
@@ -587,18 +479,18 @@ const makeClaudeChild = Effect.gen(function* () {
         beforeFinish: Effect.void,
       });
       boundary = conversation.awaitUnpaused;
+      yield* Deferred.succeed(boundaryReady, undefined);
       const tools = new Map<string, string>();
-      const usage = claudeSessionMeter(Option.getOrUndefined(request.usage));
+      const usage = claudeSessionMeter(Option.getOrUndefined(request.usage), current.retained);
       const readRateLimits = claudeRateLimits(session);
-      // The latest session ID from Claude, which a resume loads.
-      let harnessSessionId = Option.map(request.resume, (saved) => saved.id);
-      // Resumes since Claude last sent a message.
-      let resumes = 0;
+      let harnessSession = request.resume;
       let backgroundTasks: ReadonlyArray<string> = [];
       let reportsSessionState = false;
       let completedTurn = Option.none<string>();
       // Claude sends `init` with one session ID before each turn; the first is the launch record.
-      const launched = yield* Ref.make(request.paused || Option.isSome(request.idle));
+      const launched = yield* Ref.make(
+        request.paused || Option.isSome(request.idle) || current.retained,
+      );
       // API retries reported in the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
@@ -641,6 +533,8 @@ const makeClaudeChild = Effect.gen(function* () {
       });
 
       let providerFailure = Option.none<AgentCapacityError | AgentResultError>();
+
+      let resumed = false;
 
       /** Applies one message from Claude to the session. */
       const handle = (message: Schema.Json) =>
@@ -695,31 +589,34 @@ const makeClaudeChild = Effect.gen(function* () {
             return;
           }
           const init = decodeClaudeInit(message);
-          if (Option.isSome(init)) harnessSessionId = Option.some(init.value.session_id);
-          if (Option.isSome(init) && !(yield* Ref.getAndSet(launched, true))) {
-            const harnessSession = HarnessSession.make({
+          if (Option.isSome(init)) {
+            const saved = HarnessSession.make({
               id: init.value.session_id,
               cwd: request.cwd,
               home,
             });
-            yield* channel.emit(
-              SessionStarted.make({
-                session,
-                harnessSession: Option.some(harnessSession),
-              }),
-            );
-            yield* Effect.logInfo("Claude child session saved", {
-              sessionId: session.id,
-              parentSessionId: session.parentId,
-              harnessSessionId: harnessSession.id,
-              cwd: harnessSession.cwd,
-            });
+            harnessSession = Option.some(saved);
+            if (!(yield* Ref.getAndSet(launched, true))) {
+              yield* channel.emit(
+                SessionStarted.make({
+                  session,
+                  harnessSession,
+                }),
+              );
+              yield* Effect.logInfo("Claude child session saved", {
+                sessionId: session.id,
+                parentSessionId: session.parentId,
+                harnessSessionId: saved.id,
+                cwd: saved.cwd,
+              });
+            }
           }
           const used = usage.read(message);
           if (Option.isSome(used))
             yield* channel.emit(SessionTokensUpdated.make({ session, ...used.value }));
           for (const event of sessionEventsFrom(message, session, tools)) {
             yield* channel.emit(event);
+            if (event._tag === "ToolFinished") resumed = false;
           }
           if (!Schema.is(ClaudeResultMessage)(message)) return;
           completedTurn = Option.none();
@@ -729,6 +626,7 @@ const makeClaudeChild = Effect.gen(function* () {
             yield* channel.fail(resultFailure(session.id, message, providerFailure));
             return;
           }
+          resumed = false;
           providerFailure = Option.none();
           const stillQueued = message.queued_turn_count;
           // Claude has read every queued message except those still queued as separate turns.
@@ -776,10 +674,7 @@ const makeClaudeChild = Effect.gen(function* () {
             Stream.runForEach(
               Result.match({
                 onSuccess: (message) =>
-                  Effect.suspend(() => {
-                    resumes = 0;
-                    return handle(message);
-                  }),
+                  handle(message).pipe(Effect.andThen(launch.acknowledge(message))),
                 onFailure: (error) =>
                   Effect.sync(() => {
                     broken = Option.some(error);
@@ -790,107 +685,58 @@ const makeClaudeChild = Effect.gen(function* () {
           return broken;
         });
 
-      /**
-       * Resumes the session in a new launch after `broken` lost its SSH connection to the Worker:
-       * stops what is left of its Claude process there, then launches Claude with the saved session,
-       * retrying after each delay in `RESUME_DELAYS`. Returns `None` if the session can't be resumed.
-       */
-      const resume = Effect.fn("ClaudeRuntime.resume")(function* (
-        broken: ClaudeLaunch,
-        error: SessionOperationError,
-      ) {
-        yield* Effect.annotateCurrentSpan({
+      const resume = Effect.fn("ClaudeRuntime.resume")(function* (error: SessionOperationError) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, worker: request.worker });
+        const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
+        if (
+          (resumed && working) ||
+          request.host._tag !== "RemoteShell" ||
+          Option.isNone(harnessSession) ||
+          !Schema.is(ChildProcessLost)(error.cause)
+        )
+          return yield* error;
+        yield* Effect.logWarning("Remote Claude process stopped; resuming its saved session", {
           sessionId: session.id,
-          worker: request.worker,
+          harnessSessionId: harnessSession.value.id,
+          exitCode: error.cause.exitCode,
         });
-        const fields = {
-          sessionId: session.id,
-          parentSessionId: session.parentId,
-          worker: request.worker,
-        };
-        const notResumed = (reason: string) =>
-          Effect.logInfo("Not resuming the Claude child after its output ended", {
-            ...fields,
-            reason,
-            message: error.message,
-          }).pipe(Effect.as(Option.none<ClaudeLaunch>()));
-        const host = request.host;
-        const harnessSession = harnessSessionId;
-        if (yield* lifecycle.isStopping) return yield* notResumed("its attempt is stopping");
-        if (host._tag !== "RemoteShell") return yield* notResumed("it runs on this machine");
-        if (Option.isNone(harnessSession)) return yield* notResumed("Claude saved no session");
-        if (!(yield* broken.lostConnection))
-          return yield* notResumed("its SSH connection didn't break");
-        yield* Effect.logWarning(
-          "Claude child lost its SSH connection to the Worker; resuming its session",
-          { ...fields, harnessSessionId: harnessSession.value, message: error.message },
-        );
-        yield* Scope.close(broken.scope, Exit.void);
-        // The broken launch's process took its background work and open tool calls with it.
+        yield* Scope.close(current.scope, Exit.void);
+        if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
         backgroundTasks = [];
         completedTurn = Option.none();
+        reportsSessionState = false;
+        providerFailure = Option.none();
+        retries = 0;
+        retrying = false;
         for (const [callId, tool] of tools)
           yield* channel.emit(
             ToolFinished.make({
               session,
               callId,
               tool,
-              output: "usine lost its connection to the Worker before this call returned",
+              output: "The Claude process stopped before this call returned",
               isError: true,
             }),
           );
         tools.clear();
-        usage.restart();
-        for (;;) {
-          const delay = RESUME_DELAYS[resumes];
-          if (delay === undefined) {
-            yield* Effect.logWarning("Could not resume the Claude child; it fails", {
-              ...fields,
-              tries: resumes,
-            });
-            return Option.none<ClaudeLaunch>();
-          }
-          resumes += 1;
-          yield* Effect.logInfo("Resuming the Claude child after a pause", {
-            ...fields,
-            try: resumes,
-            maxTries: RESUME_DELAYS.length,
-            delay: Duration.format(delay),
-          });
-          yield* Effect.sleep(delay);
-          if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal))
-            return Option.none<ClaudeLaunch>();
-          // A paused or idle child waits for the operator, so only a working child gets a turn.
-          const working = !((yield* conversation.isPaused) || (yield* conversation.isIdle));
-          const messages = [...(working ? [RESUME_PROMPT] : []), ...(yield* conversation.unread)];
-          const resumed = yield* stopRemote(request, host).pipe(
-            Effect.andThen(
-              launchWithRetries(
-                request,
-                { ...options, resume: harnessSession.value },
-                messages,
-                scope,
-              ),
-            ),
-            Effect.asSome,
-            Effect.catchTag("SessionOperationError", (failure) =>
-              Effect.logWarning("Could not resume the Claude child yet", {
-                ...fields,
-                try: resumes,
-                message: failure.message,
-              }).pipe(Effect.as(Option.none<ClaudeLaunch>())),
-            ),
-          );
-          if (Option.isSome(resumed)) {
-            yield* Effect.logInfo("Resumed the Claude child's session", {
-              ...fields,
-              harnessSessionId: harnessSession.value,
-              working,
-              messages: messages.length,
-            });
-            return resumed;
-          }
-        }
+        const messages = working ? [RESUME_PROMPT, ...(yield* conversation.unread)] : [];
+        resumed = working;
+        // A replacement that fails to launch ends the child, even while waiting for guidance.
+        // Only a completed launch can recover again; retrying launch failures could crash-loop.
+        current = yield* launchWithRetries(
+          request,
+          { ...options, resume: harnessSession.value.id },
+          messages,
+          scope,
+          "replace",
+        );
+        yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
+        yield* Effect.logInfo("Resumed the Claude child's session", {
+          sessionId: session.id,
+          harnessSessionId: harnessSession.value.id,
+          working,
+          messages: messages.length,
+        });
       });
 
       const consume = Effect.gen(function* () {
@@ -905,9 +751,7 @@ const makeClaudeChild = Effect.gen(function* () {
               new Error("unexpected end of output"),
             ),
           );
-          const resumed = yield* resume(current, error);
-          if (Option.isNone(resumed)) return yield* channel.fail(error);
-          current = resumed.value;
+          yield* resume(error);
         }
       }).pipe(Effect.catch((error) => channel.fail(error)));
       yield* Effect.forkScoped(consume);
@@ -947,7 +791,10 @@ const makeClaudeChild = Effect.gen(function* () {
     },
   );
   const stop = Effect.fn("ClaudeRuntime.stop")(function* (request: ChildRequest) {
-    if (request.host._tag === "RemoteShell") yield* stopRemote(request, request.host);
+    if (request.host._tag === "RemoteShell")
+      yield* stopChildProcess({ ...request, sessionId: Option.some(request.session.id) }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      );
   });
   return ChildBackend.of({ launch, stop });
 });

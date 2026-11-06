@@ -244,6 +244,10 @@ export class SessionTokensUpdated extends Schema.TaggedClass<
   breakdown: Schema.OptionFromOptionalKey(TokenBreakdown).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<TokenBreakdown>())),
   ),
+  /** The current Claude process's cumulative usage, used when reattaching that process. */
+  processUsage: Schema.OptionFromOptionalKey(
+    Schema.Struct({ totalTokens: TokenCount, costUsd: Schema.OptionFromNullOr(UsdAmount) }),
+  ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
 }) {}
 
 /** Returns the recorded pool, using the historical inference only for older sessions. */

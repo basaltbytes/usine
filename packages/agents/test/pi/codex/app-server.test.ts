@@ -1,3 +1,4 @@
+import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -225,7 +226,7 @@ describe("Codex app-server transport", () => {
     );
   }
 
-  it.effect("stops both retained remote app-servers before replacing the transport", () =>
+  it.effect("stops the retained process before replacing its transport", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
       const attached = yield* Deferred.make<{
@@ -234,12 +235,8 @@ describe("Codex app-server transport", () => {
       }>();
       const stopping = yield* Deferred.make<void>();
       const original = childPidFile(request.cwd, request.session.id);
-      const resumed = childPidFile(
-        request.cwd,
-        AgentSessionId.make(`${request.session.id}-resume`),
-      );
-      const live = new Set([original, resumed]);
-      const journals = new Set([original, resumed]);
+      const live = new Set([original]);
+      const journals = new Set([original]);
       const spawner = Layer.effect(
         ChildProcessSpawner.ChildProcessSpawner,
         Effect.gen(function* () {
@@ -249,7 +246,7 @@ describe("Codex app-server transport", () => {
               assert.strictEqual(command._tag, "StandardCommand");
               if (command._tag !== "StandardCommand") return yield* base.spawn(command);
               const shell = command.args.at(-1) ?? "";
-              for (const pidFile of [original, resumed]) {
+              for (const pidFile of [original]) {
                 for (const mode of ["stop", "remove"]) {
                   if (!shell.includes(`'${mode}' '${pidFile}' '0'`)) continue;
                   if (mode === "stop") live.delete(pidFile);
@@ -297,8 +294,12 @@ describe("Codex app-server transport", () => {
           });
           const retained = yield* Deferred.await(attached);
           yield* Deferred.succeed(stopping, undefined);
-          assert.deepStrictEqual(retained.live, [], "replacement must stop both app-servers");
-          assert.deepStrictEqual(retained.journals, [], "replacement must remove both transports");
+          assert.deepStrictEqual(retained.live, [], "replacement must stop the old process");
+          assert.deepStrictEqual(
+            retained.journals,
+            [],
+            "replacement must remove the old transport",
+          );
         }),
       ).pipe(
         Effect.provide(codexAppServerLive.pipe(Layer.provide(spawner))),
@@ -500,8 +501,8 @@ describe("Codex app-server transport", () => {
       assert.deepStrictEqual(command.options.env, request.environment);
       assert.strictEqual(command.options.extendEnv, false);
       assert.strictEqual(command.options.detached, false);
-      assert.strictEqual(command.options.forceKillAfter, "5 seconds");
-      assert.deepStrictEqual(command.args, [
+      assert.strictEqual(command.options.forceKillAfter, "6 seconds");
+      assert.deepStrictEqual(command.args.slice(5), [
         "app-server",
         "--stdio",
         "-c",
@@ -524,14 +525,17 @@ describe("Codex app-server transport", () => {
     });
   }
 
-  it("runs the app server on a remote host as one SSH command with its pid recorded", () => {
+  it("builds a short-lived remote preflight command without a session PID file", () => {
     const host = RemoteShell.make({
       ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
       sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
       destination: "worker.exe.xyz",
     });
     const stdin = { stream: Stream.empty, endOnDone: true };
-    const command = codexAppServerCommand(client(host, { GH_HOST: "github.int.exe.xyz" }), stdin);
+    const command = codexAppServerCommand(
+      { ...client(host, { GH_HOST: "github.int.exe.xyz" }), sessionId: Option.none() },
+      stdin,
+    );
     assert.strictEqual(command._tag, "StandardCommand");
     if (command._tag !== "StandardCommand") return;
     assert.strictEqual(command.command, "ssh");
@@ -540,13 +544,13 @@ describe("Codex app-server transport", () => {
       "BatchMode=yes",
       "worker.exe.xyz",
       "--",
-      `cd '/' && export GH_HOST='github.int.exe.xyz' && sh -c 'printf %s "$$" > "$0" && exec "$@"' '/workspace/repo.child-2.pid' 'codex' 'app-server' '--stdio' '-c' 'projects={"/workspace/repo"={trust_level="untrusted"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'; code=$?; rm -f '/workspace/repo.child-2.pid'; exit "$code"`,
+      `cd '/' && export GH_HOST='github.int.exe.xyz' && exec 'codex' 'app-server' '--stdio' '-c' 'projects={"/workspace/repo"={trust_level="untrusted"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'`,
     ]);
     assert.deepStrictEqual(command.options.env, host.sshEnvironment);
     assert.strictEqual(command.options.extendEnv, false);
     assert.strictEqual(command.options.cwd, undefined);
     assert.strictEqual(command.options.stdin, stdin);
-    assert.strictEqual(command.options.forceKillAfter, "5 seconds");
+    assert.strictEqual(command.options.forceKillAfter, "6 seconds");
   });
 
   it.effect("skips blank, malformed, and unknown-shaped lines instead of failing", () =>
@@ -605,6 +609,52 @@ describe("Codex app-server transport", () => {
     }),
   );
 
+  for (const exitCode of [0, 1]) {
+    it.effect(`delivers buffered thread replies before reporting process exit ${exitCode}`, () =>
+      Effect.gen(function* () {
+        const process = yield* fakeProcess;
+        const readOutput = yield* Deferred.make<void>();
+        const stdout = Stream.unwrap(
+          Deferred.await(readOutput).pipe(Effect.as(Stream.fromQueue(process.stdout))),
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* (yield* CodexAppServer).open({
+              cwd: request.cwd,
+              sessionId: Option.some(request.session.id),
+              environment: request.environment,
+              host: request.host,
+            });
+            const pending = yield* Effect.forkChild(
+              connection.request("launch", "thread/start", {}),
+            );
+            yield* awaitStdinLines(process, 1);
+            yield* Queue.offer(
+              process.stdout,
+              line({ id: 1, result: { thread: { id: "thread-one" } } }),
+            );
+            yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(exitCode));
+            yield* TestClock.adjust(0);
+            yield* Deferred.succeed(readOutput, undefined);
+            const reply = yield* Fiber.join(pending);
+            assert.deepStrictEqual(reply, {
+              thread: { id: "thread-one" },
+            });
+            const error = yield* connection.request("stream", "turn/start", {}).pipe(Effect.flip);
+            assert.deepStrictEqual(
+              error.cause,
+              ChildProcessLost.make({ exitCode, stderrTail: "" }),
+            );
+          }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
+        ).pipe(
+          Effect.provide(
+            codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { stdout }))),
+          ),
+        );
+      }),
+    );
+  }
+
   it.effect("fails pending requests with the exit code and captured stderr", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
@@ -625,10 +675,10 @@ describe("Codex app-server transport", () => {
           const matchesError = Schema.is(SessionOperationError)(error);
           assert(matchesError);
           assert.match(error.message, /exited with code 1/u);
-          assert.deepStrictEqual(error.cause, {
-            exitCode: 1,
-            stderr: ["codex: no login found"],
-          });
+          assert.deepStrictEqual(
+            error.cause,
+            ChildProcessLost.make({ exitCode: 1, stderrTail: "codex: no login found\n" }),
+          );
 
           const afterFailure = yield* Effect.flip(connection.request("steer", "turn/steer", {}));
           assert.strictEqual(afterFailure, error, "later requests preserve the recorded failure");

@@ -48546,6 +48546,32 @@
               "output"
             ],
             "additionalProperties": false
+          },
+          "processUsage": {
+            "type": "object",
+            "properties": {
+              "totalTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "costUsd": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "totalTokens",
+              "costUsd"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

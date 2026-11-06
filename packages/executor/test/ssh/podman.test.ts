@@ -19,6 +19,7 @@ import {
   INSTANCE_ID,
   mintingProvider,
   request,
+  remoteWords,
   runtime,
   TEST_AGENT,
   WORKER,
@@ -347,7 +348,9 @@ describe("rootless Podman", () => {
       yield* Deferred.await(started);
       yield* executor.cancel(request.attemptId, "cancel");
       yield* Fiber.await(launch);
-      const stopped = machine.state.calls.find(({ line }) => line.includes(CHILD_KILL_SCRIPT));
+      const stopped = machine.state.calls.find(({ line }) =>
+        remoteWords(line).includes(CHILD_KILL_SCRIPT),
+      );
       assert.include(stopped?.line ?? "", "'podman'");
       assert.strictEqual(machine.state.containers.size, 0);
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));

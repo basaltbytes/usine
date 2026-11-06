@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
-import { TokenBreakdown } from "@usine/core/agent/session";
+import { TokenBreakdown, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { Effect, Option, Schema } from "effect";
 import {
   addUsage,
   claudeTokenMeter,
+  claudeSessionMeter,
   codexThreadTokens,
   codexTokenBreakdown,
   piMessageUsage,
@@ -11,6 +12,34 @@ import {
 import { CodexTokenUsage } from "../../src/protocol/codex.ts";
 
 describe("Claude query tokens", () => {
+  it("restores a retained process's usage separately from earlier processes", () => {
+    const result = (input: number, cost: number) => ({
+      type: "result",
+      modelUsage: {
+        model: { inputTokens: input, outputTokens: 0, cacheCreationInputTokens: 0, costUSD: cost },
+      },
+    });
+    const first = claudeSessionMeter();
+    first.read(result(100, 1));
+    first.restart();
+    const saved = first.read(result(20, 0.2));
+    assert(Option.isSome(saved));
+    const retained = claudeSessionMeter(saved.value, true);
+    const updated = retained.read(result(30, 0.3));
+    assert(Option.isSome(updated));
+    assert.strictEqual(updated.value.totalTokens, 130);
+    assert.deepStrictEqual(updated.value.costUsd, Option.some(1.3));
+    retained.restart();
+    assert.strictEqual(Option.getOrThrow(retained.read(result(5, 0.1))).totalTokens, 135);
+    const replacement = claudeSessionMeter(saved.value, false);
+    assert.strictEqual(Option.getOrThrow(replacement.read(result(5, 0.1))).totalTokens, 125);
+    const legacy = claudeSessionMeter(
+      { totalTokens: TokenCount.make(100), costUsd: Option.some(UsdAmount.make(1)) },
+      true,
+    );
+    assert.strictEqual(Option.getOrThrow(legacy.read(result(110, 1.1))).totalTokens, 110);
+  });
+
   it("counts output plus uncached input, reconciling repeated blocks and cumulative results", () => {
     const read = claudeTokenMeter();
     const assistant = (id: string, output: number) =>

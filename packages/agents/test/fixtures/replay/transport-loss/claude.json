@@ -319,7 +319,6 @@
       }
     },
     { "type": "expect_outbound", "port": "scenario", "payload": { "method": "drop" } },
-    { "type": "runtime_exit", "port": "claude:1/ssh-exit", "code": 255, "error": null },
     {
       "type": "runtime_exit",
       "port": "claude:1/output",

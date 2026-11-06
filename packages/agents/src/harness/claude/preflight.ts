@@ -22,6 +22,7 @@ const check = Effect.fn("ClaudeRuntime.check")(function* (brain: BrainSpec, targ
     model: brain.model,
     worker: target.worker,
   });
+  if (host._tag === "RemoteShell") yield* probeBinary(claude, target, "node", ["--version"]);
   yield* probeBinary(claude, target, "claude", ["--version"]);
   if (target.credential !== "host-login") {
     yield* Effect.logInfo("Harness uses an external credential; skipped the host login check", {

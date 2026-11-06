@@ -8,13 +8,14 @@ import { Deferred, Effect, FileSystem, Layer, Option, Path, Schema } from "effec
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { env } from "node:process";
 import { fileURLToPath } from "node:url";
-import { childPidFile, LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
+import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
 import { claudeChildLayer } from "../../src/harness/claude/claude.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { ClaudeSdk, claudeSdkLive } from "../../src/harness/claude/sdk.ts";
 import { codexChildLayer } from "../../src/harness/codex/codex.ts";
 import { codexAppServerLive } from "../../src/harness/codex/app-server.ts";
 import { ChildBackend, ChildRequest, HostLoginLock, WorkingDirectory } from "../../src/runtime.ts";
+import { ownedClaudeReplay } from "./owned-claude.ts";
 import { claudeTransport } from "./claude.ts";
 import { processTransport } from "./process.ts";
 import { type Scenario, Tape, Transcript } from "./transcript.ts";
@@ -165,12 +166,62 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
       }),
       prompt: "Reply with exactly REPLAY_DONE. Do not use tools.",
     });
+    if (mode === "replay" && provider === "codex" && scenario === "early-exit") {
+      yield* fs.writeFileString(
+        `${cwd}/codex`,
+        "#!/usr/bin/env node\nprocess.stderr.write('replayed early exit'); process.exitCode = 7;\n",
+      );
+      yield* fs.chmod(`${cwd}/codex`, 0o755);
+      return {
+        tape: new Tape("record"),
+        cwd,
+        request: ChildRequest.make({
+          ...request,
+          environment: { ...environment, PATH: `${cwd}:${environment.PATH}` },
+        }),
+        backend: codexChildLayer.pipe(
+          Layer.provide(codexAppServerLive),
+          Layer.provide(NodeServices.layer),
+        ),
+        save: Effect.void,
+        controls: {
+          drop: Effect.void,
+          boundary: Effect.void,
+          toolReady: Effect.void,
+          releaseCommand: Effect.void,
+          sessionReleased: Effect.void,
+        },
+      };
+    }
+    if (
+      mode === "replay" &&
+      provider === "claude" &&
+      (scenario === "transport-loss" || scenario === "early-exit")
+    ) {
+      assert(source !== "record");
+      const owned = yield* ownedClaudeReplay(request, source, scenario);
+      const idleTape = new Tape("record");
+      return {
+        ...owned,
+        tape: idleTape,
+        cwd,
+        controls: {
+          drop: Effect.gen(function* () {
+            const savedPid = yield* fs.readFileString(`${cwd}/drop.pid`);
+            yield* fs.writeFileString(`${cwd}/drop`, "drop");
+            process.kill(recordingPid(savedPid), "SIGKILL");
+          }).pipe(Effect.orDie),
+          releaseCommand: fs.writeFileString(`${cwd}/release`, "ready").pipe(Effect.orDie),
+          sessionReleased: Effect.void,
+          boundary: Effect.void,
+          toolReady: Effect.void,
+        },
+      };
+    }
     const drop = Effect.gen(function* () {
       tape.outbound("scenario", { method: "drop" });
       if (mode !== "record") return;
-      const savedPid = yield* fs.readFileString(
-        provider === "claude" ? childPidFile(cwd, request.session.id) : `${cwd}/drop.pid`,
-      );
+      const savedPid = yield* fs.readFileString(`${cwd}/drop.pid`);
       const pid = recordingPid(savedPid);
       yield* fs.writeFileString(`${cwd}/drop`, "drop");
       process.kill(pid, "SIGKILL");

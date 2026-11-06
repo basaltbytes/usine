@@ -132,7 +132,7 @@ describe("harness probe on a remote host", () => {
         "BatchMode=yes",
         "remote-one.exe.xyz",
         "--",
-        "exec 'claude' '--version'",
+        "exec 'node' '--version'",
       ]);
       assert.deepStrictEqual(first.options.env, host.sshEnvironment);
       assert.strictEqual(first.options.extendEnv, false);

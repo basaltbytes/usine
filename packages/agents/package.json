@@ -23,6 +23,10 @@
       "types": "./dist/child-host/child-host.d.ts",
       "default": "./dist/child-host/child-host.js"
     },
+    "./child-host/owner": {
+      "types": "./dist/child-host/owner.d.ts",
+      "default": "./dist/child-host/owner.js"
+    },
     "./children": {
       "types": "./dist/harness/children.d.ts",
       "default": "./dist/harness/children.js"
