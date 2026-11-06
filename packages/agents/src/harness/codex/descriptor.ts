@@ -1,5 +1,6 @@
 import { Harness } from "@usine/core/agent/brain";
 import { Option } from "effect";
+import { CODEX_PROTOCOL } from "../../protocol/codex-version.ts";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import {
   CredentialWiring,
@@ -10,7 +11,7 @@ import {
 } from "../harness.ts";
 
 /** The pinned app-server protocol baseline used by the conformance check. */
-export const CODEX_CLI_VERSION = "0.164.0";
+export const CODEX_CLI_VERSION = CODEX_PROTOCOL.version;
 
 // Standard tier, up to 272K input tokens. Read from
 // https://developers.openai.com/api/docs/pricing on 2026-10-26.
