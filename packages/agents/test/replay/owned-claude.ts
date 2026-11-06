@@ -38,12 +38,14 @@ const sessionState = state => ({ type: 'system', subtype: 'session_state_changed
   sdk_host_only: true, session_id: messages[0].session_id, uuid: require('node:crypto').randomUUID() });
 const mirror = { type: 'transcript_mirror', filePath: '/replay/session.jsonl', entries: [] };
 const sendBatch = batch => process.stdout.write(batch.map(message => JSON.stringify(message) + '\\n').join(''));
+const sendNoise = () => process.stdout.write('\\n \\t\\r\\nWarning: replay diagnostic on stdout\\n');
 let waiting = false;
 let hookPending = false;
 let toolFinished = false;
 const timer = setInterval(() => {
   if (fs.existsSync('request-sdk-tail') && !fs.existsSync('sdk-tail-sent')) {
     sendBatch([sessionState('idle'), mirror]);
+    sendNoise();
     fs.writeFileSync('sdk-tail-sent', 'ready\\n');
   }
     if (waiting && !hookPending && !fs.existsSync('hook-sent') && fs.existsSync('request-hook')) {
@@ -78,6 +80,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       return;
     }
     // One write makes the checkpoint exercise multiple protocol messages in one owner frame.
+    sendNoise();
     sendBatch([sessionState('running'), mirror, ...messages.slice(0, 2)]);
     waiting = true;
   }

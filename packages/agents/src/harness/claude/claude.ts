@@ -260,14 +260,7 @@ const makeClaudeChild = Effect.gen(function* () {
           environment: request.environment,
         },
         transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
-        (bytes) =>
-          checkpoint
-            .read(bytes)
-            .pipe(
-              Effect.mapError((cause) =>
-                operationError("stream", request, "Claude returned malformed JSON", cause),
-              ),
-            ),
+        checkpoint.read,
       ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
       const query = sdk.open(input, { ...options, spawnClaudeCodeProcess: owner.spawn });
       const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();

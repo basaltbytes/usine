@@ -8,7 +8,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Result, Schema } from "effect";
 
 // The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
@@ -189,7 +189,15 @@ export const claudeOutputCheckpoint = () => {
         buffered = Buffer.concat([buffered, bytes]);
         let end;
         while ((end = buffered.indexOf(10)) >= 0) {
-          const message = yield* decodeMessage(buffered.subarray(0, end).toString());
+          const line = buffered.subarray(0, end).toString();
+          const decoded = yield* Effect.result(decodeMessage(line));
+          buffered = buffered.subarray(end + 1);
+          if (Result.isFailure(decoded)) {
+            yield* Effect.logDebug("Ignoring non-JSON Claude stdout", { bytes: end + 1 });
+            pending.push({ key: line, bytes: end + 1, handled: true, control: false });
+            continue;
+          }
+          const message = decoded.success;
           const type = Schema.is(ControlMessage)(message) ? message.type : "";
           pending.push({
             key: messageKey(message),
@@ -197,7 +205,6 @@ export const claudeOutputCheckpoint = () => {
             handled: Schema.is(SdkOnlyMessage)(message),
             control: type === "control_request" || type === "control_cancel_request",
           });
-          buffered = buffered.subarray(end + 1);
         }
         return flush();
       }),
