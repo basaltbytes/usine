@@ -28,6 +28,8 @@ interface ConversationOptions {
   readonly held: boolean;
   readonly paused: boolean;
   readonly unread?: ReadonlyArray<QueuedOperatorMessage>;
+  /** Restored messages already submitted to a retained native process. */
+  readonly submitted?: ReadonlyArray<OperatorMessageId>;
   readonly idle: Option.Option<string>;
   /**
    * Queues a message during a turn, or starts another turn in an idle session. If it returns
@@ -72,7 +74,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     onDelivery: (state) => journal.delivered(message.id, state),
   }));
 
-  const unsent = new Set((options.unread ?? []).map(({ id }) => id));
+  const unsent = new Set(
+    (options.unread ?? [])
+      .map(({ id }) => id)
+      .filter((id) => !(options.submitted ?? []).includes(id)),
+  );
   const sent = (id: OperatorMessageId) =>
     Effect.sync(() => {
       unsent.delete(id);

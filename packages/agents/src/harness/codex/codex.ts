@@ -332,7 +332,7 @@ const makeCodexChild = Effect.gen(function* () {
         message: string;
         id: OperatorMessageId | undefined;
         turnId: string | undefined;
-      }> = [];
+      }> = turnActive ? request.unread.map((message) => ({ ...message, turnId })) : [];
       const forgetInput = (input: (typeof submitted)[number]) =>
         Effect.sync(() => {
           const index = submitted.indexOf(input);
@@ -449,7 +449,11 @@ const makeCodexChild = Effect.gen(function* () {
             return "queued" as const;
           }
           if (!turnActive) {
-            yield* startTurn(message, id);
+            const messages = [...pendingMessages.splice(0), { message, id }];
+            for (const input of messages) {
+              if (!turnActive) yield* startTurn(input.message, input.id);
+              else yield* steer(input.message, input.id);
+            }
             return "queued" as const;
           }
           // Codex records steered input as a user message once the running turn reads it.
@@ -475,6 +479,7 @@ const makeCodexChild = Effect.gen(function* () {
         paused: request.paused,
         idle: request.idle,
         unread: request.unread,
+        submitted: submitted.flatMap(({ id }) => (id === undefined ? [] : [id])),
         send: (message, _activity, id) => steer(message, id),
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
         beforeFinish: Effect.suspend(() => connection.close),
@@ -722,17 +727,24 @@ const makeCodexChild = Effect.gen(function* () {
               const wasInterrupted = interrupting;
               interrupting = false;
               toolsInFlight.clear();
+              const hasNewGuidance = pendingMessages.length > 0;
+              const unread = submitted.splice(0).filter((input) => input.id !== undefined);
+              pendingMessages.unshift(...unread);
+              if (unread.length > 0)
+                yield* Effect.logInfo("Codex turn ended with unconsumed input", {
+                  sessionId: session.id,
+                  turnId,
+                  unread: unread.length,
+                });
               if (
                 completed.turn.status === "completed" ||
                 (completed.turn.status === "interrupted" &&
                   wasInterrupted &&
-                  ((yield* conversation.isPaused) || pendingMessages.length > 0))
+                  ((yield* conversation.isPaused) || hasNewGuidance))
               ) {
-                const nextMessage = pendingMessages.shift();
-                if (nextMessage !== undefined) {
-                  yield* startTurn(nextMessage.message, nextMessage.id);
-                  for (const message of pendingMessages.splice(0))
-                    yield* steer(message.message, message.id);
+                if (hasNewGuidance) {
+                  const nextMessage = pendingMessages.pop();
+                  if (nextMessage !== undefined) yield* steer(nextMessage.message, nextMessage.id);
                   return;
                 }
                 return yield* conversation.finish(finalText ?? lastText ?? "Codex turn paused");

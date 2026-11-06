@@ -338,7 +338,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
       backend,
       request,
       controls: {
-        nativeReceipts: mode === "record" || provider !== "claude",
+        nativeReceipts: true,
         drop: drop.pipe(Effect.orDie),
         // Release must precede this connection's clean exit, independently of later launches.
         sessionReleased:

@@ -100,10 +100,14 @@ export const runScenario = (
             OperatorMessage.make({
               message: "Reply with exactly REPLAY_SECOND. Do not use tools.",
             }),
-            () => Effect.void,
+            (taken) => Queue.offer(delivery, taken).pipe(Effect.asVoid),
           );
           yield* until("SessionResumed");
           yield* until("SessionIdle");
+          const delivered = yield* Queue.take(delivery);
+          assert(Option.isSome(delivered));
+          assert(delivered.value.held);
+          assert(!delivered.value.queued);
         }
         yield* running.intervene(Release.make(), () => Effect.void);
         yield* control.sessionReleased;

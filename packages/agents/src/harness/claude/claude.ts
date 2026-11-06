@@ -476,6 +476,19 @@ const makeClaudeChild = Effect.gen(function* () {
         current.input.end();
       });
       yield* channel.emit(SessionStarted.make({ session, harnessSession: Option.some(reference) }));
+      const submitted = current.retained ? request.unread.map(({ id }) => id) : [];
+      const send = Effect.fn("ClaudeRuntime.send")(function* (
+        message: string,
+        id?: OperatorMessageId,
+      ) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+        yield* Effect.try({
+          try: () => current.input.offer(userMessage(message, id)),
+          catch: (cause) =>
+            operationError("steer", request, "Can't send a message to Claude", cause),
+        });
+        if (id !== undefined) submitted.push(id);
+      });
       const conversation = yield* sessionConversation({
         session,
         channel,
@@ -483,13 +496,9 @@ const makeClaudeChild = Effect.gen(function* () {
         paused: request.paused,
         idle: request.idle,
         unread: request.unread,
+        submitted,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
-        send: (message, _activity, id) =>
-          Effect.try({
-            try: () => current.input.offer(userMessage(message, id)),
-            catch: (cause) =>
-              operationError("steer", request, "Can't send a message to Claude", cause),
-          }).pipe(Effect.as("queued" as const)),
+        send: (message, _activity, id) => send(message, id).pipe(Effect.as("queued" as const)),
         pause: Effect.void,
         beforeFinish: Effect.void,
       });
@@ -548,8 +557,14 @@ const makeClaudeChild = Effect.gen(function* () {
       const handle = (message: Schema.Json) =>
         Effect.gen(function* () {
           const acknowledged = decodeMessageAcknowledgement(message);
-          if (Option.isSome(acknowledged))
-            yield* conversation.read(acknowledged.value.user_message_uuids);
+          if (Option.isSome(acknowledged)) {
+            const ids = acknowledged.value.user_message_uuids;
+            for (let index = submitted.length - 1; index >= 0; index -= 1) {
+              const id = submitted[index];
+              if (id !== undefined && ids.includes(id)) submitted.splice(index, 1);
+            }
+            yield* conversation.read(ids);
+          }
           const limits = yield* readRateLimits(message);
           if (Option.isSome(limits)) yield* channel.emit(limits.value);
           const retry = decodeApiRetry(message);
@@ -614,6 +629,21 @@ const makeClaudeChild = Effect.gen(function* () {
             return;
           }
           providerFailure = Option.none();
+          // Typed-prompt turns stamp only their first assistant frame, even after folding guidance.
+          if (message.queued_turn_count !== undefined) {
+            const read = submitted.splice(
+              0,
+              Math.max(0, submitted.length - message.queued_turn_count),
+            );
+            if (read.length > 0) {
+              yield* Effect.logInfo("Claude result acknowledged submitted operator messages", {
+                sessionId: session.id,
+                read: read.length,
+                queuedTurns: message.queued_turn_count,
+              });
+              yield* conversation.read(read);
+            }
+          }
           if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
             yield* Effect.logInfo("Claude child has queued user turns", {
               sessionId: session.id,
@@ -694,14 +724,11 @@ const makeClaudeChild = Effect.gen(function* () {
             "replace",
           ),
         );
+        submitted.length = 0;
         yield* conversation.recover(
           policy,
           [...tools].map(([callId, tool]) => ({ callId, tool })),
-          (message, id) =>
-            Effect.try({
-              try: () => current.input.offer(userMessage(message, id)),
-              catch: (cause) => operationError("steer", request, "Can't continue Claude", cause),
-            }),
+          send,
         );
         tools.clear();
         yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
@@ -731,14 +758,7 @@ const makeClaudeChild = Effect.gen(function* () {
       const steer = Effect.fn("ClaudeRuntime.steer")((message: string, id?: OperatorMessageId) =>
         Effect.logDebug("Steering Claude child session", {
           sessionId: session.id,
-        }).pipe(
-          Effect.andThen(
-            Effect.try({
-              try: () => current.input.offer(userMessage(message, id)),
-              catch: (cause) => operationError("steer", request, "Can't steer Claude", cause),
-            }),
-          ),
-        ),
+        }).pipe(Effect.andThen(send(message, id))),
       );
       const interrupt = Effect.logInfo("Interrupting Claude child session", {
         sessionId: session.id,

@@ -20,6 +20,7 @@ import {
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
+  Deferred,
   Effect,
   Exit,
   Fiber,
@@ -763,6 +764,96 @@ describe("Claude child backend", () => {
           }),
         );
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("acknowledges folded guidance on a typed turn while leaving pending sends queued", () =>
+    Effect.gen(function* () {
+      const inputs = yield* Queue.make<ClaudeUserMessage>();
+      const output = yield* Queue.make<Schema.Json, Cause.Done>();
+      const idle = yield* Deferred.make<void>();
+      const receipts = yield* Queue.make<string>();
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (input) => {
+          void (async () => {
+            for await (const message of input) {
+              Queue.offerUnsafe(inputs, message);
+              Queue.offerUnsafe(output, rateLimitEvent);
+            }
+          })();
+          return {
+            ...scripted([]),
+            close: () => Queue.endUnsafe(output),
+            [Symbol.asyncIterator]: () =>
+              Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+          };
+        },
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(
+          ChildRequest.make({ ...request(), held: true }),
+        );
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Deferred.succeed(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        yield* Queue.take(inputs);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Waiting",
+          queued_turn_count: 0,
+        });
+        yield* Deferred.await(idle);
+        const first = OperatorMessage.make({ message: "Start the correction" });
+        const folded = OperatorMessage.make({ message: "Review the diff" });
+        const pending = OperatorMessage.make({ message: "Review the diff" });
+        const send = (action: OperatorMessage) =>
+          running.intervene(action, (delivery) =>
+            Queue.offer(receipts, Option.isSome(delivery) ? action.id : "unread").pipe(
+              Effect.asVoid,
+            ),
+          );
+        yield* send(first);
+        assert.strictEqual((yield* Queue.take(inputs)).uuid, first.id);
+        yield* Queue.offer(output, { type: "assistant", user_message_uuids: [first.id] });
+        const firstReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(firstReceipt, first.id);
+        for (const action of [folded, pending]) {
+          yield* send(action);
+          assert.strictEqual((yield* Queue.take(inputs)).uuid, action.id);
+        }
+        // Typed-prompt turns do not stamp another assistant frame after folding guidance.
+        yield* Queue.offer(output, {
+          type: "assistant",
+          message: { content: [{ type: "text", text: "Corrected" }] },
+        });
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Corrected",
+          queued_turn_count: 1,
+        });
+        const foldedReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(foldedReceipt, folded.id);
+        const extraReceipts = yield* Queue.clear(receipts);
+        assert.deepStrictEqual(extraReceipts, []);
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Reviewed",
+          queued_turn_count: 0,
+        });
+        const pendingReceipt = yield* Queue.take(receipts);
+        assert.strictEqual(pendingReceipt, pending.id);
+        yield* running.intervene(Release.make(), noDelivery);
+        assert.strictEqual((yield* running.result).message, "Reviewed");
+        const finalReceipts = yield* Queue.clear(receipts);
+        assert.deepStrictEqual(finalReceipts, []);
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+    }).pipe(Effect.scoped),
   );
 
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
