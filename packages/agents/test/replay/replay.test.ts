@@ -518,8 +518,8 @@ it.live.skipIf(process.platform !== "linux")(
         assert(started._tag === "SessionStarted");
         yield* until("ToolStarted");
         yield* fs.writeFileString(`${fixture.cwd}/request-usage-prefix`, "ready");
-        // old-x, x, and y are separate messages; x and y belong to parallel parent tools.
-        for (let i = 0; i < 2; i++) yield* until("SessionTokensUpdated");
+        // x and y belong to parallel parent tools; save y's second block after its first is checkpointed.
+        for (let i = 0; i < 3; i++) yield* until("SessionTokensUpdated");
         const saved = yield* until("SessionTokensUpdated");
         assert(saved._tag === "SessionTokensUpdated");
         const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(SessionTokensUpdated))(

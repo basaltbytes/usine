@@ -64,7 +64,10 @@ let hookPending = false;
 let toolFinished = false;
 const timer = setInterval(() => {
   if (fs.existsSync('request-usage-prefix') && !fs.existsSync('usage-prefix-sent')) {
-    sendBatch([usageFrame('old-x', 'task-x'), usageFrame('x', 'task-x'), usageFrame('y', 'task-y')]);
+    sendBatch([
+      usageFrame('old-x', 'task-x'), usageFrame('x', 'task-x'),
+      usageFrame('y', 'task-y'), usageFrame('y', 'task-y'),
+    ]);
     fs.writeFileSync('usage-prefix-sent', 'ready');
   }
   if (fs.existsSync('request-usage-replay') && !fs.existsSync('usage-replay-sent')) {
