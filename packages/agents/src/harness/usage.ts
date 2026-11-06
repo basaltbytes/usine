@@ -105,7 +105,7 @@ const NO_USAGE: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Optio
 /**
  * Returns a Claude token meter for a session that another process can resume. `read` returns the
  * session's usage: the current process's, as `claudeTokenMeter` reads it, plus the earlier
- * processes'. `restart` starts on a new process, which Claude counts from zero.
+ * processes'. `restart` starts on a new process and returns the usage checkpoint to persist.
  */
 export const claudeSessionMeter = (
   seed: SessionUsage & { readonly processUsage?: Option.Option<SessionUsage> } = NO_USAGE,
@@ -133,6 +133,7 @@ export const claudeSessionMeter = (
       earlier = addUsage(earlier, current);
       current = NO_USAGE;
       meter = claudeTokenMeter();
+      return { ...earlier, processUsage: Option.some(current) };
     },
   };
 };

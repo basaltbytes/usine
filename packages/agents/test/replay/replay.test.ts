@@ -224,6 +224,7 @@ for (const state of [
   "working",
   "idle",
   "usage",
+  "usage-after-recovery",
   "hook",
   "answered-hook",
   "buffered-result",
@@ -245,8 +246,8 @@ for (const state of [
           const stopping = yield* Ref.make(false);
           const events = yield* Queue.unbounded<AgentSessionEvent>();
           let committedUsage = Option.none<SessionTokensUpdated>();
-          if (state === "usage")
-            yield* fs.writeFileString(`${fixture.cwd}/cumulative-usage`, "ready");
+          const tracksUsage = state === "usage" || state === "usage-after-recovery";
+          if (tracksUsage) yield* fs.writeFileString(`${fixture.cwd}/cumulative-usage`, "ready");
           if (state === "buffered-result")
             yield* fs.writeFileString(`${fixture.cwd}/block-result`, "ready");
           const first = yield* Effect.gen(function* () {
@@ -274,9 +275,27 @@ for (const state of [
           const started = yield* until("SessionStarted");
           assert(started._tag === "SessionStarted");
           yield* until("ToolStarted");
-          if (state === "idle" || state === "usage") {
+          if (state === "idle" || tracksUsage) {
             yield* fixture.controls.releaseCommand;
             yield* until("SessionIdle");
+            if (state === "usage-after-recovery") {
+              assert(Option.isSome(committedUsage));
+              const beforeRecovery = committedUsage.value;
+              const pidFile = childPidFile(fixture.cwd, fixture.request.session.id);
+              const originalPid = yield* fs.readFileString(pidFile);
+              yield* fs.utimes(`${pidFile}.transport/heartbeat`, 0, 0);
+              const reset = yield* until("SessionTokensUpdated");
+              assert(reset._tag === "SessionTokensUpdated");
+              assert.strictEqual(reset.totalTokens, beforeRecovery.totalTokens);
+              assert.deepStrictEqual(reset.costUsd, beforeRecovery.costUsd);
+              assert(Option.isSome(reset.processUsage));
+              assert.strictEqual(reset.processUsage.value.totalTokens, 0);
+              assert.deepStrictEqual(reset.processUsage.value.costUsd, Option.none());
+              const replacementPid = yield* fs.readFileString(pidFile);
+              assert.notStrictEqual(replacementPid, originalPid);
+              const launches = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
+              assert.lengthOf(launches, 2);
+            }
             // SDK-only output arriving after the result must advance without another adapter event.
             yield* fs.writeFileString(`${fixture.cwd}/request-sdk-tail`, "ready");
             yield* fileWithLines(`${fixture.cwd}/sdk-tail-sent`, 1);
@@ -335,10 +354,8 @@ for (const state of [
                       : fixture.request.environment,
                   paused: state === "hook",
                   idle:
-                    state === "idle" || state === "usage"
-                      ? Option.some("REPLAY_DONE")
-                      : Option.none(),
-                  usage: state === "usage" ? committedUsage : Option.none(),
+                    state === "idle" || tracksUsage ? Option.some("REPLAY_DONE") : Option.none(),
+                  usage: tracksUsage ? committedUsage : Option.none(),
                 }),
               );
               const currentPid = yield* fs.readFileString(pidFile);
@@ -398,7 +415,7 @@ for (const state of [
               // This message is a FIFO barrier after any input from the retained launch.
               const guidance = "Continue after reattachment";
               const resumedEvents = yield* Queue.unbounded<AgentSessionEvent>();
-              if (state === "usage") {
+              if (tracksUsage) {
                 yield* resumed.events.pipe(
                   Stream.runForEach((event) => Queue.offer(resumedEvents, event)),
                   Effect.forkScoped,
@@ -413,8 +430,8 @@ for (const state of [
               assert.lengthOf(inputs, count, "reattachment sends no task or continuation prompt");
               assert.include(inputs[0] ?? "", fixture.request.prompt);
               assert.include(inputs[count - 1] ?? "", guidance);
-              if (state !== "idle" && state !== "usage") yield* fixture.controls.releaseCommand;
-              if (state === "usage") {
+              if (state !== "idle" && !tracksUsage) yield* fixture.controls.releaseCommand;
+              if (tracksUsage) {
                 let latest = Option.none<SessionTokensUpdated>();
                 for (;;) {
                   const event = yield* Queue.take(resumedEvents);
@@ -434,7 +451,18 @@ for (const state of [
               assert.include(result.message, "REPLAY_DONE");
             }).pipe(Effect.provide(fixture.backend)),
           );
-          if (state !== "fresh" && state !== "environment-changed") yield* fixture.save;
+          if (
+            state !== "fresh" &&
+            state !== "environment-changed" &&
+            state !== "usage-after-recovery"
+          )
+            yield* fixture.save;
+          if (state === "usage-after-recovery") {
+            const launches = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
+            assert.lengthOf(launches, 2, "reattachment retains the recovered process");
+            const retained = yield* fs.exists(pidFile);
+            assert.isFalse(retained);
+          }
           assert.strictEqual(first.session.id, fixture.request.session.id);
         }),
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),

@@ -719,7 +719,6 @@ const makeClaudeChild = Effect.gen(function* () {
             }),
           );
         tools.clear();
-        usage.restart();
         const messages = working ? [RESUME_PROMPT, ...(yield* conversation.unread)] : [];
         resumed = working;
         // A replacement that fails to launch ends the child, even while waiting for guidance.
@@ -731,6 +730,7 @@ const makeClaudeChild = Effect.gen(function* () {
           scope,
           "replace",
         );
+        yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
         yield* Effect.logInfo("Resumed the Claude child's session", {
           sessionId: session.id,
           harnessSessionId: harnessSession.value.id,
