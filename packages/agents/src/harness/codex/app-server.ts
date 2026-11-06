@@ -273,6 +273,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         Effect.forkScoped,
       );
       yield* handle.exit.pipe(
+        Effect.tap(() => Fiber.join(stdoutReader)),
         Effect.flatMap((event) =>
           Ref.get(closing).pipe(
             Effect.flatMap((closed) =>

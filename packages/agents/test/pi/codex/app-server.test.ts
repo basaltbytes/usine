@@ -609,6 +609,52 @@ describe("Codex app-server transport", () => {
     }),
   );
 
+  for (const exitCode of [0, 1]) {
+    it.effect(`delivers buffered thread replies before reporting process exit ${exitCode}`, () =>
+      Effect.gen(function* () {
+        const process = yield* fakeProcess;
+        const readOutput = yield* Deferred.make<void>();
+        const stdout = Stream.unwrap(
+          Deferred.await(readOutput).pipe(Effect.as(Stream.fromQueue(process.stdout))),
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* (yield* CodexAppServer).open({
+              cwd: request.cwd,
+              sessionId: Option.some(request.session.id),
+              environment: request.environment,
+              host: request.host,
+            });
+            const pending = yield* Effect.forkChild(
+              connection.request("launch", "thread/start", {}),
+            );
+            yield* awaitStdinLines(process, 1);
+            yield* Queue.offer(
+              process.stdout,
+              line({ id: 1, result: { thread: { id: "thread-one" } } }),
+            );
+            yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(exitCode));
+            yield* TestClock.adjust(0);
+            yield* Deferred.succeed(readOutput, undefined);
+            const reply = yield* Fiber.join(pending);
+            assert.deepStrictEqual(reply, {
+              thread: { id: "thread-one" },
+            });
+            const error = yield* connection.request("stream", "turn/start", {}).pipe(Effect.flip);
+            assert.deepStrictEqual(
+              error.cause,
+              ChildProcessLost.make({ exitCode, stderrTail: "" }),
+            );
+          }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
+        ).pipe(
+          Effect.provide(
+            codexAppServerLive.pipe(Layer.provideMerge(spawnerFor(process, { stdout }))),
+          ),
+        );
+      }),
+    );
+  }
+
   it.effect("fails pending requests with the exit code and captured stderr", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
