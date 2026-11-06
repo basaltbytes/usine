@@ -373,6 +373,40 @@ describe("standalone worker owner", () => {
     }, 15_000);
   }
 
+  it("escalates to KILL when the owner itself ignores TERM", async () => {
+    const { dir, pidFile, root } = temporary();
+    const termFile = join(dir, "term");
+    const stubborn = spawn(process.execPath, [
+      "-e",
+      `process.on("SIGTERM", () => require("node:fs").writeFileSync(${JSON.stringify(termFile)}, "TERM"));process.stdout.write("ready");setInterval(() => {}, 1000)`,
+    ]);
+    relays.push(stubborn);
+    let output = "";
+    stubborn.stdout.on("data", (data: Buffer) => {
+      output += data.toString();
+    });
+    const terminated = new Promise<NodeJS.Signals | null>((resolve, reject) => {
+      stubborn.on("close", (_code, signal) => resolve(signal));
+      stubborn.on("error", reject);
+    });
+    await eventually(() => output === "ready");
+    const pid = stubborn.pid;
+    if (pid === undefined) throw new Error("Owner process missing");
+    mkdirSync(root);
+    writeFileSync(pidFile, String(pid));
+    writeFileSync(join(root, "identity"), `test-boot:${pid}`);
+    const stopped = spawn(process.execPath, ["-e", program, "stop", pidFile]);
+    relays.push(stopped);
+    const closed = new Promise<number | null>((resolve, reject) => {
+      stopped.on("close", resolve);
+      stopped.on("error", reject);
+    });
+    expect(await terminated).toBe("SIGKILL");
+    expect(await closed).toBe(0);
+    expect(readFileSync(termFile, "utf8")).toBe("TERM");
+    expect(existsSync(pidFile)).toBe(false);
+  }, 15_000);
+
   it.skipIf(process.platform !== "linux")(
     "runs the shipped bundle without a loader or installed worker dependencies",
     async () => {

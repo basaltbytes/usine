@@ -19,7 +19,7 @@ const bundle = async (entry, globalName) => {
 const lifeline = await bundle("lifeline");
 const owner = await bundle("owner", "ChildHostWorker");
 const program = `${owner}\nChildHostWorker.run(${JSON.stringify({ owner, lifeline })});`;
-const generated = `export const PROCESS_OWNER = ${JSON.stringify(program)};\nexport const CHILD_LIFELINE = ${JSON.stringify(lifeline)};\n`;
+const generated = `export const PROCESS_OWNER: string = ${JSON.stringify(program)};\nexport const CHILD_LIFELINE: string = ${JSON.stringify(lifeline)};\n`;
 const generatedPath = "src/child-host/programs.ts";
 if (
   (await readFile(generatedPath, "utf8").catch((error) => {
