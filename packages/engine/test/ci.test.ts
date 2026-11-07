@@ -7,6 +7,8 @@ import {
   CiPolicy,
   CiSuperseded,
 } from "@usine/core/ci";
+import { WorkerName } from "@usine/core/worker";
+import { BlockedFailure } from "@usine/core/attempt/failure";
 import { ItemNumber } from "@usine/core/item";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import * as RunState from "@usine/core/run/state";
@@ -17,7 +19,13 @@ import { PullRequest, StepResult } from "@usine/core/step/result";
 import { Context, Effect, Exit, Option, Scope, Layer, TxRef } from "effect";
 import { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
+import { RunStore } from "../src/store/store.ts";
+import { localSqliteLayer } from "../src/database/local-sqlite.ts";
+import { RunReader } from "../src/run-reader/run-reader.ts";
+import { RunId } from "@usine/core/run";
+import { Result } from "effect";
 import {
+  approvalEvent,
   engineLayer,
   slottedExecutor,
   stepResult,
@@ -336,4 +344,199 @@ it.live.each([1, 2])(
         }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
       }),
     ),
+);
+
+it.live(
+  "a reset preserves only the blocked CI fix across restart, including revoked events and inherited actions",
+  () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const actions = [
+          CiLabelMutation.make({
+            item: ItemNumber.make(811),
+            add: ["implemented"],
+            remove: ["agent-in-progress"],
+          }),
+        ];
+        const source = Submission.make({
+          ...submission({ number: 1 }),
+          cycleLimit: Option.some(CycleLimit.make(1)),
+        });
+        const current = Submission.make({
+          ...submission({ number: 4 }),
+          loop: policy.fixLoop,
+          ciFailureHead: Option.some(head),
+          ciOnGreen: actions,
+          ciPolicy: Option.some(policy),
+        });
+        const storage = Layer.merge(RunStore.layer, CycleBudgets.layer).pipe(
+          Layer.provide(localSqliteLayer(directory)),
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const budgets = yield* CycleBudgets;
+            const sourceId = RunId.make("source");
+            yield* store.recordAndClaim(source, sourceId);
+            const started = yield* store.beginAttempt(
+              sourceId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
+            assert(started._tag === "AttemptStarted");
+            yield* store.finishAttempt(
+              started.execution.attempt,
+              Result.succeed(stepResult("Completed")),
+            );
+            const labelEvent = Submission.make({
+              ...submission({ number: 2 }),
+              cycleLimit: source.cycleLimit,
+            });
+            const exhausted = yield* store.recordAndClaim(labelEvent, RunId.make("exhausted"));
+            assert(exhausted.result._tag === "CycleBlocked");
+            const older = Submission.make({ ...current, event: submission({ number: 3 }).event });
+            yield* store.recordAndClaim(older, RunId.make("older-ci-fix"));
+            const blocked = yield* store.recordAndClaim(current, RunId.make("current-ci-fix"));
+            assert(blocked.result._tag === "CycleBlocked");
+            const waitingForReset = yield* store.pendingCiFixes;
+            assert.deepStrictEqual(waitingForReset, []);
+            yield* store.revoke(current.loop, current.itemKey);
+            const answer = approvalEvent(1);
+            yield* budgets.reset(blocked.result.ask.id, answer);
+            yield* budgets.reset(blocked.result.ask.id, answer);
+            const pending = yield* store.pendingCiFixes;
+            assert.strictEqual(pending.length, 1);
+            assert.strictEqual(pending[0]?.submission.event.id, current.event.id);
+            assert.strictEqual(pending[0]?.submission.cycleGeneration, 1);
+            const stale = yield* store.recordAndClaim(labelEvent, RunId.make("stale-label-event"));
+            assert.strictEqual(stale.result._tag, "Ignored");
+          }).pipe(Effect.provide(storage)),
+        );
+
+        const worker = yield* slottedExecutor([Effect.succeed(pushed)]);
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const reader = yield* RunReader;
+            const admitted = yield* reader.runForEvent(current.event.dedupKey);
+            assert(Option.isSome(admitted));
+            const waiting = yield* waitFor(
+              engine,
+              admitted.value,
+              ({ run }) => run.state._tag === "AwaitingCi",
+            );
+            assert(waiting.run.state._tag === "AwaitingCi");
+            assert.deepStrictEqual(waiting.run.state.handoff.onGreen, actions);
+            assert.strictEqual(waiting.attempts.length, 1);
+            yield* engine.reconcile;
+            const repeated = yield* engine.inspect(admitted.value);
+            assert.strictEqual(repeated.attempts.length, 1);
+            yield* engine.drain;
+          }).pipe(Effect.provide(engineLayer(directory, worker.executor))),
+        );
+      }),
+    ),
+);
+
+it.live.each(["required", "none"] as const)(
+  "item revocation cancels unstarted CI fixes with %s approval",
+  (approval) =>
+    withInstance((directory) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const current = Submission.make({
+            ...submission({ number: 1, approval }),
+            ciFailureHead: Option.some(head),
+          });
+          const runId = RunId.make("unstarted-ci-fix");
+          yield* store.recordAndClaim(current, runId);
+          if (approval === "required") yield* store.parkForApproval(runId);
+          const labelRevoked = yield* store.revoke(current.loop, current.itemKey, {
+            openCiHead: head,
+          });
+          assert.deepStrictEqual(labelRevoked, []);
+          assert.strictEqual(
+            (yield* store.snapshot(runId)).run.state._tag,
+            approval === "required" ? "Waiting" : "Pending",
+          );
+
+          const itemRevoked = yield* store.revoke(current.loop, current.itemKey);
+          assert.deepStrictEqual(itemRevoked, [runId]);
+          const revoked = yield* store.snapshot(runId);
+          assert(revoked.run.state._tag === "Canceled");
+          assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+          assert.deepStrictEqual(revoked.attempts, []);
+          const pending = yield* store.pendingCiFixes;
+          assert.deepStrictEqual(pending, []);
+        }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
+      ),
+    ),
+);
+
+it.live(
+  "reconciliation preserves the latest cycle ask block when CI and label events compete",
+  () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const worker = yield* slottedExecutor([Effect.succeed(stepResult("Completed"))]);
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const budgets = yield* CycleBudgets;
+            const source = Submission.make({
+              ...submission({ number: 1 }),
+              cycleLimit: Option.some(CycleLimit.make(1)),
+            });
+            const accepted = yield* engine.submit(source);
+            assert(accepted._tag === "Claimed");
+            yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Succeeded");
+            const ci = Submission.make({
+              ...source,
+              event: submission({ number: 2 }).event,
+              ciFailureHead: Option.some(head),
+            });
+            assert.strictEqual((yield* engine.submit(ci))._tag, "CycleBlocked");
+            const label = Submission.make({ ...source, event: submission({ number: 3 }).event });
+            assert.strictEqual((yield* engine.submit(label))._tag, "CycleBlocked");
+            const before = yield* budgets.asks;
+            assert.strictEqual(before[0]?.blocks[0]?.eventId, label.event.id);
+            yield* engine.reconcile;
+            yield* engine.reconcile;
+            const after = yield* budgets.asks;
+            assert.deepStrictEqual(after, before);
+          }).pipe(Effect.provide(engineLayer(directory, worker.executor))),
+        );
+      }),
+    ),
+);
+
+it.live("a suppressed CI fix stays queued until the operator resolves the blocker", () =>
+  withInstance((directory) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const current = submission({ number: 1 });
+        const runId = RunId.make("blocked-ci-fix");
+        yield* store.recordAndClaim(current, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        yield* store.finishAttempt(
+          started.execution.attempt,
+          Result.fail(BlockedFailure.make({ message: "Needs an operator decision" })),
+        );
+        const queued = Submission.make({
+          ...current,
+          event: submission({ number: 2 }).event,
+          ciFailureHead: Option.some(head),
+        });
+        const blocked = yield* store.recordAndClaim(queued, RunId.make("queued-ci-fix"));
+        assert.strictEqual(blocked.result._tag, "Suppressed");
+        const suppressed = yield* store.pendingCiFixes;
+        assert.deepStrictEqual(suppressed, []);
+        yield* store.resolveFailure(runId, started.execution.attempt.id, Option.none());
+        assert.strictEqual((yield* store.pendingCiFixes)[0]?.submission.event.id, queued.event.id);
+      }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
+    ),
+  ),
 );

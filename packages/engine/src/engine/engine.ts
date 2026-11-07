@@ -24,7 +24,12 @@ import {
   type RunEngineError,
 } from "./error.ts";
 import type { RunSnapshot } from "../run-reader/model.ts";
-import { runIdFor, type Submission, type SubmissionResult } from "./submission.ts";
+import {
+  runIdFor,
+  type RevokeScope,
+  type Submission,
+  type SubmissionResult,
+} from "./submission.ts";
 import type { RunAgainRequest, RunAgainResult } from "./run-again.ts";
 import { plainRetry, type RetryRequest } from "./retry.ts";
 import type { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
@@ -242,8 +247,13 @@ const makeRunEngine = Effect.gen(function* () {
     yield* driver.continueWithNewest(runId);
   }, Effect.uninterruptible);
 
-  const revoke = Effect.fn("RunEngine.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
-    const revoked = yield* store.revoke(loop, itemKey);
+  const revoke = Effect.fn("RunEngine.revoke")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+    scope: RevokeScope = "all",
+  ) {
+    yield* Effect.annotateCurrentSpan({ loop, itemKey, scope });
+    const revoked = yield* store.revoke(loop, itemKey, scope);
     yield* Effect.forEach(revoked, driver.stop, { concurrency: "unbounded", discard: true });
     return revoked;
   }, Effect.uninterruptible);
@@ -402,10 +412,11 @@ export class RunEngine extends Context.Service<
       runId: RunId,
       request: RunAgainRequest,
     ) => Effect.Effect<RunAgainResult, RunEngineError>;
-    /** Cancels unstarted Runs and discards queued Events for a Loop's Item that stopped matching; running Attempts continue. */
+    /** Cancels unstarted Runs and discards queued Events; open-PR scope preserves only CI fixes for its observed failing head. Running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
+      scope?: RevokeScope,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
     /**
      * Records a matching Event and claims its Run, or queues it behind the Item's running Attempt.
@@ -448,10 +459,12 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
 > => {
   const store = RunStore.layer.pipe(Layer.provide(database));
   const itemWriter = ItemProjectionWriter.layer.pipe(Layer.provide(database));
+  const controls = LoopControl.layer.pipe(Layer.provide(database));
   const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),
     Layer.provide(itemWriter),
+    Layer.provide(controls),
     Layer.provide(database),
   );
   const runEngine = Layer.mergeAll(
@@ -476,12 +489,13 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     itemWriter,
     RepositoryLabelProjectionReader.layer.pipe(Layer.provide(database)),
     RepositoryLabelProjectionWriter.layer.pipe(Layer.provide(database)),
-    LoopControl.layer.pipe(Layer.provide(database)),
+    controls,
   );
 };
 
 export {
   Submission,
+  type RevokeScope,
   Claimed,
   Queued,
   Suppressed,

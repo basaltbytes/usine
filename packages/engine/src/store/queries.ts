@@ -59,7 +59,7 @@ import {
 } from "../database/schema.ts";
 import { RunNotFoundError } from "../engine/error.ts";
 import { BoardRunHistory, RunSnapshot, RunSummary } from "../run-reader/model.ts";
-import { Submission } from "../engine/submission.ts";
+import { type RevokeScope, Submission } from "../engine/submission.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
   type RunSummaryRow,
@@ -1120,6 +1120,39 @@ export const queriesFor = (
     return submissionFromRow(existing);
   });
 
+  const pendingCiFixes = Effect.fn("RunStoreQueries.pendingCiFixes")(function* () {
+    const rows = yield* database
+      .select(eventRouteSelection)
+      .from(events)
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
+      .leftJoin(runs, eq(runs.eventId, events.eventId))
+      .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, events.eventId))
+      .leftJoin(itemCycleBudgets, eq(itemCycleBudgets.itemKey, triggerEvents.itemKey))
+      .leftJoin(
+        loopItems,
+        and(
+          eq(loopItems.loopName, triggerEvents.loopName),
+          eq(loopItems.itemKey, triggerEvents.itemKey),
+        ),
+      )
+      .where(
+        and(
+          isNotNull(triggerEvents.ciFailureHead),
+          cycleQueries(database, record).currentEvent,
+          isNull(runs.runId),
+          isNull(ignoredEvents.eventId),
+          isNull(itemCycleBudgets.askJson),
+          isNull(loopItems.suppressedByRunId),
+        ),
+      )
+      .orderBy(desc(events.receivedAt))
+      .execute();
+    return (yield* decodeEventRoutes(rows)).map((row): QueuedEvents => ({
+      submission: submissionFromRow(row),
+      eventIds: [row.eventId],
+    }));
+  });
+
   const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: RunId) {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
@@ -1252,20 +1285,35 @@ export const queriesFor = (
   const revokeUnstarted = Effect.fn("RunStoreQueries.revokeUnstarted")(function* (
     loop: LoopName,
     itemKey: ItemKey,
+    scope: RevokeScope,
   ) {
+    const revokedHead =
+      scope === "all"
+        ? undefined
+        : or(
+            isNull(triggerEvents.ciFailureHead),
+            ne(triggerEvents.ciFailureHead, scope.openCiHead),
+          );
     const storedRows = yield* database
       .select({ runId: runs.runId })
       .from(runs)
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .where(
-        and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), unstartedState),
+        and(
+          eq(triggerEvents.loopName, loop),
+          eq(triggerEvents.itemKey, itemKey),
+          revokedHead,
+          unstartedState,
+        ),
       )
       .execute();
     const rows = yield* decodeRunIds(storedRows);
     const queued = database
       .select({ eventId: triggerEvents.eventId })
       .from(triggerEvents)
-      .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey)));
+      .where(
+        and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), revokedHead),
+      );
     yield* revokeQueued(loop, itemKey, queued);
     return rows;
   });
@@ -1298,6 +1346,7 @@ export const queriesFor = (
     reopenedEvent,
     recordRunAgain,
     pendingContinuations,
+    pendingCiFixes,
     recordTriggerEvent,
     runIdsToDrive,
     recordApproval,

@@ -52,6 +52,7 @@ import {
   CycleBlocked,
   Ignored,
   Queued,
+  type RevokeScope,
   reopeningOf,
   runIdFor,
   Submission,
@@ -1034,12 +1035,17 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("cancel run"));
 
-  const revoke = Effect.fn("RunStore.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
+  const revoke = Effect.fn("RunStore.revoke")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+    scope: RevokeScope = "all",
+  ) {
+    yield* Effect.annotateCurrentSpan({ loop, itemKey, scope });
     return yield* transact((transaction, record) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction, codec, record);
         yield* tx.loopItems.unmatched(loop, itemKey);
-        const storedRuns = yield* tx.revokeUnstarted(loop, itemKey);
+        const storedRuns = yield* tx.revokeUnstarted(loop, itemKey, scope);
         for (const row of storedRuns) {
           const current = yield* tx.snapshot(row.runId);
           if (RunState.isUnstarted(current.run.state)) {
@@ -1140,6 +1146,7 @@ const makeRunStore = Effect.gen(function* () {
     finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
     parkForApproval,
+    pendingCiFixes: queries.pendingCiFixes().pipe(persistence("list pending CI fixes")),
     pendingContinuations: queries
       .pendingContinuations()
       .pipe(persistence("list pending continuations")),
@@ -1234,6 +1241,8 @@ export class RunStore extends Context.Service<
      * excluding Items under a suppression.
      */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
+    /** Unclaimed CI fixes in the current cycle generation, excluding open budget asks and suppressions. */
+    readonly pendingCiFixes: Effect.Effect<ReadonlyArray<QueuedEvents>, RunStoreError>;
     /** The open Runs that a fiber drives: pending, queued, or running, but not waiting for approval. */
     readonly runIdsToDrive: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /**
@@ -1304,10 +1313,11 @@ export class RunStore extends Context.Service<
       runId: RunId,
       request: RunAgainRequest,
     ) => Effect.Effect<RunAgainResult, RunStoreError>;
-    /** Records a non-matching sighting and revokes the Loop's unstarted Runs and queued Events for the Item. */
+    /** Records a non-matching sighting and revokes unstarted Runs and queued Events; open-PR scope preserves only CI fixes for its observed failing head. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
+      scope?: RevokeScope,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /** Revokes the Events in `queued` that are still unclaimed, keeping later arrivals, and returns the number revoked. */
     readonly revokeQueued: (queued: QueuedEvents) => Effect.Effect<number, RunStoreError>;
