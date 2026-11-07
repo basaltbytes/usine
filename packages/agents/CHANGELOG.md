@@ -1,5 +1,103 @@
 # @usine/agents
 
+## 0.7.0
+
+### Minor Changes
+
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- 389f35e: Generate worker image packages and tags from harness descriptors. Export `workerImageInputs` from `@usine/agents/harness`, derive the default SSH attempt image from it, and keep both Dockerfiles, Hetzner cloud-init, image publishing, and snapshot creation consistent with the catalog.
+- 9290433: Define harness metadata in one platform-free catalog. Configuration validates registered harness IDs, workers share credential and login requirements, and operator clients receive labels and resume commands through the capabilities API. Harness IDs are branded strings, and Codex pricing reads the descriptor’s bundled rates. Existing launch, authentication, and version policies are unchanged.
+- 12c3921: Check harness capabilities by role, credential route, and placement with one admission policy. Configuration and preflight refusals identify the missing requirement and adapter reason. Validate parent models, efforts, and credentials before accepting configuration imports, reloads, or saved edits. At startup, quarantine agents with refused parent brains and their loops in Needs attention while keeping the server available. Restore them after a corrected reload.
+- 548e6b7: Register harness preflight and launch through `Harnesses` on `@usine/agents/harness/node`. Registration rejects incomplete descriptor/runtime pairs and duplicate IDs. Gateway, injected-key, and Cloudflare preflight use the registered runtime with their credential route. Refusal messages name the harness and its installation location, mention a login only for host-login probes, and retain sandbox-image guidance for Cloudflare. Successful binary probes log the installed version.
+  
+  Replace the three harness-specific backend tags with `ChildBackend`, and rename the single-harness layers to `claudeChildLayer`, `codexChildLayer`, and `piChildLayer`. Replace `ClaudeLoginLock` and `claudeLoginLockLayer` with `HostLoginLock` and `hostLoginLockLayer`; `withLock` takes the harness ID before the worker and machine. Share one lock layer between the executor and attempt runtime.
+  
+  `preflight` accepts a `ProbeTarget` and requires the injected `Harnesses` service. Build the registry once with the process spawner and shared `HostLoginLock`, then provide it to the executors and durable attempt runtime. Registration errors remain typed until the server reports a startup failure. It returns capability gaps as readiness reports and fails on transport errors or timeouts. Custom `HarnessProbe` wrappers forward the worker and machine context in their second argument.
+- 1c981c9: Scope child environments and forwarded credentials to the launched harness. Saved child continuations exclude credential routes and billing metadata, and resolve the current credential kind at every launch. Refuse moved homes and changed Codex model provider IDs before starting another turn.
+  
+  Add harness-owned login variables, continuation mismatch errors, and `HarnessSession.modelProvider`. Coordinator credentials use the shared `CredentialRoute` values through `credentials.route`. Cloudflare's `harnessEnvironment` accepts an `Option<Harness>` to select provider wiring or the base command environment.
+- fc15261: Save Pi child conversations under each attempt checkout and expose a runtime operation to continue them by saved session ID after the process exits. Record saved session metadata in the transcript and declare the resume-session capability in harness descriptors. Preflight probes remain in memory.
+- 77ede43: Read harness credential environment variables and configuration files from descriptors, and manage SSH attempt homes per harness.
+  
+  Gateway credential slots and URL prefixes use `anthropic-messages` and `openai-responses`. Upgrade the gateway first, then the orchestrator, replacing `anthropic` and `openai` in `gateway.llm_providers`. For one release, the gateway accepts the previous URL prefixes as deprecated aliases so running attempts can finish. Preflight normalizes previous provider IDs and requires a gateway with credential reporting. Provisioner API-key names, Cloudflare provider records, and gateway credential environment-variable names stay the same.
+- 10154eb: Continue saved child conversations through `ChildRequest.resume`. Launch admission checks the resume capability for the worker and credential route, and each harness restores its saved session location.
+  
+  Codex stops the original and reconnect app-servers before replacing retained transports for a saved-thread resume.
+  
+  Restore paused child sessions as idle and wait for operator guidance before starting another model turn.
+  
+  Initialize resumed Claude Code and Pi usage meters from `ChildRequest.usage` so token and cost totals include earlier processes.
+- 9cf0b5e: Share child continuation policy across Claude Code, Codex, Pi, and durable restart. Native resume reopens a conversation without sending input. Working children receive one continuation and unread guidance; supervised children wait. Persist a limit of three continuation turns per ten minutes and close interrupted tool calls with errors.
+  
+  Assign Claude session UUIDs before the first prompt and give operator messages stable UUIDs. Acknowledge guidance by native message IDs so identical messages have separate delivery receipts, and use Claude's pending-send count only for results without UUID receipts. Send the task to a retained Claude process that never acknowledged its prompt. A restored child keeps its unread messages until its call ends. Preserve unread Codex guidance across turn boundaries and active-turn reattachment. Failed resume returns interrupted without spending another child-session slot, and a replacement clears the previous child's infrastructure failure.
+- 9e30c8c: Add the Node `child-host/owner` API and use one process owner for Claude Code and Codex. Remote children reattach across SSH loss and orderly restart, with a two-minute orchestrator lease and bounded exit diagnostics. Local children terminate their process groups when the orchestrator pipe closes, including after a crash.
+- 69ba086: Collect typed JSON step outputs from attempt checkouts, preserve them across restarts, and store gzip bodies separately from run results. Run evidence includes output refs. Output collection enforces file-size, count, envelope, and pinned-commit limits, and excludes `.usine/` from commits and salvage.
+
+### Patch Changes
+
+- df0bd8f: Log child blocker and question reports at Info with their report kind across Claude Code, Codex, and Pi. Keep harness and infrastructure failures at Error.
+- 09417f7: Preserve Claude Code sessions across orchestrator restarts on container-isolated SSH workers. Store projects in an attempt-scoped worker directory until checkout cleanup, and remove orphan session directories during sweeping and provisioned machine resets. Harness descriptors declare container session storage independently of credential wiring.
+- b7ff637: Report Claude Code subscription allowance windows for the Claude plan pool. Five-hour and seven-day utilization reports update pool health and Needs attention warnings, preserving the latest observation of the other window across children and attempts. API-key sessions do not update Claude plan windows.
+- 10822d3: Fix Codex checkout trust overrides so children disable project-local configuration, hooks, and exec policies even when the saved configuration marks the checkout as trusted. Start the app server outside the home directory to avoid repeated configuration warnings.
+- 1674238: Generate Codex app-server response and notification schemas from a pinned upstream commit. Accept new status and phase strings when decoding saved threads and notifications, while preserving domain validation and the supported CLI version policy.
+- 92f21ce: Keep remote Codex app-servers running through SSH drops and reattach to their pending turns. Resume the saved thread once if the app-server exits, preserving operator pauses and idle sessions. Record child transport failures as infrastructure failures even after earlier child reports or parent blockers, so attempts retry automatically from recorded salvage.
+  
+  Preserve the original task when an app-server exits before saving its first user message. Recovery continues saved work when the task is already recorded.
+  
+  Replay unread operator guidance when recovering a Codex thread. Report delivery after the recovered turn accepts the messages, and preserve unread guidance while the child waits for the operator to resume it.
+  
+  Replay incomplete output frames after an SSH disconnect, preserving the last complete output offset.
+  
+  Discard incomplete input frames before journaling them so reconnecting preserves the running app-server. Acknowledge guidance included in resumed input when Codex reads it, preventing replay after another pause.
+  
+  Preserve the recorded process-loss error when the app-server exits before the first turn request starts, so recovery resumes the saved thread.
+- 8c079aa: Route coordinator model requests through the instance's first configured gateway with a caller token. The orchestrator host needs no provider login when a gateway is configured. Check coordinator gateway credentials at startup and keep usage in the API-key or ChatGPT plan pool. Expose the gateway model route for orchestrator-hosted runtimes.
+- a1c0d36: Add durable CI waits for developer and fix loops. Agents can end after pushing, freeing their worker slot while usine observes checks on the recorded head. Green applies recorded labels, red starts a budgeted fix loop with failure diagnostics, and silent checks time out into Needs attention. The run page and board link to the waiting PR's checks.
+- 8d28709: Expose operations without arguments as Effect values in engine, GitHub App, and attachment services. Run them with `yield* service.operation`. Backup operations require `FileSystem` and `Path` from the application's platform layer.
+  
+  Use schema-backed errors and schema predicates, preserve typed failures during selective recovery, and compose services in their owning scopes. Sandbox errors expose `sandbox` in TypeScript while preserving the JSON `name` field.
+- e007d09: Use explicit finite number schemas for numeric fields and update the operator API schema. Apply Effect's safe rewrites for schema construction, decoding, and layer composition.
+- 35f68ef: Stop child connection recovery when an attempt detaches during orchestrator shutdown. Codex preserves its remote supervisor and journals for reattachment, and Codex, Claude Code, and Pi suppress shutdown infrastructure failures.
+- 3229601: Run Pi children on a ChatGPT subscription with an `openai-codex` model. Preflight accepts the Pi login without an API key, and child usage counts in the ChatGPT plan pool. OAuth providers without a supported billing pool remain unavailable.
+- bb96f16: Save a Claude child's zero usage for its replacement process before the replacement launches, so an orchestrator stop during that launch keeps the earlier process's tokens and cost in the session total. Wait for the worker to acknowledge pending input before the detach checkpoint, so an answered hook is not replayed after the restart. Save active and uncheckpointed assistant message IDs with the process usage, so a reattached process doesn't count their replay again.
+- 6316707: Connect Claude and ChatGPT from setup, Settings, or `usine login`, with subscription and API-key options. Save completed logins on the configured gateway or in local harness storage, show credential metadata, and replace or disconnect credentials without manually transferring files.
+- 89ae7ee: Group the Claude Code, Codex, and Pi child harness implementations under `harness/` while preserving the published subpaths.
+- 9476883: Pass the rendered loop task unchanged to each child, with parent-written text as supplemental context. Record the exact child prompt in the transcript and display it in the run page's attempt details.
+- b6a858e: Send remote child environments over stdin so gateway caller tokens stay out of SSH and container command arguments during launch, reconnection, and cleanup.
+- 10154eb: Keep held children that finished their turn idle after an orchestrator restart. Release returns the saved report to the parent; operator guidance starts another turn. Include the completed report in SessionIdle events for recovery.
+- 1948b10: Record the resolved billing pool on parent and child sessions and preserve parent billing across restarts. API-key sessions record their endpoint's provider name when available. Usage reads the recorded pool, with compatibility for older transcripts.
+- ef5aa4d: Save the remote child's output checkpoint when the worker doesn't acknowledge pending input within 4 seconds of a detach, instead of skipping it. The worker relay now ignores an input line cut off by a dropped connection and exits normally. If the worker cannot identify the process that holds the child, it stops that process and exits instead of leaving the child unsupervised.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- fc18d3f: Build the child process owner and lifeline from TypeScript into self-contained Node programs. Add direct worker lifecycle tests for input replay, lease expiry, stale process identities, environment changes, and TERM-to-KILL shutdown.
+  
+  Track relay input history, retry state, and output checkpoints in Effect refs, with separate connect, replay, stream, and reattach phases.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [6e60662]
+- Updated dependencies [01467e3]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [e007d09]
+- Updated dependencies [9290433]
+- Updated dependencies [1c981c9]
+- Updated dependencies [82b55aa]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [d740598]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [9476883]
+- Updated dependencies [10154eb]
+- Updated dependencies [7c58461]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes
