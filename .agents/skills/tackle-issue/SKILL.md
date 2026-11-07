@@ -14,7 +14,9 @@ argument-hint: <issue-or-pr number> [notes]
 2. **Branch** — `git worktree list` first: the branch may be checked out in another session's
    worktree — leave those alone, work in a temporary worktree pushed to the branch. Fresh work
    branches from `origin/main`; an existing PR rebases onto it. The gate is
-   `.github/workflows/ci.yml` run locally — green before any new work.
+   `.github/workflows/ci.yml` run locally — green before any new work. `codex:check` is
+   CI-only: it fetches the pinned schema from `raw.githubusercontent.com`, which a worker
+   sandbox cannot reach. Skip it locally; a fetch failure is not a blocker.
 
 3. **Build** — decomposed, individually green commits. A pattern the precedents don't carry is
    established deliberately and recorded: AGENTS.md for a standing rule, an ADR for an
