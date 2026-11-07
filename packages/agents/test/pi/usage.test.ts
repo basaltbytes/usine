@@ -68,6 +68,26 @@ describe("Claude query tokens", () => {
     assert.isUndefined(result.value.processUsage.value.messages);
   });
 
+  it("keeps the latest message of each parent stream when a checkpoint covers interleaved messages", () => {
+    const meter = claudeTokenMeter();
+    const assistant = (id: string, parent: string | null) =>
+      meter.read({
+        type: "assistant",
+        parent_tool_use_id: parent,
+        message: { id, usage: { input_tokens: 10, output_tokens: 5 } },
+      });
+    assistant("main-1", null);
+    assistant("task-1", "tool");
+    assistant("main-2", null);
+    meter.covered();
+    const replayed = Option.getOrThrow(assistant("main-2", null));
+    assert.strictEqual(replayed.totalTokens, 45);
+    assert.deepStrictEqual(replayed.messages, {
+      "task-1": TokenCount.make(15),
+      "main-2": TokenCount.make(15),
+    });
+  });
+
   it("counts output plus uncached input, reconciling repeated blocks and cumulative results", () => {
     const { read } = claudeTokenMeter();
     const assistant = (id: string, output: number) =>

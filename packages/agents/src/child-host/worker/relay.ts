@@ -22,12 +22,34 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
+import { Transform } from "node:stream";
 import { hasCode, type OwnerFiles } from "./files.ts";
 import { ownerProgram, type Launch, type WorkerSources } from "./program.ts";
 import { checkpoint, environment, inputFrame, outputFrame, relayFrame } from "./protocol.ts";
 
+/** Passes only newline-terminated input; an unterminated final line is dropped at EOF. */
+const terminatedLines = () => {
+  let partial: Buffer[] = [];
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      const end = chunk.lastIndexOf(10) + 1;
+      if (end === 0) {
+        partial.push(chunk);
+        callback();
+        return;
+      }
+      const complete = Buffer.concat([...partial, chunk.subarray(0, end)]);
+      partial = [chunk.subarray(end)];
+      callback(null, complete);
+    },
+  });
+};
+
 export const relay = async (files: OwnerFiles, launch: Launch, sources: WorkerSources) => {
-  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const lines = createInterface({
+    input: process.stdin.pipe(terminatedLines()),
+    crlfDelay: Infinity,
+  });
   const input = lines[Symbol.asyncIterator]();
   const first = await input.next();
   if (first.done === true) throw new Error("Missing child process environment");

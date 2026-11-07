@@ -29,7 +29,10 @@ export const supervise = (files: OwnerFiles, launch: Launch, lifeline: string) =
   );
   if (child.pid !== undefined) {
     const childIdentity = files.readIdentity(child.pid);
-    if (childIdentity === null) throw new Error("Could not identify the child process lifeline");
+    if (childIdentity === null) {
+      signal(-child.pid, "SIGTERM");
+      process.exit(1);
+    }
     writeFileSync(files.identityFile(files.lifelinePid), childIdentity, { mode: 0o600 });
   }
   let killTimer: ReturnType<typeof setTimeout> | undefined;

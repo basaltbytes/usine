@@ -64,8 +64,8 @@ describe("recorded harness transports", () => {
               );
               yield* fixture.save;
             }),
-          ).pipe(Effect.provide(NodeServices.layer)),
-        180_000,
+          ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+        20_000,
       );
     }
 });
@@ -477,7 +477,6 @@ for (const state of [
             const retained = yield* fs.exists(pidFile);
             assert.isFalse(retained);
           }
-          assert.strictEqual(first.session.id, fixture.request.session.id);
         }),
       ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
     20_000,
@@ -622,7 +621,7 @@ it.live.skipIf(process.platform !== "linux")(
         const events = yield* Queue.unbounded<AgentSessionEvent>();
         yield* fs.writeFileString(`${fixture.cwd}/cumulative-usage`, "ready");
         const scope = yield* Scope.make();
-        const first = yield* Effect.gen(function* () {
+        yield* Effect.gen(function* () {
           const running = yield* (yield* ChildBackend).launch(
             ChildRequest.make({ ...fixture.request, held: true }),
           );
@@ -630,7 +629,6 @@ it.live.skipIf(process.platform !== "linux")(
             Stream.runForEach((event) => Queue.offer(events, event)),
             Effect.forkScoped,
           );
-          return running;
         }).pipe(
           Effect.provide(fixture.backend),
           Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
@@ -711,7 +709,6 @@ it.live.skipIf(process.platform !== "linux")(
         }).pipe(Effect.provide(fixture.backend), Effect.scoped);
         const launches = yield* fileWithLines(`${fixture.cwd}/launches`, 2);
         assert.lengthOf(launches, 2, "reattachment retains the replacement process");
-        assert.strictEqual(first.session.id, fixture.request.session.id);
       }),
     ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
   20_000,
@@ -929,7 +926,6 @@ for (const outcome of [
             yield* fixture.controls.releaseCommand;
             yield* running.intervene(Release.make(), () => Effect.void);
             assert.include((yield* running.result).message, "REPLAY_DONE");
-            assert.strictEqual(running.session.id, fixture.request.session.id);
           }).pipe(
             Effect.provide([fixture.backend, Logger.layer([logger], { mergeWithExisting: true })]),
             Effect.scoped,

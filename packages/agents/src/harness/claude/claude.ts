@@ -168,7 +168,10 @@ interface ClaudeLaunch {
    */
   readonly login: Exclude<LoginCheck, "waiting"> | "undecided";
   readonly retained: boolean;
-  /** Checkpoints a handled message; returns whether the checkpoint covers all output read so far. */
+  /**
+   * Checkpoints a handled message; returns whether the checkpoint covers the message and all output
+   * read before it.
+   */
   readonly acknowledge: (message: Schema.Json) => Effect.Effect<boolean>;
   /** The scope of the launch's process, input, and output reader. */
   readonly scope: Scope.Closeable;
@@ -745,7 +748,6 @@ const makeClaudeChild = Effect.gen(function* () {
         });
         yield* Scope.close(current.scope, Exit.void);
         if ((yield* lifecycle.isStopping) || (yield* channel.isTerminal)) return;
-        // Emitted before the launch, because a stop during the launch retains the replacement.
         yield* channel.emit(SessionTokensUpdated.make({ session, ...usage.restart() }));
         backgroundTasks = [];
         completedTurn = Option.none();
