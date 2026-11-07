@@ -25,6 +25,8 @@ import {
 import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import { StepExecutor, type WorkerLease } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
+import type { QueuedEvents } from "../store/queries.ts";
+import { LoopControl } from "../loop-control/loop-control.ts";
 import { TranscriptAllQuery } from "../transcript.ts";
 import { TriggerCondition } from "../trigger-condition.ts";
 import { AttemptAdmission } from "./admission.ts";
@@ -172,6 +174,7 @@ export class RunDriver extends Context.Service<
       const outputs = yield* StepOutputStore;
       const admission = yield* AttemptAdmission;
       const condition = yield* TriggerCondition;
+      const controls = yield* LoopControl;
       const items = yield* ItemProjectionWriter;
       const crypto = yield* Crypto.Crypto;
       const fibers = yield* FiberMap.make<RunId>();
@@ -255,18 +258,18 @@ export class RunDriver extends Context.Service<
       });
 
       const markItemGone = Effect.fn("RunDriver.markItemGone")(function* (
-        closedRunId: RunId,
+        runId: RunId,
         submission: Submission,
       ) {
-        yield* Effect.annotateCurrentSpan({ runId: closedRunId, itemKey: submission.itemKey });
+        yield* Effect.annotateCurrentSpan({ runId, itemKey: submission.itemKey });
         const observedAt = yield* DateTime.now;
         return yield* items.markGone(submission.itemKey, observedAt).pipe(
-          retryingStore(closedRunId, "mark the item's projection gone"),
+          retryingStore(runId, "mark the item's projection gone"),
           Effect.catch((error) =>
             Effect.logWarning(
               "Could not mark the gone Item's projection; its Board card stays in place",
               {
-                completedRunId: closedRunId,
+                runId,
                 itemKey: submission.itemKey,
                 errorTag: error._tag,
               },
@@ -275,27 +278,32 @@ export class RunDriver extends Context.Service<
         );
       });
 
-      const continueWithNewest = Effect.fn("RunDriver.continueWithNewest")(function* (
-        closedRunId: RunId,
+      const continueQueued = Effect.fn("RunDriver.continueQueued")(function* (
+        queued: QueuedEvents,
       ) {
-        yield* Effect.annotateCurrentSpan({ runId: closedRunId });
-        const queued = yield* store
-          .nextQueued(closedRunId)
-          .pipe(retryingStore(closedRunId, "read the queued events"));
-        if (Option.isNone(queued)) return;
-        const submission = queued.value.submission;
+        const submission = queued.submission;
+        const runId = yield* runIdFor(submission).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+        );
         const fields = {
-          completedRunId: closedRunId,
           eventId: submission.event.id,
           loop: submission.loop,
           itemKey: submission.itemKey,
         };
+        yield* Effect.annotateCurrentSpan(fields);
+        if (
+          Option.isSome(submission.ciFailureHead) &&
+          (yield* controls.isPaused(submission.loop))
+        ) {
+          yield* Effect.logInfo("CI fix remains queued while its loop is paused", fields);
+          return;
+        }
         const recheck = yield* condition.recheck(submission);
         if (recheck !== "matches") {
           // Revoke only the queue read before the remote check.
           const revoked = yield* store
-            .revokeQueued(queued.value)
-            .pipe(retryingStore(closedRunId, "revoke the queued events"));
+            .revokeQueued(queued)
+            .pipe(retryingStore(runId, "revoke the queued events"));
           if (recheck === "no-longer-matches") {
             yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
               ...fields,
@@ -303,19 +311,16 @@ export class RunDriver extends Context.Service<
             });
             return;
           }
-          const projectionMarkedGone = yield* markItemGone(closedRunId, submission);
+          const projectionMarkedGone = yield* markItemGone(runId, submission);
           yield* Effect.logInfo(
             "Queued Event's Item is gone from its source; revoked its queued Events",
             { ...fields, revokedEvents: revoked, projectionMarkedGone },
           );
           return;
         }
-        const runId = yield* runIdFor(submission).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
-        );
         const claimed = yield* store
           .claimQueued(submission, runId)
-          .pipe(retryingStore(closedRunId, "claim the queued event"));
+          .pipe(retryingStore(runId, "claim the queued event"));
         if (Option.isNone(claimed)) {
           // During the check, the Event was ignored, another Run opened for the Item, or a cycle
           // reset superseded the Event.
@@ -330,6 +335,16 @@ export class RunDriver extends Context.Service<
           runId: claimed.value,
         });
         yield* launch(claimed.value);
+      });
+
+      const continueWithNewest = Effect.fn("RunDriver.continueWithNewest")(function* (
+        closedRunId: RunId,
+      ) {
+        yield* Effect.annotateCurrentSpan({ runId: closedRunId });
+        const queued = yield* store
+          .nextQueued(closedRunId)
+          .pipe(retryingStore(closedRunId, "read the queued events"));
+        if (Option.isSome(queued)) yield* continueQueued(queued.value);
       });
 
       /**
@@ -802,6 +817,18 @@ export class RunDriver extends Context.Service<
             ),
           { discard: true },
         );
+        const pendingCiFixes = yield* store.pendingCiFixes;
+        for (const queued of pendingCiFixes) {
+          yield* continueQueued(queued).pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Could not admit the queued CI fix; reconciliation retries it", {
+                eventId: queued.submission.event.id,
+                errorTag: error._tag,
+              }),
+            ),
+            Effect.ignore,
+          );
+        }
         const continuations = yield* store.pendingContinuations;
         yield* Effect.forEach(
           continuations,

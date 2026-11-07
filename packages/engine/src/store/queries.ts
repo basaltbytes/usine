@@ -1120,6 +1120,29 @@ export const queriesFor = (
     return submissionFromRow(existing);
   });
 
+  const pendingCiFixes = Effect.fn("RunStoreQueries.pendingCiFixes")(function* () {
+    const rows = yield* database
+      .select(eventRouteSelection)
+      .from(events)
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
+      .leftJoin(runs, eq(runs.eventId, events.eventId))
+      .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, events.eventId))
+      .where(
+        and(
+          isNotNull(triggerEvents.ciFailureHead),
+          cycleQueries(database, record).currentEvent,
+          isNull(runs.runId),
+          isNull(ignoredEvents.eventId),
+        ),
+      )
+      .orderBy(desc(events.receivedAt))
+      .execute();
+    return (yield* decodeEventRoutes(rows)).map((row): QueuedEvents => ({
+      submission: submissionFromRow(row),
+      eventIds: [row.eventId],
+    }));
+  });
+
   const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: RunId) {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
@@ -1258,14 +1281,25 @@ export const queriesFor = (
       .from(runs)
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .where(
-        and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), unstartedState),
+        and(
+          eq(triggerEvents.loopName, loop),
+          eq(triggerEvents.itemKey, itemKey),
+          isNull(triggerEvents.ciFailureHead),
+          unstartedState,
+        ),
       )
       .execute();
     const rows = yield* decodeRunIds(storedRows);
     const queued = database
       .select({ eventId: triggerEvents.eventId })
       .from(triggerEvents)
-      .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey)));
+      .where(
+        and(
+          eq(triggerEvents.loopName, loop),
+          eq(triggerEvents.itemKey, itemKey),
+          isNull(triggerEvents.ciFailureHead),
+        ),
+      );
     yield* revokeQueued(loop, itemKey, queued);
     return rows;
   });
@@ -1298,6 +1332,7 @@ export const queriesFor = (
     reopenedEvent,
     recordRunAgain,
     pendingContinuations,
+    pendingCiFixes,
     recordTriggerEvent,
     runIdsToDrive,
     recordApproval,

@@ -1140,6 +1140,7 @@ const makeRunStore = Effect.gen(function* () {
     finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
     parkForApproval,
+    pendingCiFixes: queries.pendingCiFixes().pipe(persistence("list pending CI fixes")),
     pendingContinuations: queries
       .pendingContinuations()
       .pipe(persistence("list pending continuations")),
@@ -1234,6 +1235,8 @@ export class RunStore extends Context.Service<
      * excluding Items under a suppression.
      */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
+    /** Unclaimed CI fixes in the current cycle generation, including resets without a prior fix run. */
+    readonly pendingCiFixes: Effect.Effect<ReadonlyArray<QueuedEvents>, RunStoreError>;
     /** The open Runs that a fiber drives: pending, queued, or running, but not waiting for approval. */
     readonly runIdsToDrive: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /**

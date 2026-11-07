@@ -12,7 +12,7 @@ import {
   RepositoryRevision,
 } from "@usine/core/repository";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { Submission, RunEngine, type EnginePersistenceError } from "@usine/engine/engine";
+import { Submission, RunEngine, EnginePersistenceError } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
@@ -53,6 +53,7 @@ export class CiMonitor extends Context.Service<
     CiMonitor,
     Effect.gen(function* () {
       const engine = yield* RunEngine;
+      const budgets = yield* CycleBudgets;
       const reader = yield* RunReader;
       const checks = yield* GitHubChecks;
       const writer = yield* GitHubItemWriter;
@@ -291,6 +292,16 @@ export class CiMonitor extends Context.Service<
           instance: LoadedInstance,
           repository: Option.Option<RepositoryName>,
         ) {
+          if ((yield* budgets.pendingResets).length > 0) {
+            yield* engine.reconcile.pipe(
+              Effect.mapError((cause) =>
+                EnginePersistenceError.make({
+                  operation: "reconcile cycle reset CI fixes",
+                  cause,
+                }),
+              ),
+            );
+          }
           const waits = (yield* engine.awaitingCi).filter((wait) =>
             Option.match(repository, {
               onNone: () => true,

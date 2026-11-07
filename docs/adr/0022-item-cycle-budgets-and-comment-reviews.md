@@ -29,3 +29,9 @@ This resolves the identity question in #77 without a second credential set: GitH
 ## Amendment (2026-10-24, #476): a closed or merged item closes its ask
 
 An ask on a merged pull request stayed in Needs attention with a reset as its only action, though no loop acted on the item any more and a reset would only request fresh polling. Each poll now closes the ask of an item that is closed, merged, or gone with the reason `ItemClosed`. A closure isn't a reset: the generation and reservations stay, so the budget's history keeps counting, and a reopened item at its limit asks again. The closed ask is stored with its reason, so the record says why it left.
+
+## Amendment (2026-11-07, #1028): replay blocked CI fix events on reset
+
+A CI fix can exhaust the cycle budget after its source run removes the trigger label. Refreshing label triggers then produces no work, although the ask identifies the blocked CI event. Reset moves only the ask's recorded, unclaimed CI fix events into the new generation, including events that earlier label polling marked revoked. Ordinary queued trigger matches retain their old generation and require fresh evaluation.
+
+CI fixes preserve their recorded task and failure evidence, along with inherited completion actions. Reconciliation checks the current loop, repository selection, PR state, failed head, and checks before admission; paused loops keep the event queued. These events survive label-trigger revocation and can open the fix loop's first run on an item. Polling requests reconciliation before acknowledging a reset, and startup and periodic reconciliation recover pending events after interruption. Admission still applies the cycle budget and approval gate atomically.

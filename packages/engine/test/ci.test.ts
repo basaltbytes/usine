@@ -7,6 +7,7 @@ import {
   CiPolicy,
   CiSuperseded,
 } from "@usine/core/ci";
+import { WorkerName } from "@usine/core/worker";
 import { ItemNumber } from "@usine/core/item";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import * as RunState from "@usine/core/run/state";
@@ -17,7 +18,13 @@ import { PullRequest, StepResult } from "@usine/core/step/result";
 import { Context, Effect, Exit, Option, Scope, Layer, TxRef } from "effect";
 import { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
+import { RunStore } from "../src/store/store.ts";
+import { localSqliteLayer } from "../src/database/local-sqlite.ts";
+import { RunReader } from "../src/run-reader/run-reader.ts";
+import { RunId } from "@usine/core/run";
+import { Result } from "effect";
 import {
+  approvalEvent,
   engineLayer,
   slottedExecutor,
   stepResult,
@@ -334,6 +341,96 @@ it.live.each([1, 2])(
             assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
           }
         }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
+      }),
+    ),
+);
+
+it.live(
+  "a reset preserves only the blocked CI fix across restart, including revoked events and inherited actions",
+  () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const actions = [
+          CiLabelMutation.make({
+            item: ItemNumber.make(811),
+            add: ["implemented"],
+            remove: ["agent-in-progress"],
+          }),
+        ];
+        const source = Submission.make({
+          ...submission({ number: 1 }),
+          cycleLimit: Option.some(CycleLimit.make(1)),
+        });
+        const current = Submission.make({
+          ...submission({ number: 4 }),
+          loop: policy.fixLoop,
+          ciFailureHead: Option.some(head),
+          ciOnGreen: actions,
+          ciPolicy: Option.some(policy),
+        });
+        const storage = Layer.merge(RunStore.layer, CycleBudgets.layer).pipe(
+          Layer.provide(localSqliteLayer(directory)),
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const budgets = yield* CycleBudgets;
+            const sourceId = RunId.make("source");
+            yield* store.recordAndClaim(source, sourceId);
+            const started = yield* store.beginAttempt(
+              sourceId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
+            assert(started._tag === "AttemptStarted");
+            yield* store.finishAttempt(
+              started.execution.attempt,
+              Result.succeed(stepResult("Completed")),
+            );
+            const labelEvent = Submission.make({
+              ...submission({ number: 2 }),
+              cycleLimit: source.cycleLimit,
+            });
+            const exhausted = yield* store.recordAndClaim(labelEvent, RunId.make("exhausted"));
+            assert(exhausted.result._tag === "CycleBlocked");
+            const older = Submission.make({ ...current, event: submission({ number: 3 }).event });
+            yield* store.recordAndClaim(older, RunId.make("older-ci-fix"));
+            const blocked = yield* store.recordAndClaim(current, RunId.make("current-ci-fix"));
+            assert(blocked.result._tag === "CycleBlocked");
+            yield* store.revokeQueued({ submission: current, eventIds: [current.event.id] });
+            const answer = approvalEvent(1);
+            yield* budgets.reset(blocked.result.ask.id, answer);
+            yield* budgets.reset(blocked.result.ask.id, answer);
+            const pending = yield* store.pendingCiFixes;
+            assert.strictEqual(pending.length, 1);
+            assert.strictEqual(pending[0]?.submission.event.id, current.event.id);
+            assert.strictEqual(pending[0]?.submission.cycleGeneration, 1);
+            const stale = yield* store.recordAndClaim(labelEvent, RunId.make("stale-label-event"));
+            assert.strictEqual(stale.result._tag, "Ignored");
+          }).pipe(Effect.provide(storage)),
+        );
+
+        const worker = yield* slottedExecutor([Effect.succeed(pushed)]);
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const reader = yield* RunReader;
+            const admitted = yield* reader.runForEvent(current.event.dedupKey);
+            assert(Option.isSome(admitted));
+            const waiting = yield* waitFor(
+              engine,
+              admitted.value,
+              ({ run }) => run.state._tag === "AwaitingCi",
+            );
+            assert(waiting.run.state._tag === "AwaitingCi");
+            assert.deepStrictEqual(waiting.run.state.handoff.onGreen, actions);
+            assert.strictEqual(waiting.attempts.length, 1);
+            yield* engine.reconcile;
+            const repeated = yield* engine.inspect(admitted.value);
+            assert.strictEqual(repeated.attempts.length, 1);
+            yield* engine.drain;
+          }).pipe(Effect.provide(engineLayer(directory, worker.executor))),
+        );
       }),
     ),
 );

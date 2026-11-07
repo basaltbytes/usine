@@ -18,7 +18,7 @@ import { runView } from "../src/operator/projection.ts";
 import { runNeedsAttention } from "../src/board/items.ts";
 import { CiPolicy } from "@usine/core/ci";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
-import { DedupKey } from "@usine/core/event";
+import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
@@ -26,6 +26,8 @@ import { StepName } from "@usine/core/step";
 import { PullRequest, StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
+import { RunReader } from "@usine/engine/run-reader";
+import { LoopControl } from "@usine/engine/loop-control";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
@@ -39,6 +41,8 @@ import {
   GitHubPolling,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryNotModified,
+  RepositoryLabelCatalog,
 } from "@usine/github/polling";
 import {
   DateTime,
@@ -198,9 +202,11 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   });
   const polling = Layer.succeed(GitHubPolling)({
     baseRefHead: unmovedBaseRefHead,
-    changes: () => Effect.die("unused detection"),
+    changes: (_repository, cursor) =>
+      Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
     missingIssues: () => Effect.succeed([]),
-    labels: () => Effect.die("unused labels"),
+    labels: () =>
+      Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
     snapshot: () =>
       Effect.gen(function* () {
         const { head, state } = yield* Ref.get(observed);
@@ -209,7 +215,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
             ...fixturePayload,
             headRefOid: head,
             mergeable: state === "conflict" ? yield* Ref.get(mergeable) : "UNKNOWN",
-            statusCheckRollup: state === "conflict" ? null : fixturePayload.statusCheckRollup,
+            statusCheckRollup:
+              state === "conflict" ? null : { state: state === "success" ? "SUCCESS" : "FAILURE" },
           }),
           contentHash: ContentHash.make("b".repeat(64)),
         });
@@ -725,6 +732,98 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each(["failure", "superseded", "success", "paused"] as const)(
+  "a cycle reset rechecks a blocked CI fix without a trigger label: %s",
+  (state) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const limited = LoadedInstance.make({
+          ...fixtureInstance,
+          loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) })],
+        });
+        const setup = yield* scenario(3600, limited);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const budgets = yield* CycleBudgets;
+          const monitor = yield* CiMonitor;
+          yield* openWait(setup.timeoutSeconds, true);
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* monitor.reconcile(limited, Option.none());
+          const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+          const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+          const answer = Event.make({
+            id: EventId.make("reset-ci-fix"),
+            dedupKey: DedupKey.make("reset-ci-fix"),
+            receivedAt: yield* DateTime.now,
+            payload: {},
+          });
+          yield* engine.revoke(loop.name, ask.itemKey);
+          yield* budgets.reset(ask.id, answer);
+          yield* engine.revoke(loop.name, ask.itemKey);
+          const controls = yield* LoopControl;
+          if (state === "paused") yield* controls.pause(loop.name);
+          if (state === "superseded" || state === "success") {
+            yield* Ref.set(
+              setup.observed,
+              CheckSnapshot.make({
+                head: state === "superseded" ? CommitSha.make("c".repeat(40)) : head,
+                state: "success",
+              }),
+            );
+          }
+
+          const polling = yield* PollingTriggers;
+          const cycle = yield* polling.poll(limited);
+          assert.deepStrictEqual(cycle.failures, []);
+          if (state === "paused") {
+            assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+            const resets = yield* budgets.pendingResets;
+            for (const reset of resets) yield* budgets.acknowledgeReset(reset);
+            yield* controls.unpause(loop.name);
+            yield* engine.reconcile;
+          }
+          if (state === "failure" || state === "paused") {
+            yield* Ref.get(setup.tasks).pipe(
+              Effect.repeat({
+                until: (tasks) => tasks.length === 2,
+                schedule: Schedule.spaced("10 millis"),
+              }),
+              Effect.timeout("5 seconds"),
+            );
+          }
+          yield* engine.drain;
+          yield* budgets.reset(ask.id, answer);
+          yield* monitor.reconcile(limited, Option.none());
+
+          assert.strictEqual(
+            (yield* Ref.get(setup.tasks)).length,
+            state === "failure" || state === "paused" ? 2 : 1,
+          );
+          const remainingAsks = yield* budgets.asks;
+          assert.deepStrictEqual(remainingAsks, []);
+          const admitted = yield* RunReader;
+          const fixId = yield* admitted.runForEvent(DedupKey.make(blocked.eventId));
+          if (state === "failure" || state === "paused") {
+            assert(Option.isSome(fixId));
+            const fix = yield* engine.inspect(fixId.value);
+            assert.strictEqual(fix.event.id, blocked.eventId);
+            const tasks = yield* Ref.get(setup.tasks);
+            assert.include(tasks[1] ?? "", "TypeError: failing CI log");
+          } else {
+            assert(Option.isNone(fixId));
+          }
+        }).pipe(
+          Effect.provide(
+            PollingTriggers.layer.pipe(
+              Layer.provideMerge(Layer.merge(setup.runtime, inertLabelReconcilerLayer)),
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live.each([

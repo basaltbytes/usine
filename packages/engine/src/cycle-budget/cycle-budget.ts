@@ -4,7 +4,7 @@ import { CycleBudgetAsk, CycleBudgetAskId, CycleGeneration } from "@usine/core/c
 import { ItemKey } from "@usine/core/item";
 import { Event } from "@usine/core/event";
 import * as RunState from "@usine/core/run/state";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, notExists } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { jsonExtract } from "../database/dialect.ts";
 import { RunDatabase } from "../database/database.ts";
@@ -13,8 +13,10 @@ import {
   cycleReservations,
   cycleResets,
   events,
+  ignoredEvents,
   itemCycleBudgets,
   runs,
+  triggerEvents,
 } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
 import { encodeDateTime, encodePayload } from "../store/codec.ts";
@@ -145,6 +147,43 @@ export class CycleBudgets extends Context.Service<
               .set({ generation, askJson: null, resetPending: true })
               .where(eq(itemCycleBudgets.itemKey, ask.itemKey))
               .execute();
+            const replayed = yield* transaction
+              .update(triggerEvents)
+              .set({ cycleGeneration: generation })
+              .where(
+                and(
+                  eq(triggerEvents.itemKey, ask.itemKey),
+                  inArray(
+                    triggerEvents.eventId,
+                    ask.blocks.map(({ eventId }) => eventId),
+                  ),
+                  isNotNull(triggerEvents.ciFailureHead),
+                  notExists(
+                    transaction
+                      .select({ runId: runs.runId })
+                      .from(runs)
+                      .where(eq(runs.eventId, triggerEvents.eventId)),
+                  ),
+                ),
+              )
+              .returning({ eventId: triggerEvents.eventId })
+              .execute();
+            if (replayed.length > 0) {
+              yield* transaction
+                .delete(ignoredEvents)
+                .where(
+                  inArray(
+                    ignoredEvents.eventId,
+                    replayed.map(({ eventId }) => eventId),
+                  ),
+                )
+                .execute();
+            }
+            yield* Effect.logInfo("Blocked CI fix events moved to the reset cycle generation", {
+              itemKey: ask.itemKey,
+              generation,
+              eventIds: replayed.map(({ eventId }) => eventId),
+            });
             // Unstarted Runs move their reservation to the new generation. Started Runs keep the
             // old one, and retries don't charge again.
             yield* transaction

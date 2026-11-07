@@ -448,10 +448,12 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
 > => {
   const store = RunStore.layer.pipe(Layer.provide(database));
   const itemWriter = ItemProjectionWriter.layer.pipe(Layer.provide(database));
+  const controls = LoopControl.layer.pipe(Layer.provide(database));
   const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),
     Layer.provide(itemWriter),
+    Layer.provide(controls),
     Layer.provide(database),
   );
   const runEngine = Layer.mergeAll(
@@ -476,7 +478,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     itemWriter,
     RepositoryLabelProjectionReader.layer.pipe(Layer.provide(database)),
     RepositoryLabelProjectionWriter.layer.pipe(Layer.provide(database)),
-    LoopControl.layer.pipe(Layer.provide(database)),
+    controls,
   );
 };
 
