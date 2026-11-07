@@ -917,6 +917,74 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
     ).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.live.each(["newer head", "green checks"] as const)(
+  "polling revokes an approval-waiting CI fix after %s",
+  (change) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const limited = LoadedInstance.make({
+          ...fixtureInstance,
+          loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1), approval: "required" })],
+        });
+        const setup = yield* scenario(3600, limited);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const budgets = yield* CycleBudgets;
+          const polling = yield* PollingTriggers;
+          yield* openWait(setup.timeoutSeconds, true);
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* (yield* CiMonitor).reconcile(limited, Option.none());
+          const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+          const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+          yield* budgets.reset(
+            ask.id,
+            Event.make({
+              id: EventId.make("reset-waiting-ci-fix"),
+              dedupKey: DedupKey.make("reset-waiting-ci-fix"),
+              receivedAt: yield* DateTime.now,
+              payload: {},
+            }),
+          );
+          assert.deepStrictEqual((yield* polling.poll(limited)).failures, []);
+          const reader = yield* RunReader;
+          const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+          assert(Option.isSome(fixId));
+          const waiting = yield* engine.inspect(fixId.value).pipe(
+            Effect.repeat({
+              until: ({ run }) => run.state._tag === "Waiting",
+              schedule: Schedule.spaced("10 millis"),
+            }),
+            Effect.timeout("5 seconds"),
+          );
+          assert.deepStrictEqual(waiting.attempts, []);
+
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({
+              head: change === "newer head" ? CommitSha.make("c".repeat(40)) : head,
+              state: change === "green checks" ? "success" : "failure",
+            }),
+          );
+          assert.deepStrictEqual((yield* polling.poll(limited)).failures, []);
+          yield* engine.reconcile;
+          const revoked = yield* engine.inspect(fixId.value);
+          assert.strictEqual(revoked.run.state._tag, "Canceled");
+          assert(revoked.run.state._tag === "Canceled");
+          assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+          assert.deepStrictEqual(revoked.attempts, []);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(
+          Effect.provide(
+            PollingTriggers.layer.pipe(
+              Layer.provideMerge(Layer.merge(setup.runtime, inertLabelReconcilerLayer)),
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live.each([
   { state: "failure", outcome: "admitted" },
   { state: "failure", outcome: "admitted and pushed" },

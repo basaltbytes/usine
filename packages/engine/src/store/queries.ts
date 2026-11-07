@@ -59,7 +59,7 @@ import {
 } from "../database/schema.ts";
 import { RunNotFoundError } from "../engine/error.ts";
 import { BoardRunHistory, RunSnapshot, RunSummary } from "../run-reader/model.ts";
-import { Submission } from "../engine/submission.ts";
+import { type RevokeScope, Submission } from "../engine/submission.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
   type RunSummaryRow,
@@ -1285,8 +1285,15 @@ export const queriesFor = (
   const revokeUnstarted = Effect.fn("RunStoreQueries.revokeUnstarted")(function* (
     loop: LoopName,
     itemKey: ItemKey,
-    scope: "all" | "label-trigger",
+    scope: RevokeScope,
   ) {
+    const revokedHead =
+      scope === "all"
+        ? undefined
+        : or(
+            isNull(triggerEvents.ciFailureHead),
+            ne(triggerEvents.ciFailureHead, scope.openCiHead),
+          );
     const storedRows = yield* database
       .select({ runId: runs.runId })
       .from(runs)
@@ -1295,7 +1302,7 @@ export const queriesFor = (
         and(
           eq(triggerEvents.loopName, loop),
           eq(triggerEvents.itemKey, itemKey),
-          scope === "label-trigger" ? isNull(triggerEvents.ciFailureHead) : undefined,
+          revokedHead,
           unstartedState,
         ),
       )
@@ -1305,11 +1312,7 @@ export const queriesFor = (
       .select({ eventId: triggerEvents.eventId })
       .from(triggerEvents)
       .where(
-        and(
-          eq(triggerEvents.loopName, loop),
-          eq(triggerEvents.itemKey, itemKey),
-          scope === "label-trigger" ? isNull(triggerEvents.ciFailureHead) : undefined,
-        ),
+        and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), revokedHead),
       );
     yield* revokeQueued(loop, itemKey, queued);
     return rows;

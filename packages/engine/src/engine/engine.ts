@@ -24,7 +24,12 @@ import {
   type RunEngineError,
 } from "./error.ts";
 import type { RunSnapshot } from "../run-reader/model.ts";
-import { runIdFor, type Submission, type SubmissionResult } from "./submission.ts";
+import {
+  runIdFor,
+  type RevokeScope,
+  type Submission,
+  type SubmissionResult,
+} from "./submission.ts";
 import type { RunAgainRequest, RunAgainResult } from "./run-again.ts";
 import { plainRetry, type RetryRequest } from "./retry.ts";
 import type { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
@@ -245,7 +250,7 @@ const makeRunEngine = Effect.gen(function* () {
   const revoke = Effect.fn("RunEngine.revoke")(function* (
     loop: LoopName,
     itemKey: ItemKey,
-    scope: "all" | "label-trigger" = "all",
+    scope: RevokeScope = "all",
   ) {
     yield* Effect.annotateCurrentSpan({ loop, itemKey, scope });
     const revoked = yield* store.revoke(loop, itemKey, scope);
@@ -407,11 +412,11 @@ export class RunEngine extends Context.Service<
       runId: RunId,
       request: RunAgainRequest,
     ) => Effect.Effect<RunAgainResult, RunEngineError>;
-    /** Cancels unstarted Runs and discards queued Events; label-trigger scope preserves CI fixes. Running Attempts continue. */
+    /** Cancels unstarted Runs and discards queued Events; open-PR scope preserves only CI fixes for its observed failing head. Running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
-      scope?: "all" | "label-trigger",
+      scope?: RevokeScope,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
     /**
      * Records a matching Event and claims its Run, or queues it behind the Item's running Attempt.
@@ -490,6 +495,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
 
 export {
   Submission,
+  type RevokeScope,
   Claimed,
   Queued,
   Suppressed,

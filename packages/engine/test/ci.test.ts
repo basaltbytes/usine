@@ -452,7 +452,9 @@ it.live.each(["required", "none"] as const)(
           const runId = RunId.make("unstarted-ci-fix");
           yield* store.recordAndClaim(current, runId);
           if (approval === "required") yield* store.parkForApproval(runId);
-          const labelRevoked = yield* store.revoke(current.loop, current.itemKey, "label-trigger");
+          const labelRevoked = yield* store.revoke(current.loop, current.itemKey, {
+            openCiHead: head,
+          });
           assert.deepStrictEqual(labelRevoked, []);
           assert.strictEqual(
             (yield* store.snapshot(runId)).run.state._tag,

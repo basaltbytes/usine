@@ -18,6 +18,9 @@ import { StepName } from "@usine/core/step";
 import { type Brand, Crypto, Effect, Schema } from "effect";
 import { Hex } from "effect/encoding";
 
+/** Revokes every event, or preserves CI fixes for an open PR's observed failing head. */
+export type RevokeScope = "all" | { readonly openCiHead: CommitSha };
+
 /** A matched Event with its Loop, Item, and Run settings. */
 export class Submission extends Schema.Class<
   Submission,

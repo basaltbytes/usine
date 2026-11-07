@@ -6,7 +6,7 @@ import { environmentFor, repositoryContext } from "@usine/config/payload-slices"
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey } from "@usine/core/event";
 import { CommitSha, RepositoryRevision, canonicalRepositoryName } from "@usine/core/repository";
-import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
+import { RunEngine, type RevokeScope, type SubmissionResult } from "@usine/engine/engine";
 import { gitHubItemKey, type ObservedItem } from "./repository-sync.ts";
 import {
   type ExpressionCheckError,
@@ -119,6 +119,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
   const submissions: Array<SubmissionResult> = [];
   // Projections store generic JSON; decode the GitHub PR revision at this boundary.
   let revision = DEFAULT_BRANCH_REVISION;
+  let revokeScope: RevokeScope = "all";
   if (item.source === "pr") {
     const headCommit = yield* Schema.decodeUnknownEffect(CommitSha)(payload.headRefOid).pipe(
       Effect.mapError(() =>
@@ -130,6 +131,18 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
       ),
     );
     revision = RepositoryRevision.make(headCommit);
+    const checks = payload.statusCheckRollup;
+    const checkState = Schema.is(Schema.JsonObject)(checks) ? checks.state : undefined;
+    if (
+      payload.state === "OPEN" &&
+      payload.merged !== true &&
+      (checkState === "FAILURE" ||
+        checkState === "ERROR" ||
+        (checks === null &&
+          (payload.mergeable === "CONFLICTING" || payload.mergeable === "UNKNOWN")))
+    ) {
+      revokeScope = { openCiHead: headCommit };
+    }
   }
   const failures: Array<LoopEvaluationFailure> = [];
   let revokedRuns = 0;
@@ -156,11 +169,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
         agent: agent.name,
         item: item.number,
       });
-      const revoked = yield* runs.revoke(
-        loop.name,
-        item.itemKey,
-        payload.state === "OPEN" && payload.merged !== true ? "label-trigger" : "all",
-      );
+      const revoked = yield* runs.revoke(loop.name, item.itemKey, revokeScope);
       revokedRuns += revoked.length;
       if (revoked.length > 0) {
         yield* Effect.logInfo("Item stopped matching; revoked its unstarted runs", {

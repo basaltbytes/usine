@@ -52,6 +52,7 @@ import {
   CycleBlocked,
   Ignored,
   Queued,
+  type RevokeScope,
   reopeningOf,
   runIdFor,
   Submission,
@@ -1037,7 +1038,7 @@ const makeRunStore = Effect.gen(function* () {
   const revoke = Effect.fn("RunStore.revoke")(function* (
     loop: LoopName,
     itemKey: ItemKey,
-    scope: "all" | "label-trigger" = "all",
+    scope: RevokeScope = "all",
   ) {
     yield* Effect.annotateCurrentSpan({ loop, itemKey, scope });
     return yield* transact((transaction, record) =>
@@ -1312,11 +1313,11 @@ export class RunStore extends Context.Service<
       runId: RunId,
       request: RunAgainRequest,
     ) => Effect.Effect<RunAgainResult, RunStoreError>;
-    /** Records a non-matching sighting and revokes unstarted Runs and queued Events; label-trigger scope preserves CI fixes. */
+    /** Records a non-matching sighting and revokes unstarted Runs and queued Events; open-PR scope preserves only CI fixes for its observed failing head. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
-      scope?: "all" | "label-trigger",
+      scope?: RevokeScope,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /** Revokes the Events in `queued` that are still unclaimed, keeping later arrivals, and returns the number revoked. */
     readonly revokeQueued: (queued: QueuedEvents) => Effect.Effect<number, RunStoreError>;
