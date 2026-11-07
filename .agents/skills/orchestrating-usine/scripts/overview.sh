@@ -68,8 +68,44 @@ if [ -n "$USINE_REPOS" ]; then
   for repo in $USINE_REPOS; do
     author=()
     [ -n "$USINE_APP" ] && author=(--author "$USINE_APP")
-    gh pr list -R "$repo" "${author[@]}" --state open --json number,title,labels,mergeable,isDraft \
-      --jq '.[] | "- \(if .isDraft then "draft " else "" end)#\(.number) \(.title[:60]) [\([.labels[].name] | join(","))] \(.mergeable)"' 2>/dev/null || echo "- gh failed for $repo"
+    # App-authored PRs plus any PR carrying a loop label (fast-lane PRs by the operator). The CI
+    # summary makes a check completion a visible change for wait-change.sh.
+    {
+      gh pr list -R "$repo" "${author[@]}" --state open --json number,title,labels,mergeable,isDraft,statusCheckRollup 2>/dev/null
+      for label in ready-for-review ready-to-merge agent-review-findings; do
+        gh pr list -R "$repo" --label "$label" --state open --json number,title,labels,mergeable,isDraft,statusCheckRollup 2>/dev/null
+      done
+    } | python3 -I -c '
+import json, sys
+seen = {}
+text = sys.stdin.read()
+decoder = json.JSONDecoder()
+pos = 0
+while True:
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    if pos >= len(text):
+        break
+    prs, pos = decoder.raw_decode(text, pos)
+    for pr in prs:
+        seen.setdefault(pr["number"], pr)
+if not seen:
+    print("- none")
+for n in sorted(seen):
+    pr = seen[n]
+    checks = pr.get("statusCheckRollup") or []
+    if any(c.get("status") != "COMPLETED" for c in checks):
+        ci = "ci=pending"
+    elif any((c.get("conclusion") or "") in ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED") for c in checks):
+        ci = "ci=failed"
+    elif checks:
+        ci = "ci=green"
+    else:
+        ci = "ci=none"
+    labels = ",".join(l["name"] for l in pr.get("labels") or [])
+    draft = "draft " if pr.get("isDraft") else ""
+    print("- %s#%s %s [%s] %s %s" % (draft, n, (pr.get("title") or "")[:60], labels, pr.get("mergeable"), ci))
+' || echo "- gh failed for $repo"
   done
   echo
   echo "### Failed default-branch workflows"

@@ -28,6 +28,7 @@ Repeat until the human says stop. Every pass ends with the ledger updated and, w
    | Cycle budget used | Read why the rounds failed. Reset only with a reason you can state; otherwise Decisions. |
    | PR `ready-to-merge` | Follow **Merge**. |
    | PR conflicting, no loop on it | Load `resolving-merge-conflicts`, or relabel so the configured recovery loop takes it. |
+   | PR blocked: the loops can't move it (a second budget exhaustion, a fix round that fails the same way twice, a dependency the factory can't produce) | Dispatch a local Opus 5.5 agent at high effort (`Agent` with `model: opus`, `effort: high`) in its own worktree to finish the PR, with the findings and the CI output in its brief. Review and merge it like any agent PR. |
    | Worker silent, provider unreachable, preflight failed | Check the worker over SSH if `env.sh` has a destination. File an issue; put host-level fixes under Actions. |
    | Upgrade available | Follow **Instance changes**. |
    | Idle slots and an empty Ready lane | Queue the next issues from the order the human gave. Never invent priorities; ask under Decisions. |
@@ -50,7 +51,7 @@ Never merge a release or version-bump PR; publishing belongs to the human. Never
 
 - **Loops and agents** live in the configuration store, not in files. Read the entity, change the text, write it back with the latest revision number: `scripts/config-edit.sh <kind> <name>` does the round trip and refuses on a stale revision. A prompt renders when the run is created, so a waiting run keeps the old prompt: cancel it, remove the trigger label for one poll, re-add it.
 - **Pause before a risky edit**: pause the loop, edit, resume. New loops start paused.
-- **Upgrade**: `GET /api/upgrade` for the state; `POST /api/upgrade` with `{"timing":"idle"}` or `"now"`. Before a release that migrates storage, take a backup with `usine backup` on the host and note the path under Done. After the restart: check the host log for errors, confirm the version with `GET /api/version`, and watch one run finish end to end before the next upgrade.
+- **Upgrade**: `GET /api/upgrade` for the state; `POST /api/upgrade` with `{"timing":"idle"}` or `"now"`. Before a release that migrates storage, take a backup with `usine backup` on the host and note the path under Done. After the restart: check the host log for errors, confirm the version with `GET /api/version`, re-read the admin token into `env.sh` (every `usine up` writes a new one, so the old bearer answers 401), and watch one run finish end to end before the next upgrade.
 - **Host access**: `env.sh` names the SSH destination and instance folder when there is one. `usine` may not be on the SSH `PATH`; use the absolute path `discover.md` found. Root changes, credential changes, and anything the permission classifier refuses go to the human as a ready-made script under Actions.
 
 ## Scripts for the human
