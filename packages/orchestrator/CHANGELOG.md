@@ -1,5 +1,173 @@
 # @usine/orchestrator
 
+## 0.6.0
+
+### Minor Changes
+
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- 153d3ea: Return run and attempt summaries from overview, board, and desk reads to reduce polling response sizes. Read run or task detail for prompts and result messages. Board and stalled-item Run again actions load the saved task on demand.
+- 25728fa: Allow a boolean CEL condition to require approval per run. Save and display the
+  approval decision, require approval when evaluation fails, and validate conditions
+  in the loop editor and configuration API.
+- a1c0d36: Add durable CI waits for developer and fix loops. Agents can end after pushing, freeing their worker slot while usine observes checks on the recorded head. Green applies recorded labels, red starts a budgeted fix loop with failure diagnostics, and silent checks time out into Needs attention. The run page and board link to the waiting PR's checks.
+- d0900a3: Update web screens from server-sent change notices. Add conditional reads, scoped screen queries, optimistic board moves, and paginated, virtualized history.
+- 13bdef9: Guide first-run setup through GitHub App creation, credential recovery, installation, and first-admin sign-in. Save App and OAuth secrets atomically with mode 0600, support existing credential files, and initialize empty instance configuration in the database.
+- 9290433: Define harness metadata in one platform-free catalog. Configuration validates registered harness IDs, workers share credential and login requirements, and operator clients receive labels and resume commands through the capabilities API. Harness IDs are branded strings, and Codex pricing reads the descriptor’s bundled rates. Existing launch, authentication, and version policies are unchanged.
+- 7e5bb5b: Record accepted CI fixes as neutral handoffs with links to the continuing run. Keep source runs out of failure statistics and Needs attention when a fix run continues the work. Task lists and board cards show the fix run's status. Unavailable fix loops, refused events, exhausted budgets, and CI timeouts still require attention.
+  
+  Preserve pending completion actions across CI fix runs and apply them with the final successful head’s actions.
+- 4f87593: Add project roles and revisioned role bindings, enforce API permissions, and filter project data by access. Add token permission ceilings and controls for bindings and token scopes. Attribute local API writes and configuration CLI revisions to local admin. Existing members retain instance admin access through a one-time migration.
+  
+  Authorize run actions and cycle-budget resets against the repository’s current project, including after a repository moves. Refresh the configuration revision after writes and stale-revision failures so later writes use the current revision.
+- 8cef39b: Apply SSH and Cloudflare connection changes without restarting. New attempts use the updated connection; open and retained attempts keep their original machine, container settings, gateway, and client through recovery and restart. Cancel provisioning retries when an SSH worker switches to a fixed destination. Persist per-attempt connection metadata using credential references in the Node orchestrator.
+- 7c58461: Add opt-in machine reuse for Boat and Hetzner SSH workers with `provisioner.reuse: { attempts: 5, max_age: 2h }`. Reuse requires Docker, successful cleanup, gateway attachment revocation, and preflight before each assignment. Machines retire at the attempt or age limit and when their worker connection is removed.
+  
+  Show machine assignment counts and age on the overview and worker page, and persist daily machine-start counts for statistics.
+- 69ba086: Collect typed JSON step outputs from attempt checkouts, preserve them across restarts, and store gzip bodies separately from run results. Run evidence includes output refs. Output collection enforces file-size, count, envelope, and pinned-commit limits, and excludes `.usine/` from commits and salvage.
+- 81330c9: Show whole pull request and recorded attempt changes on task pages with collapsed file diffs, change counts, and CI and review state. Add a project-scoped files API and commit-based caching, with explicit reporting for missing and truncated GitHub patches.
+  
+  Keep recorded attempt changes available after failed or canceled CI waits, including when a later retry succeeds.
+  
+  Backfill older comparisons only when their producing attempt is identifiable, and let each attempt's completion replace an existing backfilled result.
+  
+  Classify generated files by path to avoid marking hand-written files whose patches mention generated-file markers.
+- 50ab3dd: Run preflight on an idle worker from Configuration > Workers or `POST /api/workers/:worker/preflight`. Checks refresh the worker's stored results, scheduling availability, and Needs attention without a restart. Busy workers return a typed refusal.
+
+### Patch Changes
+
+- 6a1cf79: Run SSH attempt containers with memory-backed `/dev/shm` and `/tmp` storage. Configure their capacities per worker with `container.shm_size_mib` and `container.tmpfs_size_mib`; each defaults to 2048 MiB and is capped at the container memory limit.
+- d0900a3: Keep runs on paginated cards out of Runs without a card. Refresh run details after configuration changes so agent definition warnings stay current.
+- 7e39460: Retry transient GitHub polling responses, including CI check and log reads, up to twice with jittered backoff and warning logs. Report GitHub request failures in Needs attention after three consecutive failed repository poll cycles, including deferred snapshots and CI observations for repositories removed from configuration, and clear them after a successful cycle. Preserve failure counts and existing alerts while open-issue checks or label requests are rate-limited. Retry warnings include the operation and error tag, with the response status for HTTP failures.
+- 01467e3: Reduce overview responses with compact board run summaries and a bounded recent run list. Preserve all board cards, task totals, and Needs attention entries. Load complete board run history when its menu opens.
+  
+  Read polling metadata without prompts, results, or comments. Select current board runs with SQL windows and aggregate historical counts, timing, and loop states in storage.
+- 8c079aa: Route coordinator model requests through the instance's first configured gateway with a caller token. The orchestrator host needs no provider login when a gateway is configured. Check coordinator gateway credentials at startup and keep usage in the API-key or ChatGPT plan pool. Expose the gateway model route for orchestrator-hosted runtimes.
+- 8d28709: Expose operations without arguments as Effect values in engine, GitHub App, and attachment services. Run them with `yield* service.operation`. Backup operations require `FileSystem` and `Path` from the application's platform layer.
+  
+  Use schema-backed errors and schema predicates, preserve typed failures during selective recovery, and compose services in their owning scopes. Sandbox errors expose `sandbox` in TypeScript while preserving the JSON `name` field.
+- e007d09: Use explicit finite number schemas for numeric fields and update the operator API schema. Apply Effect's safe rewrites for schema construction, decoding, and layer composition.
+- dba9075: Support gateway credentials over Tailscale on long-lived SSH workers. Set `tailnet.gateway_address` with a gateway; preflight configures gateway access through passwordless sudo, and attempts use direct internet egress.
+- 236290b: Report attempt image presence, image inspection and pull durations, and container startup timings on SSH workers. Warn when a provisioned machine's snapshot lacks the image. Show Preparing the attempt image while the machine runs preflight and prepares its shared caches.
+- 12c3921: Check harness capabilities by role, credential route, and placement with one admission policy. Configuration and preflight refusals identify the missing requirement and adapter reason. Validate parent models, efforts, and credentials before accepting configuration imports, reloads, or saved edits. At startup, quarantine agents with refused parent brains and their loops in Needs attention while keeping the server available. Restore them after a corrected reload.
+- 548e6b7: Register harness preflight and launch through `Harnesses` on `@usine/agents/harness/node`. Registration rejects incomplete descriptor/runtime pairs and duplicate IDs. Gateway, injected-key, and Cloudflare preflight use the registered runtime with their credential route. Refusal messages name the harness and its installation location, mention a login only for host-login probes, and retain sandbox-image guidance for Cloudflare. Successful binary probes log the installed version.
+  
+  Replace the three harness-specific backend tags with `ChildBackend`, and rename the single-harness layers to `claudeChildLayer`, `codexChildLayer`, and `piChildLayer`. Replace `ClaudeLoginLock` and `claudeLoginLockLayer` with `HostLoginLock` and `hostLoginLockLayer`; `withLock` takes the harness ID before the worker and machine. Share one lock layer between the executor and attempt runtime.
+  
+  `preflight` accepts a `ProbeTarget` and requires the injected `Harnesses` service. Build the registry once with the process spawner and shared `HostLoginLock`, then provide it to the executors and durable attempt runtime. Registration errors remain typed until the server reports a startup failure. It returns capability gaps as readiness reports and fails on transport errors or timeouts. Custom `HarnessProbe` wrappers forward the worker and machine context in their second argument.
+- 82b55aa: Show a dismissed cycle-budget entry again when a later event is blocked on the same item, and display the most recently blocked loop. Preserve dismissals during repeated polling of the same blocked events and keep the ask's reset identity unchanged.
+  
+  Add `CycleBudgetBlock`, `CycleBudgetAsk.blocks`, `recordBlock`, and `blockedLoop` to record the latest refused event per loop. Older asks decode with an empty block list.
+- d0900a3: Restore moves from paginated board lanes and automatic access after a role binding grant. Refresh task details when labels or merge conflicts change on any linked item.
+- 1f12974: Apply webhook mode and URL changes and add Cloudflare workers without restarting the orchestrator. New Cloudflare workers resolve credentials and register a client before preflight; existing clients remain unchanged. A refused addition of a never-accepted worker releases its client, so a corrected revision can add the worker; an accepted worker keeps its client. Document why tracing and existing worker connection fields require a restart.
+- 0abd5fa: Include the failed GitHub operation and up to 500 characters of decode detail in poll failure logs and Needs attention.
+- f0f018d: Keep polling a repository when GitHub returns a server error for one item's snapshot: log a warning, commit the other items and the poll cursor, and fetch that item again in the next poll. A cycle budget reset now fetches only its item instead of polling the whole repository from scratch.
+- 77ede43: Read harness credential environment variables and configuration files from descriptors, and manage SSH attempt homes per harness.
+  
+  Gateway credential slots and URL prefixes use `anthropic-messages` and `openai-responses`. Upgrade the gateway first, then the orchestrator, replacing `anthropic` and `openai` in `gateway.llm_providers`. For one release, the gateway accepts the previous URL prefixes as deprecated aliases so running attempts can finish. Preflight normalizes previous provider IDs and requires a gateway with credential reporting. Provisioner API-key names, Cloudflare provider records, and gateway credential environment-variable names stay the same.
+- 1d5414f: Route a pull request with merge conflicts and no checks to the configured CI fix loop. The fix task includes conflict resolution instructions and inherits pending completion actions. Unknown mergeability keeps the CI wait pending.
+- a7bd195: Add an exact browser origin allowlist with credentialed CORS and security headers on all server responses. Configure additional origins in `auth.origins` and restart; loopback browser origins now require an explicit entry unless they are the canonical server origin. Document public HTTPS deployment with Caddy, Cloudflare Tunnel, and Tailscale Serve.
+- 45bb9cb: Keep worker slots free while an idle upgrade defers new attempts. Show the requested version on deferred runs and worker rows, and report prolonged waits in Needs attention. Cancel a pending upgrade from Settings or with `DELETE /api/upgrade` to resume attempts without restarting.
+- d950835: Add a public `/api/ready` endpoint that returns HTTP 503 during startup recovery and HTTP 200 afterwards. Managed upgrades require both the expected version and readiness before recording success, so a startup failure restores the previous package and both databases. Rollback supports releases that predate the readiness endpoint.
+- d0900a3: Refresh open run views during machine preparation and quota backoff for project readers. Machine creation takes the run’s ID and loop so its notices use the project scope. Keep idle boards cached when GitHub polls return unchanged items.
+- 1948b10: Record the resolved billing pool on parent and child sessions and preserve parent billing across restarts. API-key sessions record their endpoint's provider name when available. Usage reads the recorded pool, with compatibility for older transcripts.
+- 6e9df5c: Keep dismissed pool usage warnings hidden within the 80%, 90%, 95%, and 100% usage bands while displaying the current percentage. Warnings appear again when usage enters another band or the reset time changes.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- d0900a3: Publish web change notices after committed writes. Idle connections send heartbeats without rebuilding overview, desk, or configuration projections. Filter live notices and bounded replay by project access.
+  
+  Refresh open statistics at UTC midnight as rolling windows advance.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [1ae89b1]
+- Updated dependencies [edc1f40]
+- Updated dependencies [6e60662]
+- Updated dependencies [7e39460]
+- Updated dependencies [df0bd8f]
+- Updated dependencies [09417f7]
+- Updated dependencies [b7ff637]
+- Updated dependencies [853527d]
+- Updated dependencies [10822d3]
+- Updated dependencies [1674238]
+- Updated dependencies [92f21ce]
+- Updated dependencies [01467e3]
+- Updated dependencies [25728fa]
+- Updated dependencies [8c079aa]
+- Updated dependencies [389f35e]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [8d28709]
+- Updated dependencies [e007d09]
+- Updated dependencies [c396562]
+- Updated dependencies [10154eb]
+- Updated dependencies [dba9075]
+- Updated dependencies [236290b]
+- Updated dependencies [5d1254b]
+- Updated dependencies [13bdef9]
+- Updated dependencies [dbf14bb]
+- Updated dependencies [9290433]
+- Updated dependencies [12c3921]
+- Updated dependencies [548e6b7]
+- Updated dependencies [1c981c9]
+- Updated dependencies [2482038]
+- Updated dependencies [82b55aa]
+- Updated dependencies [1f12974]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [02860bd]
+- Updated dependencies [35f68ef]
+- Updated dependencies [9132a5b]
+- Updated dependencies [d740598]
+- Updated dependencies [fc15261]
+- Updated dependencies [3229601]
+- Updated dependencies [f0f018d]
+- Updated dependencies [81330c9]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [973b47b]
+- Updated dependencies [1d5414f]
+- Updated dependencies [89ae7ee]
+- Updated dependencies [a7bd195]
+- Updated dependencies [9476883]
+- Updated dependencies [a1032fd]
+- Updated dependencies [d0900a3]
+- Updated dependencies [6e725ad]
+- Updated dependencies [87aeb52]
+- Updated dependencies [45bb9cb]
+- Updated dependencies [b6a858e]
+- Updated dependencies [10154eb]
+- Updated dependencies [10154eb]
+- Updated dependencies [d0900a3]
+- Updated dependencies [10154eb]
+- Updated dependencies [10154eb]
+- Updated dependencies [ba8c2a5]
+- Updated dependencies [8cef39b]
+- Updated dependencies [4d5036a]
+- Updated dependencies [a2c28c1]
+- Updated dependencies [7c58461]
+- Updated dependencies [03d2f48]
+- Updated dependencies [d0900a3]
+- Updated dependencies [acbf702]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [de42ea4]
+- Updated dependencies [e3cddea]
+- Updated dependencies [ef5aa4d]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [fbd379a]
+- Updated dependencies [fc18d3f]
+- Updated dependencies [765be2e]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+  - @usine/config@0.6.0
+  - @usine/executor@0.6.0
+  - @usine/expression@0.6.0
+  - @usine/engine@0.7.0
+  - @usine/agents@0.7.0
+  - @usine/durable@0.3.0
+  - @usine/github@0.5.0
+
 ## 0.5.0
 
 ### Minor Changes

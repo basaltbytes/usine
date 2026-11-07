@@ -1,5 +1,71 @@
 # @usine/cloudflare
 
+## 0.2.0
+
+### Minor Changes
+
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- 8d28709: Expose operations without arguments as Effect values in engine, GitHub App, and attachment services. Run them with `yield* service.operation`. Backup operations require `FileSystem` and `Path` from the application's platform layer.
+  
+  Use schema-backed errors and schema predicates, preserve typed failures during selective recovery, and compose services in their owning scopes. Sandbox errors expose `sandbox` in TypeScript while preserving the JSON `name` field.
+- 1c981c9: Scope child environments and forwarded credentials to the launched harness. Saved child continuations exclude credential routes and billing metadata, and resolve the current credential kind at every launch. Refuse moved homes and changed Codex model provider IDs before starting another turn.
+  
+  Add harness-owned login variables, continuation mismatch errors, and `HarnessSession.modelProvider`. Coordinator credentials use the shared `CredentialRoute` values through `credentials.route`. Cloudflare's `harnessEnvironment` accepts an `Option<Harness>` to select provider wiring or the base command environment.
+
+### Patch Changes
+
+- 389f35e: Generate worker image packages and tags from harness descriptors. Export `workerImageInputs` from `@usine/agents/harness`, derive the default SSH attempt image from it, and keep both Dockerfiles, Hetzner cloud-init, image publishing, and snapshot creation consistent with the catalog.
+- 77ede43: Read harness credential environment variables and configuration files from descriptors, and manage SSH attempt homes per harness.
+  
+  Gateway credential slots and URL prefixes use `anthropic-messages` and `openai-responses`. Upgrade the gateway first, then the orchestrator, replacing `anthropic` and `openai` in `gateway.llm_providers`. For one release, the gateway accepts the previous URL prefixes as deprecated aliases so running attempts can finish. Preflight normalizes previous provider IDs and requires a gateway with credential reporting. Provisioner API-key names, Cloudflare provider records, and gateway credential environment-variable names stay the same.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [6e60662]
+- Updated dependencies [df0bd8f]
+- Updated dependencies [09417f7]
+- Updated dependencies [b7ff637]
+- Updated dependencies [10822d3]
+- Updated dependencies [1674238]
+- Updated dependencies [92f21ce]
+- Updated dependencies [01467e3]
+- Updated dependencies [8c079aa]
+- Updated dependencies [389f35e]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [8d28709]
+- Updated dependencies [e007d09]
+- Updated dependencies [9290433]
+- Updated dependencies [12c3921]
+- Updated dependencies [548e6b7]
+- Updated dependencies [1c981c9]
+- Updated dependencies [82b55aa]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [35f68ef]
+- Updated dependencies [d740598]
+- Updated dependencies [fc15261]
+- Updated dependencies [3229601]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [89ae7ee]
+- Updated dependencies [9476883]
+- Updated dependencies [b6a858e]
+- Updated dependencies [10154eb]
+- Updated dependencies [10154eb]
+- Updated dependencies [7c58461]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [ef5aa4d]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [fc18d3f]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+  - @usine/agents@0.7.0
+
 ## 0.1.1
 
 ### Patch Changes

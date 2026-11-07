@@ -1,5 +1,90 @@
 # @usine/engine
 
+## 0.7.0
+
+### Minor Changes
+
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- 25728fa: Allow a boolean CEL condition to require approval per run. Save and display the
+  approval decision, require approval when evaluation fails, and validate conditions
+  in the loop editor and configuration API.
+- a1c0d36: Add durable CI waits for developer and fix loops. Agents can end after pushing, freeing their worker slot while usine observes checks on the recorded head. Green applies recorded labels, red starts a budgeted fix loop with failure diagnostics, and silent checks time out into Needs attention. The run page and board link to the waiting PR's checks.
+- 8d28709: Expose operations without arguments as Effect values in engine, GitHub App, and attachment services. Run them with `yield* service.operation`. Backup operations require `FileSystem` and `Path` from the application's platform layer.
+  
+  Use schema-backed errors and schema predicates, preserve typed failures during selective recovery, and compose services in their owning scopes. Sandbox errors expose `sandbox` in TypeScript while preserving the JSON `name` field.
+- 4f87593: Add project roles and revisioned role bindings, enforce API permissions, and filter project data by access. Add token permission ceilings and controls for bindings and token scopes. Attribute local API writes and configuration CLI revisions to local admin. Existing members retain instance admin access through a one-time migration.
+  
+  Authorize run actions and cycle-budget resets against the repository’s current project, including after a repository moves. Refresh the configuration revision after writes and stale-revision failures so later writes use the current revision.
+- acbf702: Compress ended attempts' SQLite transcripts in background segments while preserving transcript reads, pagination, and late messages. Report sealing failures with attempt diagnostics and skip malformed rows until restart. Require the transcript codec explicitly in SQLite compositions. Create compact runtime backups that omit freed database pages and sync them to disk before reporting success.
+- 69ba086: Collect typed JSON step outputs from attempt checkouts, preserve them across restarts, and store gzip bodies separately from run results. Run evidence includes output refs. Output collection enforces file-size, count, envelope, and pinned-commit limits, and excludes `.usine/` from commits and salvage.
+- 81330c9: Show whole pull request and recorded attempt changes on task pages with collapsed file diffs, change counts, and CI and review state. Add a project-scoped files API and commit-based caching, with explicit reporting for missing and truncated GitHub patches.
+  
+  Keep recorded attempt changes available after failed or canceled CI waits, including when a later retry succeeds.
+  
+  Backfill older comparisons only when their producing attempt is identifiable, and let each attempt's completion replace an existing backfilled result.
+  
+  Classify generated files by path to avoid marking hand-written files whose patches mention generated-file markers.
+
+### Patch Changes
+
+- b7ff637: Report Claude Code subscription allowance windows for the Claude plan pool. Five-hour and seven-day utilization reports update pool health and Needs attention warnings, preserving the latest observation of the other window across children and attempts. API-key sessions do not update Claude plan windows.
+- 01467e3: Reduce overview responses with compact board run summaries and a bounded recent run list. Preserve all board cards, task totals, and Needs attention entries. Load complete board run history when its menu opens.
+  
+  Read polling metadata without prompts, results, or comments. Select current board runs with SQL windows and aggregate historical counts, timing, and loop states in storage.
+- e007d09: Use explicit finite number schemas for numeric fields and update the operator API schema. Apply Effect's safe rewrites for schema construction, decoding, and layer composition.
+- 2482038: Speed up run history, board reads, and CI wait reconciliation with runtime store indexes.
+- 82b55aa: Show a dismissed cycle-budget entry again when a later event is blocked on the same item, and display the most recently blocked loop. Preserve dismissals during repeated polling of the same blocked events and keep the ask's reset identity unchanged.
+  
+  Add `CycleBudgetBlock`, `CycleBudgetAsk.blocks`, `recordBlock`, and `blockedLoop` to record the latest refused event per loop. Older asks decode with an empty block list.
+- 7e5bb5b: Record accepted CI fixes as neutral handoffs with links to the continuing run. Keep source runs out of failure statistics and Needs attention when a fix run continues the work. Task lists and board cards show the fix run's status. Unavailable fix loops, refused events, exhausted budgets, and CI timeouts still require attention.
+  
+  Preserve pending completion actions across CI fix runs and apply them with the final successful head’s actions.
+- d740598: Forward parent steers to the single live child and record the receiving child in delivery receipts. Require a separate parent turn when a steer cannot be delivered, including after a restart. Withdraw unread guidance on interruption and keep the parent paused until new guidance or release. Show forwarding, parent delivery, and unread steers in the run transcript.
+- 973b47b: Serve the version endpoint before startup recovery so instances with long attempt histories pass upgrade health checks. Cache SSH checkout listings per connection, avoid connection records for finished attempts without checkouts, and log reconciliation progress at Info.
+- d0900a3: Log routine pool reset scheduling decisions at Debug to keep transcript appends quiet at the default log level. Keep reset deadline notifications at Info.
+- 6e725ad: Centralize SQLite query expressions and add reusable persistence contract tests for adapter implementations. Existing storage behavior and migrations remain unchanged.
+- 87aeb52: Log per-report session usage and pool rate-limit projection updates at Debug to reduce Info log volume.
+- 45bb9cb: Keep worker slots free while an idle upgrade defers new attempts. Show the requested version on deferred runs and worker rows, and report prolonged waits in Needs attention. Cancel a pending upgrade from Settings or with `DELETE /api/upgrade` to resume attempts without restarting.
+- d0900a3: Restore pool reset notifications from persisted reports after restart. Refresh task details and history menus when any linked item changes.
+- de42ea4: Run standalone SQLite reads on a read-only worker connection so long queries permit transcript appends and HTTP responses to continue. Preserve main-connection transactions and reserved operations, and report p99 and maximum event-loop delay every minute while the server runs.
+  
+  Recover from read worker failures by routing later reads to the main connection, restarting the worker with bounded backoff, and reporting its state through `/api/health`.
+  
+  Read run summaries, their attempts, evidence, and board history aggregates in scoped read-only worker snapshots. Preserve consistent lifecycle states during concurrent completion and retries while transcript appends and HTTP responses continue. Roll back interrupted snapshots; use the main connection during worker recovery and within write transactions.
+- e3cddea: Release completed API response bodies retained by SQLite's prepared-statement cache. Preserve SQL trace relationships while preventing cached lookup fibers from retaining request spans.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- d0900a3: Refresh open task details and history when newly linked items change task membership or cycle-budget asks change attention state.
+- fbd379a: Read transcript usage and pool limits from summaries updated atomically on append, and index worker and session-state reads. Backfill existing transcripts during startup without rebuilding the transcript table.
+- d0900a3: Publish web change notices after committed writes. Idle connections send heartbeats without rebuilding overview, desk, or configuration projections. Filter live notices and bounded replay by project access.
+  
+  Refresh open statistics at UTC midnight as rolling windows advance.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [6e60662]
+- Updated dependencies [01467e3]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [e007d09]
+- Updated dependencies [9290433]
+- Updated dependencies [1c981c9]
+- Updated dependencies [82b55aa]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [d740598]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [9476883]
+- Updated dependencies [10154eb]
+- Updated dependencies [7c58461]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes
