@@ -22,6 +22,7 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { PullRequest, StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
@@ -37,11 +38,13 @@ import { CheckFailureEvidence, CheckSnapshot, GitHubChecks } from "@usine/github
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
+  ChangedPullRequest,
   ContentHash,
   GitHubPolling,
   GitHubItemNotFoundError,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryChanges,
   RepositoryNotModified,
   RepositoryLabelCatalog,
 } from "@usine/github/polling";
@@ -205,7 +208,21 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const polling = Layer.succeed(GitHubPolling)({
     baseRefHead: unmovedBaseRefHead,
     changes: (_repository, cursor) =>
-      Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
+      Effect.gen(function* () {
+        if ((yield* Ref.get(itemState)) === "gone")
+          return RepositoryNotModified.make({ cursor, nextPollAt: Option.none() });
+        return RepositoryChanges.make({
+          cursor,
+          items: [
+            ChangedPullRequest.make({
+              number: fixturePayload.number,
+              updatedAt: DateTime.makeUnsafe(fixturePayload.updatedAt),
+            }),
+          ],
+          backlog: false,
+          nextPollAt: Option.none(),
+        });
+      }),
     missingIssues: () => Effect.succeed([]),
     labels: () =>
       Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
@@ -767,7 +784,13 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
             LoopFile.make({
               ...loop,
               maxCycles: CycleLimit.make(1),
-              approval: terminal ? "required" : "none",
+              trigger: PullRequestTrigger.make({
+                on: "pr",
+                if: Source.make(
+                  'item.state == "OPEN" && !item.merged && item.labels.nodes.exists(label, label.name == "agent-review-findings")',
+                ),
+              }),
+              approval: terminal || state === "failure" ? "required" : "none",
             }),
           ],
         });
@@ -787,9 +810,9 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
             receivedAt: yield* DateTime.now,
             payload: {},
           });
-          yield* engine.revoke(loop.name, ask.itemKey, "label-trigger");
+          const polling = yield* PollingTriggers;
+          assert.deepStrictEqual((yield* polling.poll(limited)).failures, []);
           yield* budgets.reset(ask.id, answer);
-          yield* engine.revoke(loop.name, ask.itemKey, "label-trigger");
           const reader = yield* RunReader;
           if (terminal) {
             yield* engine.reconcile;
@@ -816,9 +839,31 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
             );
           }
 
-          const polling = yield* PollingTriggers;
           const cycle = yield* polling.poll(limited);
           assert.deepStrictEqual(cycle.failures, []);
+          if (state === "failure") {
+            const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+            assert(Option.isSome(fixId));
+            const waiting = yield* engine.inspect(fixId.value).pipe(
+              Effect.repeat({
+                until: ({ run }) => run.state._tag === "Waiting" || run.state._tag === "Canceled",
+                schedule: Schedule.spaced("10 millis"),
+              }),
+              Effect.timeout("5 seconds"),
+            );
+            assert.strictEqual(waiting.run.state._tag, "Waiting");
+            assert.deepStrictEqual(waiting.attempts, []);
+            yield* engine.approve(
+              fixId.value,
+              Event.make({
+                id: EventId.make("approve-ci-fix"),
+                dedupKey: DedupKey.make("approve-ci-fix"),
+                receivedAt: yield* DateTime.now,
+                payload: {},
+              }),
+              ApprovalSource.make({ channel: "ui", approver: Option.none() }),
+            );
+          }
           if (state === "paused") {
             assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
             const resets = yield* budgets.pendingResets;
