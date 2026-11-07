@@ -252,19 +252,24 @@ export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect
         }
         return flush();
       }),
+    /**
+     * Marks `message` handled. Returns the bytes that became checkpointed and whether the checkpoint
+     * now covers `message` and all output read before it.
+     */
     handled: (message: Schema.Json) => {
       const key = messageKey(message);
       const index = pending.findIndex((entry) => !entry.handled && entry.key === key);
-      if (index < 0) return 0;
       const entry = pending[index];
-      if (entry !== undefined) entry.handled = true;
+      if (entry === undefined) return { bytes: 0, covered: false };
+      entry.handled = true;
       // Cancellation has no response; the turn result confirms that it was applied.
       if (Schema.is(ControlMessage)(message) && message.type === "result")
         for (let i = 0; i < index; i++) {
           const earlier = pending[i];
           if (earlier?.control === true) earlier.handled = true;
         }
-      return flush();
+      const bytes = flush();
+      return { bytes, covered: !pending.includes(entry) };
     },
   };
 };
