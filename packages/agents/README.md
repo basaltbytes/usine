@@ -57,6 +57,10 @@ Logs record the verified authentication method and pool. On completion or interr
 
 ## Child hosts
 
+The supervisor and lifeline are TypeScript programs in `src/child-host/worker/`. `build`, `check`, and `test` bundle them with esbuild before loading their embedded source. The generated `programs.ts` stays out of git; `programs.d.ts` lets source tools resolve the module before generation. The published package includes the embedded programs and standalone bundles in `dist/child-host/worker/`. Workers need Node.js and their harness binaries.
+
+Run `pnpm --filter @usine/agents test` for the direct worker tests and harness tests. The direct tests run real Node processes against temporary journals and inject a process identity reader that works on Linux and macOS. Production remote owners use Linux `/proc` boot IDs and process start times. The orchestrator relay keeps replay history and output checkpoints in Effect refs and separates connection, replay, streaming, and reattachment.
+
 `ChildRequest.host` (`/child-host`) sets where a child runs, and `ChildRequest.worker` names that machine's worker:
 
 - `LocalProcess`: on this machine, with `ChildRequest.environment` as the whole environment.
@@ -177,6 +181,12 @@ Pi's in-process SDK retains its opt-in live contract:
 ```sh
 USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agents test:integration:pi
 ```
+
+Codex response and notification schemas are generated from the upstream app-server JSON schema. `src/protocol/codex-version.ts` records the release version and immutable upstream commit together; the harness descriptor uses that version as its preflight baseline. `src/protocol/codex.ts` selects the fields the adapter consumes and applies domain constraints. New status and phase strings decode without a protocol error; recognized tool kinds remain a closed set because the adapter maps each kind to a transcript tool.
+
+Generated `Values` tuples preserve known enum members. The adapter uses typed comparisons for turn and tool statuses, message phases, and authentication modes. Removing or renaming a compared value upstream causes `pnpm check` to fail after regeneration, while decoders continue to accept unknown strings.
+
+After updating the upstream pin, run `pnpm --filter @usine/agents codex:generate`, review `src/protocol/codex.generated.ts`, and run the conformance and replay tests. `pnpm --filter @usine/agents codex:check` fetches the pinned schema and compares the generated output without writing it. CI runs this check and rejects manual edits or stale generation. Both generation commands require access to `raw.githubusercontent.com`.
 
 The protocol conformance baseline is 0.164.0. Preflight retains 0.159.0 through 0.159.3 for one release so existing worker images can upgrade, and refuses 0.153.4. Install 0.164.0 for its updated TLS certificate roots. Other CLI builds need verification first.
 

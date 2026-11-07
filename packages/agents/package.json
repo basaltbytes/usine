@@ -76,12 +76,14 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b",
-    "check": "effect-tsgo tsc -p tsconfig.check.json && effect-tsgo tsc -p tsconfig.conformance.json",
-    "test": "vitest run --exclude 'test/integration/**'",
-    "test:integration:claude": "vitest run test/integration/claude.test.ts",
-    "test:integration:codex": "vitest run test/integration/codex.test.ts",
-    "test:integration:pi": "vitest run test/integration/pi.test.ts"
+    "build": "node build-worker.mjs && tsc -b",
+    "check": "node build-worker.mjs && effect-tsgo tsc -p tsconfig.check.json && effect-tsgo tsc -p tsconfig.conformance.json",
+    "test": "node build-worker.mjs && vitest run --exclude 'test/integration/**'",
+    "test:integration:claude": "node build-worker.mjs && vitest run test/integration/claude.test.ts",
+    "test:integration:codex": "node build-worker.mjs && vitest run test/integration/codex.test.ts",
+    "test:integration:pi": "node build-worker.mjs && vitest run test/integration/pi.test.ts",
+    "codex:generate": "node --experimental-strip-types scripts/generate-codex.mjs",
+    "codex:check": "node --experimental-strip-types scripts/generate-codex.mjs --check"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.311",
@@ -101,6 +103,7 @@
     "@pwrdrvr/codex-app-server-protocol": "0.164.0",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
+    "esbuild": "0.28.2",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

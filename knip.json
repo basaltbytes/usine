@@ -16,7 +16,11 @@
       "project": []
     },
     "packages/agents": {
-      "entry": ["protocol-conformance/check.ts"]
+      "entry": [
+        "protocol-conformance/check.ts",
+        "src/child-host/worker/owner.ts",
+        "src/child-host/worker/lifeline.ts"
+      ]
     },
     "packages/cloudflare": {
       "entry": ["src/worker.ts"],

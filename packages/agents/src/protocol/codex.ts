@@ -1,14 +1,50 @@
 import { EndpointName, HarnessSessionId } from "@usine/core/agent/session";
 import { Schema } from "effect";
 import { UsageCount } from "./count.ts";
+import {
+  AccountRateLimitsUpdatedNotification,
+  AccountUpdatedNotification,
+  AgentMessageDeltaNotification,
+  AgentMessageThreadItem,
+  AuthModeValues,
+  ChatgptAccount,
+  CommandExecutionThreadItem,
+  CommandExecutionStatusValues,
+  DynamicToolCallThreadItem,
+  ErrorNotification as GeneratedErrorNotification,
+  FileChangeThreadItem,
+  GetAccountResponse,
+  ImageGenerationThreadItem,
+  ImageViewThreadItem,
+  ItemStartedNotification,
+  LegacyAppPathString,
+  McpToolCallThreadItem,
+  MessagePhaseValues,
+  Model,
+  ModelListResponse as GeneratedModelListResponse,
+  TextUserInput,
+  ThreadResumeResponse as GeneratedThreadResumeResponse,
+  ThreadStartResponse as GeneratedThreadStartResponse,
+  ThreadTokenUsageUpdatedNotification,
+  TurnCompletedNotification,
+  TurnError,
+  TurnStartResponse as GeneratedTurnStartResponse,
+  TurnStatusValues,
+  UserMessageThreadItem,
+  WebSearchThreadItem,
+} from "./codex.generated.ts";
 
-/**
- * The Codex app-server wire types: the request types that usine sends, copied from
- * `@pwrdrvr/codex-app-server-protocol@0.164.0` (codex-cli 0.164.0) because that package resolves
- * only under bundler module resolution, and the decoders for the responses and notifications that
- * usine reads. `protocol-conformance/check.ts` fails `pnpm check` if either drifts from the
- * package; it compiles this module without Node types, so nothing here imports a Node module.
- */
+const matchesKnownValue =
+  <Values extends ReadonlyArray<string>>(_values: Values) =>
+  (value: string | null | undefined, expected: Values[number]) =>
+    value === expected;
+
+export const isTurnStatus = matchesKnownValue(TurnStatusValues);
+export const isToolStatus = matchesKnownValue(CommandExecutionStatusValues);
+export const isMessagePhase = matchesKnownValue(MessagePhaseValues);
+export const isAuthMode = matchesKnownValue(AuthModeValues);
+
+/** Request subsets and response selections for usine's Codex adapter. */
 export interface InitializeParams {
   readonly clientInfo: {
     readonly name: string;
@@ -88,152 +124,138 @@ export const TurnInterruptParams = Schema.Struct({
 });
 export type TurnInterruptParams = typeof TurnInterruptParams.Type;
 
-export const AccountResponse = Schema.Struct({
+export const AccountResponse = GetAccountResponse.mapFields(({ requiresOpenaiAuth }) => ({
+  requiresOpenaiAuth,
   account: Schema.NullOr(
     Schema.Struct({
       type: Schema.String,
-      email: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      email: Schema.optionalKey(ChatgptAccount.fields.email),
     }),
   ),
-  requiresOpenaiAuth: Schema.Boolean,
-});
-export const AccountUpdated = Schema.Struct({ authMode: Schema.NullOr(Schema.String) });
+}));
+export const AccountUpdated = AccountUpdatedNotification.mapFields(({ authMode }) => ({
+  authMode,
+}));
 
-/** The model catalog page, used to validate the requested model and reasoning effort. */
-export const ModelListResponse = Schema.Struct({
+/** The model catalog fields used to validate the model and reasoning effort. */
+export const ModelListResponse = GeneratedModelListResponse.mapFields(({ nextCursor }) => ({
+  nextCursor: Schema.requiredKey(nextCursor),
   data: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      model: Schema.String,
+    Model.mapFields(({ id, model, supportedReasoningEfforts }) => ({
+      id,
+      model,
       supportedReasoningEfforts: Schema.optionalKey(
-        Schema.Array(Schema.Struct({ reasoningEffort: Schema.String })),
+        Schema.Array(
+          supportedReasoningEfforts.value.mapFields(({ reasoningEffort }) => ({ reasoningEffort })),
+        ),
       ),
-    }),
+    })),
   ),
-  nextCursor: Schema.NullOr(Schema.String),
-});
-/** The thread ID and effective model returned when a child thread starts. */
-export const ThreadStartResponse = Schema.Struct({
+}));
+export const ThreadStartResponse = GeneratedThreadStartResponse.mapFields(({ thread }) => ({
   modelProvider: EndpointName,
-  thread: Schema.Struct({ id: HarnessSessionId }),
+  thread: thread.mapFields(() => ({ id: HarnessSessionId })),
   model: Schema.NonEmptyString,
-  instructionSources: Schema.Array(Schema.String),
-});
-/** The turn ID, needed to steer or interrupt the turn. */
-export const TurnStartResponse = Schema.Struct({
-  turn: Schema.Struct({ id: Schema.NonEmptyString }),
-});
-/** An item notification with its thread and turn IDs; `item` is kept as JSON. */
-export const ItemNotification = Schema.Struct({
+  instructionSources: Schema.Array(LegacyAppPathString),
+}));
+export const TurnStartResponse = GeneratedTurnStartResponse.mapFields(({ turn }) => ({
+  turn: turn.mapFields(() => ({ id: Schema.NonEmptyString })),
+}));
+/** Item payloads are decoded separately so unrecognized item kinds can be ignored. */
+export const ItemNotification = ItemStartedNotification.mapFields(({ threadId, turnId }) => ({
   item: Schema.Json,
-  threadId: Schema.String,
-  turnId: Schema.String,
-});
-/** A user message recorded in the thread: a turn's input, or steered input once the running turn reads it. */
-export const UserMessageItem = Schema.Struct({
+  threadId,
+  turnId,
+}));
+export const UserMessageItem = UserMessageThreadItem.mapFields(({ type }) => ({
   id: Schema.NonEmptyString,
-  type: Schema.Literal("userMessage"),
+  type,
   content: Schema.Array(Schema.Json),
-});
-/** The text part of a user message. */
-export const UserTextInput = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
-/** A completed assistant message; `phase` distinguishes a final answer from commentary. */
-export const AgentMessageItem = Schema.Struct({
-  type: Schema.Literal("agentMessage"),
+}));
+export const UserTextInput = TextUserInput.mapFields(({ type, text }) => ({ type, text }));
+export const AgentMessageItem = AgentMessageThreadItem.mapFields(({ type, text, phase }) => ({
+  type,
   id: Schema.NonEmptyString,
-  text: Schema.String,
-  phase: Schema.optionalKey(Schema.NullOr(Schema.String)),
-});
-/** A recognized tool item, with the fields needed to match starts and results. */
+  text,
+  phase,
+}));
+/** Tool kinds are closed because toolName branches on each recognized kind. */
 export const ToolItem = Schema.Struct({
-  type: Schema.Literals([
-    "commandExecution",
-    "fileChange",
-    "mcpToolCall",
-    "dynamicToolCall",
-    "webSearch",
-    "imageView",
-    "imageGeneration",
-  ] as const),
+  type: Schema.Union([
+    CommandExecutionThreadItem.fields.type,
+    FileChangeThreadItem.fields.type,
+    McpToolCallThreadItem.fields.type,
+    DynamicToolCallThreadItem.fields.type,
+    WebSearchThreadItem.fields.type,
+    ImageViewThreadItem.fields.type,
+    ImageGenerationThreadItem.members[0].fields.type,
+  ]),
   id: Schema.NonEmptyString,
-  status: Schema.optionalKey(Schema.String),
-  success: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  status: Schema.optionalKey(CommandExecutionThreadItem.fields.status),
+  success: Schema.optionalKey(DynamicToolCallThreadItem.fields.success),
 });
-/** Saved turn state needed to reattach an active turn without starting another one. */
-export const ThreadResumeResponse = Schema.Struct({
+export const ThreadResumeResponse = GeneratedThreadResumeResponse.mapFields(({ thread }) => ({
   modelProvider: EndpointName,
-  thread: Schema.Struct({
+  thread: thread.mapFields(({ turns }) => ({
     id: HarnessSessionId,
     turns: Schema.Array(
-      Schema.Struct({
+      turns.value.mapFields(({ status }) => ({
         id: Schema.NonEmptyString,
-        status: Schema.Literals(["completed", "interrupted", "failed", "inProgress"] as const),
+        status,
         items: Schema.Array(
           Schema.Union([ToolItem, AgentMessageItem, Schema.Struct({ type: Schema.String })]),
         ),
-      }),
+      })),
     ),
-  }),
-});
-/** The outcome of a turn, used to resume a conversation on Hold or report a session failure. */
-export const TurnCompleted = Schema.Struct({
-  turn: Schema.Struct({
-    id: Schema.String,
-    status: Schema.Literals(["completed", "interrupted", "failed", "inProgress"] as const),
+  })),
+}));
+export const TurnCompleted = TurnCompletedNotification.mapFields(({ turn }) => ({
+  turn: turn.mapFields(({ id, status }) => ({
+    id,
+    status,
     error: Schema.NullOr(
-      Schema.Struct({
-        message: Schema.String,
-        additionalDetails: Schema.NullOr(Schema.String),
+      TurnError.mapFields(({ message, additionalDetails }) => ({
+        message,
+        additionalDetails,
+        // Error objects can gain new variants; turnFailure classifies only known capacity errors.
         codexErrorInfo: Schema.optionalKey(
           Schema.NullOr(
             Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Unknown)]),
           ),
         ),
-      }),
+      })),
     ),
+  })),
+}));
+export const ErrorNotification = GeneratedErrorNotification.mapFields(
+  ({ error, willRetry, turnId }) => ({
+    error: error.mapFields(({ message, additionalDetails }) => ({ message, additionalDetails })),
+    willRetry,
+    turnId,
   }),
-});
-/** A turn error from the app server; if `willRetry` is set, the model provider request is retried, for example `Reconnecting... 2/5`. */
-export const ErrorNotification = Schema.Struct({
-  error: Schema.Struct({
-    message: Schema.String,
-    additionalDetails: Schema.optionalKey(Schema.NullOr(Schema.String)),
+);
+export const TurnActivity = AgentMessageDeltaNotification.mapFields(({ turnId }) => ({ turnId }));
+export { RateLimitWindow } from "./codex.generated.ts";
+export const RateLimitsUpdated = AccountRateLimitsUpdatedNotification.mapFields(
+  ({ rateLimits }) => ({
+    rateLimits: rateLimits.mapFields(({ limitId, limitName, primary, secondary }) => ({
+      limitId,
+      limitName,
+      primary,
+      secondary,
+    })),
   }),
-  willRetry: Schema.Boolean,
-  turnId: Schema.String,
-});
-/** Any notification for one turn, for example an item or a streaming delta. */
-export const TurnActivity = Schema.Struct({ turnId: Schema.String });
-
-// Upstream sends partial updates where any field can be absent, so only `usedPercent` is required.
-export const RateLimitWindow = Schema.Struct({
-  usedPercent: Schema.Finite,
-  windowDurationMins: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
-  resetsAt: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
-});
-/** A partial account usage update; omitted windows are also absent in the normalized snapshot. */
-export const RateLimitsUpdated = Schema.Struct({
-  rateLimits: Schema.Struct({
-    limitId: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    limitName: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    primary: Schema.optionalKey(Schema.NullOr(RateLimitWindow)),
-    secondary: Schema.optionalKey(Schema.NullOr(RateLimitWindow)),
-  }),
-});
-
-/**
- * The Codex thread token usage, cumulative across turns; `inputTokens` includes cache reads and
- * cache writes.
- */
-export const CodexTokenUsage = Schema.Struct({
+);
+/** Cumulative usage includes cache reads and writes in inputTokens. */
+export const CodexTokenUsage = ThreadTokenUsageUpdatedNotification.mapFields(({ tokenUsage }) => ({
   threadId: Schema.NonEmptyString,
-  tokenUsage: Schema.Struct({
-    total: Schema.Struct({
+  tokenUsage: tokenUsage.mapFields(({ total }) => ({
+    total: total.mapFields(() => ({
       inputTokens: UsageCount,
       cachedInputTokens: UsageCount,
       cacheWriteInputTokens: UsageCount,
       outputTokens: UsageCount,
-    }),
-  }),
-});
+    })),
+  })),
+}));
 export type CodexTokenUsage = typeof CodexTokenUsage.Type;
