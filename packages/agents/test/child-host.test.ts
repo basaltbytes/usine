@@ -321,12 +321,13 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
             const runtime = join(cwd, "runtime");
             const commands = join(cwd, "commands");
             const seen = join(cwd, "seen");
+            const stderr = join(cwd, "stderr");
             const shellPath = yield* Config.String("PATH");
             const token = "gateway-credential-1024";
             const value = "it's $HOME\nλ";
             writeFileSync(
               shim,
-              '#!/bin/sh\nprintf "%s\\n" "$3" >> "' + commands + '"\nexec sh -c "$3"\n',
+              `#!/bin/sh\nprintf "%s\\n" "$3" >> "${commands}"\nexec sh -c "$3" 2>> "${stderr}"\n`,
               { mode: 0o755 },
             );
             writeFileSync(runtime, '#!/bin/sh\nshift 3\nexec "$@"\n', { mode: 0o755 });
@@ -363,6 +364,7 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
             assert.notInclude(lines, value);
             assert.include(lines, "'stop'");
             assert.include(lines, "'remove'");
+            assert.notInclude(readFileSync(stderr, "utf8"), token);
             assert.isFalse(
               existsSync(childPidFile(cwd, AgentSessionId.make("attempt:child:1")) + ".transport"),
             );
@@ -371,6 +373,81 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
       15_000,
     );
   }
+
+  it.live(
+    "resumes output at the first unhandled byte of a partly handled stdout frame",
+    () =>
+      Effect.gen(function* () {
+        const cwd = mkdtempSync(join(tmpdir(), "usine-owner-partial-"));
+        const shim = join(cwd, "ssh");
+        writeFileSync(shim, '#!/bin/sh\nexec sh -c "$3"\n', { mode: 0o755 });
+        const target = {
+          host: RemoteShell.make({
+            ssh: { command: shim, args: [] },
+            sshEnvironment: { PATH: yield* Config.String("PATH") },
+            destination: "worker",
+          }),
+          cwd,
+          environment: {},
+          sessionId: Option.some(AgentSessionId.make("attempt:child:1")),
+        };
+        const harness = {
+          command: process.execPath,
+          args: [
+            "-e",
+            'process.stdout.write("one\\ntwo\\nthree\\n");process.stdin.on("data", () => process.stdout.write("four\\nfive\\n"))',
+          ],
+          cwd,
+        };
+        const connect = Effect.fnUntraced(function* (
+          transport: "resume" | undefined,
+          input: Stream.Stream<Uint8Array>,
+        ) {
+          const stopping = yield* Ref.make(false);
+          const scope = yield* Scope.make();
+          const received: Array<string> = [];
+          const owner = yield* Effect.gen(function* () {
+            const owner = yield* startChildProcess(target, harness, input, transport, "handled");
+            yield* owner.stdout.pipe(
+              Stream.runForEach((bytes) =>
+                Effect.sync(() => received.push(Buffer.from(bytes).toString())),
+              ),
+              Effect.forkScoped,
+            );
+            return owner;
+          }).pipe(
+            Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+            Scope.provide(scope),
+          );
+          return {
+            owner,
+            received,
+            detach: Ref.set(stopping, true).pipe(Effect.andThen(Scope.close(scope, Exit.void))),
+            stop: Scope.close(scope, Exit.void),
+          };
+        });
+        const first = yield* connect(undefined, Stream.never);
+        yield* eventually(() => first.received.length > 0);
+        assert.deepStrictEqual(first.received, ["one\ntwo\nthree\n"]);
+        yield* first.owner.acknowledgeOutput("one\n".length);
+        yield* first.detach;
+        const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+        const second = yield* connect("resume", Stream.fromQueue(input));
+        yield* eventually(() => second.received.length > 0);
+        assert.deepStrictEqual(second.received, ["two\nthree\n"]);
+        yield* Queue.offer(input, Buffer.from("more"));
+        yield* eventually(() => second.received.length > 1);
+        assert.deepStrictEqual(second.received, ["two\nthree\n", "four\nfive\n"]);
+        yield* second.owner.acknowledgeOutput("two\nthree\n".length);
+        yield* second.owner.acknowledgeOutput("four\n".length);
+        yield* second.detach;
+        const third = yield* connect("resume", Stream.never);
+        yield* eventually(() => third.received.length > 0);
+        assert.deepStrictEqual(third.received, ["five\n"]);
+        yield* third.stop;
+      }).pipe(Effect.provide(NodeServices.layer)),
+    20_000,
+  );
 
   it.live(
     "retains the process across SSH login changes and replaces it when exported variables change",
@@ -677,6 +754,76 @@ const decodeOwnerInput = Schema.decodeUnknownEffect(
   ),
 );
 
+type OwnerFrame = (value: Schema.Json) => Effect.Effect<boolean>;
+
+/** An owner relay that writes `initial`, passes each input frame to `onInput`, and confirms checkpoints. */
+const scriptedOwner = (
+  initial: ReadonlyArray<Schema.Json>,
+  onInput: (sequence: number, frame: OwnerFrame) => Effect.Effect<unknown>,
+) =>
+  Effect.gen(function* () {
+    const ownerOutput = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+    const frame: OwnerFrame = (value) =>
+      Queue.offer(ownerOutput, Buffer.from(`${encodeOwnerFrame(value)}\n`));
+    const saved = yield* Deferred.make<{ readonly offset: number; readonly skip: number }>();
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.gen(function* () {
+        assert(command._tag === "StandardCommand");
+        const stdin = command.options.stdin;
+        assert(Predicate.hasProperty(stdin, "stream") && Stream.isStream(stdin.stream));
+        for (const value of initial) yield* frame(value);
+        yield* stdin.stream.pipe(
+          Stream.decodeText(),
+          Stream.splitLines,
+          Stream.drop(1),
+          Stream.mapEffect((text) => decodeOwnerInput(text)),
+          Stream.runForEach((input) =>
+            Effect.gen(function* () {
+              if (input.data !== undefined && input.sequence !== undefined)
+                yield* onInput(input.sequence, frame);
+              if (
+                input.checkpoint === true &&
+                input.offset !== undefined &&
+                input.skip !== undefined
+              ) {
+                yield* Deferred.succeed(saved, { offset: input.offset, skip: input.skip });
+                yield* frame({ offset: 40, checkpoint: true });
+              }
+            }),
+          ),
+          Effect.orDie,
+          Effect.forkScoped,
+        );
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(4242),
+          exitCode: Effect.never,
+          isRunning: Effect.succeed(true),
+          kill: () => Effect.void,
+          stdin: Sink.drain,
+          stdout: Stream.fromQueue(ownerOutput),
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void),
+        });
+      }),
+    );
+    return { spawner, saved };
+  });
+
+const scriptedTarget = {
+  host: RemoteShell.make({
+    ssh: { command: "ssh", args: [] },
+    sshEnvironment: {},
+    destination: "worker",
+  }),
+  cwd: "/worktree",
+  environment: {},
+  sessionId: Option.some(AgentSessionId.make("attempt:child:1")),
+};
+const scriptedCommand = { command: "claude", args: [], cwd: "/worktree" };
+
 it.live(
   "checkpoints output that input acknowledged while detaching releases",
   () =>
@@ -694,58 +841,18 @@ it.live(
         type: "control_response",
         response: { request_id: "hook", subtype: "success" },
       });
-      const ownerOutput = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const frame = (value: Schema.Json) =>
-        Queue.offer(ownerOutput, Buffer.from(`${encodeOwnerFrame(value)}\n`));
       const responseSent = yield* Deferred.make<void>();
-      const saved = yield* Deferred.make<{ readonly offset: number; readonly skip: number }>();
       // An owner whose acknowledgement of the hook response arrives after the detach starts.
-      const spawner = ChildProcessSpawner.make((command) =>
-        Effect.gen(function* () {
-          assert(command._tag === "StandardCommand");
-          const stdin = command.options.stdin;
-          assert(Predicate.hasProperty(stdin, "stream") && Stream.isStream(stdin.stream));
-          yield* frame({ offset: 10, ready: true, sequence: 0, retained: false });
-          yield* frame({ offset: 20, stdout: hook.toString("base64") });
-          yield* stdin.stream.pipe(
-            Stream.decodeText(),
-            Stream.splitLines,
-            Stream.drop(1),
-            Stream.mapEffect((text) => decodeOwnerInput(text)),
-            Stream.runForEach((input) =>
-              Effect.gen(function* () {
-                if (input.data !== undefined && input.sequence !== undefined) {
-                  yield* Deferred.succeed(responseSent, undefined);
-                  yield* Effect.sleep("300 millis");
-                  yield* frame({ offset: 30, ack: input.sequence });
-                }
-                if (
-                  input.checkpoint === true &&
-                  input.offset !== undefined &&
-                  input.skip !== undefined
-                ) {
-                  yield* Deferred.succeed(saved, { offset: input.offset, skip: input.skip });
-                  yield* frame({ offset: 40, checkpoint: true });
-                }
-              }),
-            ),
-            Effect.orDie,
-            Effect.forkScoped,
-          );
-          return ChildProcessSpawner.makeHandle({
-            pid: ChildProcessSpawner.ProcessId(4242),
-            exitCode: Effect.never,
-            isRunning: Effect.succeed(true),
-            kill: () => Effect.void,
-            stdin: Sink.drain,
-            stdout: Stream.fromQueue(ownerOutput),
-            stderr: Stream.empty,
-            all: Stream.empty,
-            getInputFd: () => Sink.drain,
-            getOutputFd: () => Stream.empty,
-            unref: Effect.succeed(Effect.void),
-          });
-        }),
+      const { spawner, saved } = yield* scriptedOwner(
+        [
+          { offset: 10, ready: true, sequence: 0, retained: false },
+          { offset: 20, stdout: hook.toString("base64") },
+        ],
+        (sequence, frame) =>
+          Deferred.succeed(responseSent, undefined).pipe(
+            Effect.andThen(Effect.sleep("300 millis")),
+            Effect.andThen(frame({ offset: 30, ack: sequence })),
+          ),
       );
       const stopping = yield* Ref.make(false);
       const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
@@ -754,17 +861,8 @@ it.live(
       const scope = yield* Scope.make();
       yield* Effect.gen(function* () {
         const owner = yield* startChildProcess(
-          {
-            host: RemoteShell.make({
-              ssh: { command: "ssh", args: [] },
-              sshEnvironment: {},
-              destination: "worker",
-            }),
-            cwd: "/worktree",
-            environment: {},
-            sessionId: Option.some(AgentSessionId.make("attempt:child:1")),
-          },
-          { command: "claude", args: [], cwd: "/worktree" },
+          scriptedTarget,
+          scriptedCommand,
           Stream.fromQueue(input),
           undefined,
           "handled",
@@ -795,6 +893,115 @@ it.live(
       assert.deepStrictEqual(cursor, { offset: 30, skip: 0 }, "the answered hook is not replayed");
     }),
   10_000,
+);
+
+it.live(
+  "saves the output checkpoint while detaching when the owner never acknowledges input",
+  () =>
+    Effect.gen(function* () {
+      const sent = yield* Deferred.make<void>();
+      const { spawner, saved } = yield* scriptedOwner(
+        [
+          { offset: 10, ready: true, sequence: 0, retained: false },
+          { offset: 20, stdout: Buffer.from("line\n").toString("base64") },
+        ],
+        () => Deferred.succeed(sent, undefined),
+      );
+      const stopping = yield* Ref.make(false);
+      const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+      const scope = yield* Scope.make();
+      const owner = yield* startChildProcess(
+        scriptedTarget,
+        scriptedCommand,
+        Stream.fromQueue(input),
+      ).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+        Scope.provide(scope),
+      );
+      yield* owner.stdout.pipe(Stream.take(1), Stream.runDrain);
+      yield* Queue.offer(input, Buffer.from("unanswered"));
+      yield* Deferred.await(sent);
+      yield* Ref.set(stopping, true);
+      yield* Scope.close(scope, Exit.void);
+      const cursor = yield* Deferred.await(saved).pipe(Effect.timeout("1 second"));
+      assert.deepStrictEqual(cursor, { offset: 20, skip: 0 });
+    }),
+  10_000,
+);
+
+it.live("hands each acknowledged input to its callback once across later acknowledgements", () =>
+  Effect.gen(function* () {
+    const { spawner } = yield* scriptedOwner(
+      [{ offset: 10, ready: true, sequence: 0, retained: false }],
+      (sequence, frame) =>
+        frame({ offset: 10 + sequence, ack: sequence }).pipe(
+          Effect.andThen(
+            sequence === 2
+              ? frame({ offset: 20, stdout: Buffer.from("done").toString("base64") })
+              : Effect.void,
+          ),
+        ),
+    );
+    const stopping = yield* Ref.make(false);
+    const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+    const acknowledged: Array<string> = [];
+    yield* Effect.gen(function* () {
+      const owner = yield* startChildProcess(
+        scriptedTarget,
+        scriptedCommand,
+        Stream.fromQueue(input),
+        undefined,
+        "received",
+        (bytes) =>
+          Effect.sync(() => {
+            acknowledged.push(Buffer.from(bytes).toString());
+            return 0;
+          }),
+      );
+      yield* Queue.offerAll(input, [Buffer.from("first"), Buffer.from("second")]);
+      yield* owner.stdout.pipe(Stream.take(1), Stream.runDrain);
+      assert.deepStrictEqual(acknowledged, ["first", "second"]);
+    }).pipe(
+      Effect.ensuring(Ref.set(stopping, true)),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+      Effect.scoped,
+    );
+  }),
+);
+
+it.live("numbers input after a retained owner's sequence and reports it as the generation", () =>
+  Effect.gen(function* () {
+    const sequences: Array<number> = [];
+    const { spawner } = yield* scriptedOwner(
+      [{ offset: 10, ready: true, sequence: 7, retained: true }],
+      (sequence, frame) =>
+        Effect.sync(() => sequences.push(sequence)).pipe(
+          Effect.andThen(frame({ offset: 20, ack: sequence })),
+          Effect.andThen(frame({ offset: 30, stdout: Buffer.from("done").toString("base64") })),
+        ),
+    );
+    const stopping = yield* Ref.make(false);
+    const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+    yield* Effect.gen(function* () {
+      const owner = yield* startChildProcess(
+        scriptedTarget,
+        scriptedCommand,
+        Stream.fromQueue(input),
+      );
+      const generation = yield* owner.generation;
+      assert.deepStrictEqual(generation, Option.some(7));
+      yield* Queue.offer(input, Buffer.from("next"));
+      yield* owner.stdout.pipe(Stream.take(1), Stream.runDrain);
+      assert.deepStrictEqual(sequences, [8]);
+    }).pipe(
+      Effect.ensuring(Ref.set(stopping, true)),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+      Effect.scoped,
+    );
+  }),
 );
 
 describe("local process lifeline", () => {

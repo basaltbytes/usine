@@ -405,12 +405,17 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
               "Waiting for the owner to acknowledge input before the output checkpoint",
               { ...fields, unacknowledged },
             );
-            // An acknowledged response, such as a hook answer, can advance the checkpoint.
-            yield* SubscriptionRef.changes(history).pipe(
+            const drained = yield* SubscriptionRef.changes(history).pipe(
               Stream.filter((entries) => entries.size === 0),
               Stream.take(1),
               Stream.runDrain,
+              Effect.timeoutOption("4 seconds"),
             );
+            if (Option.isNone(drained))
+              yield* Effect.logWarning(
+                "The owner did not acknowledge input before detaching; saving the output checkpoint without it",
+                { ...fields, unacknowledged: (yield* SubscriptionRef.get(history)).size },
+              );
           }
           const cursor = yield* output.cursor;
           yield* Queue.offer(
