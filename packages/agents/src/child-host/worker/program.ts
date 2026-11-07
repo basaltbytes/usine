@@ -9,7 +9,6 @@ export interface Launch {
   readonly mode: "supervise" | "attach" | "replace" | "resume";
   readonly cursor: number;
   readonly lease: number;
-  readonly environmentKeys: string;
   readonly command: string;
   readonly args: string[];
 }

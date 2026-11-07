@@ -13,8 +13,7 @@ import { type Launch, type WorkerSources } from "./program.ts";
 const main = async (sources: WorkerSources, readIdentity: IdentityReader) => {
   if (readIdentity === processIdentity && !existsSync("/proc/self/stat"))
     throw new Error("The child process owner requires Linux /proc");
-  const [mode, pidFile, cursor, lease, environmentKeys = "[]", command, ...args] =
-    process.argv.slice(1);
+  const [mode, pidFile, cursor, lease, command, ...args] = process.argv.slice(1);
   if (pidFile === undefined) throw new Error("Missing child process PID file");
   const files = ownerFiles(pidFile, readIdentity);
   if (mode === "stop") return files.stopOwner();
@@ -39,7 +38,6 @@ const main = async (sources: WorkerSources, readIdentity: IdentityReader) => {
     mode,
     cursor: Number(cursor),
     lease: Number(lease),
-    environmentKeys,
     command,
     args,
   };

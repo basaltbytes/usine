@@ -145,20 +145,10 @@ const start = (
 ) => {
   const child = spawn(
     process.execPath,
-    [
-      "-e",
-      source,
-      mode,
-      pidFile,
-      String(cursor),
-      String(lease),
-      JSON.stringify(Object.keys(environment)),
-      process.execPath,
-      "-e",
-      harness,
-    ],
-    { env: { ...process.env, ...environment } },
+    ["-e", source, mode, pidFile, String(cursor), String(lease), process.execPath, "-e", harness],
+    { env: process.env },
   );
+  child.stdin.write(JSON.stringify(environment) + "\n");
   relays.push(child);
   const frames: Frame[] = [];
   let buffered = "";
@@ -211,6 +201,33 @@ afterEach(() => {
 });
 
 describe("standalone worker owner", () => {
+  it.each(["credential-1024", "[]", '{"INVALID;NAME":"credential-1024"}', '{"TOKEN":42}'])(
+    "rejects an invalid stdin environment before starting a child: %s",
+    (input) => {
+      const { pidFile, root } = temporary();
+      const result = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          program,
+          "attach",
+          pidFile,
+          "0",
+          "30000",
+          process.execPath,
+          "-e",
+          "process.stdin.resume()",
+        ],
+        { input: input + "\n", encoding: "utf8", timeout: 2000 },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Invalid child process environment");
+      expect(result.stderr).not.toContain("credential-1024");
+      expect(existsSync(root)).toBe(false);
+    },
+  );
+
   it("deduplicates input replay across relay replacement and resumes its output checkpoint", async () => {
     const { pidFile, root } = temporary();
     const first = start(pidFile);

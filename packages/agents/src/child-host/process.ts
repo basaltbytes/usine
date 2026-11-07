@@ -76,7 +76,7 @@ export const stopChildProcess = Effect.fn("ChildHost.stopChildProcess")(function
     const result = yield* hostOutput(target.host, {
       command: "node",
       args: ["-e", PROCESS_OWNER, mode, pidFile, "0", String(PROCESS_LEASE_MS)],
-      environment: target.environment,
+      environment: {},
     }).pipe(
       Effect.mapError((cause) => processError(target, "Could not stop the child process", cause)),
     );
@@ -117,9 +117,9 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   const acknowledgeOutput = output.acknowledge;
   const pidFile = childPidFile(target.cwd, target.sessionId.value);
   const fields = { sessionId: target.sessionId.value };
-  const environmentKeys = yield* Schema.encodeEffect(
-    Schema.fromJsonString(Schema.Array(Schema.String)),
-  )(Object.keys(target.environment).sort()).pipe(Effect.orDie);
+  const environment = yield* Schema.encodeEffect(
+    Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
+  )(target.environment).pipe(Effect.orDie);
   yield* Effect.annotateCurrentSpan(fields);
   if (transport === "replace") yield* stopChildProcess(target);
 
@@ -186,27 +186,30 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
             pidFile,
             String(cursor),
             String(PROCESS_LEASE_MS),
-            environmentKeys,
             command.command,
             ...command.args,
           ],
-          environment: target.environment,
+          environment: {},
         },
         {
           detached: false,
           forceKillAfter: "5 seconds",
           stdin: {
-            stream: Stream.merge(
-              frames,
-              Stream.tick("1 second").pipe(
-                Stream.mapEffect(() =>
-                  Deferred.await(relayReady).pipe(Effect.andThen(output.cursor)),
+            stream: Stream.concat(
+              Stream.succeed(environment),
+              Stream.merge(
+                frames,
+                Stream.tick("1 second").pipe(
+                  Stream.mapEffect(() =>
+                    Deferred.await(relayReady).pipe(Effect.andThen(output.cursor)),
+                  ),
+                  Stream.map(
+                    (cursor) =>
+                      `{"heartbeat":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,
+                  ),
                 ),
-                Stream.map(
-                  (cursor) => `{"heartbeat":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,
-                ),
+                { haltStrategy: "left" },
               ),
-              { haltStrategy: "left" },
             ).pipe(Stream.map((line) => encoder.encode(`${line}\n`))),
             endOnDone: false,
           },

@@ -21,17 +21,23 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { createInterface } from "node:readline";
 import { hasCode, type OwnerFiles } from "./files.ts";
 import { ownerProgram, type Launch, type WorkerSources } from "./program.ts";
-import { checkpoint, environmentKeys, inputFrame, outputFrame, relayFrame } from "./protocol.ts";
+import { checkpoint, environment, inputFrame, outputFrame, relayFrame } from "./protocol.ts";
 
 export const relay = async (files: OwnerFiles, launch: Launch, sources: WorkerSources) => {
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const input = lines[Symbol.asyncIterator]();
+  const first = await input.next();
+  if (first.done === true) throw new Error("Missing child process environment");
+  const exported = environment(first.value);
   const environmentHash = createHash("sha256")
     .update(
       JSON.stringify(
-        environmentKeys(launch.environmentKeys)
+        Object.keys(exported)
           .sort()
-          .map((key) => [key, process.env[key]]),
+          .map((key) => [key, exported[key]]),
       ),
     )
     .digest("hex");
@@ -74,11 +80,10 @@ export const relay = async (files: OwnerFiles, launch: Launch, sources: WorkerSo
         files.pidFile,
         "0",
         String(launch.lease),
-        launch.environmentKeys,
         launch.command,
         ...launch.args,
       ],
-      { detached: true, stdio: "ignore", env: process.env },
+      { detached: true, stdio: "ignore", env: { ...process.env, ...exported } },
     );
     supervisor.unref();
   } catch (error) {
@@ -150,22 +155,19 @@ export const relay = async (files: OwnerFiles, launch: Launch, sources: WorkerSo
       process.exitCode = 0;
     }
   }, 25);
-  let incoming: Buffer = Buffer.alloc(0);
-  process.stdin.on("data", (data: Buffer) => {
-    incoming = Buffer.concat([incoming, data]);
-    let end;
-    while ((end = incoming.indexOf(10)) >= 0) {
-      const line = incoming.subarray(0, end + 1);
-      incoming = incoming.subarray(end + 1);
-      const frame = relayFrame(line.toString());
+  try {
+    for await (const line of input) {
+      const frame = relayFrame(line);
       if ("heartbeat" in frame) {
         const now = new Date();
         utimesSync(files.heartbeat, now, now);
         writeFileSync(files.delivered, JSON.stringify({ offset: frame.offset, skip: frame.skip }));
         if (frame.checkpoint)
           process.stdout.write(JSON.stringify({ checkpoint: true, offset: frame.offset }) + "\n");
-      } else appendFileSync(files.input, line);
+      } else appendFileSync(files.input, line + "\n");
     }
-  });
-  process.stdin.on("end", () => process.exit(0));
+  } finally {
+    clearInterval(timer);
+    process.stdin.destroy();
+  }
 };
