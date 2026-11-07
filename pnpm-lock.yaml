@@ -448,6 +448,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.6
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

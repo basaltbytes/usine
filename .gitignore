@@ -21,3 +21,6 @@ coverage/
 # Local environment and agent worktrees
 .env
 .claude/worktrees/
+
+# Embedded Node worker programs are rebuilt from TypeScript.
+packages/agents/src/child-host/programs.ts
