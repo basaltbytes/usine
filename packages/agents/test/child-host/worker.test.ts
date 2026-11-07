@@ -183,6 +183,14 @@ const stdout = (frames: Frame[]) =>
     .join("");
 const exited = (frames: Frame[]) => frames.some((frame) => "exitCode" in frame);
 const ready = (frames: Frame[]) => frames.find((frame) => "ready" in frame);
+const running = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 afterEach(() => {
   for (const child of relays.splice(0)) child.kill("SIGKILL");
@@ -422,6 +430,57 @@ describe("standalone worker owner", () => {
     expect(await closed).toBe(0);
     expect(readFileSync(termFile, "utf8")).toBe("TERM");
     expect(existsSync(pidFile)).toBe(false);
+  }, 15_000);
+
+  it("hashes the environment as owners did before it moved to stdin", async () => {
+    const { pidFile, root } = temporary();
+    const relay = start(pidFile, "attach", 30_000, { USINE_B: "it's $HOME\nλ", USINE_A: "one" });
+    await eventually(() => ready(relay.frames) !== undefined);
+    // sha256 of JSON.stringify([["USINE_A","one"],["USINE_B","it's $HOME\nλ"]]).
+    expect(readFileSync(join(root, "environment"), "utf8")).toBe(
+      "9131a229f023f509c61355d3d8cec112c472ca19c0a3fb81316fbe85fca50466",
+    );
+  });
+
+  it("ignores an unterminated final input line at EOF", async () => {
+    const { pidFile, root } = temporary();
+    const relay = start(pidFile);
+    await eventually(() => ready(relay.frames) !== undefined);
+    const whole = JSON.stringify({ sequence: 1, data: Buffer.from("whole").toString("base64") });
+    const cut = JSON.stringify({ sequence: 2, data: Buffer.from("cut").toString("base64") });
+    relay.child.stdin.end(`${whole}\n${cut.slice(0, -4)}`);
+    expect(await relay.closed, relay.stderr()).toBe(0);
+    expect(relay.stderr()).toBe("");
+    expect(readFileSync(join(root, "input"), "utf8")).toBe(`${whole}\n`);
+  });
+
+  it("does not write input to a harness stopped by lease expiry", async () => {
+    const { pidFile } = temporary();
+    const harness =
+      'process.on("SIGTERM", () => { process.stdout.write("TERM"); setTimeout(() => process.exit(0), 1000) });process.stdin.on("data", data => process.stdout.write(data));process.stdout.write("running")';
+    const relay = start(pidFile, "attach", 500, {}, harness);
+    await eventually(() => stdout(relay.frames) === "runningTERM");
+    relay.send({ sequence: 1, data: Buffer.from("late").toString("base64") });
+    await eventually(() => exited(relay.frames));
+    expect(relay.frames.some((frame) => "ack" in frame && frame.ack === 1)).toBe(true);
+    expect(stdout(relay.frames)).toBe("runningTERM");
+    expect(await relay.closed, relay.stderr()).toBe(0);
+  }, 15_000);
+
+  it("stops the lifeline and exits when the owner cannot identify it", async () => {
+    const { dir, pidFile } = temporary();
+    const marker = join(dir, "harness");
+    start(
+      pidFile,
+      "attach",
+      30_000,
+      { WORKER_TEST_LIFELINE_IDENTITY: "missing" },
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, String(process.pid));setInterval(() => {}, 1000)`,
+    );
+    await eventually(() => existsSync(pidFile));
+    const owner = Number(readFileSync(pidFile, "utf8"));
+    await eventually(() => !running(owner));
+    await eventually(() => !existsSync(marker) || !running(Number(readFileSync(marker, "utf8"))));
   }, 15_000);
 
   it.skipIf(process.platform !== "linux")(
