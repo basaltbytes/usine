@@ -83,6 +83,7 @@ it.effect.each([
             repository: {
               pullRequest: {
                 headRefOid: head,
+                headRef: { target: { oid: head } },
                 mergeable,
                 statusCheckRollup: rollup === null ? null : { state: rollup },
               },
@@ -92,6 +93,33 @@ it.effect.each([
       ),
     ),
   ),
+);
+
+it.effect.each(["SUCCESS", "FAILURE", null])(
+  "waits for a lagging pull request head with old rollup %s before accepting its checks",
+  (rollup) =>
+    Effect.gen(function* () {
+      const snapshot = yield* (yield* GitHubChecks).snapshot(repository, ItemNumber.make(815));
+      assert.strictEqual(snapshot.head, head);
+      assert.strictEqual(snapshot.state, "pending");
+    }).pipe(
+      Effect.provide(
+        withClient(() =>
+          json({
+            data: {
+              repository: {
+                pullRequest: {
+                  headRefOid: "b".repeat(40),
+                  headRef: { target: { oid: head } },
+                  mergeable: "CONFLICTING",
+                  statusCheckRollup: rollup === null ? null : { state: rollup },
+                },
+              },
+            },
+          }),
+        ),
+      ),
+    ),
 );
 
 const failedCheckRun = {

@@ -91,6 +91,8 @@ The SSH adapter selects the runtime from `/etc/usine/container-runtime` (`podman
 
 Podman containers and helpers use `--userns=keep-id`; preflight requires matching host and image UID/GID. Attempts use a private cgroup namespace for OOM accounting and explicit proxy variables. Lifecycle, cancellation, salvage restart, and label-scoped cleanup use the selected runtime. Shared caches belong to that runtime's store. Drain attempts and rebuild the worker or snapshot when changing runtimes. See [Add a worker](https://docs.usine.dev/guides/add-a-worker/#move-a-worker-to-rootless-podman).
 
+All worker adapters pass explicit CI handoffs to harvesting, which verifies the pull request's source branch on origin even when GitHub's pull request head lags behind the pushed branch.
+
 ## Local worker
 
 For each attempt, `@usine/executor/local`:

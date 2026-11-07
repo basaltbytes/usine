@@ -46,7 +46,7 @@ For failed GitHub Actions checks, the fix attempt receives the failed job names 
 
 ## CI outcomes
 
-The handoff must match the harvested pull request and pushed head. The stored policy determines the timeout and fix loop. A plain success from a loop with a CI policy also waits, with no additional label actions. A newer push cancels the old wait. Restarts resume stored CI waits without an agent.
+The handoff must match the pull request number and the checkout's pushed head. usine verifies that the pull request's source branch on origin points at that head, so a delayed pull request API update does not reject a valid push. When the PR head lags behind its branch, CI remains pending until the PR catches up; checks on the older head cannot complete the wait. An unverified handoff records a retryable infrastructure failure. The stored policy determines the timeout and fix loop. A plain success from a loop with a CI policy also waits, with no additional label actions. A newer push cancels the old wait. Restarts resume stored CI waits without an agent.
 
 Missing checks remain pending until the deadline; a timeout appears in **Needs attention**. When the recorded head has no checks and GitHub reports `CONFLICTING`, usine starts the configured fix loop with instructions to merge the base branch, resolve conflicts, run local checks, and push. The fix inherits pending completion actions. Mergeability `UNKNOWN` continues waiting.
 

@@ -33,6 +33,7 @@ const Head = Schema.Struct({
       pullRequest: Schema.NullOr(
         Schema.Struct({
           headRefOid: CommitSha,
+          headRef: Schema.NullOr(Schema.Struct({ target: Schema.Struct({ oid: CommitSha }) })),
           mergeable: Schema.Literals(["MERGEABLE", "CONFLICTING", "UNKNOWN"]),
           statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
         }),
@@ -42,7 +43,7 @@ const Head = Schema.Struct({
 });
 const HEAD_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) { headRefOid mergeable statusCheckRollup { state } }
+    pullRequest(number: $number) { headRefOid headRef { target { oid } } mergeable statusCheckRollup { state } }
   }
 }`;
 const Checks = Schema.Struct({
@@ -189,6 +190,16 @@ export class GitHubChecks extends Context.Service<
               "The pull request awaiting CI is unavailable",
             );
           const state = pr.statusCheckRollup?.state;
+          const branchHead = pr.headRef?.target.oid ?? pr.headRefOid;
+          if (branchHead !== pr.headRefOid) {
+            yield* Effect.logInfo("Pull request head lags its branch; CI remains pending", {
+              repository,
+              item,
+              branchHead,
+              pullRequestHead: pr.headRefOid,
+            });
+            return CheckSnapshot.make({ head: branchHead, state: "pending" });
+          }
           return CheckSnapshot.make({
             head: pr.headRefOid,
             state:

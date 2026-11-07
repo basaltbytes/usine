@@ -178,8 +178,9 @@ export const finishAttempt = (
       return failRunningAttempt(
         current.run.state,
         attempt.value,
-        AgentFailure.make({
+        InfraFailure.make({
           message: "The CI handoff has no harvested pull request for the checkout's pushed head",
+          cause: { pullRequest: request.pullRequest, head: request.head },
         }),
       );
     }
