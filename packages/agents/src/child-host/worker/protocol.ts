@@ -88,9 +88,19 @@ export const relayFrame = (line: string): RelayFrame => {
   return inputFrame(line);
 };
 
-export const environmentKeys = (line: string): string[] => {
-  const value: unknown = JSON.parse(line);
-  if (Array.isArray(value) && value.every((key): key is string => typeof key === "string"))
-    return value;
-  throw new Error("Invalid child process environment keys");
+export const environment = (line: string): Record<string, string> => {
+  let value: object;
+  try {
+    value = record(line);
+  } catch {
+    throw new Error("Invalid child process environment");
+  }
+  if (Array.isArray(value)) throw new Error("Invalid child process environment");
+  return Object.fromEntries(
+    Object.entries(value).map(([key, value]: [string, unknown]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || typeof value !== "string")
+        throw new Error("Invalid child process environment");
+      return [key, value];
+    }),
+  );
 };

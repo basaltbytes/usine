@@ -1,6 +1,8 @@
+import { NodeServices } from "@effect/platform-node";
 import {
   type Cause,
   Clock,
+  Config,
   Deferred,
   Duration,
   Effect,
@@ -251,21 +253,12 @@ const workerRelay = (
     shim,
     sshArguments(worker, {
       command: process.execPath,
-      args: [
-        "-e",
-        PROCESS_OWNER,
-        mode,
-        pidFile,
-        String(cursor),
-        String(lease),
-        encodeOwnerFrame(Object.keys(environment).sort()),
-        command,
-        ...args,
-      ],
-      environment,
+      args: ["-e", PROCESS_OWNER, mode, pidFile, String(cursor), String(lease), command, ...args],
+      environment: {},
     }),
     { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...loginEnvironment } },
   );
+  child.stdin.write(encodeOwnerFrame(environment) + "\n");
   const frames: Array<{
     offset: number;
     stdout?: string;
@@ -301,7 +294,6 @@ it.skipIf(process.platform === "linux")(
           pidFile,
           "0",
           "120000",
-          "[]",
           process.execPath,
           "-e",
           "process.stdin.resume()",
@@ -318,6 +310,68 @@ it.skipIf(process.platform === "linux")(
 );
 
 describe.skipIf(process.platform !== "linux")("worker process owner", () => {
+  for (const contained of [false, true]) {
+    it.live(
+      `keeps credentials out of SSH argv during child launch and stop${contained ? " in a container" : ""}`,
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const cwd = mkdtempSync(join(tmpdir(), "usine-owner-credentials-"));
+            const shim = join(cwd, "ssh");
+            const runtime = join(cwd, "runtime");
+            const commands = join(cwd, "commands");
+            const seen = join(cwd, "seen");
+            const shellPath = yield* Config.String("PATH");
+            const token = "gateway-credential-1024";
+            const value = "it's $HOME\nλ";
+            writeFileSync(
+              shim,
+              '#!/bin/sh\nprintf "%s\\n" "$3" >> "' + commands + '"\nexec sh -c "$3"\n',
+              { mode: 0o755 },
+            );
+            writeFileSync(runtime, '#!/bin/sh\nshift 3\nexec "$@"\n', { mode: 0o755 });
+            let worker = RemoteShell.make({
+              ssh: { command: shim, args: [] },
+              sshEnvironment: { PATH: shellPath },
+              destination: "worker",
+            });
+            if (contained)
+              worker = RemoteShell.make({ ...worker, container: { runtime, name: "attempt" } });
+            const owner = yield* startChildProcess(
+              {
+                host: worker,
+                cwd,
+                environment: { GATEWAY_TOKEN: token, EXPORTED: value },
+                sessionId: Option.some(AgentSessionId.make("attempt:child:1")),
+              },
+              {
+                command: process.execPath,
+                args: [
+                  "-e",
+                  "require('node:fs').writeFileSync('seen', JSON.stringify([process.env.GATEWAY_TOKEN, process.env.EXPORTED]));process.stdin.resume()",
+                ],
+                cwd,
+              },
+              Stream.never,
+            );
+            yield* eventually(() => existsSync(seen));
+            assert.strictEqual(readFileSync(seen, "utf8"), encodeOwnerFrame([token, value]));
+            assert.notInclude(execFileSync("ps", ["-eo", "args"], { encoding: "utf8" }), token);
+            yield* owner.kill();
+            const lines = readFileSync(commands, "utf8");
+            assert.notInclude(lines, token);
+            assert.notInclude(lines, value);
+            assert.include(lines, "'stop'");
+            assert.include(lines, "'remove'");
+            assert.isFalse(
+              existsSync(childPidFile(cwd, AgentSessionId.make("attempt:child:1")) + ".transport"),
+            );
+          }),
+        ).pipe(Effect.provide(NodeServices.layer)),
+      15_000,
+    );
+  }
+
   it.live(
     "retains the process across SSH login changes and replaces it when exported variables change",
     () =>
@@ -656,6 +710,7 @@ it.live(
           yield* stdin.stream.pipe(
             Stream.decodeText(),
             Stream.splitLines,
+            Stream.drop(1),
             Stream.mapEffect((text) => decodeOwnerInput(text)),
             Stream.runForEach((input) =>
               Effect.gen(function* () {

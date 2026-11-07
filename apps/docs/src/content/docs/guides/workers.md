@@ -9,6 +9,8 @@ Workers run the child sessions of attempts. Choose where they run, configure the
 
 On Linux workers, Claude Code and Codex run under a shared process owner. An SSH interruption reconnects to the running child and replays unacknowledged input. The owner deduplicates that input and keeps output in journals beside the checkout. An environment change replaces the retained child after confirming that it stopped.
 
+Child environment values, including gateway caller tokens, travel over SSH stdin. SSH and container command arguments exclude those values during launch, reconnection, and cleanup. The worker stores only a hash of the exported environment for reattachment checks.
+
 Orchestrator heartbeats renew a two-minute lease. When the lease expires, the worker stops the child with TERM, then KILL if it has not exited within five seconds. Boot IDs and process start times prevent stale PID files from identifying an unrelated process after a worker restart. The worker programs ship with usine; workers need Node.js and their harness binaries.
 
 ## Add capacity
