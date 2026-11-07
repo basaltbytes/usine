@@ -1,3 +1,5 @@
+import { jsonKey } from "@usine/core/json-key";
+import { withRunStore } from "./store/support.ts";
 import { assert, it } from "@effect/vitest";
 import {
   CiFailed,
@@ -49,6 +51,42 @@ const pushed = StepResult.make({
 });
 const required = () =>
   Submission.make({ ...submission({ number: 1 }), ciPolicy: Option.some(policy) });
+
+it.live.each(["verified", "unverified"] as const)(
+  "a %s CI handoff either waits or records a retryable infrastructure failure",
+  (verification) =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("lagging-handoff");
+        yield* store.recordAndClaim(required(), runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const result = StepResult.make({
+          message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: 3600, on_green: [] })}`,
+          facts: verification === "verified" ? pushed.facts : [],
+        });
+        const decision = yield* store.finishAttempt(
+          started.execution.attempt,
+          Result.succeed(result),
+        );
+        assert.strictEqual(
+          decision._tag,
+          verification === "verified" ? "RunAwaitingCi" : "RetryAttempt",
+        );
+        if (verification === "verified") {
+          const snapshot = yield* store.snapshot(runId);
+          assert(snapshot.run.state._tag === "AwaitingCi");
+          assert.strictEqual(snapshot.run.state.handoff.head, head);
+          return;
+        }
+        const snapshot = yield* store.snapshot(runId);
+        const outcome = snapshot.attempts[0]?.outcome;
+        assert(outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed");
+        assert.strictEqual(outcome.value.failure._tag, "InfraFailure");
+      }),
+    ),
+);
 
 it.live(
   "a required CI check survives an ordinary success report and restart while releasing its worker slot",

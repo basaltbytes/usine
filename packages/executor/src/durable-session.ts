@@ -9,6 +9,7 @@ import {
   RunawayFailure,
 } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
+import { ciHandoff, type CiHandoff } from "@usine/core/ci";
 import type { GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
 import type { Comment, StepCompletion, StepResultFact } from "@usine/core/step/result";
@@ -75,6 +76,7 @@ export interface DurableCheckout {
    */
   readonly harvest: (
     windows: AttemptWindowsRead<AttemptFailure>,
+    handoff: Option.Option<CiHandoff>,
   ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
   /** Reads validated documents through this checkout's command runner and container. */
   readonly readOutputs: Effect.Effect<ReadonlyArray<StepOutput>, AttemptFailure>;
@@ -383,7 +385,15 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       // Reads the windows after GitHub lists the comments, because a later Attempt of the same Agent
       // can overlap this one and a cancel can close this window first (#429). A failed read fails
       // the Attempt.
-      const facts = yield* checkout.harvest(io.windows);
+      const parsedHandoff = ciHandoff(report.message);
+      if (Result.isFailure(parsedHandoff)) {
+        yield* Effect.logWarning("Invalid CI handoff; collecting facts before engine rejection", {
+          attemptId,
+          message: parsedHandoff.failure.message,
+        });
+      }
+      const handoff = Result.getOrElse(parsedHandoff, () => Option.none());
+      const facts = yield* checkout.harvest(io.windows, handoff);
       const outputs = yield* checkout.readOutputs;
       const harvested = harvestedResult(report, facts, outputs);
       if (Result.isFailure(harvested)) {

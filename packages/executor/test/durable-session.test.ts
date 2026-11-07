@@ -1,9 +1,11 @@
+import { jsonKey } from "@usine/core/json-key";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { LocalProcess } from "@usine/agents/child-host";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RunawayFailure } from "@usine/core/attempt/failure";
+import { PullRequest } from "@usine/core/step/result";
 import { CommitSha } from "@usine/core/repository";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { answer, layer, PARENT_MODEL } from "@usine/durable/testing";
@@ -38,6 +40,45 @@ const checkout: DurableCheckout = {
 };
 
 describe("durable session settlement", () => {
+  it.live("passes the final CI handoff to checkout harvesting", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-handoff-",
+      });
+      const head = CommitSha.make("b".repeat(40));
+      const message = `[usine:awaiting-ci]\n${jsonKey({ pull_request: 71, head, fix_loop: "fix", timeout_seconds: 1800, on_green: [] })}`;
+      yield* Effect.gen(function* () {
+        const session = yield* durableSessionFor({ interruptGrace: "1 second" });
+        const completed = yield* session.launch(workspace, recording().sink, {
+          ...checkout,
+          harvest: (_windows, handoff) =>
+            Effect.succeed(
+              Option.toArray(handoff).map((request) =>
+                PullRequest.make({
+                  number: request.pullRequest,
+                  url: new URL(
+                    `https://github.com/${workspace.spec.repository}/pull/${request.pullRequest}`,
+                  ),
+                  head: Option.some(request.head),
+                }),
+              ),
+            ),
+        });
+        assert.strictEqual(completed.result.message, message);
+        const fact = completed.result.facts[0];
+        assert(fact?._tag === "PullRequest");
+        assert.strictEqual(fact.number, 71);
+        assert.deepStrictEqual(fact.head, Option.some(head));
+      }).pipe(
+        Effect.provide(
+          layer({ database: `${directory}/durable.sqlite`, parent: [answer(message)] }),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   for (const terminal of ["completed", "failed"] as const) {
     it.live(
       `settles a ${terminal} task after its terminal append fails and skips cancellation on later startups`,

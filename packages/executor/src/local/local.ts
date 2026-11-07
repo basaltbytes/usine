@@ -1,3 +1,4 @@
+import type { CiHandoff } from "@usine/core/ci";
 import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
@@ -463,11 +464,13 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       credential: Effect.Success<ReturnType<typeof credentials>>,
       environment: Record<string, string>,
       windows: AttemptWindowsRead<AttemptFailure>,
+      handoff: Option.Option<CiHandoff>,
     ) =>
       harvestFacts(
         workspace.spec,
         harvestCommand("launch", workspace.worktree, credential, environment),
         windows,
+        handoff,
       ).pipe(
         Effect.mapError((error) =>
           InfraFailure.make({
@@ -600,7 +603,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             environment,
             // Local Workers have no Gateway; every harness uses its own login.
             gatewayCredential: Effect.succeedNone,
-            harvest: (windows) => harvest(prepared.workspace, credential, environment, windows),
+            harvest: (windows, handoff) =>
+              harvest(prepared.workspace, credential, environment, windows, handoff),
             readOutputs: readOutputs(
               prepared.workspace.spec,
               checkoutCommand("launch", worktree, credential, environment),

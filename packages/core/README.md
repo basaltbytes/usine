@@ -107,7 +107,7 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 
 ## CI waits
 
-`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts.
+`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The branch must belong to the attempt's repository and point at the checkout's final commit; the pull request API can report an older head.
 
 `HandedOff` is a closed, neutral run state with the failed head, reason, fix loop, and fix run ID. `CiHandedOff` settles a CI wait into this state and ends its attempt as `AttemptHandedOff`.
 

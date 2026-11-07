@@ -1,3 +1,4 @@
+import type { CiHandoff } from "@usine/core/ci";
 import { prepareOutputs, readOutputs } from "../outputs.ts";
 import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
@@ -552,11 +553,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       access: RemoteAccess,
       shell: RemoteShell,
       windows: AttemptWindowsRead<AttemptFailure>,
+      handoff: Option.Option<CiHandoff>,
     ) =>
       harvestFacts(
         workspace.spec,
         harvestCommand("launch", workspace.worktree, access, shell),
         windows,
+        handoff,
       ).pipe(
         Effect.mapError((error) =>
           InfraFailure.make({
@@ -1020,7 +1023,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                   provisioned.gitHooks,
                 ),
                 gatewayCredential,
-                harvest: (windows) => harvest(prepared, access, shell, windows),
+                harvest: (windows, handoff) => harvest(prepared, access, shell, windows, handoff),
                 readOutputs: readOutputs(
                   prepared.spec,
                   checkoutCommand("launch", worktree, access, shell),

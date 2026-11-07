@@ -11,6 +11,9 @@ import {
   harvestFacts,
   harvestPostedComments,
 } from "../src/step/harvest.ts";
+import { CiHandoff } from "../src/ci.ts";
+import { ItemNumber } from "../src/item.ts";
+import { LoopName } from "../src/loop.ts";
 import type { StepResultFact } from "../src/step/result.ts";
 import { BotLogin } from "../src/worker.ts";
 
@@ -74,6 +77,7 @@ const harvest = (
   github: ReadonlyArray<readonly [string, Answer]> = [],
   harvested: HarvestSpec = spec,
   windows: AttemptWindowsRead<CommandFailed> = Effect.succeed(ALONE),
+  handoff: Option.Option<CiHandoff> = Option.none(),
 ) => {
   const commands: Array<string> = [];
   const warnings: Array<string> = [];
@@ -94,6 +98,7 @@ const harvest = (
       return answers.get(line) ?? Effect.die(`unexpected command ${line}`);
     },
     windows,
+    handoff,
   ).pipe(
     Effect.map((facts) => ({ facts, commands, warnings, infos })),
     Effect.provide(
@@ -166,6 +171,50 @@ describe("harvesting an Attempt's facts", () => {
       );
       assert.deepStrictEqual(warnings, []);
     }),
+  );
+
+  it.effect.each([
+    { branchHead: HEAD, repository: "acme/demo", expected: [HEAD] },
+    { branchHead: OTHER, repository: "acme/demo", expected: [] },
+    { branchHead: HEAD, repository: "someone/demo", expected: [] },
+  ])(
+    "verifies a handoff with a stale PR head against $repository at $branchHead",
+    ({ branchHead, repository, expected }) =>
+      Effect.gen(function* () {
+        const { facts, commands, warnings } = yield* harvest(
+          [`${branchHead}\trefs/heads/usine/fix`, `${HEAD}\trefs/heads/unrelated`],
+          Effect.die("An explicit handoff must not depend on the commit-to-PR index"),
+          [
+            [
+              "gh api repos/acme/demo/pulls/71",
+              Effect.succeed([
+                jsonKey({
+                  number: 71,
+                  html_url: "https://github.com/acme/demo/pull/71",
+                  head: { sha: BASE, ref: "usine/fix", repo: { full_name: repository } },
+                }),
+              ]),
+            ],
+          ],
+          spec,
+          Effect.succeed(ALONE),
+          Option.some(
+            CiHandoff.make({
+              pullRequest: ItemNumber.make(71),
+              head: HEAD,
+              fixLoop: LoopName.make("fix"),
+              timeoutSeconds: 1800,
+              onGreen: [],
+            }),
+          ),
+        );
+        assert.deepStrictEqual(
+          facts.flatMap((fact) => (fact._tag === "PullRequest" ? Option.toArray(fact.head) : [])),
+          expected,
+        );
+        assert.notInclude(commands, PULL_REQUESTS);
+        assert.deepStrictEqual(warnings, []);
+      }),
   );
 
   it.effect("finds a pushed final commit by its pull request ref once its branch is gone", () =>

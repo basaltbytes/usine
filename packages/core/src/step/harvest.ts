@@ -2,8 +2,14 @@ import { type Brand, DateTime, Effect, Option, Schema } from "effect";
 import { githubSignature } from "../agent/agent.ts";
 import { type AttemptWindow, AttemptWindows, windowHolds } from "../attempt/attempt.ts";
 import type { RunSpec } from "../attempt/channel.ts";
+import type { CiHandoff } from "../ci.ts";
 import { ItemNumber } from "../item.ts";
-import { CommitSha, RepositoryRevision } from "../repository.ts";
+import {
+  canonicalRepositoryName,
+  CommitSha,
+  RepositoryName,
+  RepositoryRevision,
+} from "../repository.ts";
 import { Comment, type CommentKind, Commit, PullRequest, type StepResultFact } from "./result.ts";
 
 /** The fields of `RunSpec` that harvesting reads. */
@@ -54,6 +60,19 @@ const PullRequestResponse = Schema.Struct({
 }).pipe(Schema.encodeKeys({ url: "html_url" }));
 const decodePullRequestPages = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(Schema.Array(PullRequestResponse))),
+);
+const decodeHandoffPullRequest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      number: PullRequest.fields.number,
+      url: Schema.URLFromString,
+      head: Schema.Struct({
+        sha: CommitSha,
+        ref: Schema.NonEmptyString,
+        repo: Schema.NullOr(Schema.Struct({ full_name: RepositoryName })),
+      }),
+    }).pipe(Schema.encodeKeys({ url: "html_url" })),
+  ),
 );
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
@@ -174,6 +193,7 @@ const harvestCommits = Effect.fn("StepResult.harvestCommits")(function* <E>(
 const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function* <E>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
+  handoff: Option.Option<CiHandoff>,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
 
@@ -189,7 +209,8 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
   if (
     head === spec.baseCommit &&
     spec.revision !== RepositoryRevision.make(spec.baseCommit) &&
-    branch === ""
+    branch === "" &&
+    Option.isNone(handoff)
   ) {
     yield* Effect.logDebug("No pull request candidate in the Attempt checkout", {
       attemptId: spec.attemptId,
@@ -198,8 +219,9 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
   }
   // GitHub returns HTTP 422 for a commit that was never pushed, so first check that a branch or
   // `refs/pull/<n>/head` points at it.
-  if (head !== spec.baseCommit) {
-    const refs = yield* run("git", ["ls-remote", "origin", "refs/heads/*", "refs/pull/*/head"]);
+  let refs: ReadonlyArray<string> = [];
+  if (head !== spec.baseCommit || Option.isSome(handoff)) {
+    refs = yield* run("git", ["ls-remote", "origin", "refs/heads/*", "refs/pull/*/head"]);
     if (!refs.some((ref) => ref.startsWith(`${head}\t`))) {
       yield* Effect.logDebug("No remote branch or pull request has the Attempt's final commit", {
         attemptId: spec.attemptId,
@@ -207,6 +229,49 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
       });
       return [];
     }
+  }
+  if (Option.isSome(handoff)) {
+    const request = handoff.value;
+    if (request.head !== head) {
+      yield* Effect.logWarning("CI handoff head differs from the checkout's final commit", {
+        attemptId: spec.attemptId,
+        pullRequest: request.pullRequest,
+        requestedHead: request.head,
+        head,
+      });
+      return [];
+    }
+    const pr = yield* askGitHub(
+      run,
+      ["api", `repos/${spec.repository}/pulls/${request.pullRequest}`],
+      decodeHandoffPullRequest,
+      "CI handoff pull request",
+    );
+    const verified =
+      pr.number === request.pullRequest &&
+      pr.head.repo !== null &&
+      canonicalRepositoryName(pr.head.repo.full_name) ===
+        canonicalRepositoryName(spec.repository) &&
+      refs.includes(`${head}\trefs/heads/${pr.head.ref}`);
+    yield* Effect.logInfo("CI handoff origin branch verification", {
+      attemptId: spec.attemptId,
+      pullRequest: pr.number,
+      branch: pr.head.ref,
+      branchHead:
+        refs.find((ref) => ref.endsWith(`\trefs/heads/${pr.head.ref}`))?.split("\t")[0] ?? null,
+      pullRequestHead: pr.head.sha,
+      verified,
+    });
+    return verified
+      ? [
+          PullRequest.make({
+            number: pr.number,
+            url: pr.url,
+            base: Option.some(spec.baseCommit),
+            head: Option.some(head),
+          }),
+        ]
+      : [];
   }
   const pages = yield* askGitHub(
     run,
@@ -588,15 +653,26 @@ const windowsUnread = (spec: HarvestSpec, outcome: string) => (error: HarvestErr
  * Returns the facts from a finished Attempt's checkout: new commits, the pull requests at the
  * final commit, and the comments and reviews attributed to the Attempt. A GitHub failure or
  * 10-second timeout drops only the GitHub facts. Fails with `HarvestError` if git output is
- * invalid or the windows can't be read.
+ * invalid or the windows can't be read. An explicit CI handoff verifies its pull request's
+ * source branch on origin, even when GitHub's pull request head is stale.
  */
 export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   E extends { readonly _tag: string; readonly message: string },
   W,
->(spec: HarvestSpec, run: HarvestCommand<E>, windows: AttemptWindowsRead<W>) {
+>(
+  spec: HarvestSpec,
+  run: HarvestCommand<E>,
+  windows: AttemptWindowsRead<W>,
+  handoff: Option.Option<CiHandoff> = Option.none(),
+) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const commits = yield* harvestCommits(spec, run);
-  const pullRequests = yield* enrichment(spec, "Pull request", harvestPullRequests(spec, run), []);
+  const pullRequests = yield* enrichment(
+    spec,
+    "Pull request",
+    harvestPullRequests(spec, run, handoff),
+    [],
+  );
   const comments = yield* harvestComments(spec, run, windows).pipe(
     Effect.tapError(windowsUnread(spec, "the harvest fails")),
   );

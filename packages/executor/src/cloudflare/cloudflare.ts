@@ -1072,11 +1072,12 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             checkoutCommand("launch", worker, name, prepared.worktree, access),
             crypto,
           ),
-          harvest: (windows) =>
+          harvest: (windows, handoff) =>
             harvestFacts(
               prepared.spec,
               harvestCommand("launch", worker, name, prepared.worktree, access),
               windows,
+              handoff,
             ).pipe(
               Effect.mapError((error) =>
                 InfraFailure.make({
