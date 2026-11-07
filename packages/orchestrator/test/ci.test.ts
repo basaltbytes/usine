@@ -39,6 +39,7 @@ import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
   ContentHash,
   GitHubPolling,
+  GitHubItemNotFoundError,
   PullRequestPayload,
   PullRequestSnapshot,
   RepositoryNotModified,
@@ -145,6 +146,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   });
   const directory = InstanceDirectory.make(currentDirectory);
   const observed = yield* Ref.make(CheckSnapshot.make({ head, state: "pending" }));
+  const itemState = yield* Ref.make<"OPEN" | "CLOSED" | "MERGED" | "gone">("OPEN");
   const observationFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
   const mergeable = yield* Ref.make<PullRequestPayload["mergeable"]>("CONFLICTING");
   const tasks = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -210,9 +212,18 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     snapshot: () =>
       Effect.gen(function* () {
         const { head, state } = yield* Ref.get(observed);
+        const currentState = yield* Ref.get(itemState);
+        if (currentState === "gone")
+          return yield* GitHubItemNotFoundError.make({
+            operation: "fetch-pull-request-snapshot",
+            item: 815,
+            message: "Pull request no longer exists",
+          });
         return PullRequestSnapshot.make({
           payload: PullRequestPayload.make({
             ...fixturePayload,
+            state: currentState,
+            merged: currentState === "MERGED",
             headRefOid: head,
             mergeable: state === "conflict" ? yield* Ref.get(mergeable) : "UNKNOWN",
             statusCheckRollup:
@@ -242,7 +253,16 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     MarcbachmannCelLayer,
   );
   const runtime = CiMonitor.layer.pipe(Layer.provideMerge(dependencies));
-  return { observed, observationFailure, mergeable, tasks, mutations, runtime, timeoutSeconds };
+  return {
+    observed,
+    itemState,
+    observationFailure,
+    mergeable,
+    tasks,
+    mutations,
+    runtime,
+    timeoutSeconds,
+  };
 });
 
 const openWait = Effect.fn("test.openCiWait")(function* (timeoutSeconds: number, sameLoop = false) {
@@ -734,15 +754,22 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live.each(["failure", "superseded", "success", "paused"] as const)(
+it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", "gone"] as const)(
   "a cycle reset rechecks a blocked CI fix without a trigger label: %s",
   (state) =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixtureInstance = yield* instance;
+        const terminal = state === "CLOSED" || state === "MERGED" || state === "gone";
         const limited = LoadedInstance.make({
           ...fixtureInstance,
-          loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) })],
+          loops: [
+            LoopFile.make({
+              ...loop,
+              maxCycles: CycleLimit.make(1),
+              approval: terminal ? "required" : "none",
+            }),
+          ],
         });
         const setup = yield* scenario(3600, limited);
         yield* Effect.gen(function* () {
@@ -760,9 +787,23 @@ it.live.each(["failure", "superseded", "success", "paused"] as const)(
             receivedAt: yield* DateTime.now,
             payload: {},
           });
-          yield* engine.revoke(loop.name, ask.itemKey);
+          yield* engine.revoke(loop.name, ask.itemKey, "label-trigger");
           yield* budgets.reset(ask.id, answer);
-          yield* engine.revoke(loop.name, ask.itemKey);
+          yield* engine.revoke(loop.name, ask.itemKey, "label-trigger");
+          const reader = yield* RunReader;
+          if (terminal) {
+            yield* engine.reconcile;
+            const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+            assert(Option.isSome(fixId));
+            yield* engine.inspect(fixId.value).pipe(
+              Effect.repeat({
+                until: ({ run }) => run.state._tag === "Waiting",
+                schedule: Schedule.spaced("10 millis"),
+              }),
+              Effect.timeout("5 seconds"),
+            );
+            yield* Ref.set(setup.itemState, state);
+          }
           const controls = yield* LoopControl;
           if (state === "paused") yield* controls.pause(loop.name);
           if (state === "superseded" || state === "success") {
@@ -804,14 +845,19 @@ it.live.each(["failure", "superseded", "success", "paused"] as const)(
           );
           const remainingAsks = yield* budgets.asks;
           assert.deepStrictEqual(remainingAsks, []);
-          const admitted = yield* RunReader;
-          const fixId = yield* admitted.runForEvent(DedupKey.make(blocked.eventId));
+          const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
           if (state === "failure" || state === "paused") {
             assert(Option.isSome(fixId));
             const fix = yield* engine.inspect(fixId.value);
             assert.strictEqual(fix.event.id, blocked.eventId);
             const tasks = yield* Ref.get(setup.tasks);
             assert.include(tasks[1] ?? "", "TypeError: failing CI log");
+          } else if (terminal) {
+            assert(Option.isSome(fixId));
+            const revoked = yield* engine.inspect(fixId.value);
+            assert(revoked.run.state._tag === "Canceled");
+            assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+            assert.deepStrictEqual(revoked.attempts, []);
           } else {
             assert(Option.isNone(fixId));
           }

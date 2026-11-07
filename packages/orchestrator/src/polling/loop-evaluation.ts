@@ -156,7 +156,11 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
         agent: agent.name,
         item: item.number,
       });
-      const revoked = yield* runs.revoke(loop.name, item.itemKey);
+      const revoked = yield* runs.revoke(
+        loop.name,
+        item.itemKey,
+        payload.state === "OPEN" && payload.merged !== true ? "label-trigger" : "all",
+      );
       revokedRuns += revoked.length;
       if (revoked.length > 0) {
         yield* Effect.logInfo("Item stopped matching; revoked its unstarted runs", {

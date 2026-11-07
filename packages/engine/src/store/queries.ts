@@ -1127,12 +1127,22 @@ export const queriesFor = (
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
       .leftJoin(runs, eq(runs.eventId, events.eventId))
       .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, events.eventId))
+      .leftJoin(itemCycleBudgets, eq(itemCycleBudgets.itemKey, triggerEvents.itemKey))
+      .leftJoin(
+        loopItems,
+        and(
+          eq(loopItems.loopName, triggerEvents.loopName),
+          eq(loopItems.itemKey, triggerEvents.itemKey),
+        ),
+      )
       .where(
         and(
           isNotNull(triggerEvents.ciFailureHead),
           cycleQueries(database, record).currentEvent,
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
+          isNull(itemCycleBudgets.askJson),
+          isNull(loopItems.suppressedByRunId),
         ),
       )
       .orderBy(desc(events.receivedAt))
@@ -1275,6 +1285,7 @@ export const queriesFor = (
   const revokeUnstarted = Effect.fn("RunStoreQueries.revokeUnstarted")(function* (
     loop: LoopName,
     itemKey: ItemKey,
+    scope: "all" | "label-trigger",
   ) {
     const storedRows = yield* database
       .select({ runId: runs.runId })
@@ -1284,7 +1295,7 @@ export const queriesFor = (
         and(
           eq(triggerEvents.loopName, loop),
           eq(triggerEvents.itemKey, itemKey),
-          isNull(triggerEvents.ciFailureHead),
+          scope === "label-trigger" ? isNull(triggerEvents.ciFailureHead) : undefined,
           unstartedState,
         ),
       )
@@ -1297,7 +1308,7 @@ export const queriesFor = (
         and(
           eq(triggerEvents.loopName, loop),
           eq(triggerEvents.itemKey, itemKey),
-          isNull(triggerEvents.ciFailureHead),
+          scope === "label-trigger" ? isNull(triggerEvents.ciFailureHead) : undefined,
         ),
       );
     yield* revokeQueued(loop, itemKey, queued);

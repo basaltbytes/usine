@@ -242,8 +242,13 @@ const makeRunEngine = Effect.gen(function* () {
     yield* driver.continueWithNewest(runId);
   }, Effect.uninterruptible);
 
-  const revoke = Effect.fn("RunEngine.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
-    const revoked = yield* store.revoke(loop, itemKey);
+  const revoke = Effect.fn("RunEngine.revoke")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+    scope: "all" | "label-trigger" = "all",
+  ) {
+    yield* Effect.annotateCurrentSpan({ loop, itemKey, scope });
+    const revoked = yield* store.revoke(loop, itemKey, scope);
     yield* Effect.forEach(revoked, driver.stop, { concurrency: "unbounded", discard: true });
     return revoked;
   }, Effect.uninterruptible);
@@ -402,10 +407,11 @@ export class RunEngine extends Context.Service<
       runId: RunId,
       request: RunAgainRequest,
     ) => Effect.Effect<RunAgainResult, RunEngineError>;
-    /** Cancels unstarted Runs and discards queued Events for a Loop's Item that stopped matching; running Attempts continue. */
+    /** Cancels unstarted Runs and discards queued Events; label-trigger scope preserves CI fixes. Running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
+      scope?: "all" | "label-trigger",
     ) => Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
     /**
      * Records a matching Event and claims its Run, or queues it behind the Item's running Attempt.
