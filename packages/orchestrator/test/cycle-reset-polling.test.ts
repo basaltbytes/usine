@@ -129,6 +129,7 @@ describe("cycle reset polling", () => {
           }),
       };
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
@@ -204,6 +205,7 @@ describe("cycle reset polling", () => {
         }),
     };
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
@@ -297,6 +299,7 @@ describe("cycle reset polling", () => {
         }),
     };
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
@@ -424,6 +427,7 @@ it.live(
         closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
       });
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>

@@ -281,6 +281,7 @@ describe("PollingTriggers", () => {
         return { cycle, fetched: [...fetched].sort() };
       });
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: base.baseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
@@ -437,6 +438,7 @@ describe("PollingTriggers", () => {
       let gone = false;
       let fetches = 0;
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
@@ -563,6 +565,7 @@ describe("PollingTriggers", () => {
       const remote = { head: "a", labels: ["review-passed"] };
       let snapshots = 0;
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
@@ -695,6 +698,7 @@ describe("PollingTriggers", () => {
     () => {
       let changeRequests = 0;
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
@@ -754,6 +758,7 @@ describe("PollingTriggers", () => {
   it.effect("keeps a GitHub rate-limit backoff when a reload arrives during it", () => {
     let changeRequests = 0;
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       changes: () =>
@@ -800,6 +805,7 @@ describe("PollingTriggers", () => {
       Effect.gen(function* () {
         const polled: Array<string> = [];
         const github: GitHubPolling["Service"] = {
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           changes: (repository, cursor) =>
@@ -858,6 +864,7 @@ describe("PollingTriggers", () => {
         const loop = yield* issueLoop("paused-issues");
         const payload = issuePayload(["ready"]);
         const github: GitHubPolling["Service"] = {
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           changes: (_repository, cursor) =>
@@ -909,6 +916,7 @@ describe("PollingTriggers", () => {
 
   it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       changes: (_repository, cursor) =>
@@ -962,6 +970,7 @@ describe("PollingTriggers", () => {
             ? Ref.update(ref, (values) => [...values, value])
             : Effect.void;
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (repository, cursor) =>
@@ -1090,6 +1099,7 @@ describe("PollingTriggers", () => {
           updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
         });
         const github: GitHubPolling["Service"] = {
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           changes: (repository, cursor) =>
@@ -1299,6 +1309,7 @@ describe("PollingTriggers", () => {
       });
       let failing = true;
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (repository, cursor) =>
@@ -1440,6 +1451,7 @@ describe("PollingTriggers", () => {
       const allowRevoke = yield* Deferred.make<void, EnginePersistenceError>();
       let phase: "baseline" | "interrupted" | "recovered" = "baseline";
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
@@ -1642,6 +1654,7 @@ describe("PollingTriggers", () => {
             : Effect.succeed(`Rendered ${loop.name}.`),
       });
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
@@ -1747,6 +1760,7 @@ describe("PollingTriggers", () => {
           `${(repository.endsWith("one") ? "a" : "b").repeat(32)}${String(number).repeat(16)}`,
         );
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
@@ -1810,6 +1824,7 @@ describe("PollingTriggers", () => {
         const open = new Set([28]);
         const updatedAt = DateTime.makeUnsafe("2026-08-30T20:00:00Z");
         const github: GitHubPolling["Service"] = {
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           labels: () => Effect.succeed(emptyLabelCatalog),

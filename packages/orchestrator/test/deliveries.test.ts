@@ -155,6 +155,7 @@ describe("Webhook delivery polling", () => {
       let requests = 0;
       const cursors = memoryCursorStore();
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>

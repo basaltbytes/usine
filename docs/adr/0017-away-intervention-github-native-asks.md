@@ -47,3 +47,7 @@ A blocker is effectively a question: the agent can't continue until something ch
 2026-10-19 (#364): a child's harness failure posts nothing on the item either, so it reaches the parent as `[usine:failed]` instead of `[usine:blocked]` and ends the attempt with `AgentFailure`. Only an agent's own `[usine:blocked]` suppresses the item.
 
 2026-10-23 (#489): renames the item-level hold to suppression; hold now means only the session hold.
+
+## Amendment (2026-11-08, #1009): reports after narration
+
+Blocker and question markers at the start of any line in a final answer produce their typed failure. A report header appended to narration before a line break also produces that failure; an inline mention of a resolved report remains ordinary text. The first such marker determines the report; its following text is the diagnostic. A parent can prepend narration when relaying an interrupted child, so a prefix-only parser can incorrectly report success. Prompts still require the marker first and child reports unchanged. Failure and capacity reports retain prefix-only parsing.

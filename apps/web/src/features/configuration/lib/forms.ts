@@ -54,11 +54,15 @@ const encodeCiDraft = Schema.encodeSync(
 
 export const formText = (key: ConfigurationEntityKey, value: Schema.JsonObject): string => {
   if (key.kind === "loop") {
-    const { name: _name, body, maxCycles, selector, priority, ci, ...rest } = value;
+    const { name: _name, body, maxCycles, outcomeLabels, selector, priority, ci, ...rest } = value;
     const selected = objectValue(selector);
     const ranked = objectValue(priority);
     const configured = objectValue(ci);
-    let frontmatter: Schema.JsonObject = { ...rest, max_cycles: maxCycles ?? 3 };
+    let frontmatter: Schema.JsonObject = {
+      ...rest,
+      max_cycles: maxCycles ?? 3,
+      outcome_labels: outcomeLabels ?? [],
+    };
     if (selected._tag === "Some")
       frontmatter = { ...frontmatter, selector: objectValue(selected.value) };
     if (ranked._tag === "Some") frontmatter = { ...frontmatter, priority: ranked.value ?? 1 };

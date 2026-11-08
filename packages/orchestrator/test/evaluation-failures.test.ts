@@ -250,6 +250,7 @@ describe("Loop evaluation failures", () => {
         const fetched: Array<number> = [];
         const logs = capturedLogs();
         const github: GitHubPolling["Service"] = {
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           labels: () =>
@@ -312,6 +313,7 @@ describe("Loop evaluation failures", () => {
       let fetches = 0;
       const base = baseBranches();
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: base.baseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
@@ -374,6 +376,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       const fetched: Array<number> = [];
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
@@ -430,6 +433,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       const fetched: Array<number> = [];
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
@@ -479,6 +483,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       let deleted = false;
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
@@ -528,6 +533,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       let deleted = false;
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
@@ -578,6 +584,7 @@ describe("Loop evaluation failures", () => {
       const fetched: Array<number> = [];
       const unavailable = new Set([3, 5, 7]);
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
@@ -653,6 +660,7 @@ describe("Loop evaluation failures", () => {
       submissions.length = 0;
       const cursors = memoryCursorStore();
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>

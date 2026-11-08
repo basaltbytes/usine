@@ -1,0 +1,1 @@
+ALTER TABLE `usine_trigger_events` ADD `outcome_labels_json` text DEFAULT '[]' NOT NULL;

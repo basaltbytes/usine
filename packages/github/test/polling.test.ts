@@ -421,6 +421,45 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
+  it.effect("reads all item labels without fetching a snapshot or label history", () => {
+    const requests: string[] = [];
+    const client = HttpClient.make((request) => {
+      requests.push(request.url);
+      return Effect.succeed(
+        response(
+          request,
+          [
+            {
+              name: requests.length === 1 ? "ready" : "review-passed",
+              color: "ededed",
+              description: null,
+            },
+          ],
+          {
+            headers:
+              requests.length === 1
+                ? {
+                    link: '<https://api.github.com/repositories/1/issues/28/labels?page=2>; rel="next"',
+                  }
+                : {},
+          },
+        ),
+      );
+    });
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const labels = yield* polling.itemLabels(repository, ItemNumber.make(28));
+      assert.deepStrictEqual(
+        labels.map(({ name }) => name),
+        ["ready", "review-passed"],
+      );
+      assert.deepStrictEqual(requests, [
+        "https://api.github.com/repos/basaltbytes/usine/issues/28/labels?per_page=100",
+        "https://api.github.com/repositories/1/issues/28/labels?page=2",
+      ]);
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
   it.effect("completes truncated Item labels before Board lane matching", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
     const labels = Array.from({ length: 51 }, (_, index) => `label-${index + 1}`);

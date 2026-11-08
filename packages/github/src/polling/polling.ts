@@ -227,6 +227,11 @@ export class GitHubPolling extends Context.Service<
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
+    /** Returns every current label on an issue or pull request through the REST API. */
+    readonly itemLabels: (
+      repository: RepositoryName,
+      item: ItemNumber,
+    ) => Effect.Effect<ReadonlyArray<RepositoryLabel>, GitHubAppError>;
     /**
      * Returns the head commit of branch `baseRefName`. Sends the ETag of `known`, a head read
      * earlier for the same repository and branch, and returns `known` if GitHub answers 304,
@@ -360,6 +365,14 @@ export class GitHubPolling extends Context.Service<
       ) {
         const labelPage = yield* labelsPage(operation, initialUrl);
         return yield* remainingLabelPages(operation, labelPage);
+      });
+
+      const itemLabels = Effect.fn("GitHubPolling.itemLabels")(function* (
+        repository: RepositoryName,
+        item: ItemNumber,
+      ) {
+        yield* Effect.annotateCurrentSpan({ repository, item });
+        return yield* allLabels("fetch-item-labels", itemLabelsUrl(repository, item));
       });
 
       const labels = Effect.fn("GitHubPolling.labels")(function* (
@@ -655,7 +668,7 @@ export class GitHubPolling extends Context.Service<
         return missing.flat();
       });
 
-      return { changes, labels, baseRefHead, snapshot, missingIssues };
+      return { changes, labels, itemLabels, baseRefHead, snapshot, missingIssues };
     }),
   );
 }

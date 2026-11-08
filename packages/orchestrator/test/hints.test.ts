@@ -68,6 +68,7 @@ describe("Polling self-write Hints", () => {
   it.effect("coalesces repository hints without moving the 60-second backstop", () => {
     let requests = 0;
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels,
@@ -102,6 +103,7 @@ describe("Polling self-write Hints", () => {
   it.effect("extends an in-flight wait when another writer reports a later retry deadline", () => {
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels,
@@ -138,6 +140,7 @@ describe("Polling self-write Hints", () => {
     let requests = 0;
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels,
@@ -184,6 +187,7 @@ describe("Polling self-write Hints", () => {
       let snapshots = 0;
       const until = DateTime.makeUnsafe(90_000);
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels,
@@ -239,6 +243,7 @@ describe("Polling self-write Hints", () => {
         let requests = 0;
         let snapshots = 0;
         const github: GitHubPolling["Service"] = {
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           labels,

@@ -174,3 +174,76 @@ it.each([
   );
   assert.strictEqual(report.value.message, message);
 });
+
+it.each([
+  ["[usine:provider-capacity]", "AgentCapacityError", "ProviderCapacityFailure"],
+  ["[usine:failed]", "AgentResultError", "AgentFailure"],
+] as const)(
+  "preserves a %s prefix before later blocker and question reports",
+  (marker, tag, failure) => {
+    const sessionId = Option.some(AgentSessionId.make("child-1"));
+    for (const laterMarker of ["[usine:blocked]", "[usine:question]"]) {
+      for (const newline of ["\n", "\r\n"]) {
+        const message = `Harness refused.${newline}${laterMarker}${newline}Report details.`;
+        const report = reportedOutcome(sessionId, ` \n${marker}${newline}${message}\n `);
+        assert(Option.isSome(report));
+        assert.strictEqual(report.value._tag, tag);
+        assert.strictEqual(report.value.message, message);
+        assert.deepStrictEqual(report.value.sessionId, sessionId);
+        assert.strictEqual(toAttemptFailure(report.value)._tag, failure);
+      }
+    }
+  },
+);
+
+it.each([
+  ["[usine:blocked]", "AgentBlockedError"],
+  ["[usine:question]", "AgentQuestionError"],
+] as const)("recognizes %s after narration and preserves the report details", (marker, tag) => {
+  for (const prefix of ["", "  ", "The delegation was interrupted.\n", "Narration.\r\n  "]) {
+    for (const separator of ["\n", " "]) {
+      const report = reportedOutcome(
+        Option.none(),
+        `${prefix}${marker}${separator}Cannot finish.\nRemaining work.`,
+      );
+      assert(Option.isSome(report));
+      assert.strictEqual(report.value._tag, tag);
+      assert.strictEqual(report.value.message, "Cannot finish.\nRemaining work.");
+    }
+  }
+});
+
+it("does not treat ordinary narration or an embedded harness failure as a reserved report", () => {
+  for (const answer of [
+    "Finished.",
+    "The child was [usine:failed] but recovery completed.",
+    "The child was [usine:provider-capacity] but recovery completed.",
+    "Published. The earlier [usine:blocked] outcome is resolved.",
+    "Answered the earlier [usine:question] and completed the review.",
+  ]) {
+    assert(Option.isNone(reportedOutcome(Option.none(), answer)));
+  }
+});
+
+it("uses the first blocker or question when a final answer includes multiple reports", () => {
+  const report = reportedOutcome(
+    Option.none(),
+    "Narration.\n[usine:blocked] Blocked.\n[usine:question] Which transport?",
+  );
+  assert(Option.isSome(report));
+  assert.strictEqual(report.value._tag, "AgentBlockedError");
+  assert.strictEqual(report.value.message, "Blocked.\n[usine:question] Which transport?");
+});
+
+it.each([
+  ["[usine:blocked]", "AgentBlockedError"],
+  ["[usine:question]", "AgentQuestionError"],
+] as const)("recognizes a %s report header appended to narration", (marker, tag) => {
+  const report = reportedOutcome(
+    Option.none(),
+    `The prior delegation was interrupted.${marker}\nThe review is incomplete.`,
+  );
+  assert(Option.isSome(report));
+  assert.strictEqual(report.value._tag, tag);
+  assert.strictEqual(report.value.message, "The review is incomplete.");
+});

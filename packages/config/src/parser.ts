@@ -80,6 +80,7 @@ class LoopFrontmatter extends Schema.Class<
   agent: AgentName,
   maxCycles: LoopFile.fields.maxCycles,
   permissions: LoopFile.fields.permissions,
+  outcomeLabels: LoopFile.fields.outcomeLabels,
   ci: Schema.OptionFromOptionalKey(
     CiPolicy.pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
   ),
@@ -87,7 +88,7 @@ class LoopFrontmatter extends Schema.Class<
 }) {}
 
 const AuthoredLoopFrontmatter = LoopFrontmatter.pipe(
-  Schema.encodeKeys({ maxCycles: "max_cycles" }),
+  Schema.encodeKeys({ maxCycles: "max_cycles", outcomeLabels: "outcome_labels" }),
 );
 
 class AgentFrontmatter extends Schema.Class<

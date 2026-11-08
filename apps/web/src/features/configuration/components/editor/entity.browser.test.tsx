@@ -639,11 +639,16 @@ it("reorders project lanes by keyboard and pointer, then saves renamed lanes and
     .toContain("over droppable area 1");
   await userEvent.keyboard(" ");
   await expect.element(names.nth(0)).toHaveValue("Review");
+  await expect.poll(() => host.getAnimations({ subtree: true }).length).toBe(0);
   await button("Reorder lane 1").dropTo(button("Reorder lane 2"), { steps: 10 });
   await expect.element(names.nth(0)).toHaveValue("Ready");
-  await names.nth(0).fill("Queued");
+  await expect.poll(() => host.getAnimations({ subtree: true }).length).toBe(0);
+  await names.nth(0).click();
+  await userEvent.keyboard("{ControlOrMeta>}a{/ControlOrMeta}Queued{Tab}");
+  await expect.element(names.nth(0)).toHaveValue("Queued");
   await button("Remove lane").nth(1).click();
   await button("Add lane").click();
+  await expect.element(names.nth(0)).toHaveValue("Queued");
   await names.nth(1).fill("In review");
   await page.getByRole("checkbox", { name: "review", exact: true }).nth(1).click();
   await button("Save").click();

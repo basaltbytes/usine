@@ -21,6 +21,7 @@ The names below identify fields in the text editor. The form provides controls f
 | `max_cycles` | integer ≥ 1 | `3` | Runs this loop can open on one item between operator resets. |
 | `permissions` | `write` or `read` | `write` | Repository content access of each attempt's GitHub token. |
 | `priority` | integer or integer CEL expression | `0` | Queue priority, with higher values first. |
+| `outcome_labels` | list of label names | `[]` | At least one must be present on the current item when the agent completes. |
 | `ci` | CI policy | omitted | Required checks and fix loop after an agent pushes. |
 
 For example, choose the issue stream, agent `developer`, approval `required`, and this condition:
@@ -83,6 +84,12 @@ The entry identifies the most recently blocked loop, including a loop blocked by
 `read` gives the attempt token `contents: read` and omits `workflows` while retaining issue and pull request writes for reviews, comments, and labels. GitHub refuses code pushes with that token. A pre-push hook also explains the restriction. Failed read-only attempts create no salvage branch. `write` gives the token `contents: write` and `workflows: write`, permitting code pushes, changes under `.github/workflows/`, and pull request updates. The App and its installation must grant **Workflows: read and write**.
 
 The setting limits the attempt's token. Local children run as the orchestrator's Unix user and can access that user's other credentials. SSH attempt containers mount only their checkout and credential directory. See [Workers](/reference/configuration/workers/).
+
+## Outcome labels
+
+Set `outcome_labels: [review-passed, agent-review-findings]` for a review loop that must publish a verdict. usine fetches the current item's labels from GitHub before accepting the agent's completion and matches label names without case sensitivity. If none of the configured labels is present, the attempt and run fail with `AgentFailure` and appear in **Needs attention**. Label reads have a 15-second timeout and retry twice, after one and two seconds. If all three reads fail, the attempt and run fail with `AgentFailure` in **Needs attention**. Verification retries only the label read; it does not rerun the agent.
+
+The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the handoff's `on_green` actions instead. Schedule events cannot satisfy an item label requirement.
 
 ## Priority
 
