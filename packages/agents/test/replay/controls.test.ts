@@ -1,6 +1,16 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import { ChildBackend, HostLoginLock } from "../../src/runtime.ts";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import { claudeChildLayer } from "../../src/harness/claude/claude.ts";
@@ -8,6 +18,11 @@ import { claudeTransport } from "./claude.ts";
 import { openFixture, recordingPid } from "./fixture.ts";
 import { runScenario } from "./scenarios.ts";
 import { isJsonObject, Tape, type Transcript } from "./transcript.ts";
+
+class ProcessStillRunning extends Schema.TaggedError<
+  ProcessStillRunning,
+  { readonly brand: unique symbol }
+>()("ProcessStillRunning", { pid: Schema.Int, cause: Schema.Defect() }) {}
 
 it.live("Claude waits for the final result when a replayed result has queued turns", () =>
   Effect.scoped(
@@ -49,13 +64,13 @@ it.live("Claude waits for the final result when a replayed result has queued tur
 );
 
 it.live.skipIf(process.platform !== "linux")(
-  "Claude interruption stops the replayed owned process",
+  "Claude interruption stops the replayed owned process before the launch scope closes",
   () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* openFixture("claude", "transport-loss", "replay");
         const fs = yield* FileSystem.FileSystem;
-        const pid = yield* Effect.scoped(
+        yield* Effect.scoped(
           Effect.gen(function* () {
             const running = yield* (yield* ChildBackend).launch(fixture.request);
             const started = yield* Deferred.make<void>();
@@ -72,13 +87,15 @@ it.live.skipIf(process.platform !== "linux")(
             process.kill(pid, 0);
             yield* running.interrupt;
             yield* running.result.pipe(Effect.result);
+            yield* Effect.try({
+              try: () => assert.throws(() => process.kill(pid, 0), /ESRCH/),
+              catch: (cause) => ProcessStillRunning.make({ pid, cause }),
+            }).pipe(Effect.retry({ times: 80, schedule: Schedule.spaced("25 millis") }));
             yield* Fiber.join(events).pipe(Effect.result);
-            return pid;
           }).pipe(Effect.provide(fixture.backend)),
         );
         const retained = yield* fs.exists(childPidFile(fixture.cwd, fixture.request.session.id));
         assert.isFalse(retained);
-        assert.throws(() => process.kill(pid, 0), /ESRCH/);
       }),
     ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("5 seconds")),
   10_000,
