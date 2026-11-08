@@ -8,7 +8,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Context, Effect, Layer, Result, Schema } from "effect";
+import { Context, Effect, Layer, Option, Result, Schema } from "effect";
 
 // The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
@@ -156,9 +156,14 @@ export const userMessage = (content: string, uuid?: string): ClaudeUserMessage =
   return uuid === undefined ? input : { ...input, uuid };
 };
 
-const ControlMessage = Schema.Struct({ type: Schema.String });
+const ClaudeResult = Schema.Struct({ type: Schema.Literal("result") });
 const ControlRequest = Schema.Struct({
   type: Schema.Literal("control_request"),
+  request_id: Schema.String,
+});
+const ControlRequestSubtype = Schema.Struct({ request: Schema.Struct({ subtype: Schema.String }) });
+const ControlCancelRequest = Schema.Struct({
+  type: Schema.Literal("control_cancel_request"),
   request_id: Schema.String,
 });
 const ControlResponse = Schema.Struct({
@@ -190,6 +195,23 @@ const messageKey = (message: Schema.Json): string => {
 
 const UserInput = Schema.Struct({ type: Schema.Literal("user") });
 
+/** Returns the index of the first line break, or -1. Like the SDK's `readline`, `\r` also ends a line. */
+const lineEnd = (bytes: Uint8Array) => {
+  const lf = bytes.indexOf(10);
+  const cr = bytes.indexOf(13);
+  if (lf < 0) return cr;
+  if (cr < 0) return lf;
+  return Math.min(lf, cr);
+};
+
+interface PendingOutput {
+  readonly key: string;
+  readonly bytes: number;
+  /** A control request's subtype; only its acknowledged response or its cancellation handles it. */
+  readonly request: Option.Option<string>;
+  handled: boolean;
+}
+
 /**
  * Tracks which Claude output messages the session handled. Runs `onUserInput` when the process
  * owner acknowledges an input line that carries a user message.
@@ -198,36 +220,52 @@ export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect
   let buffered = Buffer.alloc(0);
   let input = Buffer.alloc(0);
   const answered = new Set<string>();
-  const pending: Array<{ key: string; bytes: number; handled: boolean; control: boolean }> = [];
+  const pending: Array<PendingOutput> = [];
   const flush = () => {
     let bytes = 0;
     while (pending[0]?.handled === true) bytes += pending.shift()?.bytes ?? 0;
     return bytes;
   };
+  const unansweredRequest = (id: string) =>
+    pending.find((entry) => !entry.handled && Option.isSome(entry.request) && entry.key === id);
   return {
     read: (bytes: Uint8Array) =>
       Effect.gen(function* () {
         buffered = Buffer.concat([buffered, bytes]);
         let end;
-        while ((end = buffered.indexOf(10)) >= 0) {
+        while ((end = lineEnd(buffered)) >= 0) {
           const line = buffered.subarray(0, end).toString();
           const decoded = yield* Effect.result(decodeMessage(line));
           buffered = buffered.subarray(end + 1);
           if (Result.isFailure(decoded)) {
             yield* Effect.logDebug("Ignoring non-JSON Claude stdout", { bytes: end + 1 });
-            pending.push({ key: line, bytes: end + 1, handled: true, control: false });
+            pending.push({ key: line, bytes: end + 1, request: Option.none(), handled: true });
             continue;
           }
           const message = decoded.success;
-          const type = Schema.is(ControlMessage)(message) ? message.type : "";
+          if (Schema.is(ControlCancelRequest)(message)) {
+            const request = unansweredRequest(message.request_id);
+            if (request !== undefined) request.handled = true;
+            const log = request !== undefined ? Effect.logInfo : Effect.logDebug;
+            yield* log("Claude cancelled a control request", {
+              requestId: message.request_id,
+              released: request !== undefined,
+            });
+            pending.push({ key: line, bytes: end + 1, request: Option.none(), handled: true });
+            continue;
+          }
           const request = Schema.is(ControlRequest)(message);
           pending.push({
             key: request ? message.request_id : messageKey(message),
             bytes: end + 1,
+            request: request
+              ? Option.some(
+                  Schema.is(ControlRequestSubtype)(message) ? message.request.subtype : "unknown",
+                )
+              : Option.none(),
             handled:
               Schema.is(SdkOnlyMessage)(message) ||
               (request && answered.delete(message.request_id)),
-            control: type === "control_cancel_request",
           });
         }
         return flush();
@@ -246,7 +284,7 @@ export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect
           }
           if (!Schema.is(ControlResponse)(decoded.success)) continue;
           const id = decoded.success.response.request_id;
-          const entry = pending.find((entry) => !entry.handled && entry.key === id);
+          const entry = unansweredRequest(id);
           if (entry !== undefined) entry.handled = true;
           else answered.add(id);
         }
@@ -256,20 +294,31 @@ export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect
      * Marks `message` handled. Returns the bytes that became checkpointed and whether the checkpoint
      * now covers `message` and all output read before it.
      */
-    handled: (message: Schema.Json) => {
-      const key = messageKey(message);
-      const index = pending.findIndex((entry) => !entry.handled && entry.key === key);
-      const entry = pending[index];
-      if (entry === undefined) return { bytes: 0, covered: false };
-      entry.handled = true;
-      // Cancellation has no response; the turn result confirms that it was applied.
-      if (Schema.is(ControlMessage)(message) && message.type === "result")
-        for (let i = 0; i < index; i++) {
-          const earlier = pending[i];
-          if (earlier?.control === true) earlier.handled = true;
+    handled: (message: Schema.Json) =>
+      Effect.gen(function* () {
+        const key = messageKey(message);
+        const index = pending.findIndex(
+          (entry) => !entry.handled && Option.isNone(entry.request) && entry.key === key,
+        );
+        const entry = pending[index];
+        if (entry === undefined) return { bytes: 0, covered: false };
+        entry.handled = true;
+        if (Schema.is(ClaudeResult)(message)) {
+          const unanswered = pending
+            .slice(0, index)
+            .flatMap(({ key, handled, request }) =>
+              !handled && Option.isSome(request)
+                ? [{ requestId: key, subtype: request.value }]
+                : [],
+            );
+          if (unanswered.length > 0)
+            yield* Effect.logInfo(
+              "Claude finished a turn with unanswered control requests; the output checkpoint stays before them",
+              { requests: unanswered },
+            );
         }
-      const bytes = flush();
-      return { bytes, covered: !pending.includes(entry) };
-    },
+        const bytes = flush();
+        return { bytes, covered: !pending.includes(entry) };
+      }),
   };
 };

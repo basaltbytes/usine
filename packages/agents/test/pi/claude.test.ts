@@ -28,12 +28,15 @@ import {
   Logger,
   Option,
   Queue,
+  Ref,
   Schema,
   Scope,
   Semaphore,
   Sink,
   Stream,
 } from "effect";
+import { createInterface } from "node:readline";
+import { scriptedOwner } from "../child-host/scripted-owner.ts";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
 import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
@@ -45,6 +48,7 @@ import {
   ChildBackend,
   ChildRequest,
   ChildSessionJournal,
+  ChildSessionLifecycle,
   HostLoginLock,
   type OnDelivery,
   SessionOperationError,
@@ -67,6 +71,9 @@ const loginLock = Layer.effect(
 );
 
 const encoder = new TextEncoder();
+// The fake SDK decodes each stdout line inside its async iterator.
+// @effect-diagnostics-next-line schemaSync:off
+const decodeStdoutLine = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 
 /**
  * Returns a process spawner for the backend's commands on Workers, which records each command line
@@ -765,6 +772,83 @@ describe("Claude child backend", () => {
           }),
         );
       }).pipe(Effect.scoped),
+  );
+
+  it.live("checkpoints a message only after the session has handled it", () =>
+    Effect.gen(function* () {
+      const stdout = (messages: ReadonlyArray<Schema.Json>) =>
+        Effect.forEach(messages, (message) =>
+          Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(message),
+        ).pipe(Effect.map((lines) => Buffer.from(`${lines.join("\n")}\n`).toString("base64")));
+      const { spawner, saved, frame } = yield* scriptedOwner(
+        [
+          { offset: 10, ready: true, sequence: 0, retained: false },
+          {
+            offset: 20,
+            stdout: yield* stdout([
+              { type: "system", subtype: "init", session_id: "claude-session-1" },
+              rateLimitEvent,
+            ]),
+          },
+        ],
+        () => Effect.void,
+      );
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (_input, options) => {
+          assert(options.spawnClaudeCodeProcess !== undefined);
+          const child = options.spawnClaudeCodeProcess({
+            command: "claude",
+            args: [],
+            env: {},
+            signal: new AbortController().signal,
+          });
+          const lines = createInterface({ input: child.stdout });
+          return {
+            ...scripted([]),
+            close: () => lines.close(),
+            async *[Symbol.asyncIterator]() {
+              for await (const line of lines) yield decodeStdoutLine(line);
+            },
+          };
+        },
+      });
+      const stopping = yield* Ref.make(false);
+      const scope = yield* Scope.make();
+      const handling = yield* Deferred.make<void>();
+      const guidance = OperatorMessage.make({ message: "Review the diff" });
+      const worker = RemoteShell.make({
+        ssh: { command: "ssh", args: [] },
+        sshEnvironment: {},
+        destination: "worker",
+      });
+      const running = yield* ChildBackend.pipe(
+        Effect.flatMap((backend) => backend.launch(request(undefined, undefined, worker))),
+        Effect.provide(
+          claudeChildWith(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(spawner)).pipe(
+            Layer.provideMerge(sdk),
+          ),
+        ),
+        Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
+        Scope.provide(scope),
+      );
+      // The session is still handling the receipt while the owner detaches.
+      yield* running.intervene(guidance, (delivery) =>
+        Option.isSome(delivery)
+          ? Deferred.succeed(handling, undefined).pipe(Effect.andThen(Effect.never))
+          : Effect.void,
+      );
+      yield* frame({
+        offset: 30,
+        stdout: yield* stdout([
+          { type: "assistant", uuid: "receipt", user_message_uuids: [guidance.id] },
+        ]),
+      });
+      yield* Deferred.await(handling);
+      yield* Ref.set(stopping, true);
+      yield* Scope.close(scope, Exit.void);
+      const cursor = yield* Deferred.await(saved).pipe(Effect.timeout("5 seconds"));
+      assert.deepStrictEqual(cursor, { offset: 20, skip: 0 }, "the receipt is replayed");
+    }),
   );
 
   it.effect("acknowledges folded guidance on a typed turn while leaving pending sends queued", () =>
