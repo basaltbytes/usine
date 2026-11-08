@@ -20,7 +20,7 @@ import { StepExecutor } from "@usine/engine/step-executor";
 import { GitHubApiError, GitHubApp, type GitHubAppError } from "@usine/github/github-app";
 import {
   GitHubItemHistory,
-  type GitHubItemNotFoundError,
+  GitHubItemNotFoundError,
   type ItemChange,
   LabelAdded,
   LabelRemoved,
@@ -447,6 +447,34 @@ describe("label events", () => {
 });
 
 describe("current label fallback", () => {
+  it.effect("does not retry a missing item before checking current labels", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const fake = fakeGitHub({
+        timeline: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(
+              GitHubItemNotFoundError.make({
+                operation: "fetch-item-timeline",
+                item: 1,
+                message: "The item is missing from the timeline response",
+              }),
+            ),
+          ),
+        labels: Effect.succeed(["ready-to-merge"]),
+      });
+      const fiber = yield* verify(attemptOn("local"), review()).pipe(
+        Effect.provide(fake.check),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("3 seconds");
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+      assert.strictEqual(fake.reads.timeline.length, 1);
+      assert.strictEqual(fake.reads.labels, 1);
+    }),
+  );
+
   it.effect.each([
     [[], "Failure"],
     [["unrelated"], "Failure"],
@@ -496,7 +524,13 @@ describe("current label fallback", () => {
         Effect.forkChild,
       );
       yield* Deferred.await(started);
-      yield* TestClock.adjust("3 seconds");
+      yield* TestClock.adjust("999 millis");
+      assert.strictEqual(fake.reads.timeline.length, 1);
+      yield* TestClock.adjust("1 millis");
+      assert.strictEqual(fake.reads.timeline.length, reads === 3 ? 2 : 1);
+      yield* TestClock.adjust("1999 millis");
+      assert.strictEqual(fake.reads.timeline.length, reads === 3 ? 2 : 1);
+      yield* TestClock.adjust("1 millis");
       assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
       assert.strictEqual(fake.reads.timeline.length, reads);
       assert.strictEqual(fake.reads.labels, 1);
@@ -530,7 +564,13 @@ describe("current label fallback", () => {
         Effect.forkChild,
       );
       yield* Deferred.await(started);
-      yield* TestClock.adjust("3 seconds");
+      yield* TestClock.adjust("999 millis");
+      assert.strictEqual(fake.reads.labels, 1);
+      yield* TestClock.adjust("1 millis");
+      assert.strictEqual(fake.reads.labels, reads === 3 ? 2 : 1);
+      yield* TestClock.adjust("1999 millis");
+      assert.strictEqual(fake.reads.labels, reads === 3 ? 2 : 1);
+      yield* TestClock.adjust("1 millis");
       const result = yield* Fiber.join(fiber);
       assert(result._tag === "Failure");
       assert.strictEqual(result.failure._tag, "AgentFailure");
@@ -634,7 +674,13 @@ describe("current label fallback", () => {
         Effect.forkChild,
       );
       yield* Deferred.await(started);
-      yield* TestClock.adjust("48 seconds");
+      yield* TestClock.adjust("14999 millis");
+      assert.strictEqual(calls, 1);
+      yield* TestClock.adjust("1000 millis");
+      assert.strictEqual(calls, 1);
+      yield* TestClock.adjust("1 millis");
+      assert.strictEqual(calls, 2);
+      yield* TestClock.adjust("32 seconds");
       assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
       assert.strictEqual(calls, 3);
       assert.strictEqual(fake.reads.timeline.length, 0);
@@ -642,23 +688,39 @@ describe("current label fallback", () => {
     }),
   );
 
-  it.effect("bounds each read and retries three timeouts before falling back", () =>
-    Effect.gen(function* () {
-      const started = yield* Deferred.make<void>();
-      const fake = fakeGitHub({
-        timeline: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
-        labels: Effect.succeed(["ready-to-merge"]),
-      });
-      const fiber = yield* verify(attemptOn("local"), review()).pipe(
-        Effect.provide(fake.check),
-        Effect.forkChild,
-      );
-      yield* Deferred.await(started);
-      yield* TestClock.adjust("48 seconds");
-      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
-      assert.strictEqual(fake.reads.timeline.length, 3);
-      assert.strictEqual(fake.reads.labels, 1);
-    }),
+  it.effect.each(["label events", "current labels"] as const)(
+    "allows 15 seconds per read before retrying timeouts on %s",
+    (read) =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const hung = Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+        const fake = fakeGitHub({
+          timeline: () => (read === "label events" ? hung : Effect.fail(refused)),
+          labels: read === "current labels" ? hung : Effect.succeed(["ready-to-merge"]),
+        });
+        const reads = () =>
+          read === "label events" ? fake.reads.timeline.length : fake.reads.labels;
+        const fiber = yield* verify(attemptOn("local"), review()).pipe(
+          Effect.provide(fake.check),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("14999 millis");
+        assert.strictEqual(reads(), 1);
+        yield* TestClock.adjust("1000 millis");
+        assert.strictEqual(reads(), 1);
+        yield* TestClock.adjust("1 millis");
+        assert.strictEqual(reads(), 2);
+        yield* TestClock.adjust("32 seconds");
+        const result = yield* Fiber.join(fiber);
+        assert.strictEqual(result._tag, read === "label events" ? "Success" : "Failure");
+        if (result._tag === "Failure") {
+          assert.strictEqual(result.failure._tag, "AgentFailure");
+          assert.include(result.failure.message, "Could not verify the loop's outcome labels");
+        }
+        assert.strictEqual(fake.reads.timeline.length, read === "label events" ? 3 : 1);
+        assert.strictEqual(fake.reads.labels, read === "label events" ? 1 : 3);
+      }),
   );
 });
 
