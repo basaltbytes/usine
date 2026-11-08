@@ -972,6 +972,34 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("round-trips outcome labels and rejects malformed label requirements", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const file = InstancePath.make("loops/review.md");
+      const parse = (field: string) =>
+        parser.parseLoopFile(
+          file,
+          `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`,
+        );
+      expect((yield* parse("")).outcomeLabels).toEqual([]);
+      const configured = yield* parse("outcome_labels: [review-passed, agent-review-findings]\n");
+      expect(configured.outcomeLabels).toEqual(["review-passed", "agent-review-findings"]);
+      expect((yield* parser.parseLoopFile(file, formatLoop(configured))).outcomeLabels).toEqual(
+        configured.outcomeLabels,
+      );
+      expect(formatLoop(configured)).toContain("outcome_labels:");
+      for (const field of [
+        "outcomeLabels: [passed]\n",
+        "outcome_labels: passed\n",
+        "outcome_labels: ['']\n",
+        "outcome_labels: [' passed ']\n",
+        "outcome_labels: [passed, passed]\n",
+      ]) {
+        expect((yield* parse(field).pipe(Effect.flip)).stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("defaults Loop permissions to write and accepts only read or write", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { Result } from "effect";
 import { entityKey } from "./entities";
-import { formText, readForm } from "./forms";
+import { formText, readForm, withField } from "./forms";
 
 it.each(
   ["10", "-1", "'item.tick.cron == \"0 9 * * *\" ? -1 : 0'"].flatMap((priority) =>
@@ -32,4 +32,21 @@ it("preserves project repository order and lanes through form/text edits", () =>
   expect(Result.isSuccess(draft)).toBe(true);
   if (Result.isFailure(draft)) return;
   expect(readForm(key, formText(key, draft.success))).toEqual(draft);
+});
+
+it("preserves required outcome labels when editing another field in a PR loop", () => {
+  const key = entityKey("loop", "review-pr");
+  const draft = readForm(
+    key,
+    "---\ntrigger: { on: pr, if: 'true' }\nagent: reviewer\noutcome_labels: [ready-to-merge, agent-review-findings]\n---\nReview the pull request.\n",
+  );
+  expect(Result.isSuccess(draft)).toBe(true);
+  if (Result.isFailure(draft)) return;
+  const edited = withField(draft.success, "maxCycles", 5);
+  const exported = formText(key, edited);
+  expect(exported).toContain("outcome_labels:");
+  const restored = readForm(key, exported);
+  expect(restored).toEqual(Result.succeed(edited));
+  if (Result.isFailure(restored)) return;
+  expect(restored.success.outcomeLabels).toEqual(["ready-to-merge", "agent-review-findings"]);
 });

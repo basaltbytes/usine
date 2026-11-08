@@ -1,3 +1,4 @@
+import { completionCheckLayer } from "./completion-check.ts";
 import { GitHubFiles } from "@usine/github/files";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { GitHubChecks } from "@usine/github/checks";
@@ -123,6 +124,7 @@ export const runtimeLayer = (
     Layer.provide(credentials),
     Layer.provide(app),
     Layer.provide(triggerCondition),
+    Layer.provide(completionCheckLayer.pipe(Layer.provide(polling))),
     Layer.provide(attemptRuntime),
     Layer.provide(MarcbachmannCelLayer),
   );

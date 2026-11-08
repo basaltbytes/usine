@@ -23,7 +23,7 @@ import {
   Schema,
 } from "effect";
 import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
-import { StepExecutor, type WorkerLease } from "../step-executor.ts";
+import { CompletionCheck, StepExecutor, type WorkerLease } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
 import type { QueuedEvents } from "../store/queries.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
@@ -171,6 +171,7 @@ export class RunDriver extends Context.Service<
         ]);
       const store = yield* RunStore;
       const executor = yield* StepExecutor;
+      const checkCompletion = yield* CompletionCheck;
       const outputs = yield* StepOutputStore;
       const admission = yield* AttemptAdmission;
       const condition = yield* TriggerCondition;
@@ -458,10 +459,14 @@ export class RunDriver extends Context.Service<
             completion.success.outputs,
           );
         }
-        return yield* store.finishAttempt(
-          attempt,
-          Result.map(completion, (value) => value.result),
-        );
+        const verified =
+          Result.isSuccess(completion) && submission.outcomeLabels.length > 0
+            ? yield* checkCompletion(submission).pipe(
+                Effect.as(completion.success.result),
+                Effect.result,
+              )
+            : Result.map(completion, (value) => value.result);
+        return yield* store.finishAttempt(attempt, verified);
       });
 
       /**

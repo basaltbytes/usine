@@ -125,6 +125,7 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
     ...decision,
     permissions: options.loop.permissions,
     ciPolicy: options.loop.ci,
+    outcomeLabels: options.loop.outcomeLabels,
     cycleLimit: cycleLimitOf(options.loop),
     repository: options.repository.name,
     revision: options.revision,

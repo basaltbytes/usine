@@ -58,6 +58,8 @@ Set `approval` to a boolean CEL condition to gate App-set labels and accept huma
 error requires approval and logs a warning;
 see the [expressions reference](https://docs.usine.dev/reference/configuration/expressions/#label-actors).
 
+Loops can set `outcome_labels: [review-passed, agent-review-findings]` to require a verdict on the current item before an agent completion succeeds. The default empty list disables this check. Matching ignores label name case. See [Write review and fix loops](https://docs.usine.dev/guides/review-fix-loops/).
+
 ## Settings and workers
 
 `settings.max_children` (default 4) limits the child sessions, sequential and concurrent, that one attempt can start. Without a `workers` key, the parser adds a local worker named `local` that runs one attempt at a time. A worker's `kind` (`local`, `exe.dev`, or `ssh`) selects its executor. An SSH worker's `container` (`WorkerContainer`) sets the image and the `cpus`, `memory_mib`, and `pids` limits of each attempt container; each limit is optional, and the executor derives an unset one from the machine at preflight. `shm_size_mib` and `tmpfs_size_mib` set the capacities of `/dev/shm` and `/tmp` in MiB. Each defaults to 2048 and is capped at the container memory limit.

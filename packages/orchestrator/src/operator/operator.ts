@@ -1180,6 +1180,7 @@ const makeOperator = Effect.gen(function* () {
         cycleLimit: cycleLimitOf(loop),
         permissions: loop.permissions,
         ciPolicy: loop.ci,
+        outcomeLabels: loop.outcomeLabels,
         context: AttemptContext.make({
           task: edit.task,
           agent,

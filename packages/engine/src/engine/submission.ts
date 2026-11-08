@@ -11,7 +11,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
-import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
+import { LoopName, ApprovalRequirement, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
@@ -57,6 +57,11 @@ export class Submission extends Schema.Class<
   ciPolicy: Schema.Option(CiPolicy).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
     Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+  /** Required outcome labels captured with the event; empty disables verification. */
+  outcomeLabels: OutcomeLabels.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
   ),
   /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions.pipe(

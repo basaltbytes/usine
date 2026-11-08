@@ -1,7 +1,7 @@
 import { CiPolicy } from "@usine/core/ci";
 import { AgentName } from "@usine/core/agent";
 import { CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
-import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
+import { LoopName, ApprovalRequirement, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { StepName } from "@usine/core/step";
 import { type Brand, Effect, Option, Predicate, Schema } from "effect";
 import {
@@ -70,6 +70,11 @@ export class LoopFile extends Schema.Class<LoopFile, Brand.Brand<"@usine/config/
   ci: Schema.Option(CiPolicy).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
     Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+  /** Labels checked on the current item before an agent completion can succeed. */
+  outcomeLabels: OutcomeLabels.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
   ),
   /** The repository access of the loop's attempts. */
   permissions: LoopPermissions.pipe(

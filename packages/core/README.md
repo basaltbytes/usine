@@ -126,3 +126,5 @@ Run `pnpm --filter @usine/core check` after building dependencies to check TypeS
 ## Step outputs
 
 `@usine/core/step/output` exports `StepOutput`, `StepOutputRef`, their branded fields, and the output limits. `StepResult.outputs` contains metadata only and defaults to an empty array when reading older results. `StepCompletion` (`/step/result`) contains the result and full output documents for executor transport and durable recovery.
+
+`OutcomeLabels` (`/loop`) defines the labels that can prove a loop completed its task. An empty list disables verification; otherwise, any one listed label satisfies the requirement.

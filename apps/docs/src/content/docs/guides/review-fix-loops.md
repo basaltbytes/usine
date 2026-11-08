@@ -38,6 +38,14 @@ Instance admin access, a project, `reviewer` and `developer` agents, repository 
 
 6. Save and resume both loops. Add `ready-for-review` to a test pull request with passing checks.
 
+Set the review loop's `outcome_labels` in its text editor to its two verdict labels:
+
+```yaml
+outcome_labels: [review-passed, agent-review-findings]
+```
+
+Replace `review-passed` with `ready-to-merge` if that is your loop's success label. usine verifies that the pull request has at least one configured label when the agent completes. If neither is present, the attempt and run fail in **Needs attention** with a missing-outcome diagnostic. A success message alone cannot satisfy this requirement. Existing loops use an empty list until you configure their verdict labels.
+
 ## Check the result
 
 A finding starts the fix loop. After its push, the agent session ends and frees its worker slot while the run shows **Waiting for CI**. Green checks on the recorded head apply the completion labels and start review again. Failed checks start the configured fix loop with bounded evidence; inherited completion actions continue through subsequent fixes.

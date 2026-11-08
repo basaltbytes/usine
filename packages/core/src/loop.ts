@@ -20,3 +20,9 @@ export const LOOP_PERMISSIONS = ["write", "read"] as const;
 /** The repository access granted to attempts: `read` allows comments and reviews, while `write` also allows pushes and merges (ADR 0011). */
 export const LoopPermissions = Schema.Literals(LOOP_PERMISSIONS);
 export type LoopPermissions = typeof LoopPermissions.Type;
+
+/** Labels that can prove a loop completed its task; any one label satisfies the requirement. */
+export const OutcomeLabels = Schema.Array(
+  Schema.String.check(Schema.isPattern(/^\S(?:.*\S)?$/u), Schema.isMaxLength(50)),
+).check(Schema.isUnique());
+export type OutcomeLabels = typeof OutcomeLabels.Type;
