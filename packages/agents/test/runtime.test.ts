@@ -176,6 +176,27 @@ it.each([
 });
 
 it.each([
+  ["[usine:provider-capacity]", "AgentCapacityError", "ProviderCapacityFailure"],
+  ["[usine:failed]", "AgentResultError", "AgentFailure"],
+] as const)(
+  "preserves a %s prefix before later blocker and question reports",
+  (marker, tag, failure) => {
+    const sessionId = Option.some(AgentSessionId.make("child-1"));
+    for (const laterMarker of ["[usine:blocked]", "[usine:question]"]) {
+      for (const newline of ["\n", "\r\n"]) {
+        const message = `Harness refused.${newline}${laterMarker}${newline}Report details.`;
+        const report = reportedOutcome(sessionId, ` \n${marker}${newline}${message}\n `);
+        assert(Option.isSome(report));
+        assert.strictEqual(report.value._tag, tag);
+        assert.strictEqual(report.value.message, message);
+        assert.deepStrictEqual(report.value.sessionId, sessionId);
+        assert.strictEqual(toAttemptFailure(report.value)._tag, failure);
+      }
+    }
+  },
+);
+
+it.each([
   ["[usine:blocked]", "AgentBlockedError"],
   ["[usine:question]", "AgentQuestionError"],
 ] as const)("recognizes %s after narration and preserves the report details", (marker, tag) => {
@@ -196,6 +217,7 @@ it("does not treat ordinary narration or an embedded harness failure as a reserv
   for (const answer of [
     "Finished.",
     "The child was [usine:failed] but recovery completed.",
+    "The child was [usine:provider-capacity] but recovery completed.",
     "Published. The earlier [usine:blocked] outcome is resolved.",
     "Answered the earlier [usine:question] and completed the review.",
   ]) {

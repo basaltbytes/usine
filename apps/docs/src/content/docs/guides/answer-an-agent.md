@@ -21,4 +21,6 @@ The unresolved attention entry clears. Marking the question answered or blocker 
 
 An agent ends with `[usine:question]` or `[usine:blocked]` and records the decision needed on the item. usine also recognizes these reserved markers after narration or on a later line in the final answer, so that report still fails the attempt. That outcome suppresses automatic work for the same state. A later changed item state can release suppression. A GitHub reply must change the item after polling observed the question; if both happen within one poll interval, use the explicit action above.
 
+An answer that starts with `[usine:provider-capacity]` or `[usine:failed]` retains that outcome even when a blocker or question marker appears later. Capacity reports use a delayed retry; failure reports require operator attention without suppressing the item.
+
 Claude Code, Codex, and Pi child sessions log these reports at Info with `kind` set to `question` or `blocked`, along with the report's `message` and `sessionId`. These reports still end the attempt with a question or blocker. Harness and infrastructure failures log at Error.

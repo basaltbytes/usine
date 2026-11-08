@@ -376,25 +376,35 @@ export type AgentReport =
 
 /**
  * Returns a blocker or question report from any line of a final answer, including a report header
- * appended to narration before a line break. Other report markers require the start of the answer.
+ * appended to narration before a line break. Failure and capacity prefixes take precedence.
  */
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
   answer: string,
 ): Option.Option<AgentReport> => {
-  const report = answer.match(
-    /^[ \t]*\[usine:(?:blocked|question)\]|\[usine:(?:blocked|question)\](?=[ \t]*(?:\r?\n|\\n|$))/mu,
-  );
-  const trimmed = (report === null ? answer : answer.slice(report.index)).trim();
-  if (trimmed.startsWith(CAPACITY_MARKER)) {
+  const prefix = answer.trim();
+  if (prefix.startsWith(CAPACITY_MARKER)) {
     return Option.some(
       AgentCapacityError.make({
         sessionId,
         message:
-          trimmed.slice(CAPACITY_MARKER.length).trim() || "The model provider is at capacity.",
+          prefix.slice(CAPACITY_MARKER.length).trim() || "The model provider is at capacity.",
       }),
     );
   }
+  if (prefix.startsWith(FAILED_MARKER)) {
+    return Option.some(
+      AgentResultError.make({
+        sessionId,
+        message:
+          prefix.slice(FAILED_MARKER.length).trim() || "Agent reported a failure without details.",
+      }),
+    );
+  }
+  const report = prefix.match(
+    /^[ \t]*\[usine:(?:blocked|question)\]|\[usine:(?:blocked|question)\](?=[ \t]*(?:\r?\n|\\n|$))/mu,
+  );
+  const trimmed = (report === null ? prefix : prefix.slice(report.index)).trim();
   if (trimmed.startsWith(QUESTION_MARKER)) {
     return Option.some(
       AgentQuestionError.make({
@@ -412,15 +422,6 @@ export const reportedOutcome = (
         message:
           trimmed.slice(BLOCKED_MARKER.length).trim() ||
           "Agent reported an unresolved blocker without details.",
-      }),
-    );
-  }
-  if (trimmed.startsWith(FAILED_MARKER)) {
-    return Option.some(
-      AgentResultError.make({
-        sessionId,
-        message:
-          trimmed.slice(FAILED_MARKER.length).trim() || "Agent reported a failure without details.",
       }),
     );
   }
