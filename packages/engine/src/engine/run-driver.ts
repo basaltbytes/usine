@@ -23,7 +23,8 @@ import {
   Schema,
 } from "effect";
 import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
-import { CompletionCheck, StepExecutor, type WorkerLease } from "../step-executor.ts";
+import { CompletionCheck } from "../completion-check.ts";
+import { StepExecutor, type WorkerLease } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
 import type { QueuedEvents } from "../store/queries.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
@@ -38,7 +39,12 @@ import type {
   RunRetryBlockedError,
   RunStoreError,
 } from "./error.ts";
-import type { FinishDecision } from "./lifecycle.ts";
+import {
+  type AttemptResult,
+  discardedSuccess,
+  type FinishDecision,
+  RejectedCompletion,
+} from "./lifecycle.ts";
 import { runIdFor, type Submission } from "./submission.ts";
 import { UnconfirmedStop } from "./unconfirmed-stops.ts";
 
@@ -171,7 +177,7 @@ export class RunDriver extends Context.Service<
         ]);
       const store = yield* RunStore;
       const executor = yield* StepExecutor;
-      const checkCompletion = yield* CompletionCheck;
+      const completionCheck = yield* CompletionCheck;
       const outputs = yield* StepOutputStore;
       const admission = yield* AttemptAdmission;
       const condition = yield* TriggerCondition;
@@ -440,6 +446,38 @@ export class RunDriver extends Context.Service<
         return { lease, open: Option.isSome(reattached) ? openAttempt(runId) : found };
       });
 
+      /**
+       * Returns the result to record for `attempt`. Verifies a successful report against the
+       * Run's outcome labels, unless the Run would not record the success anyway.
+       */
+      const verifiedResult = Effect.fn("RunDriver.verifiedResult")(function* (
+        attempt: Attempt,
+        completion: Result.Result<StepCompletion, AttemptFailure>,
+        submission: Submission,
+      ) {
+        const result: AttemptResult = Result.map(completion, (value) => value.result);
+        if (Result.isFailure(completion) || submission.outcomeLabels.length === 0) return result;
+        const fields = { runId: attempt.runId, attemptId: attempt.id, loop: submission.loop };
+        const current = yield* store
+          .snapshot(attempt.runId)
+          .pipe(retryingStore(attempt.runId, "read the run before verifying its outcome labels"));
+        const discarded = discardedSuccess(current, attempt.id);
+        if (Option.isSome(discarded)) {
+          yield* Effect.logInfo(
+            "Skipped the outcome label check; the Run doesn't record this Attempt's success",
+            { ...fields, reason: discarded.value },
+          );
+          return result;
+        }
+        return yield* completionCheck.verify(attempt, submission, current.attempts).pipe(
+          Effect.match({
+            onSuccess: () => result,
+            onFailure: (failure): AttemptResult =>
+              Result.fail(new RejectedCompletion({ failure, result: completion.success.result })),
+          }),
+        );
+      });
+
       const finishCompletion = Effect.fn("RunDriver.finishCompletion")(function* (
         attempt: Attempt,
         completion: Result.Result<StepCompletion, AttemptFailure>,
@@ -448,25 +486,23 @@ export class RunDriver extends Context.Service<
         yield* Effect.annotateCurrentSpan({ attemptId: attempt.id, runId: attempt.runId });
         if (Result.isSuccess(completion) && completion.success.outputs.length > 0) {
           const item = Schema.decodeOption(GitHubItemKey)(submission.itemKey);
-          yield* outputs.write(
-            StepOutputContext.make({
-              attemptId: attempt.id,
-              runId: attempt.runId,
-              stepName: attempt.stepName,
-              repository: submission.repository,
-              itemNumber: Option.map(item, (key) => key[2]),
-            }),
-            completion.success.outputs,
-          );
+          yield* outputs
+            .write(
+              StepOutputContext.make({
+                attemptId: attempt.id,
+                runId: attempt.runId,
+                stepName: attempt.stepName,
+                repository: submission.repository,
+                itemNumber: Option.map(item, (key) => key[2]),
+              }),
+              completion.success.outputs,
+            )
+            .pipe(retryingStore(attempt.runId, "write the step outputs"));
         }
-        const verified =
-          Result.isSuccess(completion) && submission.outcomeLabels.length > 0
-            ? yield* checkCompletion(submission).pipe(
-                Effect.as(completion.success.result),
-                Effect.result,
-              )
-            : Result.map(completion, (value) => value.result);
-        return yield* store.finishAttempt(attempt, verified);
+        const result = yield* verifiedResult(attempt, completion, submission);
+        return yield* store
+          .finishAttempt(attempt, result)
+          .pipe(retryingStore(attempt.runId, "finish the attempt"));
       });
 
       /**
@@ -500,7 +536,7 @@ export class RunDriver extends Context.Service<
             open.value.attempt,
             open.value.result,
             submission,
-          ).pipe(retryingStore(runId, "finish the attempt"));
+          );
           return finished._tag;
         }
         const started = yield* store
@@ -588,11 +624,7 @@ export class RunDriver extends Context.Service<
               worker,
             }),
           );
-        const finished = yield* finishCompletion(
-          started.execution.attempt,
-          result,
-          submission,
-        ).pipe(retryingStore(runId, "finish the attempt"));
+        const finished = yield* finishCompletion(started.execution.attempt, result, submission);
         return finished._tag;
       });
 

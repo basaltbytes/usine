@@ -1,4 +1,5 @@
 import { harnessesLive } from "@usine/agents/harness/node";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -110,6 +111,7 @@ describe("live exe.dev Worker", () => {
       }).pipe(
         Layer.provide(MarcbachmannCelLayer),
         Layer.provide(alwaysHoldsLayer),
+        Layer.provide(CompletionCheck.unverified),
         Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
         Layer.provide(harnessesLive),
         Layer.provide(hostLoginLockLayer),

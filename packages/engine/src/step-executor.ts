@@ -10,18 +10,10 @@ import { Run, type RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { type Brand, Schema, Context, Effect, type Option, type Result } from "effect";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
+import type { AttemptFailure } from "@usine/core/attempt/failure";
 import type { WorkerName } from "@usine/core/worker";
 import type { StepCompletion } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
-
-/** Verifies outcome labels; failures require operator attention without re-running the agent. */
-export const CompletionCheck = Context.Reference<
-  (submission: Submission) => Effect.Effect<void, AgentFailure>
->("@usine/engine/CompletionCheck", {
-  defaultValue: () => () =>
-    Effect.fail(AgentFailure.make({ message: "Outcome labels require a completion verifier." })),
-});
 
 /** The saved Event, effective task and Agent, and Step of one Attempt. */
 export class StepExecution extends Schema.Class<

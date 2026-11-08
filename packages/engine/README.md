@@ -135,7 +135,7 @@ To handle shutdown during startup, provide `RunEngineShutdown` (`/engine`): a fr
 
 ## Composition
 
-All subpaths are platform-free except the Node adapter `@usine/engine/local-sqlite`, whose `layer` provides SQLite, migrations, and startup recovery. Provide a `StepExecutor` at the composition root:
+All subpaths are platform-free except the Node adapter `@usine/engine/local-sqlite`, whose `layer` provides SQLite, migrations, and startup recovery. Provide a `StepExecutor`, a `TriggerCondition`, and a `CompletionCheck` at the composition root:
 
 ```ts
 import { Effect, Layer, Option } from "effect"
@@ -144,6 +144,7 @@ import { InstanceDirectory } from "@usine/core/instance"
 import { StepCompletion, StepResult } from "@usine/core/step/result"
 import { StepExecutor } from "@usine/engine/step-executor"
 import { TriggerCondition } from "@usine/engine/trigger-condition"
+import { CompletionCheck } from "@usine/engine/completion-check"
 import { layer } from "@usine/engine/local-sqlite"
 import { RunEngine } from "@usine/engine/engine"
 import { CursorStore } from "@usine/engine/cursor"
@@ -173,6 +174,8 @@ const TriggerConditionLive = Layer.succeed(TriggerCondition)({
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
   Layer.provide(StepExecutorLive),
   Layer.provide(TriggerConditionLive),
+  // This host doesn't verify outcome labels; it accepts every completion and logs a warning.
+  Layer.provide(CompletionCheck.unverified),
 )
 
 const program = Effect.gen(function* () {
@@ -266,7 +269,7 @@ Run `pnpm --filter @usine/engine check` after building dependencies to check Typ
 
 The local database composition provides `StepOutputStore` alongside `RunDatabase`. `layerWithDatabase` requires both ports. The engine writes documents before `finishAttempt`; replay preserves one row per output. Run reads and exports include only `StepResult.outputs` refs.
 
-`Submission.outcomeLabels` saves a loop's required verdict labels with its event. Before a successful completion, including a stored completion recovered after a restart, the engine invokes `CompletionCheck` (`/step-executor`). A rejected verdict fails the attempt and run. Already failed attempts retain their original failure. Custom hosts provide this reference to verify labels; a required check without a verifier fails with `AgentFailure`. Retry retains the saved requirement, while Run again uses the loop's current requirement.
+`Submission.outcomeLabels` saves a loop's required verdict labels with its event. Before the engine records a successful completion, including a stored completion recovered after a restart, it calls `CompletionCheck.verify` (`/completion-check`) once, outside the retried store write. The check receives the run's attempt history so retries can reuse a verdict from the same run, including when a retry uses a different Worker's GitHub account. It skips the call when the run wouldn't record the success: the run stopped running, another attempt replaced this one, or the attempt's push failed. A rejected verdict fails the attempt and the run with `AgentFailure` and starts no other attempt; the attempt keeps the report's message and facts as its result. Already failed attempts retain their original failure. `CompletionCheck` is a required service: a host that doesn't verify labels provides `CompletionCheck.unverified`. Retry retains the saved requirement, while Run again uses the loop's current requirement.
 
 ## Memory-kill records
 

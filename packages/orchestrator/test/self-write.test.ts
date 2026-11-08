@@ -1,4 +1,5 @@
 import { idleCiMonitor } from "./support/ci.ts";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
@@ -227,6 +228,7 @@ describe("Board self-writes", () => {
           const engine = localEngineLayer(directory).pipe(
             Layer.provide(executor),
             Layer.provide(alwaysHoldsLayer),
+            Layer.provide(CompletionCheck.unverified),
           );
           const dependencies = Layer.mergeAll(
             testAppLayer,

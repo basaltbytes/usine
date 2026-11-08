@@ -1,4 +1,5 @@
 import { idleCiMonitor } from "./support/ci.ts";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -129,7 +130,11 @@ const gatedExecutor = Layer.succeed(StepExecutor)({
 /** One `usine up` process over the instance database in `directory`. */
 const processLayer = (directory: InstanceDirectory, github: GitHubPolling["Service"]) => {
   const dependencies = Layer.mergeAll(
-    localEngineLayer(directory).pipe(Layer.provide(gatedExecutor), Layer.provide(alwaysHoldsLayer)),
+    localEngineLayer(directory).pipe(
+      Layer.provide(gatedExecutor),
+      Layer.provide(alwaysHoldsLayer),
+      Layer.provide(CompletionCheck.unverified),
+    ),
     MarcbachmannCelLayer,
     ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
     inertLabelReconcilerLayer,

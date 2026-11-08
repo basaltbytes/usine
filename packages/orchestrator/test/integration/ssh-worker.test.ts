@@ -1,4 +1,5 @@
 import { harnessesLive } from "@usine/agents/harness/node";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -293,6 +294,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(CompletionCheck.unverified),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
           Layer.provide(hostLoginLockLayer),
           Layer.provide(fixedConfigLayer(config)),
@@ -682,6 +684,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           Layer.provide(MarcbachmannCelLayer),
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(CompletionCheck.unverified),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
           Layer.provide(hostLoginLockLayer),
           Layer.provide(fixedConfigLayer(config)),

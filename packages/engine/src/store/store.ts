@@ -17,7 +17,7 @@ import {
   type ContainerOutOfMemoryKills,
 } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import { StartedByEditAndRetry, StartedByRetry } from "@usine/core/attempt/start";
 import { Event, EventId } from "@usine/core/event";
@@ -43,7 +43,6 @@ import {
   Layer,
   Match,
   Option,
-  Result,
   Schema,
 } from "effect";
 import { ReadSnapshot, RunDatabase } from "../database/database.ts";
@@ -92,6 +91,7 @@ import {
   suppressionDecision,
   type FinishDecision,
   type Settlement,
+  type AttemptResult,
 } from "../engine/lifecycle.ts";
 
 const OptionalRunId = Schema.Option(RunId).pipe(
@@ -436,12 +436,17 @@ const makeRunStore = Effect.gen(function* () {
     );
     const endedAt = yield* DateTime.now;
     yield* tx.closeAttempt(attempt.id, outcome, endedAt);
-    if (decision._tag === "RetryAttempt") return;
     if (decision._tag === "RunSucceeded" || decision._tag === "RunAwaitingCi") {
       const result = StepResult.make({ ...decision.result, attemptId: Option.some(attempt.id) });
       yield* tx.recordAttemptResult(attempt.id, result);
       yield* tx.updateStepResult(runId, attempt.stepName, result);
+    } else if (Option.isSome(decision.harvested)) {
+      yield* tx.recordAttemptResult(
+        attempt.id,
+        StepResult.make({ ...decision.harvested.value, attemptId: Option.some(attempt.id) }),
+      );
     }
+    if (decision._tag === "RetryAttempt") return;
     yield* tx.updateState(runId, decision.state, endedAt);
   });
 
@@ -717,7 +722,7 @@ const makeRunStore = Effect.gen(function* () {
 
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
-    result: Result.Result<StepResult, AttemptFailure>,
+    result: AttemptResult,
   ) {
     yield* Effect.annotateCurrentSpan({ runId: attempt.runId, attemptId: attempt.id });
     return yield* transact((transaction, record) =>
@@ -1226,11 +1231,11 @@ export class RunStore extends Context.Service<
     /**
      * Records an executor result if `attempt` is still the Run's open Attempt, committing its
      * outcome, the Step result, and the Run state together. A question or blocker also starts the
-     * Loop's suppression of the Item.
+     * Loop's suppression of the Item. A rejected report fails the Attempt, which keeps its result.
      */
     readonly finishAttempt: (
       attempt: Attempt,
-      result: Result.Result<StepResult, AttemptFailure>,
+      result: AttemptResult,
     ) => Effect.Effect<FinishDecision, RunStoreError>;
     /** Returns the newest queued Event of the Run's Loop and Item, or `None` during a suppression. */
     readonly nextQueued: (

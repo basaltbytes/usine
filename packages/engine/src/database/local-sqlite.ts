@@ -38,6 +38,7 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts";
 import { RunReader } from "../run-reader/run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
+import type { CompletionCheck } from "../completion-check.ts";
 import type { TriggerCondition } from "../trigger-condition.ts";
 import { foreignKeys, migrationNameColumn } from "./dialect.ts";
 import { ReadSnapshot, RunDatabase } from "./database.ts";
@@ -182,7 +183,7 @@ export const layer = (
   | StepOutputStore
   | UnconfirmedStops,
   RunEngineError,
-  StepExecutor | TriggerCondition
+  CompletionCheck | StepExecutor | TriggerCondition
 > =>
   layerWithDatabase(database).pipe(
     Layer.merge(

@@ -42,6 +42,7 @@ import {
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import type { TriggerCondition } from "@usine/engine/trigger-condition";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -231,6 +232,7 @@ const runtimeLayer = (
   const engine = localEngineLayer(directory).pipe(
     Layer.provide(executor),
     Layer.provide(condition),
+    Layer.provide(CompletionCheck.unverified),
   );
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const dependencies = Layer.mergeAll(

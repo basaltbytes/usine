@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { assert, it } from "@effect/vitest";
 // The retention assertion must run after Node’s check phase releases native async handles.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -292,6 +293,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
         Layer.provide(fixedInstanceLayer(selectedInstance)),
       ),
     ),
+    Layer.provide(CompletionCheck.unverified),
   );
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const dependencies = Layer.mergeAll(

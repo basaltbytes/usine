@@ -1,4 +1,5 @@
 import { harnessesLive } from "@usine/agents/harness/node";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -72,6 +73,7 @@ const durableRuntime = (
       Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
       Layer.provide(hostLoginLockLayer),
       Layer.provide(alwaysHoldsLayer),
+      Layer.provide(CompletionCheck.unverified),
       Layer.provide(fixedConfigLayer(decodedValue7)),
       Layer.provide(testAppLayer),
     );
