@@ -577,11 +577,18 @@ const isUnverifiedHandoff = Schema.is(UnverifiedHandoff);
  * Runs `verification` within the discovery budget, turns a failed or timed-out read into
  * `GitHubReadFailed`, and logs the outcome.
  */
-const verificationOutcome = <E extends { readonly _tag: string; readonly message: string }>(
+const verificationOutcome = Effect.fn("StepResult.verificationOutcome")(function* <
+  E extends { readonly _tag: string; readonly message: string },
+>(
   spec: HarvestSpec,
   verification: Effect.Effect<ReadonlyArray<PullRequest>, E | HarvestError | UnverifiedHandoff>,
-): Effect.Effect<PullRequestHarvest> =>
-  verification.pipe(
+): Effect.fn.Return<PullRequestHarvest> {
+  yield* Effect.annotateCurrentSpan({
+    attemptId: spec.attemptId,
+    repository: spec.repository,
+    item: Option.getOrNull(Option.map(decodePayloadItem(spec.payload), ({ number }) => number)),
+  });
+  return yield* verification.pipe(
     Effect.timeout(DISCOVERY_BUDGET),
     Effect.mapError((error) =>
       isUnverifiedHandoff(error)
@@ -612,6 +619,7 @@ const verificationOutcome = <E extends { readonly _tag: string; readonly message
       }),
     ),
   );
+});
 
 /**
  * Returns the pull requests at the checkout's final commit, or why the one that CI waits on isn't
@@ -619,12 +627,19 @@ const verificationOutcome = <E extends { readonly _tag: string; readonly message
  * verifies the pull request of the checkout's branch. Otherwise asks GitHub's
  * commit-to-pull-request index, and a failure or timeout leaves no pull request.
  */
-const harvestPullRequests = <E extends { readonly _tag: string; readonly message: string }>(
+const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function* <
+  E extends { readonly _tag: string; readonly message: string },
+>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
   handoff: Option.Option<CiHandoff>,
-): Effect.Effect<PullRequestHarvest> =>
-  Option.match(handoff, {
+): Effect.fn.Return<PullRequestHarvest> {
+  yield* Effect.annotateCurrentSpan({
+    attemptId: spec.attemptId,
+    repository: spec.repository,
+    item: Option.getOrNull(Option.map(decodePayloadItem(spec.payload), ({ number }) => number)),
+  });
+  return yield* Option.match(handoff, {
     onSome: (request) => verificationOutcome(spec, verifyHandoff(spec, run, request)),
     onNone: () =>
       spec.requiresCi
@@ -633,6 +648,7 @@ const harvestPullRequests = <E extends { readonly _tag: string; readonly message
             Effect.map((pullRequests) => Result.succeed(pullRequests)),
           ),
   });
+});
 
 /** The login whose comments harvesting keeps, and its source. */
 interface Author {

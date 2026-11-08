@@ -1,14 +1,15 @@
 import { assert, it } from "@effect/vitest";
 import { AttemptWindows } from "@usine/core/attempt";
 import { ciHandoff, CiPolicy } from "@usine/core/ci";
+import { Event } from "@usine/core/event";
 import { jsonKey } from "@usine/core/json-key";
 import { LoopName } from "@usine/core/loop";
-import { CommitSha } from "@usine/core/repository";
+import { CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { harvestFacts } from "@usine/core/step/harvest";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Fiber, Logger, Option, Result, Schema } from "effect";
+import { Effect, Fiber, Logger, Option, Result, Schema, Tracer } from "effect";
 import { TestClock } from "effect/testing";
 import { Submission } from "../src/engine/submission.ts";
 import type { StepExecution } from "../src/step-executor.ts";
@@ -102,13 +103,26 @@ const onTestClock = <A, E>(effect: Effect.Effect<A, E>) =>
  * Harvests the scripted `checkout` for a CI-requiring Run's first Attempt, as an executor does
  * after the parent reports `message`, and finishes the Attempt with the result.
  */
-const finishHarvested = (message: string, checkout: Checkout) =>
+const finishHarvested = (
+  message: string,
+  checkout: Checkout,
+  revision = RepositoryRevision.make("revision-1"),
+) =>
   withRunStore(
     Effect.gen(function* () {
       const store = yield* RunStore;
       const runId = RunId.make("unverified-handoff");
+      const submitted = submission({ number: 1 });
       yield* store.recordAndClaim(
-        Submission.make({ ...submission({ number: 1 }), ciPolicy: Option.some(policy) }),
+        Submission.make({
+          ...submitted,
+          event: Event.make({
+            ...submitted.event,
+            payload: { number: 1, url: "https://github.com/basaltbytes/usine/issues/1" },
+          }),
+          revision,
+          ciPolicy: Option.some(policy),
+        }),
         runId,
       );
       const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
@@ -116,6 +130,9 @@ const finishHarvested = (message: string, checkout: Checkout) =>
       const execution: StepExecution = started.execution;
       const commands: Array<string> = [];
       const infos: Array<unknown> = [];
+      const warnings: Array<unknown> = [];
+      const spans: Array<Tracer.Span> = [];
+      const native = yield* Effect.tracer;
       const harvest = yield* onTestClock(
         harvestFacts(
           {
@@ -138,8 +155,18 @@ const finishHarvested = (message: string, checkout: Checkout) =>
           Logger.layer([
             Logger.make(({ logLevel, message: logged }) => {
               if (logLevel === "Info") infos.push(logged);
+              if (logLevel === "Warn") warnings.push(logged);
             }),
           ]),
+        ),
+        Effect.withTracer(
+          Tracer.make({
+            span: (options) => {
+              const span = native.span(options);
+              spans.push(span);
+              return span;
+            },
+          }),
         ),
       );
       const decision = yield* store.finishAttempt(
@@ -150,7 +177,16 @@ const finishHarvested = (message: string, checkout: Checkout) =>
       const failure = Option.flatMap(snapshot.attempts[0]?.outcome ?? Option.none(), (outcome) =>
         outcome._tag === "Failed" ? Option.some(outcome.failure) : Option.none(),
       );
-      return { execution, decision, failure, commands, infos, state: snapshot.run.state };
+      return {
+        execution,
+        decision,
+        failure,
+        commands,
+        infos,
+        warnings,
+        spans,
+        state: snapshot.run.state,
+      };
     }),
   );
 
@@ -186,6 +222,46 @@ it.live(
         `CI can't wait on the pushed pull request: no open pull request has the checkout's HEAD ${BASE} as its head`,
       );
       assert.isFalse(finished.commands.some((command) => command.startsWith("gh ")));
+    }),
+);
+
+it.live.each([
+  {
+    checkout: "a fixed commit revision with detached HEAD",
+    revision: RepositoryRevision.make(BASE),
+    branch: "",
+  },
+  {
+    checkout: "a branch revision with a named branch",
+    revision: RepositoryRevision.make(BRANCH),
+    branch: BRANCH,
+  },
+])(
+  "an unchanged checkout at $checkout still waits on its pull request's CI",
+  ({ revision, branch }) =>
+    Effect.gen(function* () {
+      const finished = yield* finishHarvested(
+        "No changes needed.",
+        {
+          head: BASE,
+          branch,
+          origin: [branchAt(BASE)],
+          github: [
+            [
+              BRANCH_PULL_REQUESTS,
+              [Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])])],
+            ],
+          ],
+        },
+        revision,
+      );
+      assert.strictEqual(finished.execution.revision, revision);
+      assert.isTrue(finished.execution.requiresCi);
+      assert.strictEqual(finished.decision._tag, "RunAwaitingCi");
+      assert(finished.state._tag === "AwaitingCi");
+      assert.strictEqual(finished.state.handoff.pullRequest, 815);
+      assert.strictEqual(finished.state.handoff.head, BASE);
+      assert.isTrue(Option.isNone(finished.failure));
     }),
 );
 
@@ -296,6 +372,14 @@ it.live.each([
       );
       assert.strictEqual(tries(finished.commands, PULL_REQUEST), reads);
       assert.notInclude(finished.commands, INDEX);
+      assert.lengthOf(
+        finished.infos.filter(
+          (logged) =>
+            Array.isArray(logged) &&
+            logged[0] === "Could not verify the pull request that CI waits on",
+        ),
+        1,
+      );
     }),
 );
 
@@ -310,6 +394,25 @@ it.live("a CI handoff verifies after a failed pull request read is retried", () 
     assert(finished.state._tag === "AwaitingCi");
     assert.strictEqual(finished.state.handoff.head, HEAD);
     assert.strictEqual(tries(finished.commands, PULL_REQUEST), 2);
+    assert.lengthOf(
+      finished.warnings.filter(
+        (logged) =>
+          Array.isArray(logged) &&
+          logged[0] === "Could not read pull request #815 on GitHub; retrying",
+      ),
+      1,
+    );
+    const discovery = finished.spans.find((span) => span.name === "StepResult.harvestPullRequests");
+    const verification = finished.spans.find(
+      (span) => span.name === "StepResult.verificationOutcome",
+    );
+    assert(discovery && verification);
+    assert.strictEqual(Option.getOrNull(verification.parent), discovery);
+    for (const span of [discovery, verification]) {
+      assert.strictEqual(span.attributes.get("attemptId"), finished.execution.attempt.id);
+      assert.strictEqual(span.attributes.get("repository"), finished.execution.repository);
+      assert.strictEqual(span.attributes.get("item"), 1);
+    }
     // Each read logs the branch's commit on origin against GitHub's lagging pull request head.
     assert.deepStrictEqual(
       finished.infos.filter(
