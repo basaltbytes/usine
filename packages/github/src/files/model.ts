@@ -12,8 +12,19 @@ export class CommitRangeFilesQuery extends Schema.TaggedClass<
   Brand.Brand<"@usine/github/files/CommitRangeFilesQuery">
 >("CommitRangeFilesQuery")("CommitRangeFiles", { base: CommitSha, head: CommitSha }) {}
 
-export const FileChangesQuery = Schema.Union([PullRequestFilesQuery, CommitRangeFilesQuery]);
+export const FileChangesQuery = Schema.Union([
+  PullRequestFilesQuery.pipe(Schema.encodeKeys({ _tag: "scope" })),
+  CommitRangeFilesQuery.pipe(Schema.encodeKeys({ _tag: "scope" })),
+]);
 export type FileChangesQuery = typeof FileChangesQuery.Type;
+
+/** The selected PR range changed before a consistent file list could be read. */
+export class PullRequestFilesChangedError extends Schema.TaggedError<
+  PullRequestFilesChangedError,
+  Brand.Brand<"@usine/github/files/PullRequestFilesChangedError">
+>("@usine/github/PullRequestFilesChangedError")("PullRequestFilesChangedError", {
+  message: Schema.NonEmptyString,
+}) {}
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 

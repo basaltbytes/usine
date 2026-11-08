@@ -306,11 +306,24 @@ const handlers = HttpApiBuilder.group(
                     errorTag: error._tag,
                   }),
                 ),
-                Effect.mapError((error) =>
-                  error._tag === "InvalidGitHubResponseError"
+                Effect.mapError((error) => {
+                  if (error._tag === "PullRequestFilesChangedError")
+                    return OperatorHttpError.make({ error: error._tag, message: error.message });
+                  if (
+                    error._tag === "GitHubApiError" &&
+                    Option.exists(error.status, (status) => status === 404 || status === 422)
+                  )
+                    return OperatorHttpError.make({
+                      error: "FileChangesNotFoundError",
+                      message:
+                        query._tag === "PullRequestFiles"
+                          ? "The pull request or its selected commits are unavailable on GitHub. Refresh the task to load the latest selection."
+                          : "The selected commit comparison is unavailable on GitHub. A commit may be unknown or no longer retained after a force push.",
+                    });
+                  return error._tag === "InvalidGitHubResponseError"
                     ? OperatorHttpError.make({ error: error._tag, message: error.detail })
-                    : operatorFailure(error),
-                ),
+                    : operatorFailure(error);
+                }),
               );
             }),
           ),

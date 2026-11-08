@@ -2,7 +2,7 @@ import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { CommitSha } from "@usine/core/repository";
-import { ChangedFile, FileChanges } from "@usine/github/files";
+import { ChangedFile, FileChanges } from "@usine/github/file-changes";
 import {
   TaskAttemptChangesView,
   TaskItemView,
@@ -49,6 +49,7 @@ let overview: FactoryOverview;
 let fileRequests: Array<string>;
 let fileFailure: boolean;
 let emptyFiles: boolean;
+let changedPath: string;
 const prHead = CommitSha.make("a".repeat(40));
 const attemptHead = CommitSha.make("c".repeat(40));
 const attemptId = AttemptId.make("attempt-changes");
@@ -61,7 +62,7 @@ const changesOf = (head: CommitSha) =>
       ? []
       : [
           ChangedFile.make({
-            path: "src/reader.ts",
+            path: changedPath,
             oldPath: "src/old-reader.ts",
             status: "renamed",
             additions: 1,
@@ -237,6 +238,7 @@ beforeEach(() => {
   fileRequests = [];
   fileFailure = false;
   emptyFiles = false;
+  changedPath = "src/reader.ts";
   taskUnavailable = false;
   taskDelay = undefined;
   taskRequests = [];
@@ -533,13 +535,18 @@ it("shows whole-PR and attempt changes in place and reuses the immutable query",
   }
   expect(fileRequests).toHaveLength(1);
   await changes.getByRole("combobox", { name: "Compare" }).selectOptions(attemptId);
+  await expect.element(changes.getByText("Checks: passed")).not.toBeInTheDocument();
+  await expect.element(changes.getByText("Review: approved")).not.toBeInTheDocument();
   await expect
     .element(changes.getByText("GitHub limited this file list.", { exact: false }))
     .toBeVisible();
   await changes.getByRole("button", { name: /src\/reader.ts/u }).click();
   await expect.element(changes.getByText("attempt change", { exact: false })).toBeVisible();
   expect(fileRequests).toHaveLength(2);
+  expect(fileRequests[1]).toContain("scope=CommitRangeFiles");
   await changes.getByRole("combobox", { name: "Compare" }).selectOptions("whole");
+  await expect.element(changes.getByText("Checks: passed")).toBeVisible();
+  await expect.element(changes.getByText("Review: approved")).toBeVisible();
   await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
   expect(fileRequests).toHaveLength(2);
   await pullRequests.getByText("Changes", { exact: true }).nth(1).click();
@@ -588,7 +595,8 @@ it("shows whole-PR and attempt changes in place and reuses the immutable query",
 });
 
 it("shows file marks and patch availability on a phone without widening the task page", async () => {
-  tasks.set("40", taskWithChanges());
+  changedPath = "src/transcript/reader/really-long-directory/reader-with-a-long-filename.ts";
+  tasks.set("40", TaskView.make({ ...taskWithChanges(), attemptChanges: [] }));
   await mount(40, 390);
   await page
     .getByRole("region", { name: /^Pull requests/u })
@@ -596,7 +604,12 @@ it("shows file marks and patch availability on a phone without widening the task
     .nth(1)
     .click();
   const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
-  await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
+  const path = changes.getByText(changedPath, { exact: true });
+  await expect.element(path).toBeVisible();
+  expect(getComputedStyle(path.element()).whiteSpace).toBe("normal");
+  expect(path.element().scrollWidth).toBeLessThanOrEqual(path.element().clientWidth);
+  await expect.element(changes.getByRole("combobox", { name: "Compare" })).not.toBeInTheDocument();
+  await expect.element(changes.getByText("Whole pull request", { exact: true })).toBeVisible();
   await expect.element(changes.getByText("test", { exact: true })).toBeVisible();
   await expect.element(changes.getByText("generated", { exact: true })).toBeVisible();
   await changes.getByRole("button", { name: /pnpm-lock.yaml/u }).click();

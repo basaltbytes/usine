@@ -12,7 +12,7 @@ A task is named after its originating item: the earliest issue, or else, for a t
 
 A mark is the item's GitHub icon and number in GitHub's state colour: an issue icon or a pull request icon, open, merged, or closed. It links to the item on GitHub, and its tooltip says the kind, number, and state, such as `Pull request #530, closed`. A mark inside a row, card, or entry that opens something else doesn't link. While a state is unknown, the mark shows the kind's icon in the muted colour.
 
-Each pull request on the task page has a **Changes** disclosure. **Compare** selects the whole pull request or an attempt with recorded commits. Files start collapsed, show added and removed counts, and mark test and generated files. Missing and truncated patches and GitHub's file-list limits are reported in the view. The latest polled checks and review decision appear beside the comparison. Commit-based reads remain cached while navigating and do not poll GitHub.
+Each pull request on the task page has a **Changes** disclosure. **Compare** selects the whole pull request or an attempt with new commits between its recorded checkout base and pushed head. It shows plain text when no attempt comparisons are available. Files start collapsed, show added and removed counts, and mark test and generated files. Missing and truncated patches and GitHub's file-list limits are reported in the view. The latest polled checks and review decision appear only for the whole pull request. Long file paths wrap on phones. Older open PRs refresh once on the next poll to record their comparison bases. Commit-based reads remain cached while navigating and do not poll GitHub.
 
 ## Needs attention
 

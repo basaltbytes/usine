@@ -39,7 +39,12 @@ export const harvestedAttemptChanges = (
       onNone: () => [],
       onSome: (result) =>
         result.facts.flatMap((fact) => {
-          if (fact._tag !== "PullRequest" || Option.isNone(fact.base) || Option.isNone(fact.head))
+          if (
+            fact._tag !== "PullRequest" ||
+            Option.isNone(fact.base) ||
+            Option.isNone(fact.head) ||
+            fact.base.value === fact.head.value
+          )
             return [];
           return [
             TaskAttemptChangesView.make({
