@@ -7,8 +7,8 @@ import { StepResult } from "@usine/core/step/result";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
+import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { CompletionCheck } from "@usine/engine/completion-check";
-import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { Executor, ExecutorError } from "@usine/executor";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import {
@@ -124,7 +124,9 @@ it.live(
       const runtime = engineLayer(directory).pipe(
         Layer.provide(scheduler),
         Layer.provide(
-          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+          Layer.succeed(TriggerCondition)({
+            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+          }),
         ),
         Layer.provide(CompletionCheck.unverified),
       );

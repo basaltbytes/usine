@@ -75,8 +75,9 @@ export const triggerEvents = snakeCase.table(
     cycleLimit: integer().$type<CycleLimit>(),
     // The Item's cycle generation, read before fetching the trigger input.
     cycleGeneration: integer().notNull().default(0),
-    // The submitted execution context, never updated. A queued Event is claimed from these
-    // columns; execution reads the Run's copy.
+    // The submitted execution context. A queued Event is claimed from these columns; execution
+    // reads the Run's copy. Claiming a queued Event rewrites its Agent and parent model, with the
+    // Loop settings above, when its trigger recheck returns the Loop's current settings.
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),

@@ -23,6 +23,9 @@ import {
   triggerSubmission,
 } from "../trigger-submission.ts";
 import { LoopEvaluationFailure } from "./evaluation-failures.ts";
+import { CiFixState, needsCiFix } from "./ci-fix-state.ts";
+
+const decodeCiFixState = Schema.decodeUnknownOption(CiFixState);
 
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
@@ -131,16 +134,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
       ),
     );
     revision = RepositoryRevision.make(headCommit);
-    const checks = payload.statusCheckRollup;
-    const checkState = Schema.is(Schema.JsonObject)(checks) ? checks.state : undefined;
-    if (
-      payload.state === "OPEN" &&
-      payload.merged !== true &&
-      (checkState === "FAILURE" ||
-        checkState === "ERROR" ||
-        (checks === null &&
-          (payload.mergeable === "CONFLICTING" || payload.mergeable === "UNKNOWN")))
-    ) {
+    if (Option.exists(decodeCiFixState(payload), needsCiFix)) {
       revokeScope = { openCiHead: headCommit };
     }
   }

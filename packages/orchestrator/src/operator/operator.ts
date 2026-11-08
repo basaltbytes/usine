@@ -95,6 +95,7 @@ import {
   ApprovalNeed,
   ConfigFileNeed,
   CycleBudgetNeed,
+  CycleBudgetResetView,
   BoardProjectionNeed,
   PollFailureNeed,
   PreflightFindingNeed,
@@ -492,6 +493,9 @@ const makeOperatorObservation = Effect.gen(function* () {
     const approvalItems = yield* readApprovalItems(managedRuns, cardedItems).pipe(
       Effect.provideService(ItemProjectionReader, itemReader),
     );
+    const fixRuns = yield* reader.ciFixRuns(
+      managedRuns.filter(({ canResolveFailure }) => canResolveFailure).map(({ id }) => id),
+    );
     for (const run of managedRuns) {
       if (run.state === "Waiting") {
         needsYou.push(
@@ -529,6 +533,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             runId: run.id,
             loop: run.loop,
             failure: attempt.outcome.failure,
+            fixRunId: fixRuns.get(run.id) ?? null,
           }),
         );
       }
@@ -1355,15 +1360,14 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ askId });
     const key = `cycle-budget-reset:${askId}`;
 
-    yield* budgets.reset(
-      askId,
-      Event.make({
-        id: EventId.make(key),
-        dedupKey: DedupKey.make(key),
-        payload: { action: "reset-cycle-budget", askId },
-        receivedAt: yield* DateTime.now,
-      }),
-    );
+    const answer = Event.make({
+      id: EventId.make(key),
+      dedupKey: DedupKey.make(key),
+      payload: { action: "reset-cycle-budget", askId },
+      receivedAt: yield* DateTime.now,
+    });
+    const replayed = yield* budgets.reset(askId, answer);
+    return CycleBudgetResetView.make({ replayedCiFixEventIds: replayed });
   });
 
   return {
@@ -1414,11 +1418,14 @@ export class Operator extends Context.Service<
     ) => Effect.Effect<void, OperatorError>;
     /** Removes the acknowledgement of this revision. */
     readonly undoDismissNeed: (key: AttentionKey) => Effect.Effect<void, OperatorError>;
-    /** Answers the current cycle-budget ask and requests fresh polling. */
+    /**
+     * Answers the current cycle-budget ask, requests fresh polling, and returns the blocked CI fix
+     * events the reset replayed.
+     */
     readonly resetCycleBudget: (
       instance: LoadedInstance,
       askId: CycleBudgetAskId,
-    ) => Effect.Effect<void, OperatorError>;
+    ) => Effect.Effect<CycleBudgetResetView, OperatorError>;
     /**
      * Records the operator's approval of a waiting Run, attributed to the operator login in
      * `usine.yaml` if one is set. Execution still waits for Worker capacity.
@@ -1606,6 +1613,7 @@ export {
 export {
   ApprovalNeed,
   CycleBudgetNeed,
+  CycleBudgetResetView,
   RunFailureNeed,
   PollFailureNeed,
   PreflightFindingNeed,

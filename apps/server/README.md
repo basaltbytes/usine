@@ -78,7 +78,7 @@ Run conversations remember the reader's filter, opened disclosures, and reading 
 
 Direct browser requests for UI routes serve the app shell, so refreshing or sharing a project or configuration URL works. Unknown `/api/*` routes, missing `/assets/*` files, and other file-like paths return 404.
 
-`POST /api/cycle-budgets/reset` takes an ask identity, with the same origin guard and typed errors as other interventions. A stale ask returns 409, and setup mode rejects resets.
+`POST /api/cycle-budgets/reset` takes an ask identity, with the same origin guard and typed errors as other interventions, and returns `replayedCiFixEventIds`, the blocked CI fix events the reset replayed. A repeated answer returns an empty list. A stale ask returns 409, and setup mode rejects resets.
 
 Cycle-budget attention entries identify the most recently blocked loop. A later refused event changes the entry's revision and raises it again after dismissal. Repeated sightings of the recorded events preserve dismissal, and later blocks keep the same ask identity for reset.
 

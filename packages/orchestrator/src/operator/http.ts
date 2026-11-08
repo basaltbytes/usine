@@ -76,6 +76,7 @@ import {
 import { RestartBlock } from "../current-instance/changes.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
+import { CycleBudgetResetView } from "./need.ts";
 import {
   ColdTranscriptRequest,
   EarlierTranscriptRequest,
@@ -556,12 +557,12 @@ export const OperatorApi = operatorApi.add(
         ),
       HttpApiEndpoint.post("resetCycleBudget", "/api/cycle-budgets/reset", {
         payload: Schema.Struct({ askId: CycleBudgetAskId }),
-        success: acknowledged,
+        success: CycleBudgetResetView,
       })
         .annotate(OpenApi.Summary, "Reset an item cycle budget")
         .annotate(
           OpenApi.Description,
-          "Answers an open cycle budget ask and allows the item to run again.",
+          "Answers an open cycle budget ask and allows the item to run again. Returns the blocked CI fix events that the reset replayed; a repeated answer returns an empty list.",
         ),
       HttpApiEndpoint.get("detail", "/api/runs/:runId", {
         params: runParams,

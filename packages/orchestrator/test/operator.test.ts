@@ -76,6 +76,7 @@ import {
 import { StartedByEvent, StartedByInfraRetry } from "@usine/core/attempt/start";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
+  AgentFailure,
   BlockedFailure,
   DefectFailure,
   GitHubPushFailure,
@@ -471,6 +472,8 @@ const testLayer = (
   } = {},
   workerStatus: Layer.Layer<WorkerStatus> = WorkerStatus.idle,
   upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>> = Effect.succeedNone,
+  /** The CI fix Run of each source Run that the reader reports. */
+  ciFixRuns: ReadonlyMap<RunId, RunId> = new Map(),
 ) => {
   const acknowledged: Array<AttentionAcknowledgement> = [];
   const readTranscript = (query: TranscriptQuery) =>
@@ -525,6 +528,7 @@ const testLayer = (
   });
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
+    ciFixRuns: () => Effect.succeed(ciFixRuns),
     latestPoolRateLimits: Effect.sync(() => [
       ...new Map(
         laterReports.flatMap(({ envelope }) => {
@@ -1673,6 +1677,71 @@ describe("Operator", () => {
       }),
   );
 
+  it.effect("links a failed Run in Needs attention to the CI fix Run that carries its work", () =>
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const original = snapshot.attempts[0];
+      assert(original !== undefined);
+      const failed = RunSnapshot.make({
+        ...snapshot,
+        run: Run.make({ ...snapshot.run, state: RunState.Failed.make() }),
+        attempts: [
+          Attempt.make({
+            ...original,
+            outcome: Option.some(
+              AttemptFailed.make({
+                failure: AgentFailure.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
+              }),
+            ),
+          }),
+        ],
+      });
+      const fixRunId = RunId.make("replayed-ci-fix");
+      for (const [fixes, linked] of [
+        [new Map<RunId, RunId>(), null],
+        [new Map([[runId, fixRunId]]), fixRunId],
+      ] as const) {
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+
+          const overview = yield* operator.overview(fixtureInstance);
+
+          const need = overview.needsYou.find((entry) => entry._tag === "RunFailureNeed");
+          assert(need?._tag === "RunFailureNeed");
+          assert.strictEqual(need.fixRunId, linked);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              failed,
+              noCycleBudgets,
+              {
+                retry: () => Effect.void,
+                intervene: () => Effect.void,
+                runAgain: () => Effect.die("unused"),
+              },
+              [],
+              [],
+              [],
+              Effect.succeed([]),
+              {},
+              WorkerStatus.idle,
+              Effect.succeedNone,
+              fixes,
+            ),
+          ),
+        );
+      }
+    }),
+  );
+
   it.effect("clears only resolved failure attention and renews it for a later failed Attempt", () =>
     Effect.gen(function* () {
       const fixtureInstance = yield* instance;
@@ -2527,6 +2596,7 @@ describe("Operator", () => {
             yield* Ref.update(answered, (values) => [...values, { id, event }]);
             yield* Ref.set(asks, []);
             yield* Ref.set(revision, Option.some(ProjectionRevision.make(2)));
+            return [EventId.make("blocked-ci-fix")];
           }),
       });
       yield* Effect.gen(function* () {
@@ -2579,7 +2649,8 @@ describe("Operator", () => {
         const decodedValue30 = yield* operator.overview(fixtureInstance);
         assert(decodedValue30.needsYou.some((entry) => entry.id === need.id));
 
-        yield* operator.resetCycleBudget(fixtureInstance, ask.id);
+        const reset = yield* operator.resetCycleBudget(fixtureInstance, ask.id);
+        assert.deepStrictEqual(reset.replayedCiFixEventIds, [EventId.make("blocked-ci-fix")]);
         const answers = yield* Ref.get(answered);
         assert.strictEqual(answers[0]?.id, ask.id);
         assert.strictEqual(answers[0]?.event.id, `cycle-budget-reset:${ask.id}`);
@@ -3481,6 +3552,7 @@ it.effect("authorizes historical run actions by current repository ownership", (
         reset: () =>
           Effect.sync(() => {
             actions.push("reset");
+            return [];
           }),
       })),
     ).pipe(Layer.provide(noCycleBudgets));

@@ -46,8 +46,8 @@ the original requirement and reason.
 
 ### Supersede, revoke, and reopening
 
-- A newer event supersedes a pending, waiting, or queued run. A running attempt finishes first; then only the item's newest queued event opens.
-- Before it opens, `TriggerCondition` (`/trigger-condition`, supplied by the deployment) re-evaluates the loop's trigger on the item's current state. If it no longer matches, the event is recorded as ignored (revoked) and opens no run. If the item's source no longer has the item, the events are revoked and `ItemProjectionWriter.markGone` marks it gone, so the board stops showing it as open.
+- A newer event supersedes a pending, waiting, or queued run. A running attempt finishes first; then the item's newest queued event that passes its recheck opens.
+- Before it opens, `TriggerCondition` (`/trigger-condition`, supplied by the deployment) re-evaluates the loop's trigger on the item's current state. `Matches` carries the submission that the run opens with; the adapter may replace the loop settings saved with the event, and claiming the event records them. If it no longer matches, the event is recorded as ignored (revoked) and opens no run. If the item's source no longer has the item, the events are revoked and `ItemProjectionWriter.markGone` marks it gone, so the board stops showing it as open.
 - Revoke stops pending, waiting, and queued runs; operator cancel also stops a running attempt. Cancel rejects failed and succeeded runs with `RunOperationRejectedError` and preserves their outcomes. Repeating cancel on a canceled run succeeds without changing it.
 - If `StepExecutor.interrupt` can't confirm that a canceled attempt's parent task stopped, `RunEngine.cancel` fails with `AttemptCancellationError`, and the attempt keeps its run's worker slot. After `StepExecutor.execute` fails, the engine also calls `interrupt` before it closes the attempt, and keeps the slot the same way if the stop isn't confirmed. The engine records a pending stop before calling the executor. While the stop is pending or unconfirmed, no loop starts a new attempt on the item, on any worker; the run's fiber ends instead of reserving a slot. Each reconcile retries the stop, with its reason (`cancel`, `failed`, or `startup`) passed to `interrupt`, releases the slot once the stop is confirmed, and then starts the fibers of the waiting runs. `UnconfirmedStops` (`/engine`) lists these attempts with their loop and item, and `UnconfirmedStops.empty` lists none, for a process that drives no run.
 - The engine records what each loop last saw of an item: a submitted event, or a non-matching sighting. A canceled, superseded, or revoked run keeps its event while the item stays the same, and so does a queued event that a revoke ignored. If the loop saw the item not matching or changed, and it then matches again, the event reopens with the dedup key `["reopened", n, <original key>]`, so the new run gets its own id.
@@ -65,7 +65,7 @@ An attempt ending with `QuestionFailure` or `BlockedFailure` starts a suppressio
 
 ### Run fibers and restarts
 
-Each open run has one fiber, and the run tables are the only durable state. At startup and every `ReconcileInterval` (three minutes by default), the engine starts a fiber for each open run without one, except runs waiting for approval, and opens the newest queued event of an item whose run closed first. A failed store operation is retried four times with exponential backoff. If the engine fails while driving a run (a defect, or a write that still fails), the fiber logs the cause and stops until the next reconcile or restart.
+Each open run has one fiber, and the run tables are the only durable state. At startup and every `ReconcileInterval` (three minutes by default), the engine starts a fiber for each open run without one, except runs waiting for approval, and opens the newest queued event of each loop item without an open run, if the item has a closed run or that event is a CI fix. CI fixes and trigger matches follow the same rule: events are rechecked from newest to oldest. A CI fix that does not match is revoked on its own before the next candidate is rechecked. A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks. The first matching event opens the next run and supersedes older queued events. A missing item revokes the whole queued group. Reconcile skips items with an open run, so their queued CI fixes wait for that run's continuation without a trigger recheck. A failed store operation is retried four times with exponential backoff. If the engine fails while driving a run (a defect, or a write that still fails), the fiber logs the cause and stops until the next reconcile or restart.
 
 After a stop during an attempt, the engine asks `StepExecutor.isLive` whether its parent task survived:
 
@@ -121,7 +121,7 @@ The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, in
 
 A later refused event updates the ask's latest block for that loop in the admission transaction. This changes its attention revision, so a dismissed entry appears again and identifies the blocked loop. Repeated sightings of each loop's recorded event preserve the revision. The ask ID, exhausted loop, counts, and reset identity stay unchanged.
 
-A reset records a fresh polling request. Trigger adapters read `CycleBudgets.generation(itemKey)` before fetching and put it in `Submission.cycleGeneration` and the event identity. Admission supersedes older observations, including in-flight polls and queued events, and new polling creates an event with current settings. A reset also moves the ask’s blocked CI fix events into the new generation and preserves their recorded task, failure diagnostics, completion actions, and execution settings (including approval, agent, models, permissions, CI policy, and cycle limit). Changes to these settings apply to fresh trigger events only. Reconciliation checks their current PR head before admission, including after a restart or when the fix loop has no earlier run on the item. Open-PR revocation preserves CI fixes only for the observed head while checks fail, or while checks are absent and mergeability is `CONFLICTING` or `UNKNOWN`; paused loops keep them queued. Labels, restarts, and loop changes never clear an ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).
+A reset records a fresh polling request. Trigger adapters read `CycleBudgets.generation(itemKey)` before fetching and put it in `Submission.cycleGeneration` and the event identity. Admission supersedes older observations, including in-flight polls and queued events, and new polling creates an event with current settings. A reset also moves the ask’s blocked CI fix events into the new generation, preserves their recorded prompt, failure diagnostics, and completion actions, and returns the moved event IDs. A repeated reset answer returns an empty list. The deployment's `TriggerCondition` gives a queued CI fix its loop's current approval, agent, models, permissions, CI policy, outcome labels, and cycle limit when its run opens. `RunReader.ciFixRuns` maps a source run to its newest admitted CI fix run, omitting canceled and revoked fixes. Reconciliation checks their current PR head before admission, including after a restart or when the fix loop has no earlier run on the item. Open-PR revocation preserves CI fixes only for the observed head while checks fail, or while checks are absent and mergeability is `CONFLICTING` or `UNKNOWN`; paused loops keep them queued. Labels, restarts, and loop changes never clear an ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).
 
 `CycleBudgets.close(askId, "ItemClosed")` closes an ask without a reset, for an item that was closed or merged. It records the ask and the reason in `usine_cycle_ask_closures` and keeps the generation and reservations, so the item's next admission at the limit opens a new ask.
 
@@ -143,7 +143,7 @@ import { WorkerName } from "@usine/core/worker"
 import { InstanceDirectory } from "@usine/core/instance"
 import { StepCompletion, StepResult } from "@usine/core/step/result"
 import { StepExecutor } from "@usine/engine/step-executor"
-import { TriggerCondition } from "@usine/engine/trigger-condition"
+import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition"
 import { CompletionCheck } from "@usine/engine/completion-check"
 import { layer } from "@usine/engine/local-sqlite"
 import { RunEngine } from "@usine/engine/engine"
@@ -168,7 +168,7 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
 
 // Re-checks a queued Event's trigger before its Run opens; this one always matches.
 const TriggerConditionLive = Layer.succeed(TriggerCondition)({
-  recheck: () => Effect.succeed("matches"),
+  recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
 })
 
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(

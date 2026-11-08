@@ -7,6 +7,7 @@ import type { ManagedRepo } from "@usine/config/factory";
 import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
+import type { CiPolicy } from "@usine/core/ci";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleGeneration, type CycleLimit } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
@@ -81,23 +82,66 @@ export const resolveTriggerLoops = Effect.fn("TriggerRouting.resolveLoops")(func
   return resolved;
 });
 
-interface TriggerSubmissionOptions {
-  readonly agent: Agent;
+interface TriggerSubmissionOptions extends ResolvedLoop {
   readonly dedupKey: DedupKey;
   readonly cycleGeneration: CycleGeneration;
   readonly itemKey: ItemKey;
-  readonly loop: LoopFile;
   readonly payload: Schema.Json;
   readonly receivedAt: DateTime.Utc;
   readonly repository: ManagedRepo;
   readonly revision: RepositoryRevision;
   readonly task: AttemptTask;
-  readonly parentModel: Option.Option<ModelId>;
 }
 
 /** Returns the Loop's `max_cycles`, or `None` for a schedule Loop, whose Runs no budget counts. */
 export const cycleLimitOf = (loop: LoopFile): Option.Option<CycleLimit> =>
   loop.trigger.on === "schedule" ? Option.none() : Option.some(loop.maxCycles);
+
+/**
+ * Returns the Submission settings that come from the Loop and its Agent: approval, evaluated
+ * against `payload`, permissions, CI policy, outcome labels, cycle limit, Agent, and parent model.
+ */
+export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
+  expressions: ExpressionEngine["Service"],
+  { agent, loop, parentModel }: ResolvedLoop,
+  repository: Pick<ManagedRepo, "name">,
+  payload: Schema.Json,
+) {
+  const decision = yield* approvalFor(expressions, loop, repository, payload);
+  return {
+    ...decision,
+    permissions: loop.permissions,
+    ciPolicy: loop.ci,
+    outcomeLabels: loop.outcomeLabels,
+    cycleLimit: cycleLimitOf(loop),
+    agent,
+    parentModel,
+  };
+});
+
+const ciInstructions = (policy: CiPolicy): string =>
+  `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${policy.fixLoop}"), timeout_seconds (${policy.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`;
+
+/** Replaces the generated CI suffix while preserving the recorded prompt and failure evidence. */
+export const taskWithCiPolicy = (
+  task: AttemptTask,
+  policy: Option.Option<CiPolicy>,
+  previousPolicy: Option.Option<CiPolicy> = Option.none(),
+): AttemptTask => {
+  const prompt = Option.match(previousPolicy, {
+    onNone: () => task,
+    onSome: (previous) => {
+      const suffix = ciInstructions(previous);
+      return task.endsWith(suffix) ? task.slice(0, -suffix.length) : task;
+    },
+  });
+  return AttemptTask.make(
+    Option.match(policy, {
+      onNone: () => prompt,
+      onSome: (current) => `${prompt}${ciInstructions(current)}`,
+    }),
+  );
+};
 
 /** Builds the Submission that every trigger stream sends to the engine. */
 export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function* (
@@ -105,12 +149,7 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
   options: TriggerSubmissionOptions,
 ) {
   yield* Effect.annotateCurrentSpan({ eventId: options.dedupKey, itemKey: options.itemKey });
-  const decision = yield* approvalFor(
-    expressions,
-    options.loop,
-    options.repository,
-    options.payload,
-  );
+  const settings = yield* loopSettings(expressions, options, options.repository, options.payload);
   return Submission.make({
     event: Event.make({
       id: EventId.make(options.dedupKey),
@@ -122,22 +161,10 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
     cycleGeneration: options.cycleGeneration,
     loop: options.loop.name,
     step: options.loop.step,
-    ...decision,
-    permissions: options.loop.permissions,
-    ciPolicy: options.loop.ci,
-    outcomeLabels: options.loop.outcomeLabels,
-    cycleLimit: cycleLimitOf(options.loop),
+    ...settings,
     repository: options.repository.name,
     revision: options.revision,
-    task: Option.match(options.loop.ci, {
-      onNone: () => options.task,
-      onSome: (ci) =>
-        AttemptTask.make(
-          `${options.task}\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${ci.fixLoop}"), timeout_seconds (${ci.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`,
-        ),
-    }),
-    agent: options.agent,
-    parentModel: options.parentModel,
+    task: taskWithCiPolicy(options.task, options.loop.ci),
   });
 });
 

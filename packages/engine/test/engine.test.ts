@@ -53,13 +53,14 @@ import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
-import type { TriggerRecheck } from "../src/trigger-condition.ts";
+import { TriggerRecheck } from "../src/trigger-condition.ts";
 import { runIdFor, Submission } from "../src/engine/submission.ts";
 import {
   approvalEvent,
   uiApproval,
   type AttemptPlan,
   conditionLayer,
+  stillMatches,
   engineLayer,
   executorLayer,
   slottedExecutor,
@@ -655,7 +656,7 @@ describe("durable run engine", () => {
         const runtime = engineLayer(
           directory,
           executorLayer(plans),
-          conditionLayer(
+          conditionLayer(() =>
             Deferred.succeed(checking, undefined).pipe(Effect.andThen(Deferred.await(answer))),
           ),
         );
@@ -672,7 +673,7 @@ describe("durable run engine", () => {
           const retrying = yield* Effect.forkChild(engine.retry(failing.runId), {
             startImmediately: true,
           });
-          yield* Deferred.succeed(answer, "no-longer-matches");
+          yield* Deferred.succeed(answer, TriggerRecheck.NoLongerMatches());
           yield* Fiber.join(retrying);
           const finished = yield* waitFor(
             engine,
@@ -863,8 +864,8 @@ describe("durable run engine", () => {
             return { ...scripted, interrupt: () => Deferred.succeed(stopped, undefined) };
           }),
         ).pipe(Layer.provide(executorLayer(plans)));
-        const condition = conditionLayer(
-          Ref.update(checks, (count) => count + 1).pipe(Effect.as("matches" as const)),
+        const condition = conditionLayer((queued) =>
+          Ref.update(checks, (count) => count + 1).pipe(Effect.andThen(stillMatches(queued))),
         );
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -1362,7 +1363,7 @@ const flakyEngineLayer = (
 ) =>
   layerWithDatabase(flakyDatabase(directory, failures)).pipe(
     Layer.provide(executor),
-    Layer.provide(conditionLayer(Effect.succeed("matches"))),
+    Layer.provide(conditionLayer(stillMatches)),
     Layer.provide(check),
     Layer.provide(NodeServices.layer),
   );

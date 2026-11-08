@@ -116,6 +116,7 @@ const readerOf = (reports: ReadonlyArray<TranscriptEntry>) =>
     Layer.provide(
       Layer.succeed(RunReader)({
         runForEvent: () => Effect.die("unused"),
+        ciFixRuns: () => Effect.succeed(new Map()),
         latestPoolRateLimits: Effect.succeed([]),
         inspect: () => Effect.die("unused"),
         summary: () => Effect.die("unused"),

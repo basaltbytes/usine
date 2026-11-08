@@ -1098,6 +1098,7 @@ const makeRunStore = Effect.gen(function* () {
           return Option.none<RunId>();
         }
         if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<RunId>();
+        yield* tx.recordSettings(submission);
         return (yield* openRun(tx, submission, runId)).openedRun;
       }),
     );
@@ -1152,6 +1153,8 @@ const makeRunStore = Effect.gen(function* () {
     claimQueued,
     finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
+    queuedOn: (loop: LoopName, itemKey: ItemKey) =>
+      queries.queuedOn(loop, itemKey).pipe(persistence("find queued events on a loop item")),
     parkForApproval,
     pendingCiFixes: queries.pendingCiFixes().pipe(persistence("list pending CI fixes")),
     pendingContinuations: queries
@@ -1223,7 +1226,10 @@ export class RunStore extends Context.Service<
       live: Option.Option<AttemptId>,
     ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed | RunClosed, RunStoreError>;
     readonly cancel: (runId: RunId) => Effect.Effect<CancelOutcome, RunStoreError>;
-    /** Opens the queued Event's Run as `runId` if the Item has no open Run, or returns `None`. */
+    /**
+     * Opens the queued Event's Run as `runId` if the Item has no open Run, or returns `None`. The
+     * Event keeps the Loop settings of `submission`, which a recheck may have refreshed.
+     */
     readonly claimQueued: (
       submission: Submission,
       runId: RunId,
@@ -1241,14 +1247,24 @@ export class RunStore extends Context.Service<
     readonly nextQueued: (
       runId: RunId,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
+    /** Returns the current unclaimed Events of the Loop's Item, newest first. */
+    readonly queuedOn: (
+      loop: LoopName,
+      itemKey: ItemKey,
+    ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
     /** Moves a pending Run to `Waiting` and returns the Run's state. */
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
     /**
      * The closed Runs whose Item still has a queued Event that no continuation opened or revoked,
-     * excluding Items under a suppression.
+     * and whose newest queued Event is a trigger match. Excludes Items with an open Run, an open
+     * budget ask, or a suppression.
      */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
-    /** Unclaimed CI fixes in the current cycle generation, excluding open budget asks and suppressions. */
+    /**
+     * The queues of the current cycle generation whose newest Event is an unclaimed CI fix, with
+     * every queued Event of the Loop's Item. Excludes Items with an open Run, an open budget ask,
+     * or a suppression.
+     */
     readonly pendingCiFixes: Effect.Effect<ReadonlyArray<QueuedEvents>, RunStoreError>;
     /** The open Runs that a fiber drives: pending, queued, or running, but not waiting for approval. */
     readonly runIdsToDrive: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;

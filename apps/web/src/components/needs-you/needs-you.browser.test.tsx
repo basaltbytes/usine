@@ -23,7 +23,9 @@ import { RunId } from "@usine/core/run";
 import {
   RunSummaryView,
   AttemptSummaryView,
+  AgentFailureView,
   ApprovalNeed,
+  RunFailureNeed,
   CycleBudgetNeed,
   UnresponsiveWorkerNeed,
   UnconfiguredWorkerNeed,
@@ -313,6 +315,54 @@ it("shows a silent worker's last answer and opens an affected run", async () => 
   await held.getByRole("button", { name: /^Actions for/ }).click();
   await page.getByRole("menuitem", { name: "approval/project · start-dev · attempt 1" }).click();
   await expect.element(page.getByRole("dialog")).toBeVisible();
+});
+
+it("names the CI fix run that continues a failed run's work and opens it", async () => {
+  const fixRunId = RunId.make("fix-run-1047");
+  const need = RunFailureNeed.make({
+    id: "run-failure:approval-run:attempt-1",
+    repository,
+    runId,
+    loop,
+    failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
+    fixRunId,
+  });
+  await commands.approvalResponses(
+    overview([need]),
+    overview([need]),
+    detail(running),
+    detail(running),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  const held = entry("fix run fix-run- continues the work");
+  await expect.element(held).toBeVisible();
+  await held.getByRole("button", { name: /^Actions for/ }).click();
+  await page.getByRole("menuitem", { name: "Open fix run", exact: true }).click();
+  await expect.element(page.getByRole("dialog")).toBeVisible();
+});
+
+it("offers no fix run for a failed run without one", async () => {
+  const need = RunFailureNeed.make({
+    id: "run-failure:approval-run:attempt-1",
+    repository,
+    runId,
+    loop,
+    failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
+  });
+  await commands.approvalResponses(
+    overview([need]),
+    overview([need]),
+    detail(running),
+    detail(running),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  const held = entry("start-dev");
+  await expect.element(held).toBeVisible();
+  await expect.element(held.getByText(/continues the work/)).not.toBeInTheDocument();
+  await held.getByRole("button", { name: /^Actions for/ }).click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Open fix run" }))
+    .not.toBeInTheDocument();
 });
 
 const bell = (count: number) =>

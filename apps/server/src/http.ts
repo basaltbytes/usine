@@ -377,7 +377,7 @@ const handlers = HttpApiBuilder.group(
         fromBackend((backend) => backend.undoDismissNeed(payload)).pipe(acknowledge),
       )
       .handle("resetCycleBudget", ({ payload }) =>
-        fromBackend((backend) => backend.resetCycleBudget(payload.askId)).pipe(acknowledge),
+        fromBackend((backend) => backend.resetCycleBudget(payload.askId)),
       )
       .handle("detail", ({ params, query }) =>
         fromBackend((backend) => backend.detail(params.runId, query)),

@@ -4,10 +4,11 @@ import { BillingPool, PoolLogin } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
+import { EventId } from "@usine/core/event";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { type Brand, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
@@ -55,6 +56,8 @@ export class RunFailureNeed extends Schema.TaggedClass<
   loop: LoopName,
   /** The unresolved failure from the latest failed attempt. */
   failure: FailureView,
+  /** The CI fix Run admitted for this Run's failed head, which carries the work on, or null. */
+  fixRunId: Schema.NullOr(RunId).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
 }) {}
 
 /** A repository poll failure that needs operator attention. */
@@ -211,6 +214,15 @@ export class CycleBudgetNeed extends Schema.TaggedClass<
   itemLabel: Schema.String,
   /** The GitHub item URL, or null when the item key cannot be decoded. */
   itemUrl: Schema.NullOr(Schema.String),
+}) {}
+
+/** The outcome of a cycle-budget reset. */
+export class CycleBudgetResetView extends Schema.Class<
+  CycleBudgetResetView,
+  Brand.Brand<"@usine/orchestrator/operator/need/CycleBudgetResetView">
+>("@usine/orchestrator/CycleBudgetResetView")({
+  /** The blocked CI fix events that the reset replayed; empty when there was nothing to replay. */
+  replayedCiFixEventIds: Schema.Array(EventId),
 }) {}
 
 /** A worker excluded from scheduling after its startup preflight failed. */

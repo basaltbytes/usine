@@ -234,6 +234,7 @@ const testLayer = (
 ) => {
   const reader = Layer.succeed(RunReader)({
     runForEvent: () => Effect.die("unused"),
+    ciFixRuns: () => Effect.succeed(new Map()),
     latestPoolRateLimits: Effect.succeed([]),
     inspect: () => Ref.get(current),
     summary: () => Effect.die("unused"),

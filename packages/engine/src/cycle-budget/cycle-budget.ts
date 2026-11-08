@@ -2,7 +2,7 @@ import { ChangeBus } from "@usine/core/changes";
 import { changeTransaction } from "../store/changes.ts";
 import { CycleBudgetAsk, CycleBudgetAskId, CycleGeneration } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
-import { Event } from "@usine/core/event";
+import { Event, type EventId } from "@usine/core/event";
 import * as RunState from "@usine/core/run/state";
 import { and, eq, inArray, isNotNull, notExists } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
@@ -46,11 +46,18 @@ export class CycleBudgets extends Context.Service<
     ) => Effect.Effect<CycleGeneration, EnginePersistenceError>;
     /** Returns all unanswered cycle-budget Asks, including those for Items whose labels no longer match. */
     readonly asks: Effect.Effect<ReadonlyArray<CycleBudgetAsk>, EnginePersistenceError>;
-    /** Records the answer to the Ask and requests fresh trigger evaluation; repeated calls are idempotent. */
+    /**
+     * Records the answer to the Ask and requests fresh trigger evaluation. Returns the blocked CI
+     * fix Events that the reset moved into the new cycle generation. Repeated calls are idempotent
+     * and return an empty list.
+     */
     readonly reset: (
       askId: CycleBudgetAskId,
       answer: Event,
-    ) => Effect.Effect<void, EnginePersistenceError | CycleBudgetResetRejectedError>;
+    ) => Effect.Effect<
+      ReadonlyArray<EventId>,
+      EnginePersistenceError | CycleBudgetResetRejectedError
+    >;
     /**
      * Closes the Ask without a reset and records `reason`. The Item keeps its cycle generation and
      * reservations, so its next admission at the limit opens a new Ask. Returns `false` if the Ask
@@ -107,7 +114,7 @@ export class CycleBudgets extends Context.Service<
         answer: Event,
       ) {
         yield* Effect.annotateCurrentSpan({ askId, eventId: answer.id });
-        yield* transact((transaction, record) =>
+        return yield* transact((transaction, record) =>
           Effect.gen(function* () {
             const previous = yield* transaction
               .select()
@@ -119,7 +126,7 @@ export class CycleBudgets extends Context.Service<
                 askId,
                 eventId: answer.id,
               });
-              return;
+              return [];
             }
 
             const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
@@ -223,6 +230,7 @@ export class CycleBudgets extends Context.Service<
               completedCycles: ask.completedCycles,
               counts: ask.counts,
             });
+            return replayed.map(({ eventId }) => eventId);
           }),
         ).pipe(persistence);
       });

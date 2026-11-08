@@ -1,18 +1,16 @@
-import { jsonKey } from "@usine/core/json-key";
 import { ConfigParser } from "@usine/config/parser";
 import type { LoadedInstance } from "@usine/config/instance";
 import { matchesLoop } from "@usine/config/project";
 import { repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
 import { CiFailed, CiHandedOff, CiPassed, CiSuperseded, CiTimedOut } from "@usine/core/ci";
-import { DedupKey } from "@usine/core/event";
 import {
   canonicalRepositoryName,
   type RepositoryName,
   RepositoryRevision,
 } from "@usine/core/repository";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { Submission, RunEngine, EnginePersistenceError } from "@usine/engine/engine";
+import { ciFixDedupKey, Submission, RunEngine, EnginePersistenceError } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
@@ -104,8 +102,7 @@ export class CiMonitor extends Context.Service<
         if (endedAt === undefined || Option.isNone(endedAt))
           return yield* Effect.die("A CI wait has no ended attempt");
         const observed = yield* checks.snapshot(wait.repository, pullRequest);
-        const dedupKeyJson = jsonKey(["ci-failure", runId, head]);
-        const dedupKey = DedupKey.make(dedupKeyJson);
+        const dedupKey = ciFixDedupKey(runId, head);
         const admitted = yield* reader.runForEvent(dedupKey);
         if (Option.isSome(admitted)) {
           yield* Effect.logInfo("CI fix event admitted; source hands off to its recorded run", {

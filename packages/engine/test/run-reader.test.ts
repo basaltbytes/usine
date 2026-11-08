@@ -11,8 +11,10 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { TestClock } from "effect/testing";
+import { ciFixDedupKey } from "../src/engine/submission.ts";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { EffectLogger } from "drizzle-orm/effect-core";
@@ -25,7 +27,7 @@ import { RunEngine, Submission } from "../src/engine/engine.ts";
 import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
-import { TriggerCondition } from "../src/trigger-condition.ts";
+import { TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 import {
   type AttemptPlan,
   engineLayer,
@@ -77,7 +79,9 @@ describe("Run evidence reader", () => {
       const writer = layer(directory).pipe(
         Layer.provide(executor),
         Layer.provide(
-          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+          Layer.succeed(TriggerCondition)({
+            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+          }),
         ),
         Layer.provide(CompletionCheck.unverified),
       );
@@ -271,6 +275,109 @@ describe("Run Events", () => {
     ),
   );
 });
+
+it.effect("maps a source Run to its newest admitted CI fix across failed heads", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        const sourceId = RunId.make("source-run");
+        const unrelatedId = RunId.make("unrelated-source");
+        const fix = (number: number, source: RunId, head: string) => {
+          const original = supportSubmission({ number, approval: "required" });
+          const failedHead = CommitSha.make(head.repeat(40));
+          const key = ciFixDedupKey(source, failedHead);
+          return Submission.make({
+            ...original,
+            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
+            ciFailureHead: Option.some(failedHead),
+          });
+        };
+        yield* TestClock.setTime(1000);
+        const first = yield* engine.submit(
+          Submission.make({ ...fix(1, sourceId, "a"), itemKey: ItemKey.make("first-fix") }),
+        );
+        assert(first._tag === "Claimed");
+        assert.strictEqual((yield* reader.ciFixRuns([sourceId])).get(sourceId), first.runId);
+        yield* TestClock.setTime(2000);
+        const second = yield* engine.submit(fix(2, sourceId, "b"));
+        assert(second._tag === "Claimed");
+        yield* TestClock.setTime(3000);
+        const unrelated = yield* engine.submit(
+          Submission.make({
+            ...fix(3, unrelatedId, "c"),
+            itemKey: ItemKey.make("other-item"),
+          }),
+        );
+        assert(unrelated._tag === "Claimed");
+
+        const links = yield* reader.ciFixRuns([
+          sourceId,
+          unrelatedId,
+          RunId.make("unknown-source"),
+        ]);
+        assert.deepStrictEqual(
+          links,
+          new Map([
+            [sourceId, second.runId],
+            [unrelatedId, unrelated.runId],
+          ]),
+        );
+        const unknownSources = Array.from({ length: 1100 }, (_, index) =>
+          RunId.make(index.toString(16).padStart(32, "0")),
+        );
+        const manyLinks = yield* reader.ciFixRuns([
+          sourceId,
+          ...unknownSources,
+          unrelatedId,
+          sourceId,
+        ]);
+        assert.deepStrictEqual(manyLinks, links);
+        const empty = yield* reader.ciFixRuns([]);
+        assert.deepStrictEqual(empty, new Map());
+        yield* engine.drain;
+      }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+    }),
+  ),
+);
+
+it.live.each(["canceled", "revoked"] as const)(
+  "omits a %s CI fix from its source Run's links",
+  (state) =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const sourceId = RunId.make("source-with-canceled-fix");
+          const original = supportSubmission({ number: 1, approval: "required" });
+          const head = CommitSha.make("a".repeat(40));
+          const key = ciFixDedupKey(sourceId, head);
+          const fix = Submission.make({
+            ...original,
+            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
+            ciFailureHead: Option.some(head),
+          });
+          const admitted = yield* engine.submit(fix);
+          assert(admitted._tag === "Claimed");
+          yield* waitFor(engine, admitted.runId, ({ run }) => run.state._tag === "Waiting");
+          assert.strictEqual((yield* reader.ciFixRuns([sourceId])).get(sourceId), admitted.runId);
+
+          if (state === "canceled") yield* engine.cancel(admitted.runId);
+          else yield* engine.revoke(fix.loop, fix.itemKey);
+
+          const stopped = yield* engine.inspect(admitted.runId);
+          assert.strictEqual(stopped.run.state._tag, "Canceled");
+          const links = yield* reader.ciFixRuns([sourceId]);
+          assert.deepStrictEqual(links, new Map());
+          yield* engine.drain;
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+);
 
 describe("Attempts by Worker", () => {
   it("counts a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {

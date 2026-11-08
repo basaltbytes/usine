@@ -497,6 +497,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
 
 export {
   Submission,
+  ciFixDedupKey,
   type RevokeScope,
   Claimed,
   Queued,

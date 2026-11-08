@@ -28,6 +28,7 @@ import {
   engineLayer,
   slottedExecutor,
   stepResult,
+  stillMatches,
   submission,
   waitFor,
   withInstance,
@@ -128,12 +129,7 @@ it.live.each(["missing", "present", "blocked", "disabled"] as const)(
           assert.deepStrictEqual(attempt.result.value.attemptId, Option.some(attempt.id));
         }).pipe(
           Effect.provide(
-            engineLayer(
-              directory,
-              worker.executor,
-              conditionLayer(Effect.succeed("matches")),
-              check,
-            ),
+            engineLayer(directory, worker.executor, conditionLayer(stillMatches), check),
           ),
         );
       }),
@@ -227,12 +223,7 @@ it.live.each(["automatic", "operator"] as const)(
           );
         }).pipe(
           Effect.provide(
-            engineLayer(
-              directory,
-              worker.executor,
-              conditionLayer(Effect.succeed("matches")),
-              check,
-            ),
+            engineLayer(directory, worker.executor, conditionLayer(stillMatches), check),
           ),
         );
       }),
@@ -273,12 +264,7 @@ it.live("checks saved outcome labels before accepting a completion recovered aft
         );
       }).pipe(
         Effect.provide(
-          engineLayer(
-            directory,
-            executor,
-            conditionLayer(Effect.succeed("matches")),
-            rejecting(verified),
-          ),
+          engineLayer(directory, executor, conditionLayer(stillMatches), rejecting(verified)),
         ),
       );
     }),
@@ -328,12 +314,7 @@ it.live("skips the check when a refused push already fails the Attempt", () =>
         assert.deepStrictEqual(verified, []);
       }).pipe(
         Effect.provide(
-          engineLayer(
-            directory,
-            executor,
-            conditionLayer(Effect.succeed("matches")),
-            rejecting(verified),
-          ),
+          engineLayer(directory, executor, conditionLayer(stillMatches), rejecting(verified)),
         ),
       );
     }),

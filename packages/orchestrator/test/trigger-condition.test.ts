@@ -132,7 +132,7 @@ describe("TriggerCondition", () => {
       const recheck = yield* condition.recheck(
         submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(recheck, "matches");
+      assert.strictEqual(recheck._tag, "Matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 
@@ -142,7 +142,7 @@ describe("TriggerCondition", () => {
       const recheck = yield* condition.recheck(
         submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(recheck, "item-gone");
+      assert.strictEqual(recheck._tag, "ItemGone");
     }).pipe(
       Effect.provide(
         layerWith({
@@ -184,7 +184,7 @@ describe("TriggerCondition", () => {
       assert.isUndefined(fiber.pollUnsafe());
       yield* TestClock.adjust("1 second");
       const fiberResult = yield* Fiber.join(fiber);
-      assert.strictEqual(fiberResult, "matches");
+      assert.strictEqual(fiberResult._tag, "Matches");
       const interruptedDone = yield* Deferred.isDone(interrupted);
       assert.isTrue(interruptedDone);
     }),
@@ -197,7 +197,7 @@ describe("TriggerCondition", () => {
       const recheck = yield* condition.recheck(
         submissionFor(fixtureScheduleLoop.name, '["github","basaltbytes/usine"]'),
       );
-      assert.strictEqual(recheck, "matches");
+      assert.strictEqual(recheck._tag, "Matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 
@@ -224,13 +224,13 @@ describe("TriggerCondition", () => {
         yield* Effect.gen(function* () {
           const condition = yield* TriggerCondition;
           const triggerMatch = yield* condition.recheck(submission);
-          assert.strictEqual(triggerMatch, "matches");
+          assert.strictEqual(triggerMatch._tag, "Matches");
           yield* SubscriptionRef.set(
             current,
             LoadedInstance.make({ ...fixtureInstance, loops: [issueLoop] }),
           );
           const currentTriggerMatch = yield* condition.recheck(submission);
-          assert.strictEqual(currentTriggerMatch, "no-longer-matches");
+          assert.strictEqual(currentTriggerMatch._tag, "NoLongerMatches");
         }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));
       }),
   );
@@ -241,7 +241,7 @@ describe("TriggerCondition", () => {
       const recheck = yield* condition.recheck(
         submissionFor(LoopName.make("retired"), '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(recheck, "no-longer-matches");
+      assert.strictEqual(recheck._tag, "NoLongerMatches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 });
