@@ -196,7 +196,13 @@ const messageKey = (message: Schema.Json): string => {
 const UserInput = Schema.Struct({ type: Schema.Literal("user") });
 
 /** Returns the index of the first line break, or -1. Like the SDK's `readline`, `\r` also ends a line. */
-const lineEnd = (bytes: Uint8Array) => bytes.findIndex((byte) => byte === 10 || byte === 13);
+const lineEnd = (bytes: Uint8Array) => {
+  const lf = bytes.indexOf(10);
+  const cr = bytes.indexOf(13);
+  if (lf < 0) return cr;
+  if (cr < 0) return lf;
+  return Math.min(lf, cr);
+};
 
 interface PendingOutput {
   readonly key: string;

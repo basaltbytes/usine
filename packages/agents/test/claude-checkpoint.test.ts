@@ -98,5 +98,12 @@ it.effect("ends a stdout line at a lone carriage return, as the SDK does", () =>
     assert.strictEqual(read, noise.length);
     const handled = yield* checkpoint.handled(message);
     assert.deepStrictEqual(handled, { bytes: line.length, covered: true });
+    const beforeProgress = yield* checkpoint.read(Buffer.concat([line, noise]));
+    assert.strictEqual(beforeProgress, 0);
+    const handledBeforeProgress = yield* checkpoint.handled(message);
+    assert.deepStrictEqual(handledBeforeProgress, {
+      bytes: line.length + noise.length,
+      covered: true,
+    });
   }),
 );
