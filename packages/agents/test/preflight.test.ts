@@ -9,7 +9,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
-import { Deferred, Effect, Fiber, Layer, Option, Schema, Sink, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { TestClock } from "effect/testing";
 // The Node process boundary uses native process handles and synchronous subprocess operations.
@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/harness/codex/app-server.ts";
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/harness/pi/sdk.ts";
+import { probeOutput } from "../src/preflight/command.ts";
 import { CODEX_CLI_VERSION } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
 
@@ -646,5 +647,22 @@ describe("worker harness readiness", () => {
         ),
       ),
     ),
+  );
+
+  it.effect("refuses an environment for a remote readiness command before running it", () =>
+    Effect.gen(function* () {
+      const exit = yield* probeOutput(
+        remote,
+        { GH_HOST: "github.example" },
+        Harness.make("codex"),
+        "binary",
+        "codex",
+        ["--version"],
+      ).pipe(Effect.exit);
+      assert(Exit.isFailure(exit));
+      const defect = Cause.squash(exit.cause);
+      assert(defect instanceof Error);
+      assert.strictEqual(defect.message, "Cannot pass GH_HOST to a remote command on its command line");
+    }).pipe(Effect.provide(commands({}))),
   );
 });

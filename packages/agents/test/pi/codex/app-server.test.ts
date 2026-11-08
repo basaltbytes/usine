@@ -533,7 +533,7 @@ describe("Codex app-server transport", () => {
     });
     const stdin = { stream: Stream.empty, endOnDone: true };
     const command = codexAppServerCommand(
-      { ...client(host, { GH_HOST: "github.int.exe.xyz" }), sessionId: Option.none() },
+      { ...client(host, {}), sessionId: Option.none() },
       stdin,
     );
     assert.strictEqual(command._tag, "StandardCommand");
@@ -544,7 +544,7 @@ describe("Codex app-server transport", () => {
       "BatchMode=yes",
       "worker.exe.xyz",
       "--",
-      `cd '/' && export GH_HOST='github.int.exe.xyz' && exec 'codex' 'app-server' '--stdio' '-c' 'projects={"/workspace/repo"={trust_level="untrusted"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'`,
+      `cd '/' && exec 'codex' 'app-server' '--stdio' '-c' 'projects={"/workspace/repo"={trust_level="untrusted"}}' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'`,
     ]);
     assert.deepStrictEqual(command.options.env, host.sshEnvironment);
     assert.strictEqual(command.options.extendEnv, false);

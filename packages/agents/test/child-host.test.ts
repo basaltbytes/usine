@@ -27,7 +27,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PROCESS_OWNER } from "../src/child-host/supervisor.ts";
-import { CHILD_LIFELINE, startChildProcess } from "../src/child-host/node.ts";
+import { CHILD_LIFELINE, childProcessCommand, startChildProcess } from "../src/child-host/node.ts";
 import { signal } from "../src/child-host/worker/files.ts";
 import { claudeOutputCheckpoint } from "../src/harness/claude/sdk.ts";
 import { ChildSessionLifecycle } from "../src/runtime.ts";
@@ -220,6 +220,22 @@ describe("remote shell commands", () => {
     assert.throws(
       () => remoteLine({ environment: { "A;B": "x" }, command: "true", args: [] }),
       /Cannot export A;B/u,
+    );
+  });
+
+  it("refuses an environment for a remote child without a session", () => {
+    assert.throws(
+      () =>
+        childProcessCommand(
+          {
+            host,
+            cwd: "/workspace/repo",
+            environment: { GH_HOST: "github.example" },
+            sessionId: Option.none(),
+          },
+          { command: "codex", args: ["app-server"], cwd: "/" },
+        ),
+      /Cannot pass GH_HOST to a remote command/u,
     );
   });
 });
