@@ -42,7 +42,8 @@ const fetchUpstream = async (consequence) => {
   } catch (error) {
     const cause = error instanceof Error ? error.cause : undefined;
     reason =
-      cause instanceof Error ? cause.message : error instanceof Error ? error.message : `${error}`;
+      (cause instanceof Error && (cause.message || cause.code)) ||
+      (error instanceof Error ? error.message || error.name : `${error}`);
   }
   console.error(`upstream fetch failed: ${reason}; ${consequence}`);
   process.exit(UPSTREAM_UNAVAILABLE);
