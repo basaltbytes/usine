@@ -116,6 +116,43 @@ describe("emitDeclarations", () => {
     expect(declarations.get("TextItem")).toBe('Schema.Struct({"text": Schema.String})');
   });
 
+  it.each(["oneOf", "anyOf"])(
+    "keeps %s nullable objects with an ordinary type field",
+    (keyword) => {
+      for (const type of [{ type: "string" }, ref("Kind")]) {
+        for (const branches of [
+          [ref("Attachment"), { type: "null" }],
+          [{ type: "null" }, ref("Attachment")],
+        ]) {
+          const definitions = {
+            Root: { [keyword]: branches },
+            Attachment: { type: "object", properties: { type }, required: ["type"] },
+            Kind: { enum: ["a", "b"], type: "string" },
+          };
+          const declarations = emitDeclarations(definitions, ["Root"]);
+          expect(declarations.get("Root")).toBe(
+            branches[0].$ref
+              ? "Schema.Union([Attachment, Schema.Null])"
+              : "Schema.Union([Schema.Null, Attachment])",
+          );
+          expect(declarations.get("Attachment")).toBe(
+            `Schema.Struct({"type": ${type.$ref ? "Kind" : "Schema.String"}})`,
+          );
+        }
+      }
+    },
+  );
+
+  it("still validates tagged variants when a union also allows null", () => {
+    const definitions = {
+      Item: { anyOf: [ref("PlanItem"), variant("OtherItem", "other"), { type: "null" }] },
+      PlanItem: { ...variant("PlanItem", "plan"), properties: { type: { type: "string" } } },
+    };
+    expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+      "Variant PlanItem needs an inline single-value type tag",
+    );
+  });
+
   it("rejects reference wrappers with sibling constraints", () => {
     for (const wrapper of [ref("PlanItem"), { allOf: [ref("PlanItem")] }]) {
       for (const sibling of [

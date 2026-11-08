@@ -72,8 +72,11 @@ export function emitDeclarations(definitions, roots) {
     }
     if (schema.oneOf || schema.anyOf) {
       assert(!(schema.oneOf && schema.anyOf), "Simultaneous oneOf and anyOf need explicit support");
+      const alternatives = schema.oneOf ?? schema.anyOf;
+      const nullable =
+        alternatives.length === 2 && alternatives.some((branch) => branch.type === "null");
       return union(
-        (schema.oneOf ?? schema.anyOf).map((branch) => {
+        alternatives.map((branch) => {
           const member = schema.properties
             ? {
                 ...branch,
@@ -81,7 +84,7 @@ export function emitDeclarations(definitions, roots) {
                 required: [...(schema.required ?? []), ...(branch.required ?? [])],
               }
             : branch;
-          assertVariantTag(member);
+          if (!nullable) assertVariantTag(member);
           if (member.title && member.type === "object") {
             declare(member.title, emit(member));
             return member.title;
