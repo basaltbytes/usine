@@ -662,7 +662,10 @@ describe("worker harness readiness", () => {
       assert(Exit.isFailure(exit));
       const defect = Cause.squash(exit.cause);
       assert(defect instanceof Error);
-      assert.strictEqual(defect.message, "Cannot pass GH_HOST to a remote command on its command line");
+      assert.strictEqual(
+        defect.message,
+        "Cannot pass GH_HOST to a remote command on its command line",
+      );
     }).pipe(Effect.provide(commands({}))),
   );
 });

@@ -532,10 +532,7 @@ describe("Codex app-server transport", () => {
       destination: "worker.exe.xyz",
     });
     const stdin = { stream: Stream.empty, endOnDone: true };
-    const command = codexAppServerCommand(
-      { ...client(host, {}), sessionId: Option.none() },
-      stdin,
-    );
+    const command = codexAppServerCommand({ ...client(host, {}), sessionId: Option.none() }, stdin);
     assert.strictEqual(command._tag, "StandardCommand");
     if (command._tag !== "StandardCommand") return;
     assert.strictEqual(command.command, "ssh");

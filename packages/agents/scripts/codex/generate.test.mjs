@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import { CODEX_PROTOCOL } from "../../src/protocol/codex/version.ts";
 
 const script = fileURLToPath(new URL("generate.mjs", import.meta.url));
-const copy = fileURLToPath(new URL("../../src/protocol/codex/upstream-schema.json", import.meta.url));
+const copy = fileURLToPath(
+  new URL("../../src/protocol/codex/upstream-schema.json", import.meta.url),
+);
 
 /** Runs the generator with `fetch` replaced by `stub`, a JavaScript function expression. */
 const generate = (stub, ...args) =>

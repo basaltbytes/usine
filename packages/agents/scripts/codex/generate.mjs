@@ -49,9 +49,7 @@ const fetchUpstream = async (consequence) => {
 };
 
 const text =
-  upstream && !check
-    ? await fetchUpstream("nothing was written")
-    : await readFile(copy, "utf8");
+  upstream && !check ? await fetchUpstream("nothing was written") : await readFile(copy, "utf8");
 const document = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
