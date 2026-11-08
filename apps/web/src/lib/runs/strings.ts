@@ -205,3 +205,8 @@ export const childPromptLabel = (agent: string, sessionId: string): string =>
   `Prompt received by ${agent} (${sessionId})`;
 
 export const resumeDetailsLoading = "Loading resume details…";
+
+export const missingMemoryProcessesLine = (count: number): string =>
+  `Process details unavailable for ${count} ${count === 1 ? "kill" : "kills"}.`;
+
+export const memoryProcessesLabel = "Killed processes (kernel task names)";

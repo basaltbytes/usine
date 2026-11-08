@@ -66,6 +66,22 @@ export class FailureResolution extends Schema.Class<
 
 const Kills = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
+/** A process identified by the worker kernel's OOM diagnostic. */
+export class MemoryKilledProcess extends Schema.Class<
+  MemoryKilledProcess,
+  Brand.Brand<"@usine/core/attempt/attempt/MemoryKilledProcess">
+>("MemoryKilledProcess")({
+  /** The kernel task name, which can be truncated and excludes command-line arguments. */
+  command: Schema.NonEmptyString,
+  /** The process ID in the worker host's PID namespace. */
+  pid: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+}) {}
+
+const killedProcesses = Schema.Array(MemoryKilledProcess).pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed([])),
+  Schema.withConstructorDefault(Effect.succeed([])),
+);
+
 /**
  * The processes that the kernel killed in an Attempt's containers because a container reached
  * its memory limit, `memoryMib`: the limit of the last container that recorded kills.
@@ -78,6 +94,8 @@ export class OutOfMemoryKills extends Schema.Class<
   kills: Kills,
   /** The memory limit, in MiB, of the last container that recorded kills. */
   memoryMib: ContainerMemoryMib,
+  /** Available kernel process identities; older records and unreadable logs have none. */
+  processes: killedProcesses,
 }) {}
 
 /**
@@ -94,6 +112,8 @@ export class ContainerOutOfMemoryKills extends Schema.Class<
   kills: Kills,
   /** This container's memory limit in MiB. */
   memoryMib: ContainerMemoryMib,
+  /** Available kernel process identities; older records and unreadable logs have none. */
+  processes: killedProcesses,
 }) {}
 
 /** Returns the kills in `containers` together, with the memory limit of the last one. */
@@ -103,6 +123,7 @@ export const totalOutOfMemoryKills = (
   OutOfMemoryKills.make({
     kills: containers.reduce((total, { kills }) => total + kills, 0),
     memoryMib: EffectArray.lastNonEmpty(containers).memoryMib,
+    processes: containers.flatMap(({ processes }) => processes),
   });
 
 /**

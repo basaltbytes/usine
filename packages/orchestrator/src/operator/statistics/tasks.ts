@@ -1,3 +1,4 @@
+import type { OutOfMemoryKills } from "@usine/core/attempt";
 import { jsonKey } from "@usine/core/json-key";
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import type { ItemNumber } from "@usine/core/item";
@@ -87,6 +88,7 @@ interface MeasuredTask {
   readonly start: number;
   readonly mergedAt: number;
   readonly firstTimeRight: boolean;
+  readonly outOfMemory: ReadonlyArray<OutOfMemoryKills>;
   readonly operatorActions: number;
   readonly timing: TaskTiming;
   /** The task's tokens, or `None` if a Run with an Attempt reported none. */
@@ -259,6 +261,9 @@ const measure = (
     start,
     mergedAt,
     firstTimeRight: firstTimeRight(runs),
+    outOfMemory: runs.flatMap(({ attempts }) =>
+      attempts.flatMap(({ outOfMemory }) => Option.toArray(outOfMemory)),
+    ),
     operatorActions: runActions(runs) + task.budgetResets,
     timing: taskTiming(runs, start, end, now),
     tokens: taskTokens(runs, usage),
@@ -380,6 +385,7 @@ export const taskStatisticsView = ({
     Option.getOrNull(
       Option.map(median(members.map(({ view }) => view.durationMillis)), Math.round),
     );
+  const memory = tasks.flatMap(({ outOfMemory }) => outOfMemory);
   return StatisticsView.make({
     window,
     from: DateTime.formatIso(DateTime.makeUnsafe(from)),
@@ -399,6 +405,9 @@ export const taskStatisticsView = ({
       });
     }),
     firstTimeRight: tasks.filter(({ firstTimeRight }) => firstTimeRight).length,
+    memoryKills: sum(memory.map(({ kills }) => kills)),
+    memoryKillAttempts: memory.length,
+    repeatedMemoryKillAttempts: memory.filter(({ kills }) => kills > 1).length,
     operatorActions: sum(tasks.map(({ operatorActions }) => operatorActions)),
     time: timeView(times, order),
     tokens: tokensView(metered, order),

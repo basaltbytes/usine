@@ -1,6 +1,11 @@
 import type { StatisticsView, TaskPeriodView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
-import { percentLabel, periodLabel, perTaskLabel } from "~/features/overview/strings";
+import {
+  memoryKillsLine,
+  percentLabel,
+  periodLabel,
+  perTaskLabel,
+} from "~/features/overview/strings";
 
 /** The most points a sparkline shows; longer windows merge neighbouring periods. */
 const SPARK_POINTS = 8;
@@ -139,6 +144,13 @@ export const FirstTimeRight = ({ statistics }: FirstTimeRightProps) => {
           format={(value) => perTaskLabel(value, 1)}
         />
       </Figure>
+      <p className="col-span-2 text-xs text-muted-foreground">
+        {memoryKillsLine(
+          statistics.memoryKills,
+          statistics.memoryKillAttempts,
+          statistics.repeatedMemoryKillAttempts,
+        )}
+      </p>
     </div>
   );
 };

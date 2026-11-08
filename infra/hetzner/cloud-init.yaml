@@ -16,6 +16,7 @@ ssh_pwauth: false
 
 users:
   - name: usine
+    groups: [systemd-journal]
     shell: /bin/bash
     lock_passwd: true
     ssh_authorized_keys: "@AUTHORIZED_KEYS@"

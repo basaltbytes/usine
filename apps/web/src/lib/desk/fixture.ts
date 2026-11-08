@@ -544,6 +544,9 @@ export const statisticsFixture = (now: number, window: "7d" | "30d") => {
     medianMillis: (window === "7d" ? 1.75 : 2.1) * HOUR,
     periods: dailyPeriods(from, days, tasks),
     firstTimeRight: (tasks.length * 3) / 4,
+    memoryKills: 5,
+    memoryKillAttempts: 2,
+    repeatedMemoryKillAttempts: 1,
     operatorActions: (tasks.length * 3) / 2,
     time: TaskTimeView.make({
       tasks: window === "7d" ? 4 : 9,
