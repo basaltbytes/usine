@@ -1,5 +1,4 @@
 import { assert, it } from "@effect/vitest";
-import { jsonKey } from "@usine/core/json-key";
 import { Effect, Logger, Schema } from "effect";
 import { claudeOutputCheckpoint } from "../src/harness/claude/sdk.ts";
 
@@ -55,36 +54,121 @@ it.effect("covers a handled message only once all earlier output is checkpointed
   }),
 );
 
-it.effect("checkpoints a control request once Claude cancels it", () =>
+it.effect("cancels only the control request with the matching request ID", () =>
   Effect.gen(function* () {
     const hook = yield* hookRequest;
-    const cancel = yield* encode({ type: "control_cancel_request", request_id: "hook" });
+    const other = yield* encode({
+      type: "control_request",
+      request_id: "other",
+      request: { subtype: "hook_callback" },
+    });
+    const unknown = yield* encode({ type: "control_cancel_request", request_id: "unknown" });
+    const cancel = yield* encode({ type: "control_cancel_request", request_id: "other" });
     const checkpoint = claudeOutputCheckpoint();
-    const pending = yield* checkpoint.read(hook);
+    const pending = yield* checkpoint.read(Buffer.concat([hook, other]));
     assert.strictEqual(pending, 0);
+    const ignored = yield* checkpoint.read(unknown);
+    assert.strictEqual(ignored, 0);
     const cancelled = yield* checkpoint.read(cancel);
-    assert.strictEqual(cancelled, hook.length + cancel.length);
+    assert.strictEqual(cancelled, 0);
+    const response = yield* hookResponse;
+    const answered = yield* checkpoint.inputAcknowledged(response);
+    assert.strictEqual(answered, hook.length + other.length + unknown.length + cancel.length);
   }),
+);
+
+for (const release of ["response", "cancellation"] as const) {
+  it.effect(
+    `a control ${release} does not checkpoint an application message with the same key`,
+    () =>
+      Effect.gen(function* () {
+        const message = { type: "assistant", uuid: "hook", message: { id: "one" } };
+        const line = yield* encode(message);
+        const checkpoint = claudeOutputCheckpoint();
+        const pending = yield* checkpoint.read(line);
+        assert.strictEqual(pending, 0);
+        const response = yield* hookResponse;
+        const cancel = yield* encode({ type: "control_cancel_request", request_id: "hook" });
+        const released = yield* release === "response"
+          ? checkpoint.inputAcknowledged(response)
+          : checkpoint.read(cancel);
+        assert.strictEqual(released, 0);
+        const handled = yield* checkpoint.handled(message);
+        assert.deepStrictEqual(handled, {
+          bytes: line.length + (release === "cancellation" ? cancel.length : 0),
+          covered: true,
+        });
+      }),
+  );
+}
+
+it.effect(
+  "handling an application message does not checkpoint a control request with the same key",
+  () =>
+    Effect.gen(function* () {
+      const hook = yield* hookRequest;
+      const message = { type: "assistant", uuid: "hook", message: { id: "one" } };
+      const line = yield* encode(message);
+      const checkpoint = claudeOutputCheckpoint();
+      const pending = yield* checkpoint.read(Buffer.concat([hook, line]));
+      assert.strictEqual(pending, 0);
+      const handled = yield* checkpoint.handled(message);
+      assert.deepStrictEqual(handled, { bytes: 0, covered: false });
+      const response = yield* hookResponse;
+      const answered = yield* checkpoint.inputAcknowledged(response);
+      assert.strictEqual(answered, hook.length + line.length);
+    }),
 );
 
 it.effect("keeps a blocked hook replayable after the main turn's result", () =>
   Effect.gen(function* () {
-    const logs: Array<string> = [];
+    const logs: Array<unknown> = [];
     const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (logLevel === "Info") logs.push(jsonKey(message));
+      if (logLevel === "Info") logs.push(message);
     });
     const hook = yield* hookRequest;
     const response = yield* hookResponse;
+    const other = yield* encode({
+      type: "control_request",
+      request_id: "answered",
+      request: { subtype: "remote_tools_probe" },
+    });
+    const otherResponse = yield* encode({
+      type: "control_response",
+      response: { request_id: "answered", subtype: "success" },
+    });
+    const assistant = { type: "assistant", uuid: "assistant", message: { id: "one" } };
+    const assistantLine = yield* encode(assistant);
     const result = { type: "result", subtype: "success", uuid: "result", result: "Done" };
     const line = yield* encode(result);
     const checkpoint = claudeOutputCheckpoint();
-    yield* checkpoint.read(Buffer.concat([hook, line]));
+    yield* checkpoint.read(Buffer.concat([hook, other, assistantLine, line]));
+    const otherAnswered = yield* checkpoint.inputAcknowledged(otherResponse);
+    assert.strictEqual(otherAnswered, 0);
+    const handledAssistant = yield* checkpoint
+      .handled(assistant)
+      .pipe(Effect.provide(Logger.layer([logger])));
+    assert.deepStrictEqual(handledAssistant, { bytes: 0, covered: false });
+    assert.deepStrictEqual(logs, []);
     const handled = yield* checkpoint.handled(result).pipe(Effect.provide(Logger.layer([logger])));
     assert.deepStrictEqual(handled, { bytes: 0, covered: false });
-    assert.lengthOf(logs, 1);
-    assert.include(logs[0], "hook_callback");
+    assert.deepStrictEqual(logs, [
+      [
+        "Claude finished a turn with unanswered control requests; the output checkpoint stays before them",
+        { requests: [{ requestId: "hook", subtype: "hook_callback" }] },
+      ],
+    ]);
     const answered = yield* checkpoint.inputAcknowledged(response);
-    assert.strictEqual(answered, hook.length + line.length);
+    assert.strictEqual(answered, hook.length + other.length + assistantLine.length + line.length);
+    const nextResult = { ...result, uuid: "next-result" };
+    const nextLine = yield* encode(nextResult);
+    const nextRead = yield* checkpoint.read(nextLine);
+    assert.strictEqual(nextRead, 0);
+    const nextHandled = yield* checkpoint
+      .handled(nextResult)
+      .pipe(Effect.provide(Logger.layer([logger])));
+    assert.deepStrictEqual(nextHandled, { bytes: nextLine.length, covered: true });
+    assert.lengthOf(logs, 1);
   }),
 );
 
