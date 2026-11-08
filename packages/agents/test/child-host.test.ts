@@ -190,6 +190,31 @@ describe("remote shell commands", () => {
     assert.strictEqual(existsSync(pidFile), false);
   });
 
+  it("keeps the contained owner launch within the Linux argument length limit", () => {
+    const contained = RemoteShell.make({
+      ...host,
+      container: { runtime: "docker", name: "usine-attempt" },
+    });
+    const [, , , , line] = sshArguments(contained, {
+      command: "node",
+      args: [
+        "-e",
+        PROCESS_OWNER,
+        "resume",
+        "/workspace/repository.child-1.pid",
+        "0",
+        "120000",
+        "claude",
+        "--output-format",
+        "stream-json",
+      ],
+      environment: {},
+    });
+    assert(line !== undefined);
+    // Linux MAX_ARG_STRLEN: the remote shell receives this line as one exec argument.
+    assert.isBelow(Buffer.byteLength(line), 128 * 1024);
+  });
+
   it("refuses a variable name the shell would not read as one", () => {
     assert.throws(
       () => remoteLine({ environment: { "A;B": "x" }, command: "true", args: [] }),

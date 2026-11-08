@@ -9,6 +9,7 @@ const bundle = async (entry, globalName) => {
     platform: "node",
     target: "node22",
     format: "iife",
+    minify: true,
     legalComments: "none",
     write: false,
   };
