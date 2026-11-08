@@ -1,5 +1,147 @@
 # @usine/executor
 
+## 0.6.0
+
+### Minor Changes
+
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- 8c079aa: Route coordinator model requests through the instance's first configured gateway with a caller token. The orchestrator host needs no provider login when a gateway is configured. Check coordinator gateway credentials at startup and keep usage in the API-key or ChatGPT plan pool. Expose the gateway model route for orchestrator-hosted runtimes.
+- dba9075: Support gateway credentials over Tailscale on long-lived SSH workers. Set `tailnet.gateway_address` with a gateway; preflight configures gateway access through passwordless sudo, and attempts use direct internet egress.
+- 548e6b7: Register harness preflight and launch through `Harnesses` on `@usine/agents/harness/node`. Registration rejects incomplete descriptor/runtime pairs and duplicate IDs. Gateway, injected-key, and Cloudflare preflight use the registered runtime with their credential route. Refusal messages name the harness and its installation location, mention a login only for host-login probes, and retain sandbox-image guidance for Cloudflare. Successful binary probes log the installed version.
+  
+  Replace the three harness-specific backend tags with `ChildBackend`, and rename the single-harness layers to `claudeChildLayer`, `codexChildLayer`, and `piChildLayer`. Replace `ClaudeLoginLock` and `claudeLoginLockLayer` with `HostLoginLock` and `hostLoginLockLayer`; `withLock` takes the harness ID before the worker and machine. Share one lock layer between the executor and attempt runtime.
+  
+  `preflight` accepts a `ProbeTarget` and requires the injected `Harnesses` service. Build the registry once with the process spawner and shared `HostLoginLock`, then provide it to the executors and durable attempt runtime. Registration errors remain typed until the server reports a startup failure. It returns capability gaps as readiness reports and fails on transport errors or timeouts. Custom `HarnessProbe` wrappers forward the worker and machine context in their second argument.
+- 77ede43: Read harness credential environment variables and configuration files from descriptors, and manage SSH attempt homes per harness.
+  
+  Gateway credential slots and URL prefixes use `anthropic-messages` and `openai-responses`. Upgrade the gateway first, then the orchestrator, replacing `anthropic` and `openai` in `gateway.llm_providers`. For one release, the gateway accepts the previous URL prefixes as deprecated aliases so running attempts can finish. Preflight normalizes previous provider IDs and requires a gateway with credential reporting. Provisioner API-key names, Cloudflare provider records, and gateway credential environment-variable names stay the same.
+- a1032fd: Support rootless Podman for SSH attempt containers alongside Docker. Check rootless prerequisites and resource enforcement during preflight, preserve host-owned mounts with keep-id, and use the selected runtime for cancellation, salvage, OOM recording, and cleanup.
+- 8cef39b: Apply SSH and Cloudflare connection changes without restarting. New attempts use the updated connection; open and retained attempts keep their original machine, container settings, gateway, and client through recovery and restart. Cancel provisioning retries when an SSH worker switches to a fixed destination. Persist per-attempt connection metadata using credential references in the Node orchestrator.
+- 7c58461: Add opt-in machine reuse for Boat and Hetzner SSH workers with `provisioner.reuse: { attempts: 5, max_age: 2h }`. Reuse requires Docker, successful cleanup, gateway attachment revocation, and preflight before each assignment. Machines retire at the attempt or age limit and when their worker connection is removed.
+  
+  Show machine assignment counts and age on the overview and worker page, and persist daily machine-start counts for statistics.
+- d0900a3: Refresh open run views during machine preparation and quota backoff for project readers. Machine creation takes the run’s ID and loop so its notices use the project scope. Keep idle boards cached when GitHub polls return unchanged items.
+- 69ba086: Collect typed JSON step outputs from attempt checkouts, preserve them across restarts, and store gzip bodies separately from run results. Run evidence includes output refs. Output collection enforces file-size, count, envelope, and pinned-commit limits, and excludes `.usine/` from commits and salvage.
+
+### Patch Changes
+
+- 6a1cf79: Run SSH attempt containers with memory-backed `/dev/shm` and `/tmp` storage. Configure their capacities per worker with `container.shm_size_mib` and `container.tmpfs_size_mib`; each defaults to 2048 MiB and is capped at the container memory limit.
+- 1ae89b1: Recover Boat attempts when SSH endpoints change, retain the previous working address, and retry stopped or deleted sandboxes on a fresh machine.
+- edc1f40: Log missing attempt images on Boat machines at Info level without snapshot rebuild advice. Boat snapshots do not retain container images; each new machine pulls the image during preflight.
+- 09417f7: Preserve Claude Code sessions across orchestrator restarts on container-isolated SSH workers. Store projects in an attempt-scoped worker directory until checkout cleanup, and remove orphan session directories during sweeping and provisioned machine resets. Harness descriptors declare container session storage independently of credential wiring.
+- 853527d: Use the shared Codex CLI version check for Cloudflare sandboxes so accepted versions and rejection messages match local and SSH workers.
+- 92f21ce: Keep remote Codex app-servers running through SSH drops and reattach to their pending turns. Resume the saved thread once if the app-server exits, preserving operator pauses and idle sessions. Record child transport failures as infrastructure failures even after earlier child reports or parent blockers, so attempts retry automatically from recorded salvage.
+  
+  Preserve the original task when an app-server exits before saving its first user message. Recovery continues saved work when the task is already recorded.
+  
+  Replay unread operator guidance when recovering a Codex thread. Report delivery after the recovered turn accepts the messages, and preserve unread guidance while the child waits for the operator to resume it.
+  
+  Replay incomplete output frames after an SSH disconnect, preserving the last complete output offset.
+  
+  Discard incomplete input frames before journaling them so reconnecting preserves the running app-server. Acknowledge guidance included in resumed input when Codex reads it, preventing replay after another pause.
+  
+  Preserve the recorded process-loss error when the app-server exits before the first turn request starts, so recovery resumes the saved thread.
+- 389f35e: Generate worker image packages and tags from harness descriptors. Export `workerImageInputs` from `@usine/agents/harness`, derive the default SSH attempt image from it, and keep both Dockerfiles, Hetzner cloud-init, image publishing, and snapshot creation consistent with the catalog.
+- 8d28709: Expose operations without arguments as Effect values in engine, GitHub App, and attachment services. Run them with `yield* service.operation`. Backup operations require `FileSystem` and `Path` from the application's platform layer.
+  
+  Use schema-backed errors and schema predicates, preserve typed failures during selective recovery, and compose services in their owning scopes. Sandbox errors expose `sandbox` in TypeScript while preserving the JSON `name` field.
+- 236290b: Report attempt image presence, image inspection and pull durations, and container startup timings on SSH workers. Warn when a provisioned machine's snapshot lacks the image. Show Preparing the attempt image while the machine runs preflight and prepares its shared caches.
+- 9290433: Define harness metadata in one platform-free catalog. Configuration validates registered harness IDs, workers share credential and login requirements, and operator clients receive labels and resume commands through the capabilities API. Harness IDs are branded strings, and Codex pricing reads the descriptor’s bundled rates. Existing launch, authentication, and version policies are unchanged.
+- 12c3921: Check harness capabilities by role, credential route, and placement with one admission policy. Configuration and preflight refusals identify the missing requirement and adapter reason. Validate parent models, efforts, and credentials before accepting configuration imports, reloads, or saved edits. At startup, quarantine agents with refused parent brains and their loops in Needs attention while keeping the server available. Restore them after a corrected reload.
+- 1c981c9: Scope child environments and forwarded credentials to the launched harness. Saved child continuations exclude credential routes and billing metadata, and resolve the current credential kind at every launch. Refuse moved homes and changed Codex model provider IDs before starting another turn.
+  
+  Add harness-owned login variables, continuation mismatch errors, and `HarnessSession.modelProvider`. Coordinator credentials use the shared `CredentialRoute` values through `credentials.route`. Cloudflare's `harnessEnvironment` accepts an `Option<Harness>` to select provider wiring or the base command environment.
+- 1f12974: Apply webhook mode and URL changes and add Cloudflare workers without restarting the orchestrator. New Cloudflare workers resolve credentials and register a client before preflight; existing clients remain unchanged. A refused addition of a never-accepted worker releases its client, so a corrected revision can add the worker; an accepted worker keeps its client. Document why tracing and existing worker connection fields require a restart.
+- 9786f67: An attempt whose CI pull request can't be verified now fails with the reason in its message. A handed-off head that differs from the checkout, a pull request that origin doesn't have or that comes from another repository, and a branch that isn't at the pushed head are agent failures. A GitHub read that still fails is a retryable infrastructure failure.
+  
+  The pull request read during harvesting retries twice, on the same schedule as the GitHub polling reads, and logs the branch's commit on origin against the pull request's head on GitHub.
+  
+  A loop with a CI policy whose agent ends without a handoff now verifies the open pull request of the checkout's branch on origin and uses branches on origin at HEAD for detached checkouts. When only pull request refs match, it uses GitHub's commit-to-pull-request index. An unchanged detached checkout from a branch or tag revision fails as an agent failure instead of waiting on an unrelated pull request.
+  
+  For a detached fixed-commit checkout, indexed pull requests from a fork now fail with `RepositoryMismatch`. When an origin branch matches the detached HEAD but has no open pull request, verification fails with `PullRequestNotFound` even if a matching pull request ref is also on origin. The commit index is queried only when no origin branch matches.
+  
+  A plain success whose GitHub or git verification read fails now records an `InfraFailure` instead of an `AgentFailure`. This includes persistent authorization failures such as HTTP 403, so the attempt can run up to three times. A local branch pushed under a different remote name fails with `BranchNotAtHead`; an explicit handoff verifies the pull request's source branch independently of the local branch name.
+- 02860bd: Allow shared cache preparation on SSH workers without GNU date. Omit unreadable container run durations from the preparation log and record the raw timing output at debug level.
+- d740598: Forward parent steers to the single live child and record the receiving child in delivery receipts. Require a separate parent turn when a steer cannot be delivered, including after a restart. Withdraw unread guidance on interruption and keep the parent paused until new guidance or release. Show forwarding, parent delivery, and unread steers in the run transcript.
+- 6316707: Connect Claude and ChatGPT from setup, Settings, or `usine login`, with subscription and API-key options. Save completed logins on the configured gateway or in local harness storage, show credential metadata, and replace or disconnect credentials without manually transferring files.
+- 973b47b: Serve the version endpoint before startup recovery so instances with long attempt histories pass upgrade health checks. Cache SSH checkout listings per connection, avoid connection records for finished attempts without checkouts, and log reconciliation progress at Info.
+- 5796627: Verify explicit CI handoffs against the pushed origin branch when GitHub's pull request head is stale. Keep CI pending until the PR head catches up, and classify unverified handoffs as retryable infrastructure failures.
+- 4d60236: Record kernel task names and host PIDs for processes killed by attempt container memory limits. Show available process details and missing-detail counts below attempt outcomes, and report memory kills and repeated kills beside first-time-right statistics. Older records retain their kill counts with empty process lists.
+  
+  Serialize the repository check and build tasks to fit the worker memory limit, matching the existing test command. Document gate memory requirements and host kernel-log permissions.
+- 10154eb: Restore child holds in the runaway guard after an orchestrator restart so supervised time stays excluded from the wall-clock limit.
+- ba8c2a5: Preserve SSH attempt Codex homes across orchestrator stops while their checkouts remain, so Codex children can resume saved threads after restart. Remove homes after checkout cleanup or during the startup sweep when their checkouts are gone.
+- a2c28c1: Retry missing attempt image pulls on the same SSH worker machine after 5 seconds and then 15 seconds before failing preflight. Log each pull attempt and include up to 1,000 characters of stderr in failed pull warnings.
+- 1948b10: Record the resolved billing pool on parent and child sessions and preserve parent billing across restarts. API-key sessions record their endpoint's provider name when available. Usage reads the recorded pool, with compatibility for older transcripts.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- d0900a3: Publish web change notices after committed writes. Idle connections send heartbeats without rebuilding overview, desk, or configuration projections. Filter live notices and bounded replay by project access.
+  
+  Refresh open statistics at UTC midnight as rolling windows advance.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [e0cedc8]
+- Updated dependencies [6e60662]
+- Updated dependencies [47c0f07]
+- Updated dependencies [df0bd8f]
+- Updated dependencies [b70b5fe]
+- Updated dependencies [09417f7]
+- Updated dependencies [b7ff637]
+- Updated dependencies [5c3a684]
+- Updated dependencies [10822d3]
+- Updated dependencies [1674238]
+- Updated dependencies [3e822f6]
+- Updated dependencies [92f21ce]
+- Updated dependencies [01467e3]
+- Updated dependencies [8c079aa]
+- Updated dependencies [389f35e]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [8d28709]
+- Updated dependencies [e007d09]
+- Updated dependencies [10154eb]
+- Updated dependencies [5d1254b]
+- Updated dependencies [9290433]
+- Updated dependencies [12c3921]
+- Updated dependencies [548e6b7]
+- Updated dependencies [1c981c9]
+- Updated dependencies [82b55aa]
+- Updated dependencies [9786f67]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [9d7dfb0]
+- Updated dependencies [35f68ef]
+- Updated dependencies [d740598]
+- Updated dependencies [fc15261]
+- Updated dependencies [3229601]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [5796627]
+- Updated dependencies [89ae7ee]
+- Updated dependencies [4d60236]
+- Updated dependencies [9476883]
+- Updated dependencies [b6a858e]
+- Updated dependencies [0e34ec1]
+- Updated dependencies [10154eb]
+- Updated dependencies [10154eb]
+- Updated dependencies [10154eb]
+- Updated dependencies [4d5036a]
+- Updated dependencies [7c58461]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [ef5aa4d]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [fc18d3f]
+- Updated dependencies [0e34ec1]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+  - @usine/agents@0.7.0
+  - @usine/durable@0.3.0
+  - @usine/gateway@0.3.0
+  - @usine/cloudflare@0.2.0
+
 ## 0.5.0
 
 ### Minor Changes

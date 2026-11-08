@@ -1,5 +1,128 @@
 # @usine/engine
 
+## 0.7.0
+
+### Minor Changes
+
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- 25728fa: Allow a boolean CEL condition to require approval per run. Save and display the
+  approval decision, require approval when evaluation fails, and validate conditions
+  in the loop editor and configuration API.
+- a1c0d36: Add durable CI waits for developer and fix loops. Agents can end after pushing, freeing their worker slot while usine observes checks on the recorded head. Green applies recorded labels, red starts a budgeted fix loop with failure diagnostics, and silent checks time out into Needs attention. The run page and board link to the waiting PR's checks.
+- 8d28709: Expose operations without arguments as Effect values in engine, GitHub App, and attachment services. Run them with `yield* service.operation`. Backup operations require `FileSystem` and `Path` from the application's platform layer.
+  
+  Use schema-backed errors and schema predicates, preserve typed failures during selective recovery, and compose services in their owning scopes. Sandbox errors expose `sandbox` in TypeScript while preserving the JSON `name` field.
+- 4f87593: Add project roles and revisioned role bindings, enforce API permissions, and filter project data by access. Add token permission ceilings and controls for bindings and token scopes. Attribute local API writes and configuration CLI revisions to local admin. Existing members retain instance admin access through a one-time migration.
+  
+  Authorize run actions and cycle-budget resets against the repository’s current project, including after a repository moves. Refresh the configuration revision after writes and stale-revision failures so later writes use the current revision.
+- 294ebdd: A queued CI fix takes approval, agent, models, permissions, CI policy, outcome labels, and `max_cycles` from its loop's current configuration when its run opens. Its prompt and failure evidence stay as recorded. Current settings also apply when a GitHub read error or recheck timeout permits admission. Approval expressions use the saved event payload. The generated CI handoff instructions follow the current CI policy.
+  
+  When a CI fix and a trigger match wait on the same loop and item, the newest event that passes its recheck opens the next run and supersedes older events. A CI fix that does not match is revoked on its own before the next candidate is rechecked. A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks. A missing item revokes the whole queued group. Reconciliation no longer rechecks CI fixes queued behind a running attempt.
+  
+  The cycle budget reset response lists the CI fix events it replayed in `replayedCiFixEventIds`. A failed run in Needs attention links to the newest admitted CI fix run that has not been canceled or revoked.
+  
+  Breaking API changes:
+  
+  - `TriggerCondition.recheck` returns `TriggerRecheck.Matches({ submission })`, `TriggerRecheck.NoLongerMatches()`, or `TriggerRecheck.ItemGone()` instead of a string. Custom adapters must return the tagged result and include the submission for a match.
+  - `RunReader` implementations must provide `ciFixRuns(sourceRunIds)`, which maps source run IDs to their newest admitted CI fix run IDs.
+  - `CycleBudgets.reset` returns the replayed CI fix event IDs, or an empty list for a repeated answer.
+  - `POST /api/cycle-budgets/reset` returns `{ replayedCiFixEventIds: string[] }` instead of `{ ok: true }`. Update clients to read the new response.
+- acbf702: Compress ended attempts' SQLite transcripts in background segments while preserving transcript reads, pagination, and late messages. Report sealing failures with attempt diagnostics and skip malformed rows until restart. Require the transcript codec explicitly in SQLite compositions. Create compact runtime backups that omit freed database pages and sync them to disk before reporting success.
+- 69ba086: Collect typed JSON step outputs from attempt checkouts, preserve them across restarts, and store gzip bodies separately from run results. Run evidence includes output refs. Output collection enforces file-size, count, envelope, and pinned-commit limits, and excludes `.usine/` from commits and salvage.
+- 81330c9: Show whole pull request and recorded attempt changes on task pages with collapsed file diffs, change counts, and CI and review state. Add a project-scoped files API and commit-based caching, with explicit reporting for missing and truncated GitHub patches.
+  
+  Keep recorded attempt changes available after failed or canceled CI waits, including when a later retry succeeds.
+  
+  Backfill older comparisons only when their producing attempt is identifiable, and let each attempt's completion replace an existing backfilled result.
+  
+  Classify generated files by path to avoid marking hand-written files whose patches mention generated-file markers.
+- 0e34ec1: Add `outcome_labels` to require a GitHub verdict before an agent completion succeeds, with a fresh labels-only read and a visible failure when the verdict is missing. Retry failed verification reads twice; if verification remains unavailable, require operator attention without rerunning the agent.
+
+### Patch Changes
+
+- e0cedc8: Classify pending CI deadlines as infrastructure failures and report running jobs with elapsed times and previous successful durations when available. Bound diagnostic reads so a stalled request cannot prevent timeout settlement.
+- b7ff637: Report Claude Code subscription allowance windows for the Claude plan pool. Five-hour and seven-day utilization reports update pool health and Needs attention warnings, preserving the latest observation of the other window across children and attempts. API-key sessions do not update Claude plan windows.
+- 01467e3: Reduce overview responses with compact board run summaries and a bounded recent run list. Preserve all board cards, task totals, and Needs attention entries. Load complete board run history when its menu opens.
+  
+  Read polling metadata without prompts, results, or comments. Select current board runs with SQL windows and aggregate historical counts, timing, and loop states in storage.
+- e007d09: Use explicit finite number schemas for numeric fields and update the operator API schema. Apply Effect's safe rewrites for schema construction, decoding, and layer composition.
+- 2482038: Speed up run history, board reads, and CI wait reconciliation with runtime store indexes.
+- 82b55aa: Show a dismissed cycle-budget entry again when a later event is blocked on the same item, and display the most recently blocked loop. Preserve dismissals during repeated polling of the same blocked events and keep the ask's reset identity unchanged.
+  
+  Add `CycleBudgetBlock`, `CycleBudgetAsk.blocks`, `recordBlock`, and `blockedLoop` to record the latest refused event per loop. Older asks decode with an empty block list.
+- 9786f67: An attempt whose CI pull request can't be verified now fails with the reason in its message. A handed-off head that differs from the checkout, a pull request that origin doesn't have or that comes from another repository, and a branch that isn't at the pushed head are agent failures. A GitHub read that still fails is a retryable infrastructure failure.
+  
+  The pull request read during harvesting retries twice, on the same schedule as the GitHub polling reads, and logs the branch's commit on origin against the pull request's head on GitHub.
+  
+  A loop with a CI policy whose agent ends without a handoff now verifies the open pull request of the checkout's branch on origin and uses branches on origin at HEAD for detached checkouts. When only pull request refs match, it uses GitHub's commit-to-pull-request index. An unchanged detached checkout from a branch or tag revision fails as an agent failure instead of waiting on an unrelated pull request.
+  
+  For a detached fixed-commit checkout, indexed pull requests from a fork now fail with `RepositoryMismatch`. When an origin branch matches the detached HEAD but has no open pull request, verification fails with `PullRequestNotFound` even if a matching pull request ref is also on origin. The commit index is queried only when no origin branch matches.
+  
+  A plain success whose GitHub or git verification read fails now records an `InfraFailure` instead of an `AgentFailure`. This includes persistent authorization failures such as HTTP 403, so the attempt can run up to three times. A local branch pushed under a different remote name fails with `BranchNotAtHead`; an explicit handoff verifies the pull request's source branch independently of the local branch name.
+- 7e5bb5b: Record accepted CI fixes as neutral handoffs with links to the continuing run. Keep source runs out of failure statistics and Needs attention when a fix run continues the work. Task lists and board cards show the fix run's status. Unavailable fix loops, refused events, exhausted budgets, and CI timeouts still require attention.
+  
+  Preserve pending completion actions across CI fix runs and apply them with the final successful head’s actions.
+- f632c1b: Verify a loop's outcome labels from the run's label events on GitHub. An outcome label added during the run counts across retries even if another loop removed it before the attempt settled, and a label left from an earlier run doesn't count. usine checks the item's current labels only when it can't read the label events.
+  
+  Retry outcome label reads after timeouts, transport failures, server errors, and other failures except definite refusals or a missing item. Verify each completion once, skip the check when the run doesn't record the success, and keep a rejected report's message and facts on the failed attempt.
+  
+  `CompletionCheck` moves to `@usine/engine/completion-check` and becomes a required service with a `verify` method. Hosts that don't verify outcome labels provide `CompletionCheck.unverified`.
+- d740598: Forward parent steers to the single live child and record the receiving child in delivery receipts. Require a separate parent turn when a steer cannot be delivered, including after a restart. Withdraw unread guidance on interruption and keep the parent paused until new guidance or release. Show forwarding, parent delivery, and unread steers in the run transcript.
+- 973b47b: Serve the version endpoint before startup recovery so instances with long attempt histories pass upgrade health checks. Cache SSH checkout listings per connection, avoid connection records for finished attempts without checkouts, and log reconciliation progress at Info.
+- 5796627: Verify explicit CI handoffs against the pushed origin branch when GitHub's pull request head is stale. Keep CI pending until the PR head catches up, and classify unverified handoffs as retryable infrastructure failures.
+- 4d60236: Record kernel task names and host PIDs for processes killed by attempt container memory limits. Show available process details and missing-detail counts below attempt outcomes, and report memory kills and repeated kills beside first-time-right statistics. Older records retain their kill counts with empty process lists.
+  
+  Serialize the repository check and build tasks to fit the worker memory limit, matching the existing test command. Document gate memory requirements and host kernel-log permissions.
+- d0900a3: Log routine pool reset scheduling decisions at Debug to keep transcript appends quiet at the default log level. Keep reset deadline notifications at Info.
+- 6e725ad: Centralize SQLite query expressions and add reusable persistence contract tests for adapter implementations. Existing storage behavior and migrations remain unchanged.
+- 87aeb52: Log per-report session usage and pool rate-limit projection updates at Debug to reduce Info log volume.
+- 45bb9cb: Keep worker slots free while an idle upgrade defers new attempts. Show the requested version on deferred runs and worker rows, and report prolonged waits in Needs attention. Cancel a pending upgrade from Settings or with `DELETE /api/upgrade` to resume attempts without restarting.
+- d5fb58b: Replay blocked CI fix events after a cycle-budget reset without requiring a trigger label. Recheck the recorded PR head before admission and preserve failure diagnostics and completion actions across restarts. Keep paused fixes queued until their loop resumes.
+- d0900a3: Restore pool reset notifications from persisted reports after restart. Refresh task details and history menus when any linked item changes.
+- de42ea4: Run standalone SQLite reads on a read-only worker connection so long queries permit transcript appends and HTTP responses to continue. Preserve main-connection transactions and reserved operations, and report p99 and maximum event-loop delay every minute while the server runs.
+  
+  Recover from read worker failures by routing later reads to the main connection, restarting the worker with bounded backoff, and reporting its state through `/api/health`.
+  
+  Read run summaries, their attempts, evidence, and board history aggregates in scoped read-only worker snapshots. Preserve consistent lifecycle states during concurrent completion and retries while transcript appends and HTTP responses continue. Roll back interrupted snapshots; use the main connection during worker recovery and within write transactions.
+- e3cddea: Release completed API response bodies retained by SQLite's prepared-statement cache. Preserve SQL trace relationships while preventing cached lookup fibers from retaining request spans.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- d0900a3: Refresh open task details and history when newly linked items change task membership or cycle-budget asks change attention state.
+- fbd379a: Read transcript usage and pool limits from summaries updated atomically on append, and index worker and session-state reads. Backfill existing transcripts during startup without rebuilding the transcript table.
+- d0900a3: Publish web change notices after committed writes. Idle connections send heartbeats without rebuilding overview, desk, or configuration projections. Filter live notices and bounded replay by project access.
+  
+  Refresh open statistics at UTC midnight as rolling windows advance.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [e0cedc8]
+- Updated dependencies [6e60662]
+- Updated dependencies [01467e3]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [e007d09]
+- Updated dependencies [9290433]
+- Updated dependencies [1c981c9]
+- Updated dependencies [82b55aa]
+- Updated dependencies [9786f67]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [d740598]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [5796627]
+- Updated dependencies [4d60236]
+- Updated dependencies [9476883]
+- Updated dependencies [10154eb]
+- Updated dependencies [7c58461]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [0e34ec1]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes
