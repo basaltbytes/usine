@@ -143,7 +143,7 @@ Run `pnpm --filter @usine/github check` after building dependencies to check Typ
 
 ## CI failure evidence
 
-`GitHubChecks.pendingDetails(repository, head)` reports up to ten pending check names and running durations. For Actions jobs, it compares each job with the same name in the latest successful run of its workflow. Duration history requires **Actions: read-only**; unavailable history leaves the current job status and elapsed time in the diagnostic.
+`GitHubChecks.pendingDetails(repository, head)` returns up to ten `PendingCheck` records with names, statuses, start times, elapsed milliseconds, and previous successful duration milliseconds. Times and durations use `Option` when unavailable; the orchestrator formats the records for timeout diagnostics. For Actions jobs, it compares each job with the same name in the latest successful run of its workflow. Duration history requires **Actions: read-only**; unavailable history leaves the current job status and elapsed time in the diagnostic.
 
 `GitHubChecks` reads the pull request head and aggregate check state. For failed Actions jobs, it extracts bounded failed-step logs from the run-attempt archive. If the archive is unavailable or lacks the failed step, it reads the completed job's plain log, including when other matrix jobs are running. Rate limits defer polling; unavailable job logs use the check output.
 

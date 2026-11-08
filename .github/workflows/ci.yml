@@ -105,7 +105,15 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends jq lsof
-      - run: pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+      - name: Run tests
+        shell: bash
+        run: |
+          if [ "${{ matrix.leg }}" = server ]; then
+            chown -R pwuser:pwuser "$GITHUB_WORKSPACE"
+            runuser -u pwuser -- env "PATH=$PATH" pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+          else
+            pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+          fi
         timeout-minutes: 10
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

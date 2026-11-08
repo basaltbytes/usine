@@ -16,7 +16,7 @@ import { Submission, RunEngine, EnginePersistenceError } from "@usine/engine/eng
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
-import { GitHubChecks } from "@usine/github/checks";
+import { GitHubChecks, type PendingCheck } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
@@ -30,6 +30,28 @@ import {
 } from "./polling/cycle.ts";
 import type { RepositoryOutcome } from "./polling/failure-streaks.ts";
 import { observeItem } from "./polling/repository-sync.ts";
+
+const durationMinutes = (milliseconds: number) => `${Math.ceil(milliseconds / 60000)} min`;
+
+const pendingCheckDetails = (checks: ReadonlyArray<PendingCheck>) =>
+  checks.length === 0
+    ? "No pending check jobs were reported for this head."
+    : checks
+        .map((check) => {
+          const elapsed = Option.match(check.elapsedMilliseconds, {
+            onNone: () => "unknown duration",
+            onSome: durationMinutes,
+          });
+          const current = `${check.name} is ${check.status}${check.status === "in_progress" ? ` and has run for ${elapsed}` : ""}`;
+          if (check.status !== "in_progress") return `${current}.`;
+          const previous = Option.match(check.previousDurationMilliseconds, {
+            onNone: () => "unavailable",
+            onSome: (milliseconds) =>
+              `${durationMinutes(milliseconds)} in the last successful workflow run`,
+          });
+          return `${current}; previous successful duration: ${previous}.`;
+        })
+        .join(" ");
 
 /** Settles persisted CI waits during polling and webhook hints, without worker reservations. */
 export class CiMonitor extends Context.Service<
@@ -116,6 +138,7 @@ export class CiMonitor extends Context.Service<
           if (timedOut) {
             const details = yield* checks.pendingDetails(wait.repository, head).pipe(
               Effect.timeout("10 seconds"),
+              Effect.map(pendingCheckDetails),
               Effect.catch((error) =>
                 Effect.logWarning("Pending CI diagnostics unavailable", {
                   runId,

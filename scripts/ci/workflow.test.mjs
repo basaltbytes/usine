@@ -46,6 +46,10 @@ test("the server container reaps detached processes and installs its required CL
       condition === "matrix.leg == 'server'" && run?.includes("apt-get install"),
   );
   assert.ok(setupIndex >= 0 && setupIndex < testIndex);
+  const tests = job.steps[testIndex];
+  assert.match(tests.run, /if \[ "\$\{\{ matrix.leg \}\}" = server \]; then/u);
+  assert.match(tests.run, /chown -R pwuser:pwuser "\$GITHUB_WORKSPACE"/u);
+  assert.match(tests.run, /runuser -u pwuser -- env "PATH=\$PATH" pnpm turbo run test/u);
   const setup = job.steps[setupIndex];
   assert.ok(setup["timeout-minutes"] > 0 && setup["timeout-minutes"] <= 3);
   assert.match(setup.run, /apt-get update/u);

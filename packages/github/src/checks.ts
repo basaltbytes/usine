@@ -1,6 +1,6 @@
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha, RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { type Brand, Clock, Context, DateTime, Effect, Layer, Schema } from "effect";
+import { type Brand, Clock, Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
 import type { GitHubAppError } from "./error.ts";
@@ -25,6 +25,19 @@ export class CheckFailureEvidence extends Schema.Class<
 >("CheckFailureEvidence")({
   jobs: Schema.Array(Schema.NonEmptyString),
   excerpt: Schema.String.check(Schema.isMaxLength(12000)),
+}) {}
+
+export class PendingCheck extends Schema.Class<
+  PendingCheck,
+  Brand.Brand<"@usine/github/checks/PendingCheck">
+>("PendingCheck")({
+  name: Schema.NonEmptyString,
+  status: Schema.NonEmptyString,
+  startedAt: Schema.Option(Schema.DateTimeUtc),
+  elapsedMilliseconds: Schema.Option(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+  previousDurationMilliseconds: Schema.Option(
+    Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
 }) {}
 
 const Head = Schema.Struct({
@@ -75,7 +88,7 @@ const PendingChecks = Schema.Struct({
   check_runs: Schema.Array(
     Schema.Struct({
       name: Schema.NonEmptyString,
-      status: Schema.String,
+      status: Schema.NonEmptyString,
       started_at: Schema.NullOr(Schema.DateTimeUtcFromString),
       details_url: Schema.NullOr(Schema.String),
     }),
@@ -112,7 +125,7 @@ export class GitHubChecks extends Context.Service<
     readonly pendingDetails: (
       repository: RepositoryName,
       head: CommitSha,
-    ) => Effect.Effect<string, GitHubAppError>;
+    ) => Effect.Effect<ReadonlyArray<PendingCheck>, GitHubAppError>;
   }
 >()("@usine/github/checks/GitHubChecks") {
   static readonly layer = Layer.effect(
@@ -198,6 +211,64 @@ export class GitHubChecks extends Context.Service<
         });
         return output;
       });
+      const checkRuns = Effect.fn("GitHubChecks.checkRuns")(function* <C>(
+        prefix: string,
+        head: CommitSha,
+        schema: Schema.Codec<
+          { readonly total_count: number; readonly check_runs: ReadonlyArray<C> },
+          unknown,
+          never,
+          unknown
+        >,
+      ) {
+        yield* Effect.annotateCurrentSpan({ prefix, head });
+        const runs: Array<C> = [];
+        for (let page = 1; page <= 10; page++) {
+          const response = yield* get(
+            `${prefix}/commits/${head}/check-runs?per_page=100&filter=latest&page=${page}`,
+          );
+          const checks = yield* HttpClientResponse.schemaBodyJson(schema)(response).pipe(
+            Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+          );
+          runs.push(...checks.check_runs);
+          if (page * 100 >= checks.total_count) break;
+        }
+        return runs;
+      });
+      const previousSuccessfulJobs = Effect.fn("GitHubChecks.previousSuccessfulJobs")(function* (
+        prefix: string,
+        run: string,
+        histories: Map<string, ReadonlyArray<(typeof CompletedJobs.Type)["jobs"][number]>>,
+      ) {
+        yield* Effect.annotateCurrentSpan({ prefix, run });
+        const cached = histories.get(run);
+        if (cached !== undefined) return cached;
+        const metadata = yield* get(`${prefix}/actions/runs/${run}`);
+        const workflow = yield* HttpClientResponse.schemaBodyJson(WorkflowRun)(metadata).pipe(
+          Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+        );
+        const response = yield* get(
+          `${prefix}/actions/workflows/${workflow.workflow_id}/runs?status=success&per_page=1`,
+        );
+        const previous = yield* HttpClientResponse.schemaBodyJson(WorkflowRuns)(response).pipe(
+          Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+        );
+        const jobs: Array<(typeof CompletedJobs.Type)["jobs"][number]> = [];
+        const previousRun = previous.workflow_runs[0];
+        if (previousRun !== undefined) {
+          for (let page = 1; page <= 10; page++) {
+            const response = yield* get(
+              `${prefix}/actions/runs/${previousRun.id}/jobs?per_page=100&filter=latest&page=${page}`,
+            );
+            const completed = yield* HttpClientResponse.schemaBodyJson(CompletedJobs)(
+              response,
+            ).pipe(Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)));
+            jobs.push(...completed.jobs);
+            if (page * 100 >= completed.total_count) break;
+          }
+        }
+        return jobs;
+      });
       return {
         pendingDetails: Effect.fn("GitHubChecks.pendingDetails")(function* (
           repository: RepositoryName,
@@ -206,89 +277,56 @@ export class GitHubChecks extends Context.Service<
           yield* Effect.annotateCurrentSpan({ repository, head });
           const { owner, name } = splitRepositoryName(repository);
           const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-          const pending: Array<(typeof PendingChecks.Type)["check_runs"][number]> = [];
-          for (let page = 1; page <= 10; page++) {
-            const response = yield* get(
-              `${prefix}/commits/${head}/check-runs?per_page=100&filter=latest&page=${page}`,
-            );
-            const checks = yield* HttpClientResponse.schemaBodyJson(PendingChecks)(response).pipe(
-              Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-            );
-            pending.push(...checks.check_runs.filter(({ status }) => status !== "completed"));
-            if (page * 100 >= checks.total_count) break;
-          }
+          const pending = (yield* checkRuns(prefix, head, PendingChecks)).filter(
+            ({ status }) => status !== "completed",
+          );
           const histories = new Map<
             string,
             ReadonlyArray<(typeof CompletedJobs.Type)["jobs"][number]>
           >();
-          const details: Array<string> = [];
           const now = yield* Clock.currentTimeMillis;
-          for (const check of pending.slice(0, 10)) {
-            const elapsed =
-              check.started_at === null
-                ? "unknown duration"
-                : `${Math.max(0, Math.ceil((now - DateTime.toEpochMillis(check.started_at)) / 60000))} min`;
-            const current = `${check.name} is ${check.status}${check.status === "in_progress" ? ` and has run for ${elapsed}` : ""}`;
-            const run = check.details_url?.match(/\/actions\/runs\/(\d+)\/job\/\d+(?:\?|$)/u)?.[1];
-            if (run === undefined || check.status !== "in_progress") {
-              details.push(`${current}.`);
-              continue;
-            }
-            const history = yield* Effect.gen(function* () {
-              const cached = histories.get(run);
-              if (cached !== undefined) return cached;
-              const metadata = yield* get(`${prefix}/actions/runs/${run}`);
-              const workflow = yield* HttpClientResponse.schemaBodyJson(WorkflowRun)(metadata).pipe(
-                Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+          return yield* Effect.forEach(pending.slice(0, 10), (check) =>
+            Effect.gen(function* () {
+              const run = check.details_url?.match(
+                /\/actions\/runs\/(\d+)\/job\/\d+(?:\?|$)/u,
+              )?.[1];
+              const history =
+                run === undefined || check.status !== "in_progress"
+                  ? []
+                  : yield* previousSuccessfulJobs(prefix, run, histories).pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning("CI duration history unavailable", {
+                          repository,
+                          head,
+                          job: check.name,
+                          errorTag: error._tag,
+                        }).pipe(Effect.as([])),
+                      ),
+                    );
+              if (run !== undefined && check.status === "in_progress") histories.set(run, history);
+              const previous = history.find(
+                ({ name, conclusion }) => name === check.name && conclusion === "success",
               );
-              const response = yield* get(
-                `${prefix}/actions/workflows/${workflow.workflow_id}/runs?status=success&per_page=1`,
-              );
-              const previous = yield* HttpClientResponse.schemaBodyJson(WorkflowRuns)(
-                response,
-              ).pipe(Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)));
-              const jobs: Array<(typeof CompletedJobs.Type)["jobs"][number]> = [];
-              const previousRun = previous.workflow_runs[0];
-              if (previousRun !== undefined) {
-                for (let page = 1; page <= 10; page++) {
-                  const response = yield* get(
-                    `${prefix}/actions/runs/${previousRun.id}/jobs?per_page=100&filter=latest&page=${page}`,
-                  );
-                  const completed = yield* HttpClientResponse.schemaBodyJson(CompletedJobs)(
-                    response,
-                  ).pipe(
-                    Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-                  );
-                  jobs.push(...completed.jobs);
-                  if (page * 100 >= completed.total_count) break;
-                }
-              }
-              return jobs;
-            }).pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("CI duration history unavailable", {
-                  repository,
-                  head,
-                  job: check.name,
-                  errorTag: error._tag,
-                }).pipe(Effect.as([])),
-              ),
-            );
-            histories.set(run, history);
-            const previous = history.find(
-              ({ name, conclusion }) => name === check.name && conclusion === "success",
-            );
-            const usual =
-              previous !== undefined &&
-              previous.started_at !== null &&
-              previous.completed_at !== null
-                ? `${Math.max(0, Math.ceil((DateTime.toEpochMillis(previous.completed_at) - DateTime.toEpochMillis(previous.started_at)) / 60000))} min in the last successful workflow run`
-                : "unavailable";
-            details.push(`${current}; previous successful duration: ${usual}.`);
-          }
-          return details.length === 0
-            ? "No pending check jobs were reported for this head."
-            : details.join(" ");
+              return PendingCheck.make({
+                name: check.name,
+                status: check.status,
+                startedAt: Option.fromNullOr(check.started_at),
+                elapsedMilliseconds: Option.fromNullOr(check.started_at).pipe(
+                  Option.map((startedAt) => Math.max(0, now - DateTime.toEpochMillis(startedAt))),
+                ),
+                previousDurationMilliseconds:
+                  previous?.started_at != null && previous.completed_at !== null
+                    ? Option.some(
+                        Math.max(
+                          0,
+                          DateTime.toEpochMillis(previous.completed_at) -
+                            DateTime.toEpochMillis(previous.started_at),
+                        ),
+                      )
+                    : Option.none(),
+              });
+            }),
+          );
         }),
         snapshot: Effect.fn("GitHubChecks.snapshot")(function* (
           repository: RepositoryName,
@@ -341,21 +379,9 @@ export class GitHubChecks extends Context.Service<
           yield* Effect.annotateCurrentSpan({ repository, head });
           const { owner, name } = splitRepositoryName(repository);
           const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-          const failed: Array<(typeof Checks.Type)["check_runs"][number]> = [];
-          for (let page = 1; page <= 10; page++) {
-            const response = yield* get(
-              `${prefix}/commits/${head}/check-runs?per_page=100&filter=latest&page=${page}`,
-            );
-            const checks = yield* HttpClientResponse.schemaBodyJson(Checks)(response).pipe(
-              Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-            );
-            failed.push(
-              ...checks.check_runs.filter(
-                ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
-              ),
-            );
-            if (page * 100 >= checks.total_count) break;
-          }
+          const failed = (yield* checkRuns(prefix, head, Checks)).filter(
+            ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
+          );
           const excerpts: Array<string> = [];
           const archives = new Map<string, Uint8Array>();
           for (const check of failed.slice(0, 4)) {
