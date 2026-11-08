@@ -21,4 +21,4 @@ A passing preflight restores scheduling and updates the recorded check time. A f
 
 Preflight checks tools and credentials and pulls the SSH attempt image. It does not install harnesses. Provisioned workers defer machine and harness checks until a machine is available. [Workers](/reference/configuration/workers/) describes the checks and limits.
 
-Codex preflight checks the worker's CLI version against the generated app-server protocol baseline, 0.164.0. Versions 0.159.0 through 0.159.3 remain accepted for one release. A newer Codex version fails the version check before any account request or agent work. Install a supported version on the worker to restore scheduling.
+Codex preflight checks the worker's CLI version against the generated app-server protocol baseline, 0.164.0. Versions 0.159.0 through 0.159.3 remain accepted so existing worker images can upgrade. A newer Codex version fails the version check before any account request or agent work. Install a supported version on the worker to restore scheduling.
