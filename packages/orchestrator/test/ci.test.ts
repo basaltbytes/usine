@@ -34,7 +34,12 @@ import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ExpressionEngine, Source } from "@usine/expression/expression-engine";
-import { CheckFailureEvidence, CheckSnapshot, GitHubChecks } from "@usine/github/checks";
+import {
+  CheckFailureEvidence,
+  CheckSnapshot,
+  GitHubChecks,
+  PendingCheck,
+} from "@usine/github/checks";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
@@ -53,6 +58,7 @@ import {
   Deferred,
   Effect,
   FileSystem,
+  Fiber,
   Layer,
   Option,
   Ref,
@@ -183,7 +189,33 @@ const scenario = Effect.fn("test.ciScenario")(function* (
         Effect.map(StepCompletion.fromResult),
       ),
   });
+  const pendingFailure = yield* Ref.make(Option.none<GitHubApiError>());
+  const pendingStarted = yield* Deferred.make<void>();
+  const pendingStalled = yield* Ref.make(false);
   const checks = Layer.succeed(GitHubChecks)({
+    pendingDetails: () =>
+      Effect.gen(function* () {
+        yield* Deferred.succeed(pendingStarted, undefined);
+        if (yield* Ref.get(pendingStalled)) return yield* Effect.never;
+        const failure = yield* Ref.get(pendingFailure);
+        if (Option.isSome(failure)) return yield* failure.value;
+        return [
+          PendingCheck.make({
+            name: "test (web)",
+            status: "in_progress",
+            startedAt: Option.some(DateTime.makeUnsafe("2026-11-05T19:54:00Z")),
+            elapsedMilliseconds: Option.some(31 * 60000),
+            previousDurationMilliseconds: Option.some(6 * 60000),
+          }),
+          PendingCheck.make({
+            name: "test (server)",
+            status: "queued",
+            startedAt: Option.none(),
+            elapsedMilliseconds: Option.none(),
+            previousDurationMilliseconds: Option.none(),
+          }),
+        ];
+      }),
     snapshot: () =>
       Effect.gen(function* () {
         const failure = yield* Ref.get(observationFailure);
@@ -274,6 +306,9 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     observed,
     itemState,
     observationFailure,
+    pendingFailure,
+    pendingStarted,
+    pendingStalled,
     mergeable,
     tasks,
     mutations,
@@ -688,31 +723,92 @@ it.live("a new push observed after the deadline supersedes the old head", () =>
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live("a silent check times out as a failed run for Needs attention", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const setup = yield* scenario(1);
-      yield* Effect.gen(function* () {
-        const runId = yield* openWait(setup.timeoutSeconds);
-        yield* Effect.sleep("1100 millis");
+it.live.each(["available", "unavailable"])(
+  "a pending check timeout records infrastructure failure with %s job diagnostics",
+  (diagnostics) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(1);
+        yield* Effect.gen(function* () {
+          const runId = yield* openWait(setup.timeoutSeconds);
+          if (diagnostics === "unavailable")
+            yield* Ref.set(
+              setup.pendingFailure,
+              Option.some(
+                GitHubApiError.make({
+                  operation: "read-ci-checks",
+                  status: Option.some(403),
+                  message: "Forbidden",
+                }),
+              ),
+            );
+          yield* Effect.sleep("1100 millis");
 
-        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
-        const failed = yield* (yield* RunEngine).inspect(runId);
-        assert.strictEqual(failed.run.state._tag, "Failed");
-        assert.strictEqual(
-          failed.attempts
-            .at(-1)
-            ?.outcome.pipe(Option.map(({ _tag }) => _tag))
-            .pipe(Option.getOrNull),
-          "Failed",
-        );
+          const failed = yield* (yield* RunEngine).inspect(runId);
+          assert.strictEqual(failed.run.state._tag, "Failed");
+          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(outcome.failure._tag, "InfraFailure");
+          if (diagnostics === "available") {
+            assert.include(outcome.failure.message, "test (web) is in_progress");
+            assert.include(outcome.failure.message, "test (server) is queued");
+            assert.include(outcome.failure.message, "31 min");
+            assert.include(outcome.failure.message, "6 min");
+          } else {
+            assert.include(outcome.failure.message, "Pending job diagnostics are unavailable.");
+          }
+          const mutations = yield* Ref.get(setup.mutations);
+          assert.deepStrictEqual(mutations, []);
+          assert.strictEqual(
+            failed.attempts
+              .at(-1)
+              ?.outcome.pipe(Option.map(({ _tag }) => _tag))
+              .pipe(Option.getOrNull),
+            "Failed",
+          );
 
-        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
-      }).pipe(Effect.provide(setup.runtime));
-    }),
-  ).pipe(Effect.provide(NodeServices.layer)),
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("a pending diagnostic read that never finishes still settles the CI timeout", () =>
+  Effect.gen(function* () {
+    const fixtureInstance = yield* instance;
+    const setup = yield* scenario(1);
+    yield* Effect.gen(function* () {
+      const engine = yield* RunEngine;
+      const runId = yield* TestClock.withLive(openWait(setup.timeoutSeconds));
+      const waiting = yield* engine.inspect(runId);
+      const endedAt = waiting.attempts.at(-1)?.endedAt ?? Option.none();
+      assert(Option.isSome(endedAt));
+      yield* TestClock.setTime(DateTime.toEpochMillis(endedAt.value) + 1001);
+      yield* Ref.set(setup.pendingStalled, true);
+      const reconcile = yield* (yield* CiMonitor)
+        .reconcile(fixtureInstance, Option.none())
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(setup.pendingStarted);
+      yield* TestClock.adjust("10 seconds");
+      const result = yield* Fiber.join(reconcile).pipe(
+        Effect.timeout("1 second"),
+        TestClock.withLive,
+      );
+      assert.deepStrictEqual(result.failures, []);
+      const failed = yield* engine.inspect(runId);
+      assert.strictEqual(failed.run.state._tag, "Failed");
+      const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
+      assert(outcome?._tag === "Failed");
+      assert.strictEqual(outcome.failure._tag, "InfraFailure");
+      assert.include(outcome.failure.message, "Pending job diagnostics are unavailable.");
+      const mutations = yield* Ref.get(setup.mutations);
+      assert.deepStrictEqual(mutations, []);
+      assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+    }).pipe(Effect.provide(setup.runtime));
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live("CI fixes from their own loop are admitted before the source hands off", () =>

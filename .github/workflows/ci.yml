@@ -62,15 +62,21 @@ jobs:
   test:
     name: test (${{ matrix.leg }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - leg: web
-            playwright: true
+            container:
+              image: mcr.microsoft.com/playwright:v1.64.1-noble
+              options: --init
             filters: --filter=@usine/web
           - leg: server
-            playwright: true
+            container:
+              image: mcr.microsoft.com/playwright:v1.64.1-noble
+              options: --init
             filters: --filter=@usine/server
             args: -- --project=server
           - leg: engine
@@ -93,17 +99,22 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: matrix.playwright
-        id: playwright
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-      - if: matrix.playwright && steps.playwright.outputs.cache-hit != 'true'
-        run: pnpm --filter @usine/web exec playwright install --with-deps chromium
-      - if: matrix.playwright && steps.playwright.outputs.cache-hit == 'true'
-        run: pnpm --filter @usine/web exec playwright install-deps chromium
-      - run: pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+      - name: Install server test tools
+        if: matrix.leg == 'server'
+        timeout-minutes: 3
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends jq lsof
+      - name: Run tests
+        shell: bash
+        run: |
+          if [ "${{ matrix.leg }}" = server ]; then
+            chown -R pwuser:pwuser "$GITHUB_WORKSPACE"
+            runuser -u pwuser -- env "PATH=$PATH" pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+          else
+            pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
+          fi
+        timeout-minutes: 10
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:

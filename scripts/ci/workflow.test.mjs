@@ -11,6 +11,84 @@ const root = new URL("../../", import.meta.url);
 const testTasks = (plan) =>
   plan.tasks.filter(({ task }) => task === "test").map(({ taskId }) => taskId);
 
+test("browser test jobs use preinstalled matching Playwright browsers and bounded execution", () => {
+  const job = workflow.jobs.test;
+  assert.ok(job["timeout-minutes"] > 0 && job["timeout-minutes"] <= 15);
+  assert.equal(job.container, "${{ matrix.container }}");
+  for (const name of ["web", "server"]) {
+    const leg = job.strategy.matrix.include.find(({ leg }) => leg === name);
+    const pkg = JSON.parse(
+      readFileSync(new URL(`../../apps/${name}/package.json`, import.meta.url)),
+    );
+    assert.equal(
+      leg.container.image,
+      `mcr.microsoft.com/playwright:v${pkg.devDependencies.playwright}-noble`,
+    );
+  }
+  for (const step of job.steps) {
+    assert.doesNotMatch(
+      step.run ?? "",
+      /playwright install.*(?:--with-deps|install-deps)|playwright install-deps/u,
+    );
+    if (step.run?.includes("turbo run test") || step.run?.includes("playwright install")) {
+      assert.ok(step["timeout-minutes"] > 0 && step["timeout-minutes"] <= 10);
+    }
+  }
+});
+
+test("the server container reaps detached processes and installs its required CLI tools", () => {
+  const job = workflow.jobs.test;
+  const server = job.strategy.matrix.include.find(({ leg }) => leg === "server");
+  assert.ok(server.container.options.split(/\s+/u).includes("--init"));
+  const testIndex = job.steps.findIndex(({ run }) => run?.includes("turbo run test"));
+  const setupIndex = job.steps.findIndex(
+    ({ run, if: condition }) =>
+      condition === "matrix.leg == 'server'" && run?.includes("apt-get install"),
+  );
+  assert.ok(setupIndex >= 0 && setupIndex < testIndex);
+  const tests = job.steps[testIndex];
+  assert.match(tests.run, /if \[ "\$\{\{ matrix.leg \}\}" = server \]; then/u);
+  assert.match(tests.run, /chown -R pwuser:pwuser "\$GITHUB_WORKSPACE"/u);
+  assert.match(tests.run, /runuser -u pwuser -- env "PATH=\$PATH" pnpm turbo run test/u);
+  const setup = job.steps[setupIndex];
+  assert.ok(setup["timeout-minutes"] > 0 && setup["timeout-minutes"] <= 3);
+  assert.match(setup.run, /apt-get update/u);
+  for (const tool of ["jq", "lsof"]) {
+    assert.match(setup.run, new RegExp(`apt-get install[^\\n]*\\b${tool}\\b`, "u"));
+  }
+});
+
+test("browser test tasks receive the container's Playwright browser registry", () => {
+  const plan = JSON.parse(
+    execFileSync(
+      "corepack",
+      [
+        "pnpm",
+        "turbo",
+        "run",
+        "test",
+        "--dry=json",
+        "--filter=@usine/web",
+        "--filter=@usine/server",
+      ],
+      {
+        cwd: root,
+        env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright" },
+        encoding: "utf8",
+      },
+    ),
+  );
+  for (const name of ["web", "server"]) {
+    const task = plan.tasks.find(({ taskId }) => taskId === `@usine/${name}#test`);
+    assert.ok(
+      task.environmentVariables.configured.some((value) =>
+        value.startsWith("PLAYWRIGHT_BROWSERS_PATH="),
+      ),
+      `${name} must receive the container browser registry in Turbo's strict environment`,
+    );
+  }
+});
+
 test("the CI matrix runs every package test task exactly once", () => {
   const expected = testTasks(
     JSON.parse(

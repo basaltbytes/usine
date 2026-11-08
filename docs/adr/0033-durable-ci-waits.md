@@ -13,3 +13,7 @@ A fix for the same loop and failed head can open while its source awaits CI beca
 A newer PR head cancels the wait without applying its actions, an extension to the supersession rules in ADR 0007 after the attempt has ended. A timeout fails the attempt and run into Needs attention. Settlement checks the waiting state and expected head in one database transaction, preserving the session end time; late observations cannot change a settled or canceled run. GitHub label writes precede local success and may repeat if the process stops between them. GitHub cannot atomically compare a head and mutate labels; the monitor checks the current head before applying actions.
 
 The run page and board show **Waiting for CI** with a link to the PR checks. Review loops can omit `ci` and finish at the end of their session. This replaces agent-side CI watches for configured developer and fix loops while retaining ordinary session completion for other loops.
+
+## Amendment — 2026-11-08: pending CI deadlines
+
+A pending CI deadline records an infrastructure failure because a queued or stalled CI job is outside the agent's execution. The run still requires operator attention, without automatically starting another agent. Timeout diagnostics include pending job names and elapsed times, with the matching job's last successful workflow duration when available. Diagnostics have a ten-second limit so GitHub reads cannot stall settlement.
