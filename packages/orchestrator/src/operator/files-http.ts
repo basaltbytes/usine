@@ -6,7 +6,7 @@ import {
   FileChanges,
   FileChangesQuery,
   PullRequestFilesQuery,
-} from "@usine/github/files";
+} from "@usine/github/file-changes";
 import { Schema } from "effect";
 import { HttpApiEndpoint, OpenApi } from "effect/http-api";
 
@@ -30,8 +30,11 @@ export const pullRequestFilesRead = HttpApiEndpoint.get(
       ...operation.parameters,
       ...[
         {
-          name: "_tag",
-          schema: Schema.Union(FileChangesQuery.members.map((member) => member.fields._tag)),
+          name: "scope",
+          schema: Schema.Union([
+            PullRequestFilesQuery.fields._tag,
+            CommitRangeFilesQuery.fields._tag,
+          ]),
           required: true,
           description: "Select the whole PR or a commit range.",
         },

@@ -46,6 +46,10 @@
     "./files": {
       "types": "./dist/files/files.d.ts",
       "default": "./dist/files/files.js"
+    },
+    "./file-changes": {
+      "types": "./dist/file-changes.d.ts",
+      "default": "./dist/file-changes.js"
     }
   },
   "publishConfig": {

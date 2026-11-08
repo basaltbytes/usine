@@ -104,6 +104,8 @@ const errorStatuses = {
   BoardItemNotFoundError: 404,
   BoardLaneNotFoundError: 404,
   GitHubItemNotFoundError: 404,
+  FileChangesNotFoundError: 404,
+  PullRequestFilesChangedError: 409,
   RunOperationRejectedError: 409,
   RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,

@@ -1,5 +1,5 @@
 import { Diff } from "@balade/viewer";
-import type { FileChanges } from "@usine/github/files";
+import type { FileChanges } from "@usine/github/file-changes";
 import "@balade/viewer/viewer.css";
 import "~/features/tasks/components/pull-request/diff.css";
 

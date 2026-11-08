@@ -19,3 +19,13 @@
   --balade-font-mono: var(--font-mono);
   min-width: 0;
 }
+
+@media (width < 40rem) {
+  .task-diff .file-head > button .font-mono {
+    min-width: 0;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    text-overflow: clip;
+  }
+}

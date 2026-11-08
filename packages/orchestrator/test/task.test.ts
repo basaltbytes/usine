@@ -664,7 +664,7 @@ describe("Task view", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("omits legacy attempt comparisons whose checkout base was not recorded", () =>
+  it.effect("omits attempt comparisons without a checkout base or new commits", () =>
     Effect.gen(function* () {
       const legacy = yield* Schema.decodeEffect(PullRequest)({
         _tag: "PullRequest",
@@ -690,6 +690,22 @@ describe("Task view", () => {
         ),
       });
       assert.deepStrictEqual(harvestedAttemptChanges(snapshot), []);
+      const unchanged = PullRequest.make({
+        ...legacy,
+        base: legacy.head,
+      });
+      const noPush = RunSnapshot.make({
+        ...snapshot,
+        attempts: snapshot.attempts.map((attempt) =>
+          Attempt.make({
+            ...attempt,
+            result: Option.some(
+              StepResult.make({ message: "No commits pushed", facts: [unchanged] }),
+            ),
+          }),
+        ),
+      });
+      assert.deepStrictEqual(harvestedAttemptChanges(noPush), []);
     }),
   );
 

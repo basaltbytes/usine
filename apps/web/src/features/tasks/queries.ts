@@ -1,6 +1,6 @@
 import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
-import type { FileChangesQuery } from "@usine/github/files";
+import type { FileChangesQuery } from "@usine/github/file-changes";
 import { changes } from "~/lib/query-changes";
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
 import type { ProjectId } from "@usine/core/project";

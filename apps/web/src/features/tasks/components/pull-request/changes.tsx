@@ -1,8 +1,9 @@
+import { CaretRightIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import type { ItemNumber } from "@usine/core/item";
 import type { ProjectId } from "@usine/core/project";
 import type { RepositoryName } from "@usine/core/repository";
-import { CommitRangeFilesQuery, PullRequestFilesQuery } from "@usine/github/files";
+import { CommitRangeFilesQuery, PullRequestFilesQuery } from "@usine/github/file-changes";
 import type { TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { lazy, Suspense, useId, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
@@ -65,30 +66,43 @@ const PullRequestFiles = ({
     <div className="min-w-0 space-y-3 pb-3">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
         <div className="flex min-w-0 items-center gap-2">
-          <label htmlFor={selectId}>{compareChanges}</label>
-          <NativeSelect
-            id={selectId}
-            value={attempt === undefined ? "whole" : selected}
-            onChange={(event) => setSelected(event.target.value)}
-            className="min-w-0 max-w-full"
-          >
-            <NativeSelectOption value="whole">{wholePullRequest}</NativeSelectOption>
-            {attempts.map((attempt) => (
-              <NativeSelectOption key={attempt.attemptId} value={attempt.attemptId}>
-                {attemptChangesLabel(attempt.loop, attempt.number, attempt.head)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+          {attempts.length === 0 ? (
+            <>
+              <span>{compareChanges}</span>
+              <span className="text-foreground">{wholePullRequest}</span>
+            </>
+          ) : (
+            <>
+              <label htmlFor={selectId}>{compareChanges}</label>
+              <NativeSelect
+                id={selectId}
+                value={attempt === undefined ? "whole" : selected}
+                onChange={(event) => setSelected(event.target.value)}
+                className="min-w-0 max-w-full"
+              >
+                <NativeSelectOption value="whole">{wholePullRequest}</NativeSelectOption>
+                {attempts.map((attempt) => (
+                  <NativeSelectOption key={attempt.attemptId} value={attempt.attemptId}>
+                    {attemptChangesLabel(attempt.loop, attempt.number, attempt.head)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </>
+          )}
         </div>
-        <a
-          className="underline-offset-4 hover:underline"
-          href={`https://github.com/${repository}/pull/${number}/checks`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {checksState(state.checks)}
-        </a>
-        <span>{reviewState(state.review)}</span>
+        {attempt === undefined && (
+          <>
+            <a
+              className="underline-offset-4 hover:underline"
+              href={`https://github.com/${repository}/pull/${number}/checks`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {checksState(state.checks)}
+            </a>
+            <span>{reviewState(state.review)}</span>
+          </>
+        )}
       </div>
       {attempts.length === 0 && (
         <p className="text-xs text-muted-foreground">{noRecordedAttempts}</p>
@@ -135,8 +149,15 @@ type PullRequestChangesProps = {
 export const PullRequestChanges = ({ project, task, pullRequest }: PullRequestChangesProps) => {
   const [open, setOpen] = useState(false);
   return (
-    <details className="min-w-0" onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary className="cursor-pointer py-2 text-sm font-medium focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
+    <details
+      className="group/changes min-w-0"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-sm font-medium focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+        <CaretRightIcon
+          aria-hidden="true"
+          className="size-3.5 shrink-0 group-open/changes:rotate-90"
+        />
         {changesTitle}
       </summary>
       {open && (

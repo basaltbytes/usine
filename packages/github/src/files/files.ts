@@ -1,3 +1,4 @@
+import { jsonKey } from "@usine/core/json-key";
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha, RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { Cache, Clock, Context, Effect, Exit, Layer, Schema } from "effect";
@@ -8,6 +9,7 @@ import { API_ROOT, authorized, invalidResponse, statusError, transportError } fr
 import { retryTransientRequest } from "../retry.ts";
 import {
   changedFile,
+  PullRequestFilesChangedError,
   type ChangedFile,
   FileChanges,
   FileRead,
@@ -21,7 +23,11 @@ export {
   FileChangesQuery,
   PullRequestFilesQuery,
   CommitRangeFilesQuery,
+  PullRequestFilesChangedError,
 } from "./model.ts";
+
+const MAX_CACHED_RESPONSE_BYTES = 512 * 1024;
+const encoder = new TextEncoder();
 
 const PullRequest = Schema.Struct({
   head: Schema.Struct({ sha: CommitSha }),
@@ -40,7 +46,7 @@ export class GitHubFiles extends Context.Service<
       repository: RepositoryName,
       item: ItemNumber,
       selection: FileChangesQuery,
-    ) => Effect.Effect<FileChanges, GitHubAppError>;
+    ) => Effect.Effect<FileChanges, GitHubAppError | PullRequestFilesChangedError>;
   }
 >()("@usine/github/files/files/GitHubFiles") {
   static readonly layer = Layer.effect(
@@ -88,6 +94,7 @@ export class GitHubFiles extends Context.Service<
             base,
             head: selection.head,
             files: comparison.files.map(changedFile),
+            // GitHub provides at most 300 files and no total, so the limit is conservative.
             filesTruncated: comparison.files.length >= 300,
           });
           yield* Effect.logDebug("Read commit comparison files", {
@@ -102,10 +109,10 @@ export class GitHubFiles extends Context.Service<
         const path = `${prefix}/pulls/${item}`;
         const before = yield* get(path, PullRequest);
         if (before.head.sha !== selection.head || before.base.sha !== selection.base)
-          return yield* invalidResponse(
-            "read-pull-request-files",
-            "The pull request base or head changed. Refresh the task to load the latest changes.",
-          );
+          return yield* PullRequestFilesChangedError.make({
+            message:
+              "The pull request base or head changed. Refresh the task to load the latest changes.",
+          });
         const files: Array<ChangedFile> = [];
         let page = 1;
         while (files.length < before.changed_files && page <= 30) {
@@ -123,10 +130,10 @@ export class GitHubFiles extends Context.Service<
           after.base.sha !== before.base.sha ||
           after.changed_files !== before.changed_files
         )
-          return yield* invalidResponse(
-            "read-pull-request-files",
-            "The pull request changed while loading files. Retry to load a consistent diff.",
-          );
+          return yield* PullRequestFilesChangedError.make({
+            message:
+              "The pull request changed while loading files. Refresh the task and retry to load a consistent diff.",
+          });
         const changes = FileChanges.make({
           base: before.base.sha,
           head: selection.head,
@@ -144,7 +151,11 @@ export class GitHubFiles extends Context.Service<
       });
       const cache = yield* Cache.makeWith(load, {
         capacity: 128,
-        timeToLive: (exit) => (Exit.isSuccess(exit) ? Infinity : 0),
+        timeToLive: (exit) =>
+          Exit.isSuccess(exit) &&
+          encoder.encode(jsonKey(exit.value)).byteLength <= MAX_CACHED_RESPONSE_BYTES
+            ? Infinity
+            : 0,
       });
       return {
         read: Effect.fn("GitHubFiles.read")(function* (

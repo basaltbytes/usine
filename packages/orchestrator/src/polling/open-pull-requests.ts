@@ -22,6 +22,8 @@ export class OpenPullRequest extends Schema.Class<
   /** `None` in a cursor written before polling recorded base branches. */
   baseRefName: Schema.OptionFromOptionalKey(BaseRefName),
   mergeable: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
+  /** Older cursors refresh open PR payloads once to record their comparison base. */
+  changesRefreshed: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   /** Older cursors refresh once to learn whether checks have settled. */
   checksUnsettled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
 }) {}
@@ -38,6 +40,7 @@ export const openPullRequest = (
           updatedAt: item.updatedAt,
           baseRefName: Option.some(snapshot.payload.baseRefName),
           mergeable: snapshot.payload.mergeable,
+          changesRefreshed: true,
           checksUnsettled:
             snapshot.payload.statusCheckRollup?.state === "PENDING" ||
             snapshot.payload.statusCheckRollup?.state === "EXPECTED" ||
@@ -55,6 +58,7 @@ type BaseRefRead =
 
 /** Why a poll fetches an open pull request that change detection didn't report. */
 type RefreshReason =
+  | "changesUnrecorded"
   | "baseUnrecorded"
   | "baseMoved"
   | "baseUnreadable"
@@ -119,6 +123,7 @@ const refreshReason = (
   pullRequest: OpenPullRequest,
   reads: ReadonlyMap<BaseRefName, BaseRefRead>,
 ): Option.Option<RefreshReason> => {
+  if (!pullRequest.changesRefreshed) return Option.some("changesUnrecorded");
   if (Option.isNone(pullRequest.baseRefName)) return Option.some("baseUnrecorded");
   const read = reads.get(pullRequest.baseRefName.value);
   if (read?._tag === "Moved") return Option.some("baseMoved");
@@ -131,8 +136,9 @@ const refreshReason = (
 /**
  * Reads the head of each base branch that `openPullRequests` target, with one conditional request
  * per branch, and returns the pull requests to fetch again: those whose base branch isn't recorded,
- * moved, or couldn't be read, and those whose mergeability or checks are unsettled. Leaves out the
- * numbers in `fetched`, which the poll fetches anyway. Fails only if GitHub rate-limits a read.
+ * moved, or couldn't be read, those with older comparison payloads, and those whose mergeability
+ * or checks are unsettled. Leaves out numbers in `fetched`, which the poll fetches anyway.
+ * Fails only if GitHub rate-limits a read.
  */
 export const openPullRequestRefresh = Effect.fn("PollingTriggers.openPullRequestRefresh")(
   function* (

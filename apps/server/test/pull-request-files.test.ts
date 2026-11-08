@@ -265,7 +265,7 @@ it.live(
       );
       assert.strictEqual(
         (yield* stale.read(PullRequestFilesQuery.make({ base, head }))).status,
-        502,
+        409,
       );
       assert.strictEqual(
         (yield* stale.read(PullRequestFilesQuery.make({ base: target, head }))).status,
@@ -284,10 +284,10 @@ it.live("does not cache files under a head that changed during pagination", () =
     });
     const query = PullRequestFilesQuery.make({ base, head });
     const failed = yield* app.read(query);
-    assert.strictEqual(failed.status, 502);
+    assert.strictEqual(failed.status, 409);
     const body = yield* Effect.promise(() => failed.json());
     assert.ok(
-      Schema.is(Schema.Struct({ error: Schema.Literal("InvalidGitHubResponseError") }))(body),
+      Schema.is(Schema.Struct({ error: Schema.Literal("PullRequestFilesChangedError") }))(body),
     );
     const retried = yield* app.read(query);
     assert.strictEqual(retried.status, 200);
@@ -341,7 +341,7 @@ it.live("checks the target project and repository before reading GitHub or a cac
     const invalid = yield* Effect.promise(() =>
       app.handler(
         new Request(
-          `http://localhost/api/projects/workspace/pull-requests/${encodeURIComponent(repository)}/42/files?_tag=PullRequestFiles&head=main`,
+          `http://localhost/api/projects/workspace/pull-requests/${encodeURIComponent(repository)}/42/files?scope=PullRequestFiles&head=main`,
         ),
       ),
     );
@@ -359,7 +359,7 @@ it("documents every union query parameter and the full commit constraint", () =>
       .filter(({ in: location }) => location === "query")
       .map(({ name, required }) => ({ name, required })),
     [
-      { name: "_tag", required: true },
+      { name: "scope", required: true },
       { name: "head", required: true },
       { name: "base", required: true },
     ],
@@ -369,3 +369,69 @@ it("documents every union query parameter and the full commit constraint", () =>
     Schema.toJsonSchemaDocument(CommitSha).schema,
   );
 });
+
+it.live.each([404, 422])(
+  "maps GitHub %s to a missing file selection and retries on the next read",
+  (status) =>
+    Effect.gen(function* () {
+      let unavailable = true;
+      const app = yield* fixture((url) =>
+        unavailable
+          ? new Response("{}", { status })
+          : url.pathname.includes("/compare/")
+            ? json({ files: [file] })
+            : url.pathname.endsWith("/files")
+              ? json([file])
+              : json(pr),
+      );
+      for (const query of [
+        PullRequestFilesQuery.make({ base, head }),
+        CommitRangeFilesQuery.make({ base, head }),
+      ]) {
+        unavailable = true;
+        const response = yield* app.read(query);
+        assert.strictEqual(response.status, 404);
+        const body = yield* Effect.promise(() => response.json());
+        const error = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            error: Schema.Literal("FileChangesNotFoundError"),
+            message: Schema.String,
+          }),
+        )(body);
+        assert.match(error.message, /commits?|comparison/u);
+        unavailable = false;
+        assert.strictEqual((yield* app.read(query)).status, 200);
+      }
+    }).pipe(Effect.scoped),
+);
+
+it.live("preserves GitHub rate-limit errors instead of reporting a missing comparison", () =>
+  Effect.gen(function* () {
+    const app = yield* fixture(
+      () =>
+        new Response("{}", {
+          status: 429,
+          headers: { "retry-after": "60" },
+        }),
+    );
+    const response = yield* app.read(CommitRangeFilesQuery.make({ base, head }));
+    assert.strictEqual(response.status, 503);
+    const body = yield* Effect.promise(() => response.json());
+    assert.ok(Schema.is(Schema.Struct({ error: Schema.Literal("GitHubRateLimitError") }))(body));
+    assert.strictEqual(app.requests.length, 1);
+  }).pipe(Effect.scoped),
+);
+
+it.live("returns oversized diffs without retaining them in the shared cache", () =>
+  Effect.gen(function* () {
+    const app = yield* fixture(() =>
+      json({ files: [{ ...file, patch: "+" + "é".repeat(300_000) }] }),
+    );
+    const query = CommitRangeFilesQuery.make({ base, head });
+    const first = yield* app.read(query).pipe(Effect.flatMap(decode));
+    assert.strictEqual(first.files.length, 1);
+    const again = yield* app.read(query).pipe(Effect.flatMap(decode));
+    assert.deepStrictEqual(again, first);
+    assert.strictEqual(app.requests.length, 2);
+  }).pipe(Effect.scoped),
+);
