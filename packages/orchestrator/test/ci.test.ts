@@ -31,7 +31,7 @@ import { RunReader } from "@usine/engine/run-reader";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
-import { StepExecutor } from "@usine/engine/step-executor";
+import { CompletionCheck, StepExecutor } from "@usine/engine/step-executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import {
@@ -161,6 +161,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const observationFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
   const mergeable = yield* Ref.make<PullRequestPayload["mergeable"]>("CONFLICTING");
   const tasks = yield* Ref.make<ReadonlyArray<string>>([]);
+  const verifiedSubmissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
   const mutations = yield* Ref.make<
     ReadonlyArray<{ readonly item: number; readonly mutation: ItemLabelMutation }>
   >([]);
@@ -288,6 +289,11 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const engine = engineLayer(directory).pipe(
     Layer.provide(executor),
     Layer.provide(
+      Layer.succeed(CompletionCheck)((submission) =>
+        Ref.update(verifiedSubmissions, (all) => [...all, submission]),
+      ),
+    ),
+    Layer.provide(
       triggerConditionLayer.pipe(
         Layer.provide(polling),
         Layer.provide(MarcbachmannCelLayer),
@@ -320,6 +326,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     pendingStalled,
     mergeable,
     tasks,
+    verifiedSubmissions,
     mutations,
     runtime,
     timeoutSeconds,
@@ -1102,6 +1109,179 @@ it.live.each([
         );
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each(["added", "removed", "changed"] as const)(
+  "a replayed CI fix uses current settings and task instructions when CI is %s",
+  (change) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const oldPolicy = CiPolicy.make({ fixLoop: LoopName.make("old-fix"), timeoutSeconds: 60 });
+        const newPolicy = CiPolicy.make({
+          fixLoop: LoopName.make("new-fix"),
+          timeoutSeconds: 7200,
+        });
+        const recorded = LoadedInstance.make({
+          ...fixtureInstance,
+          loops: [
+            LoopFile.make({
+              ...loop,
+              maxCycles: CycleLimit.make(1),
+              ci: change === "added" ? Option.none() : Option.some(oldPolicy),
+            }),
+          ],
+        });
+        const editedAgent = AgentFile.make({
+          ...agent,
+          name: AgentName.make("replacement"),
+          model: ModelId.make("gpt-6-astra"),
+          parentModel: Option.some(ModelId.make("gpt-6.1-sol")),
+          persona: AgentPersona.make("Use the updated agent."),
+        });
+        const editedLoop = LoopFile.make({
+          ...loop,
+          agent: editedAgent.name,
+          approval: "required",
+          maxCycles: CycleLimit.make(4),
+          permissions: "read",
+          outcomeLabels: ["review-passed"],
+          body: PromptTemplate.make(
+            "This edited prompt must not replace the recorded failure task.",
+          ),
+          ci: change === "removed" ? Option.none() : Option.some(newPolicy),
+        });
+        const edited = LoadedInstance.make({
+          ...fixtureInstance,
+          agents: [editedAgent],
+          loops: [editedLoop],
+        });
+        const setup = yield* scenario(3600, recorded);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const budgets = yield* CycleBudgets;
+          const sourceId = yield* openWait(setup.timeoutSeconds, true);
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* (yield* CiMonitor).reconcile(recorded, Option.none());
+          const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+          const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+          yield* Ref.set(setup.currentInstance, edited);
+          yield* budgets.reset(
+            ask.id,
+            Event.make({
+              id: EventId.make("reset-settings"),
+              dedupKey: DedupKey.make("reset-settings"),
+              receivedAt: yield* DateTime.now,
+              payload: {},
+            }),
+          );
+          yield* engine.reconcile;
+          const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+          assert(Option.isSome(fixId));
+          const fix = yield* engine.inspect(fixId.value).pipe(
+            Effect.repeat({
+              until: ({ run }) => run.state._tag === "Waiting",
+              schedule: Schedule.spaced("10 millis"),
+            }),
+            Effect.timeout("5 seconds"),
+          );
+          assert.deepStrictEqual(fix.agent, editedAgent.agent);
+          assert.deepStrictEqual(fix.parentModel, editedAgent.parentModel);
+          assert.strictEqual(fix.permissions, "read");
+          assert.deepStrictEqual(fix.ciPolicy, editedLoop.ci);
+          yield* engine.approve(
+            fixId.value,
+            Event.make({
+              id: EventId.make("approve-current-settings"),
+              dedupKey: DedupKey.make("approve-current-settings"),
+              receivedAt: yield* DateTime.now,
+              payload: {},
+            }),
+            ApprovalSource.make({ channel: "ui", approver: Option.none() }),
+          );
+          const verified = yield* Ref.get(setup.verifiedSubmissions).pipe(
+            Effect.repeat({
+              until: (all) => all.length > 0,
+              schedule: Schedule.spaced("10 millis"),
+            }),
+            Effect.timeout("5 seconds"),
+          );
+          const saved = verified[0] ?? assert.fail("missing completion verification");
+          assert.deepStrictEqual(saved.outcomeLabels, ["review-passed"]);
+          assert.deepStrictEqual(saved.cycleLimit, Option.some(CycleLimit.make(4)));
+          assert.deepStrictEqual(saved.agent, editedAgent.agent);
+          assert.deepStrictEqual(saved.parentModel, editedAgent.parentModel);
+          assert.strictEqual(saved.permissions, "read");
+          assert.deepStrictEqual(saved.ciPolicy, editedLoop.ci);
+          assert.strictEqual(saved.task, fix.task);
+          assert.include(fix.task, "Fix the failing checks.");
+          assert.include(fix.task, "TypeError: failing CI log");
+          assert.include(fix.task, `Head: ${head}`);
+          assert.notInclude(fix.task, "This edited prompt");
+          assert.notInclude(fix.task, 'fix_loop ("old-fix")');
+          assert.notInclude(fix.task, "timeout_seconds (60)");
+          if (change === "removed") {
+            assert.notInclude(fix.task, "[usine:awaiting-ci]");
+            assert.notInclude(fix.task, "Do not apply completion labels");
+          } else {
+            assert.include(fix.task, 'fix_loop ("new-fix")');
+            assert.include(fix.task, "timeout_seconds (7200)");
+            assert.include(fix.task, "Do not apply completion labels");
+            assert.strictEqual(fix.task.split("After pushing, end with").length, 2);
+          }
+          assert.deepStrictEqual(saved.ciFailureHead, Option.some(head));
+          const links = yield* reader.ciFixRuns([sourceId]);
+          assert.strictEqual(links.get(sourceId), fixId.value);
+          yield* engine.drain;
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("revokes a replayed CI fix when its loop's agent leaves the roster", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const recorded = LoadedInstance.make({
+        ...fixtureInstance,
+        loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) })],
+      });
+      const setup = yield* scenario(3600, recorded);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        const budgets = yield* CycleBudgets;
+        yield* openWait(setup.timeoutSeconds, true);
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* (yield* CiMonitor).reconcile(recorded, Option.none());
+        const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+        const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+        yield* Ref.set(
+          setup.currentInstance,
+          LoadedInstance.make({ ...recorded, agents: [], loops: [] }),
+        );
+        yield* budgets.reset(
+          ask.id,
+          Event.make({
+            id: EventId.make("reset-missing-agent"),
+            dedupKey: DedupKey.make("reset-missing-agent"),
+            receivedAt: yield* DateTime.now,
+            payload: {},
+          }),
+        );
+        yield* engine.reconcile;
+        const revoked = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+        assert(Option.isNone(revoked));
+        yield* Ref.set(setup.currentInstance, recorded);
+        yield* engine.reconcile;
+        const restored = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+        assert(Option.isNone(restored));
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        yield* engine.drain;
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live.each(["newer head", "green checks"] as const)(

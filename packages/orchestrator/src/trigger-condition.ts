@@ -17,7 +17,7 @@ import { Effect, Layer, Option, Result, Schema } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { needsCiFix } from "./polling/ci-fix-state.ts";
 import { repositoryFailureLogFields } from "./polling/cycle.ts";
-import { loopSettings, resolveTriggerLoop } from "./trigger-submission.ts";
+import { loopSettings, resolveTriggerLoop, taskWithCiPolicy } from "./trigger-submission.ts";
 import { GitHubItemKey } from "@usine/core/item";
 
 const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
@@ -75,7 +75,13 @@ export const triggerConditionLayer: Layer.Layer<
         permissions: settings.permissions,
         cycleLimit: Option.getOrNull(settings.cycleLimit),
       });
-      return Option.some(Submission.make({ ...submission, ...settings }));
+      return Option.some(
+        Submission.make({
+          ...submission,
+          ...settings,
+          task: taskWithCiPolicy(submission.task, settings.ciPolicy, submission.ciPolicy),
+        }),
+      );
     });
 
     const evaluate = Effect.fn("TriggerCondition.evaluate")(function* (

@@ -11,8 +11,10 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { TestClock } from "effect/testing";
+import { ciFixDedupKey } from "../src/engine/submission.ts";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { EffectLogger } from "drizzle-orm/effect-core";
@@ -271,6 +273,62 @@ describe("Run Events", () => {
     ),
   );
 });
+
+it.effect("maps a source Run to its newest admitted CI fix across failed heads", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        const sourceId = RunId.make("source-run");
+        const unrelatedId = RunId.make("unrelated-source");
+        const fix = (number: number, source: RunId, head: string) => {
+          const original = supportSubmission({ number, approval: "required" });
+          const failedHead = CommitSha.make(head.repeat(40));
+          const key = ciFixDedupKey(source, failedHead);
+          return Submission.make({
+            ...original,
+            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
+            ciFailureHead: Option.some(failedHead),
+          });
+        };
+        yield* TestClock.setTime(1000);
+        const first = yield* engine.submit(fix(1, sourceId, "a"));
+        assert(first._tag === "Claimed");
+        assert.strictEqual((yield* reader.ciFixRuns([sourceId])).get(sourceId), first.runId);
+        yield* engine.cancel(first.runId);
+        yield* TestClock.setTime(2000);
+        const second = yield* engine.submit(fix(2, sourceId, "b"));
+        assert(second._tag === "Claimed");
+        yield* TestClock.setTime(3000);
+        const unrelated = yield* engine.submit(
+          Submission.make({
+            ...fix(3, unrelatedId, "c"),
+            itemKey: ItemKey.make("other-item"),
+          }),
+        );
+        assert(unrelated._tag === "Claimed");
+
+        const links = yield* reader.ciFixRuns([
+          sourceId,
+          unrelatedId,
+          RunId.make("unknown-source"),
+        ]);
+        assert.deepStrictEqual(
+          links,
+          new Map([
+            [sourceId, second.runId],
+            [unrelatedId, unrelated.runId],
+          ]),
+        );
+        const empty = yield* reader.ciFixRuns([]);
+        assert.deepStrictEqual(empty, new Map());
+        yield* engine.drain;
+      }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+    }),
+  ),
+);
 
 describe("Attempts by Worker", () => {
   it("counts a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {

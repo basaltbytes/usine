@@ -7,6 +7,7 @@ import type { ManagedRepo } from "@usine/config/factory";
 import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
+import type { CiPolicy } from "@usine/core/ci";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleGeneration, type CycleLimit } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
@@ -118,6 +119,30 @@ export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
   };
 });
 
+const ciInstructions = (policy: CiPolicy): string =>
+  `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${policy.fixLoop}"), timeout_seconds (${policy.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`;
+
+/** Replaces the generated CI suffix while preserving the recorded prompt and failure evidence. */
+export const taskWithCiPolicy = (
+  task: AttemptTask,
+  policy: Option.Option<CiPolicy>,
+  previousPolicy: Option.Option<CiPolicy> = Option.none(),
+): AttemptTask => {
+  const prompt = Option.match(previousPolicy, {
+    onNone: () => task,
+    onSome: (previous) => {
+      const suffix = ciInstructions(previous);
+      return task.endsWith(suffix) ? task.slice(0, -suffix.length) : task;
+    },
+  });
+  return AttemptTask.make(
+    Option.match(policy, {
+      onNone: () => prompt,
+      onSome: (current) => `${prompt}${ciInstructions(current)}`,
+    }),
+  );
+};
+
 /** Builds the Submission that every trigger stream sends to the engine. */
 export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function* (
   expressions: ExpressionEngine["Service"],
@@ -139,13 +164,7 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
     ...settings,
     repository: options.repository.name,
     revision: options.revision,
-    task: Option.match(options.loop.ci, {
-      onNone: () => options.task,
-      onSome: (ci) =>
-        AttemptTask.make(
-          `${options.task}\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${ci.fixLoop}"), timeout_seconds (${ci.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`,
-        ),
-    }),
+    task: taskWithCiPolicy(options.task, options.loop.ci),
   });
 });
 

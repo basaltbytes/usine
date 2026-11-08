@@ -31,7 +31,7 @@ import {
   Layer,
   TxRef,
 } from "effect";
-import type { EventId } from "@usine/core/event";
+import { Event, type EventId } from "@usine/core/event";
 import { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { RunStore } from "../src/store/store.ts";
@@ -655,16 +655,28 @@ it.live("a CI fix queued behind a running attempt is not rechecked until the att
   ),
 );
 
-it.live.each(["CI fix", "trigger match"] as const)(
-  "the newest queued Event opens the next Run when it is a %s",
-  (newest) =>
+it.live.each([
+  { newest: "CI fix", sameTime: false },
+  { newest: "trigger match", sameTime: false },
+  { newest: "CI fix", sameTime: true },
+  { newest: "trigger match", sameTime: true },
+] as const)(
+  "the newest queued Event opens the next Run when it is a $newest (equal receive times: $sameTime)",
+  ({ newest, sameTime }) =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const storage = RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)));
         const ciFix = (number: number) =>
           Submission.make({ ...submission({ number }), ciFailureHead: Option.some(head) });
         const older = newest === "CI fix" ? submission({ number: 2 }) : ciFix(2);
-        const newer = newest === "CI fix" ? ciFix(3) : submission({ number: 3 });
+        const candidate = newest === "CI fix" ? ciFix(3) : submission({ number: 3 });
+        const newer = Submission.make({
+          ...candidate,
+          event: Event.make({
+            ...candidate.event,
+            receivedAt: sameTime ? older.event.receivedAt : candidate.event.receivedAt,
+          }),
+        });
         yield* Effect.scoped(
           Effect.gen(function* () {
             const store = yield* RunStore;
@@ -676,10 +688,16 @@ it.live.each(["CI fix", "trigger match"] as const)(
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
-            const queuedOlder = yield* store.recordAndClaim(older, RunId.make("older"));
-            assert.strictEqual(queuedOlder.result._tag, "Queued");
-            const queuedNewer = yield* store.recordAndClaim(newer, RunId.make("newer"));
-            assert.strictEqual(queuedNewer.result._tag, "Queued");
+            const ordered = sameTime ? [newer, older] : [older, newer];
+            yield* Effect.forEach(ordered, (queued) =>
+              store
+                .recordAndClaim(queued, RunId.make(queued.event.id))
+                .pipe(
+                  Effect.tap((claim) =>
+                    Effect.sync(() => assert.strictEqual(claim.result._tag, "Queued")),
+                  ),
+                ),
+            );
             const whileRunning = yield* store.pendingCiFixes;
             assert.deepStrictEqual(whileRunning, []);
             yield* store.finishAttempt(
@@ -689,6 +707,10 @@ it.live.each(["CI fix", "trigger match"] as const)(
 
             const fixes = yield* store.pendingCiFixes;
             const continuations = yield* store.pendingContinuations;
+            const next = yield* store.nextQueued(sourceId);
+            assert(Option.isSome(next));
+            assert.strictEqual(next.value.submission.event.id, newer.event.id);
+            assert.deepStrictEqual(next.value.eventIds, [newer.event.id, older.event.id]);
 
             if (newest === "CI fix") {
               assert.deepStrictEqual(

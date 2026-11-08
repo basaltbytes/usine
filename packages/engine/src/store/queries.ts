@@ -1268,7 +1268,7 @@ export const queriesFor = (
 
   /**
    * Replaces the Loop settings saved with a queued Event by `submission`'s: approval, permissions,
-   * CI policy, outcome labels, cycle limit, Agent, and parent model.
+   * CI policy and task suffix, outcome labels, cycle limit, Agent, and parent model.
    */
   const recordSettings = Effect.fn("RunStoreQueries.recordSettings")(function* (
     submission: Submission,
@@ -1276,7 +1276,7 @@ export const queriesFor = (
     const settings = yield* loopSettingColumns(submission);
     yield* database
       .update(triggerEvents)
-      .set(settings)
+      .set({ ...settings, task: submission.task })
       .where(eq(triggerEvents.eventId, submission.event.id))
       .execute();
   });
