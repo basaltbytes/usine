@@ -176,4 +176,8 @@ export const needKindLabel = {
 export const needDetailsLabel = "Details";
 export const needOpenItemLabel = "Open item";
 export const needOpenRunLabel = "Open run";
+export const needOpenFixRunLabel = "Open fix run";
+/** Names the CI fix run that took over a failed run's work, for example `fix run 1a2b3c4d continues the work`. */
+export const fixRunContinues = (fixRunId: RunId) =>
+  `fix run ${fixRunId.slice(0, 8)} continues the work`;
 export const needActionsLabel = (title: string) => `Actions for ${title}`;

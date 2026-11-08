@@ -30,6 +30,7 @@ import {
 import { runActionLabel, runActionProgress } from "~/lib/runs/strings";
 import { isRunOperationRejected, usePendingRunAction, useRunAction } from "~/hooks/runs/actions";
 import { CycleBudgetAsk } from "~/components/needs-you/cycle-budget-ask";
+import { RunFailureAsk } from "~/components/needs-you/run-failure-ask";
 import { NeedItem } from "~/components/needs-you/need-item";
 import { UnconfiguredWorkerAsk } from "~/components/needs-you/unconfigured-worker-ask";
 
@@ -162,6 +163,8 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       return <ApprovalAsk need={need} dismiss={dismiss} />;
     case "CycleBudgetNeed":
       return <CycleBudgetAsk need={need} dismiss={dismiss} />;
+    case "RunFailureNeed":
+      return <RunFailureAsk need={need} dismiss={dismiss} />;
     case "WorkerQuotaNeed":
       return <WorkerQuotaAsk need={need} dismiss={dismiss} />;
     case "WorkerPreflightNeed":
