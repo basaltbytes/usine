@@ -17,14 +17,19 @@ export function emitDeclarations(definitions, roots) {
     declarations.set(name, expression);
   }
 
-  function reference(ref) {
+  function definition(ref) {
     assert.match(ref, /^#\/definitions\/v2\/\w+$/u);
     const name = ref.split("/").at(-1);
+    const schema = definitions[name];
+    assert(schema, `Missing upstream definition: ${name}`);
+    return { name, schema };
+  }
+
+  function reference(ref) {
+    const { name, schema } = definition(ref);
     if (definitionsEmitted.has(name)) return name;
     assert(!visiting.has(name), `Recursive schema needs explicit support: ${name}`);
     visiting.add(name);
-    const schema = definitions[name];
-    assert(schema, `Missing upstream definition: ${name}`);
     const expression = emit(schema);
     const values = enumValues(schema);
     if (values) declare(`${name}Values`, `${JSON.stringify(values)} as const`);
@@ -32,6 +37,23 @@ export function emitDeclarations(definitions, roots) {
     definitionsEmitted.add(name);
     visiting.delete(name);
     return name;
+  }
+
+  function assertVariantTag(schema, seen = new Set()) {
+    assert(!seen.has(schema), "Recursive variant wrapper needs explicit support");
+    seen.add(schema);
+    if (schema.$ref) return assertVariantTag(definition(schema.$ref).schema, seen);
+    if (schema.allOf) {
+      assert.equal(schema.allOf.length, 1, "Only reference wrappers are supported");
+      return assertVariantTag(schema.allOf[0], seen);
+    }
+    const tag = schema.properties?.type;
+    if (tag !== undefined) {
+      assert(
+        Array.isArray(tag.enum) && tag.enum.length === 1,
+        `Variant ${schema.title ?? "without a title"} needs an inline single-value type tag`,
+      );
+    }
   }
 
   function emit(schema, propertyName) {
@@ -54,13 +76,7 @@ export function emitDeclarations(definitions, roots) {
                 required: [...(schema.required ?? []), ...(branch.required ?? [])],
               }
             : branch;
-          const tag = member.properties?.type;
-          if (tag !== undefined) {
-            assert(
-              Array.isArray(tag.enum) && tag.enum.length === 1,
-              `Variant ${member.title ?? "without a title"} needs an inline single-value type tag`,
-            );
-          }
+          assertVariantTag(member);
           if (member.title && member.type === "object") {
             declare(member.title, emit(member));
             return member.title;

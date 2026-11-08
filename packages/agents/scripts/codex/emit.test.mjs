@@ -73,6 +73,49 @@ describe("emitDeclarations", () => {
     }
   });
 
+  it("validates referenced variant tags even when the definition was already emitted", () => {
+    for (const type of [
+      ref("PlanType"),
+      { allOf: [ref("PlanType")] },
+      { type: "string" },
+      { enum: ["plan", "draft"], type: "string" },
+    ]) {
+      const definitions = {
+        Item: { oneOf: [ref("PlanItem"), variant("OtherItem", "other")] },
+        PlanItem: { ...variant("PlanItem", "plan"), properties: { type } },
+        PlanType: tag("plan"),
+      };
+      for (const roots of [["Item"], ["PlanItem", "Item"]]) {
+        expect(() => emitDeclarations(definitions, roots)).toThrow(
+          "Variant PlanItem needs an inline single-value type tag",
+        );
+      }
+    }
+  });
+
+  it("validates variant tags through reference and allOf wrappers", () => {
+    const definitions = {
+      Item: { anyOf: [{ allOf: [ref("Alias")] }] },
+      Alias: ref("PlanItem"),
+      PlanItem: { ...variant("PlanItem", "plan"), properties: { type: { type: "string" } } },
+    };
+    expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+      "Variant PlanItem needs an inline single-value type tag",
+    );
+  });
+
+  it("keeps referenced variants with literal tags or no tag", () => {
+    const definitions = {
+      Item: { oneOf: [ref("PlanItem"), ref("TextItem")] },
+      PlanItem: variant("PlanItem", "plan"),
+      TextItem: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+    };
+    const declarations = emitDeclarations(definitions, ["PlanItem", "Item"]);
+    expect(declarations.get("Item")).toBe("Schema.Union([PlanItem, TextItem])");
+    expect(declarations.get("PlanItem")).toContain('"type": Schema.Literal("plan")');
+    expect(declarations.get("TextItem")).toBe('Schema.Struct({"text": Schema.String})');
+  });
+
   it("keeps the parent's required fields on merged variants", () => {
     const definitions = {
       Item: {

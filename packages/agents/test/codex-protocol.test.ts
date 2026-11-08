@@ -18,6 +18,7 @@ import {
   isMessagePhase,
   isAuthMode,
   isCodexErrorCode,
+  replaces,
 } from "../src/protocol/codex/codex.ts";
 import packageJson from "../package.json" with { type: "json" };
 import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
@@ -27,6 +28,17 @@ import { ImageGenerationThreadItem } from "../src/protocol/codex/generated.ts";
 import { expectTypeOf } from "vitest";
 
 describe("generated Codex protocol selections", () => {
+  it("requires replacements to accept the generated field's encoded type and nullability", () => {
+    // @ts-expect-error A numeric replacement cannot decode a generated string field.
+    replaces(Schema.String, Schema.Finite);
+    // @ts-expect-error A replacement must preserve the generated field's null values.
+    replaces(Schema.NullOr(Schema.String), Schema.String);
+
+    expect(replaces(Schema.String, Schema.NonEmptyString)).toBe(Schema.NonEmptyString);
+    const nullable = Schema.NullOr(Schema.String);
+    expect(replaces(Schema.NullOr(Schema.NonEmptyString), nullable)).toBe(nullable);
+  });
+
   it("restricts comparison targets to generated enum values while allowing unknown input", () => {
     expectTypeOf<"waitingForInput">().not.toExtend<Parameters<typeof isTurnStatus>[1]>();
     expectTypeOf<Parameters<typeof isToolStatus>[1]>().toEqualTypeOf<
