@@ -1,6 +1,6 @@
 import type { Attempt } from "@usine/core/attempt";
 import type { AgentFailure } from "@usine/core/attempt/failure";
-import { Context, type DateTime, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import type { Submission } from "./engine/submission.ts";
 
 /**
@@ -11,13 +11,13 @@ export class CompletionCheck extends Context.Service<
   CompletionCheck,
   {
     /**
-     * Verifies an outcome label added since `firstAttemptStartedAt`, including earlier tries in
-     * the same Run. The engine calls it only when the list is nonempty and the Run would record the success.
+     * Verifies an outcome label added by any of `runAttempts` since the Run's first Attempt.
+     * The engine calls it only when the list is nonempty and the Run would record the success.
      */
     readonly verify: (
       attempt: Attempt,
       submission: Submission,
-      firstAttemptStartedAt: DateTime.Utc,
+      runAttempts: ReadonlyArray<Attempt>,
     ) => Effect.Effect<void, AgentFailure>;
   }
 >()("@usine/engine/completion-check/CompletionCheck") {

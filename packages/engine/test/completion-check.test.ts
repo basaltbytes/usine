@@ -179,7 +179,7 @@ it.live("accepts outcome labels unverified on a host that provides the unverifie
 );
 
 it.live.each(["automatic", "operator"] as const)(
-  "verifies an %s retry from the Run's first Attempt start",
+  "verifies an %s retry with the Run's Attempt history",
   (retry) =>
     withInstance((directory) =>
       Effect.gen(function* () {
@@ -194,11 +194,11 @@ it.live.each(["automatic", "operator"] as const)(
           Effect.sleep("1100 millis").pipe(Effect.andThen(Effect.fail(failure))),
           Effect.succeed(reviewed),
         ]);
-        const starts: Array<DateTime.Utc> = [];
+        const histories: Array<ReadonlyArray<Attempt>> = [];
         const check = Layer.succeed(CompletionCheck)({
-          verify: (_attempt, _submission, firstAttemptStartedAt) =>
+          verify: (_attempt, _submission, runAttempts) =>
             Effect.sync(() => {
-              starts.push(firstAttemptStartedAt);
+              histories.push(runAttempts);
             }),
         });
         yield* Effect.gen(function* () {
@@ -220,7 +220,11 @@ it.live.each(["automatic", "operator"] as const)(
           assert(
             DateTime.isGreaterThan(second.startedAt, DateTime.add(first.startedAt, { seconds: 1 })),
           );
-          assert.deepStrictEqual(starts, [first.startedAt]);
+          const identity = ({ id, worker, startedAt }: Attempt) => ({ id, worker, startedAt });
+          assert.deepStrictEqual(
+            histories.map((attempts) => attempts.map(identity)),
+            [[first, second].map(identity)],
+          );
         }).pipe(
           Effect.provide(
             engineLayer(

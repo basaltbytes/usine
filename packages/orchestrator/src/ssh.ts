@@ -298,7 +298,8 @@ export const sshStepExecutorLayer = (
 
 /**
  * Provides the full engine and `WorkerStatus` for SSH Workers. Requires `CredentialProvider`,
- * `GitHubApp`, `TriggerCondition`, `AttemptRuntime` (built before the engine), `Harnesses`,
+ * `GitHubApp`, `TriggerCondition`, `CompletionCheck`, `AttemptRuntime` (built before the engine),
+ * `Harnesses`,
  * and `CurrentInstance`.
  */
 export const layer = (

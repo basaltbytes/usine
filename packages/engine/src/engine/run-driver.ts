@@ -469,11 +469,7 @@ export class RunDriver extends Context.Service<
           );
           return result;
         }
-        const firstAttemptStartedAt = current.attempts.reduce(
-          (first, previous) => (previous.number < first.number ? previous : first),
-          attempt,
-        ).startedAt;
-        return yield* completionCheck.verify(attempt, submission, firstAttemptStartedAt).pipe(
+        return yield* completionCheck.verify(attempt, submission, current.attempts).pipe(
           Effect.match({
             onSuccess: () => result,
             onFailure: (failure): AttemptResult =>

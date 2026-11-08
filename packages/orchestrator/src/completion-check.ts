@@ -71,7 +71,7 @@ const matching = (submission: Submission, names: ReadonlyArray<string>) => {
 
 /**
  * Verifies the outcome labels of an Attempt on the Run's GitHub issue or pull request. Accepts an
- * outcome label that the Attempt's GitHub writer added since the Run's first Attempt started,
+ * outcome label that any of the Run's GitHub writers added since its first Attempt started,
  * even if a later change removed it. If the Item's label events can't be read, accepts an outcome
  * label that is on the Item now.
  */
@@ -87,31 +87,41 @@ export const completionCheckLayer: Layer.Layer<
     const polling = yield* GitHubPolling;
     const instances = yield* CurrentInstance;
 
-    const writerOf = Effect.fn("CompletionCheck.writer")(function* (attempt: Attempt) {
-      const { config } = yield* instances.get;
-      const worker = config.workers.find(({ name }) => name === attempt.worker);
-      if (worker === undefined)
-        return yield* UnknownWriterError.make({
-          message: `Worker ${attempt.worker} is no longer configured, so its GitHub writer is unknown`,
-        });
-      const { login } = yield* app.botAccount;
-      return githubBotLogin(worker.kind, login);
-    });
-
-    /** Returns labels added by the Attempt's writer since the Run's first Attempt started. */
+    /** Returns labels added by the Run's writers since its first Attempt started. */
     const addedLabels = Effect.fn("CompletionCheck.addedLabels")(function* (
       attempt: Attempt,
       repository: RepositoryName,
       item: ItemNumber,
       fields: LogFields,
-      firstAttemptStartedAt: DateTime.Utc,
+      runAttempts: ReadonlyArray<Attempt>,
     ) {
+      const { config } = yield* instances.get;
+      const workers = yield* Effect.forEach(runAttempts, (previous) => {
+        const worker = config.workers.find(({ name }) => name === previous.worker);
+        return worker === undefined
+          ? Effect.fail(
+              UnknownWriterError.make({
+                message: `Worker ${previous.worker} is no longer configured, so its GitHub writer is unknown`,
+              }),
+            )
+          : Effect.succeed(worker);
+      });
+      const first = runAttempts.reduce(
+        (first, previous) => (previous.number < first.number ? previous : first),
+        attempt,
+      );
       // GitHub records label events to the second.
-      const since = DateTime.startOf(firstAttemptStartedAt, "second");
-      const writer = yield* writerOf(attempt);
-      const changes = yield* history
-        .appChanges(repository, item, since, writer)
-        .pipe(transientlyRetried(fields, "label events"));
+      const since = DateTime.startOf(first.startedAt, "second");
+      const changes = yield* Effect.gen(function* () {
+        const { login } = yield* app.botAccount;
+        const writers = new Set(workers.map(({ kind }) => githubBotLogin(kind, login)));
+        const timelines = yield* Effect.forEach(
+          writers,
+          (writer) => history.appChanges(repository, item, since, writer),
+          { concurrency: "unbounded" },
+        );
+        return timelines.flat();
+      }).pipe(transientlyRetried(fields, "label events"));
       return changes.flatMap((change) =>
         change._tag === "LabelAdded" && DateTime.isGreaterThanOrEqualTo(change.at, since)
           ? [change.label.name]
@@ -122,7 +132,7 @@ export const completionCheckLayer: Layer.Layer<
     const verify = Effect.fn("CompletionCheck.verify")(function* (
       attempt: Attempt,
       submission: Submission,
-      firstAttemptStartedAt: DateTime.Utc,
+      runAttempts: ReadonlyArray<Attempt>,
     ) {
       const fields = logFields(attempt, submission);
       yield* Effect.annotateCurrentSpan(fields);
@@ -145,7 +155,7 @@ export const completionCheckLayer: Layer.Layer<
         submission.repository,
         item,
         fields,
-        firstAttemptStartedAt,
+        runAttempts,
       ).pipe(Effect.result);
       if (Result.isSuccess(added)) {
         const label = matching(submission, added.success);
@@ -158,7 +168,7 @@ export const completionCheckLayer: Layer.Layer<
         return;
       }
       yield* Effect.logWarning(
-        "Could not read the attempt's label events; verifying the current labels instead",
+        "Could not read the run's label events; verifying the current labels instead",
         { ...fields, errorTag: added.failure._tag, message: added.failure.message },
       );
       const current = yield* polling.itemLabels(submission.repository, item).pipe(

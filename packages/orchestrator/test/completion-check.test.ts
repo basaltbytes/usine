@@ -12,12 +12,12 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { StepCompletion, StepResult } from "@usine/core/step/result";
-import { BotLogin, WorkerName } from "@usine/core/worker";
+import { type BotAccount, BotLogin, WorkerName } from "@usine/core/worker";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { GitHubApiError, type GitHubAppError } from "@usine/github/github-app";
+import { GitHubApiError, GitHubApp, type GitHubAppError } from "@usine/github/github-app";
 import {
   GitHubItemHistory,
   type GitHubItemNotFoundError,
@@ -132,6 +132,7 @@ type TimelineRead = (
  */
 const fakeGitHub = (options: {
   readonly timeline: TimelineRead;
+  readonly botAccount?: Effect.Effect<BotAccount, GitHubAppError>;
   readonly labels?: Effect.Effect<ReadonlyArray<string>, GitHubAppError>;
 }) => {
   const timeline: Array<{
@@ -171,7 +172,11 @@ const fakeGitHub = (options: {
         );
       }),
   });
-  const github = Layer.mergeAll(testAppLayer, history, polling);
+  const app = Layer.effect(
+    GitHubApp,
+    Effect.map(GitHubApp, (app) => ({ ...app, botAccount: options.botAccount ?? app.botAccount })),
+  ).pipe(Layer.provide(testAppLayer));
+  const github = Layer.mergeAll(app, history, polling);
   return {
     reads,
     github,
@@ -182,11 +187,11 @@ const fakeGitHub = (options: {
 const verify = (
   attempt: Attempt,
   saved: Submission,
-  firstAttemptStartedAt: DateTime.Utc = attempt.startedAt,
+  runAttempts: ReadonlyArray<Attempt> = [attempt],
 ) =>
   Effect.gen(function* () {
     const check = yield* CompletionCheck;
-    return yield* check.verify(attempt, saved, firstAttemptStartedAt).pipe(Effect.result);
+    return yield* check.verify(attempt, saved, runAttempts).pipe(Effect.result);
   });
 
 const refused = GitHubApiError.make({
@@ -304,11 +309,55 @@ describe("label events", () => {
         number: AttemptNumber.make(2),
         startedAt: at("2026-11-08T16:00:00Z"),
       });
-      const result = yield* verify(retry, review(), startedAt).pipe(Effect.provide(fake.check));
+      const result = yield* verify(retry, review(), [attemptOn("local"), retry]).pipe(
+        Effect.provide(fake.check),
+      );
       assert.strictEqual(result._tag, "Success");
       assert.deepStrictEqual(fake.reads.timeline, [
         { actor: appActor, since: "2026-11-08T15:50:10.000Z", item: 1 },
       ]);
+      assert.strictEqual(fake.reads.labels, 0);
+    }),
+  );
+
+  it.effect.each([
+    ["exe-one", "local", exeActor],
+    ["local", "exe-one", appActor],
+  ] as const)(
+    "counts an earlier verdict when a retry moves from %s to %s",
+    ([firstWorker, retryWorker, actor]) =>
+      Effect.gen(function* () {
+        const fake = fakeGitHub({
+          timeline: () =>
+            Effect.succeed([
+              added(actor, "ready-to-merge", at("2026-11-08T15:55:00Z")),
+              removed("octocat", "ready-to-merge", at("2026-11-08T15:56:00Z")),
+            ]),
+          labels: Effect.succeed([]),
+        });
+        const retry = Attempt.make({
+          ...attemptOn(retryWorker),
+          id: AttemptId.make("run-1/review/2"),
+          number: AttemptNumber.make(2),
+          startedAt: at("2026-11-08T16:00:00Z"),
+        });
+        const result = yield* verify(retry, review(), [attemptOn(firstWorker), retry]).pipe(
+          Effect.provide(fake.check),
+        );
+        assert.strictEqual(result._tag, "Success");
+        assert.strictEqual(fake.reads.labels, 0);
+      }),
+  );
+
+  it.effect("rejects a verdict from a Worker kind absent from the Run", () =>
+    Effect.gen(function* () {
+      const fake = fakeGitHub({
+        timeline: () =>
+          Effect.succeed([added(exeActor, "ready-to-merge", at("2026-11-08T15:55:00Z"))]),
+      });
+      const result = yield* verify(attemptOn("local"), review()).pipe(Effect.provide(fake.check));
+      assert(result._tag === "Failure");
+      assert.include(result.failure.message, "added no outcome label");
       assert.strictEqual(fake.reads.labels, 0);
     }),
   );
@@ -526,6 +575,71 @@ describe("current label fallback", () => {
         assert.strictEqual(fake.reads.timeline.length, read === "label events" ? 2 : 1);
         assert.strictEqual(fake.reads.labels, read === "label events" ? 0 : 2);
       }),
+  );
+
+  it.effect.each([Option.none<number>(), Option.some(502), Option.some(403)])(
+    "retries bot-account lookup unless GitHub refuses it (%j)",
+    (status) =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        let calls = 0;
+        const fake = fakeGitHub({
+          botAccount: Effect.suspend(() => {
+            calls += 1;
+            return calls === 1
+              ? Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(
+                    GitHubApiError.make({
+                      operation: "read-bot-account",
+                      status,
+                      message: "Bot-account lookup failed",
+                    }),
+                  ),
+                )
+              : Effect.succeed(testBotAccount);
+          }),
+          timeline: () =>
+            Effect.succeed([added(appActor, "ready-to-merge", at("2026-11-08T15:55:00Z"))]),
+          labels: Effect.succeed([]),
+        });
+        const fiber = yield* verify(attemptOn("local"), review()).pipe(
+          Effect.provide(fake.check),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("1 second");
+        const result = yield* Fiber.join(fiber);
+        const refusal = Option.contains(status, 403);
+        assert.strictEqual(result._tag, refusal ? "Failure" : "Success");
+        assert.strictEqual(calls, refusal ? 1 : 2);
+        assert.strictEqual(fake.reads.timeline.length, refusal ? 0 : 1);
+        assert.strictEqual(fake.reads.labels, refusal ? 1 : 0);
+      }),
+  );
+
+  it.effect("bounds bot-account lookup and retries timeouts before checking current labels", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let calls = 0;
+      const fake = fakeGitHub({
+        botAccount: Effect.suspend(() => {
+          calls += 1;
+          return Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+        }),
+        timeline: () => Effect.die("A hung bot-account lookup cannot read the timeline"),
+        labels: Effect.succeed(["ready-to-merge"]),
+      });
+      const fiber = yield* verify(attemptOn("local"), review()).pipe(
+        Effect.provide(fake.check),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("48 seconds");
+      assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+      assert.strictEqual(calls, 3);
+      assert.strictEqual(fake.reads.timeline.length, 0);
+      assert.strictEqual(fake.reads.labels, 1);
+    }),
   );
 
   it.effect("bounds each read and retries three timeouts before falling back", () =>
