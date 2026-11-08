@@ -494,6 +494,71 @@ const indexed = (state: "open" | "closed", repository: string): Answer =>
     ]),
   ]);
 
+const plainSuccessDiscovery = [
+  {
+    path: "the named branch",
+    branch: BRANCH,
+    origin: [branchAt(HEAD)],
+    command: BRANCH_PULL_REQUESTS,
+    warning: `Could not read the pull requests of branch ${BRANCH} on GitHub; retrying`,
+    success: Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])]),
+  },
+  {
+    path: "the detached checkout's commit index",
+    branch: "",
+    origin: [PULL_REF],
+    command: INDEX,
+    warning: "Could not read the final commit's pull requests on GitHub; retrying",
+    success: indexed("open", "basaltbytes/usine"),
+  },
+];
+
+it.live.each(plainSuccessDiscovery)(
+  "a plain success waits on CI after retrying a failed read of $path",
+  ({ branch, origin, command, warning, success }) =>
+    Effect.gen(function* () {
+      const finished = yield* finishHarvested("Finished the change.", {
+        branch,
+        origin,
+        github: [[command, [ghFailed, success]]],
+      });
+      assert.strictEqual(finished.decision._tag, "RunAwaitingCi");
+      assert(finished.state._tag === "AwaitingCi");
+      assert.strictEqual(finished.state.handoff.pullRequest, 815);
+      assert.strictEqual(finished.state.handoff.head, HEAD);
+      assert.isTrue(Option.isNone(finished.failure));
+      assert.strictEqual(tries(finished.commands, command), 2);
+      assert.lengthOf(
+        finished.warnings.filter((logged) => Array.isArray(logged) && logged[0] === warning),
+        1,
+      );
+    }),
+);
+
+it.live.each(plainSuccessDiscovery)(
+  "a plain success retries the attempt as an InfraFailure after exhausting reads of $path",
+  ({ branch, origin, command, warning }) =>
+    Effect.gen(function* () {
+      const finished = yield* finishHarvested("Finished the change.", {
+        branch,
+        origin,
+        github: [[command, [ghFailed]]],
+      });
+      assert.strictEqual(finished.decision._tag, "RetryAttempt");
+      assert(Option.isSome(finished.failure));
+      assert.strictEqual(finished.failure.value._tag, "InfraFailure");
+      assert.strictEqual(
+        finished.failure.value.message,
+        "CI can't wait on the pushed pull request: GitHub couldn't be read: GhFailed: gh: Bad Gateway (HTTP 502)",
+      );
+      assert.strictEqual(tries(finished.commands, command), 3);
+      assert.lengthOf(
+        finished.warnings.filter((logged) => Array.isArray(logged) && logged[0] === warning),
+        2,
+      );
+    }),
+);
+
 it.live.each([
   {
     outcome: "waits on the open pull request from the Run's repository",
