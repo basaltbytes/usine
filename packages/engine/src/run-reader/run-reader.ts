@@ -1,5 +1,13 @@
 import { TranscriptCodec } from "../store/transcript/codec.ts";
-import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
+import {
+  Array as EffectArray,
+  Context,
+  type DateTime,
+  Effect,
+  Layer,
+  Option,
+  Schema,
+} from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
 import { and, asc, eq, gte, lt, or } from "drizzle-orm";
 import { events as storedEvents, runs } from "../database/schema.ts";
@@ -52,34 +60,40 @@ const makeRunReader = Effect.gen(function* () {
     sourceRunIds: ReadonlyArray<RunId>,
   ) {
     yield* Effect.annotateCurrentSpan({ sourceRunIds });
-    const ranges = sourceRunIds.map((sourceRunId) => ({
+    const ranges = [...new Set(sourceRunIds)].map((sourceRunId) => ({
       sourceRunId,
       ...ciFixDedupKeyRange(sourceRunId),
     }));
-    const rows =
-      ranges.length === 0
-        ? []
-        : yield* database
+    const fixes = new Map<RunId, RunId>();
+    // Chunks stay below SQLite's expression-depth and bind-parameter limits. Each source's
+    // fixes are read together so ascending open time selects its newest fix.
+    yield* Effect.forEach(
+      EffectArray.chunksOf(ranges, 100),
+      (chunk) =>
+        Effect.gen(function* () {
+          const rows = yield* database
             .select({ runId: runs.runId, dedupKey: storedEvents.dedupKey })
             .from(storedEvents)
             .innerJoin(runs, eq(runs.eventId, storedEvents.eventId))
             .where(
               or(
-                ...ranges.map(({ from, to }) =>
+                ...chunk.map(({ from, to }) =>
                   and(gte(storedEvents.dedupKey, from), lt(storedEvents.dedupKey, to)),
                 ),
               ),
             )
             .orderBy(asc(runs.openedAt))
             .execute();
-    const decoded = yield* Schema.decodeEffect(
-      Schema.Array(Schema.Struct({ runId: RunId, dedupKey: Schema.String })),
-    )(rows);
-    const fixes = new Map<RunId, RunId>();
-    for (const { runId, dedupKey } of decoded) {
-      const source = ranges.find(({ from, to }) => dedupKey >= from && dedupKey < to);
-      if (source !== undefined) fixes.set(source.sourceRunId, runId);
-    }
+          const decoded = yield* Schema.decodeEffect(
+            Schema.Array(Schema.Struct({ runId: RunId, dedupKey: Schema.String })),
+          )(rows);
+          for (const { runId, dedupKey } of decoded) {
+            const source = chunk.find(({ from, to }) => dedupKey >= from && dedupKey < to);
+            if (source !== undefined) fixes.set(source.sourceRunId, runId);
+          }
+        }),
+      { discard: true },
+    );
     yield* Effect.logDebug("Read the CI fix runs of source runs", {
       sourceRunIds: sourceRunIds.length,
       fixRuns: fixes.size,

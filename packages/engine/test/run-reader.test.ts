@@ -322,6 +322,16 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
             [unrelatedId, unrelated.runId],
           ]),
         );
+        const unknownSources = Array.from({ length: 1100 }, (_, index) =>
+          RunId.make(index.toString(16).padStart(32, "0")),
+        );
+        const manyLinks = yield* reader.ciFixRuns([
+          sourceId,
+          ...unknownSources,
+          unrelatedId,
+          sourceId,
+        ]);
+        assert.deepStrictEqual(manyLinks, links);
         const empty = yield* reader.ciFixRuns([]);
         assert.deepStrictEqual(empty, new Map());
         yield* engine.drain;

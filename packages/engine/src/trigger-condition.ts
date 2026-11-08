@@ -5,8 +5,9 @@ import type { Submission } from "./engine/submission.ts";
  * The result of re-evaluating a queued Event's trigger:
  *
  * - `Matches`: the Item still matches, and the Event's Run opens with `submission`. The adapter
- *   may replace the Loop settings saved with the Event, such as approval or Agent, with the
- *   Loop's current ones; the Event, Item, task, and CI evidence stay as recorded.
+ *   may replace the Loop settings saved with the Event, such as approval or Agent, and the task
+ *   to reflect the Loop's current configuration. Admission persists these settings and the task
+ *   for execution; the Event, Item, and CI evidence stay as recorded.
  * - `NoLongerMatches`: the Item, Loop, or repository changed, and the Item's queued Events are
  *   revoked.
  * - `ItemGone`: the Item no longer exists. The queued Events are revoked, and the Item's

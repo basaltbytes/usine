@@ -31,9 +31,10 @@ const logFields = (submission: Submission) => ({
 /**
  * Re-evaluates a queued Event's trigger against a fresh GitHub snapshot of its Item. Returns
  * `ItemGone` if the Item no longer exists, and `Matches` on any other failure or after five
- * seconds. A queued CI fix keeps its task and failure evidence but takes approval, Agent,
- * models, permissions, CI policy, outcome labels, and cycle limit from its Loop's current
- * configuration.
+ * seconds. A queued CI fix preserves its recorded prompt and failure evidence. Its approval,
+ * Agent, models, permissions, CI policy, generated CI handoff instructions, outcome labels, and
+ * cycle limit follow its Loop's current configuration. Admission persists the refreshed task
+ * and settings.
  */
 export const triggerConditionLayer: Layer.Layer<
   TriggerCondition,
