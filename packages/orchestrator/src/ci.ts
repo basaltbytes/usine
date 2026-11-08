@@ -4,7 +4,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { matchesLoop } from "@usine/config/project";
 import { repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
-import { CiFailed, CiHandedOff, CiPassed, CiSuperseded } from "@usine/core/ci";
+import { CiFailed, CiHandedOff, CiPassed, CiSuperseded, CiTimedOut } from "@usine/core/ci";
 import { DedupKey } from "@usine/core/event";
 import {
   canonicalRepositoryName,
@@ -114,16 +114,27 @@ export class CiMonitor extends Context.Service<
           DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000;
         if (observed.state === "pending") {
           if (timedOut) {
+            const details = yield* checks.pendingDetails(wait.repository, head).pipe(
+              Effect.timeout("10 seconds"),
+              Effect.catch((error) =>
+                Effect.logWarning("Pending CI diagnostics unavailable", {
+                  runId,
+                  head,
+                  errorTag: error._tag,
+                }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
+              ),
+            );
             yield* Effect.logWarning("CI wait timed out; operator attention is required", {
               runId,
               head,
               timeoutSeconds: handoff.timeoutSeconds,
+              details,
             });
             return yield* engine.settleCi(
               runId,
               head,
-              CiFailed.make({
-                message: `CI did not settle within ${handoff.timeoutSeconds} seconds. Check https://github.com/${wait.repository}/pull/${pullRequest}/checks`,
+              CiTimedOut.make({
+                message: `CI did not settle within ${handoff.timeoutSeconds} seconds. ${details} Check https://github.com/${wait.repository}/pull/${pullRequest}/checks`,
               }),
             );
           }

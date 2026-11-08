@@ -1,7 +1,7 @@
 import type { TranscriptCodec } from "./transcript/codec.ts";
 import type { ChangeBus } from "@usine/core/changes";
 import { changeTransaction } from "./changes.ts";
-import { AgentFailure } from "@usine/core/attempt/failure";
+import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   AttemptCanceled,
   AttemptFailed,
@@ -68,6 +68,7 @@ export const ciQueries = (
         const state = Match.valueTags(resolution, {
           CiPassed: () => RunState.Succeeded.make(),
           CiFailed: () => RunState.Failed.make(),
+          CiTimedOut: () => RunState.Failed.make(),
           CiHandedOff: ({ reason, fixRunId }) =>
             RunState.HandedOff.make({
               reason,
@@ -83,6 +84,8 @@ export const ciQueries = (
           CiHandedOff: () => AttemptHandedOff.make(),
           CiFailed: ({ message }) =>
             AttemptFailed.make({ failure: AgentFailure.make({ message }) }),
+          CiTimedOut: ({ message }) =>
+            AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
           CiSuperseded: () => AttemptCanceled.make(),
         });
         yield* queries.settleCiAttempt(runId, outcome);

@@ -8,6 +8,7 @@ import {
   CiPassed,
   CiPolicy,
   CiSuperseded,
+  CiTimedOut,
 } from "@usine/core/ci";
 import { WorkerName } from "@usine/core/worker";
 import { BlockedFailure } from "@usine/core/attempt/failure";
@@ -164,6 +165,7 @@ it.live(
 it.live.each([
   CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
   CiFailed.make({ message: "CI failed without an available fix loop" }),
+  CiTimedOut.make({ message: "CI is still running after its deadline" }),
 ])("CI settlement preserves the result's producing attempt after $_tag", (resolution) =>
   withInstance((directory) =>
     Effect.gen(function* () {
@@ -189,6 +191,12 @@ it.live.each([
           resolution._tag === "CiSuperseded" ? "Canceled" : "Failed",
         );
         assert.deepStrictEqual(settled.step.result, waiting.step.result);
+        if (resolution._tag === "CiTimedOut") {
+          const outcome = Option.getOrNull(settled.attempts[0]?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(outcome.failure._tag, "InfraFailure");
+          assert.strictEqual(outcome.failure.message, resolution.message);
+        }
         if (resolution._tag === "CiFailed") {
           yield* engine.retry(accepted.runId);
           const retrying = yield* waitFor(

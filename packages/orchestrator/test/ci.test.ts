@@ -183,7 +183,20 @@ const scenario = Effect.fn("test.ciScenario")(function* (
         Effect.map(StepCompletion.fromResult),
       ),
   });
+  const pendingFailure = yield* Ref.make(Option.none<GitHubApiError>());
   const checks = Layer.succeed(GitHubChecks)({
+    pendingDetails: () =>
+      Ref.get(pendingFailure).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.succeed(
+                "test (web) is in_progress and has run for 31 min; previous successful duration: 6 min in the last successful workflow run.",
+              ),
+            onSome: (error) => Effect.fail(error),
+          }),
+        ),
+      ),
     snapshot: () =>
       Effect.gen(function* () {
         const failure = yield* Ref.get(observationFailure);
@@ -274,6 +287,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     observed,
     itemState,
     observationFailure,
+    pendingFailure,
     mergeable,
     tasks,
     mutations,
@@ -688,31 +702,56 @@ it.live("a new push observed after the deadline supersedes the old head", () =>
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live("a silent check times out as a failed run for Needs attention", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fixtureInstance = yield* instance;
-      const setup = yield* scenario(1);
-      yield* Effect.gen(function* () {
-        const runId = yield* openWait(setup.timeoutSeconds);
-        yield* Effect.sleep("1100 millis");
+it.live.each(["available", "unavailable"])(
+  "a pending check timeout records infrastructure failure with %s job diagnostics",
+  (diagnostics) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(1);
+        yield* Effect.gen(function* () {
+          const runId = yield* openWait(setup.timeoutSeconds);
+          if (diagnostics === "unavailable")
+            yield* Ref.set(
+              setup.pendingFailure,
+              Option.some(
+                GitHubApiError.make({
+                  operation: "read-ci-checks",
+                  status: Option.some(403),
+                  message: "Forbidden",
+                }),
+              ),
+            );
+          yield* Effect.sleep("1100 millis");
 
-        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
-        const failed = yield* (yield* RunEngine).inspect(runId);
-        assert.strictEqual(failed.run.state._tag, "Failed");
-        assert.strictEqual(
-          failed.attempts
-            .at(-1)
-            ?.outcome.pipe(Option.map(({ _tag }) => _tag))
-            .pipe(Option.getOrNull),
-          "Failed",
-        );
+          const failed = yield* (yield* RunEngine).inspect(runId);
+          assert.strictEqual(failed.run.state._tag, "Failed");
+          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(outcome.failure._tag, "InfraFailure");
+          if (diagnostics === "available") {
+            assert.include(outcome.failure.message, "test (web) is in_progress");
+            assert.include(outcome.failure.message, "31 min");
+            assert.include(outcome.failure.message, "6 min");
+          } else {
+            assert.include(outcome.failure.message, "Pending job diagnostics are unavailable.");
+          }
+          const mutations = yield* Ref.get(setup.mutations);
+          assert.deepStrictEqual(mutations, []);
+          assert.strictEqual(
+            failed.attempts
+              .at(-1)
+              ?.outcome.pipe(Option.map(({ _tag }) => _tag))
+              .pipe(Option.getOrNull),
+            "Failed",
+          );
 
-        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
-      }).pipe(Effect.provide(setup.runtime));
-    }),
-  ).pipe(Effect.provide(NodeServices.layer)),
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live("CI fixes from their own loop are admitted before the source hands off", () =>

@@ -129,6 +129,78 @@ const failedCheckRun = {
   output: { summary: "Check summary", text: null },
 };
 const failedCheck = { total_count: 1, check_runs: [failedCheckRun] };
+
+it.effect.each(["available", "missing", "forbidden"] as const)(
+  "reports running and queued checks at timeout with %s duration history",
+  (history) =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-11-05T20:25:00Z")));
+      const details = yield* (yield* GitHubChecks).pendingDetails(repository, head);
+      assert.include(details, "test (web) is in_progress and has run for 31 min");
+      assert.include(details, "test (server) is queued");
+      assert.include(
+        details,
+        history === "available"
+          ? "6 min in the last successful workflow run"
+          : "previous successful duration: unavailable",
+      );
+      assert.notInclude(details, "static");
+    }).pipe(
+      Effect.provide(
+        withClient((url) => {
+          if (url.includes("/check-runs?"))
+            return json({
+              total_count: 3,
+              check_runs: [
+                {
+                  name: "test (web)",
+                  status: "in_progress",
+                  started_at: "2026-11-05T19:54:00Z",
+                  details_url: failedCheckRun.details_url,
+                },
+                { name: "test (server)", status: "queued", started_at: null, details_url: null },
+                {
+                  name: "static",
+                  status: "completed",
+                  started_at: "2026-11-05T19:54:00Z",
+                  details_url: null,
+                },
+              ],
+            });
+          if (history === "forbidden") return new Response("", { status: 403 });
+          if (url.endsWith("/actions/runs/1")) return json({ workflow_id: 7 });
+          if (url.includes("/actions/workflows/7/runs?"))
+            return json({ workflow_runs: history === "missing" ? [] : [{ id: 8 }] });
+          assert.include(url, "/actions/runs/8/jobs?");
+          return json({
+            total_count: 1,
+            jobs: [
+              {
+                name: "test (web)",
+                conclusion: "success",
+                started_at: "2026-11-04T19:54:00Z",
+                completed_at: "2026-11-04T20:00:00Z",
+              },
+            ],
+          });
+        }),
+      ),
+    ),
+);
+
+it.effect("reports missing checks without claiming that a job is running", () =>
+  Effect.gen(function* () {
+    const details = yield* (yield* GitHubChecks).pendingDetails(repository, head);
+    assert.strictEqual(details, "No pending check jobs were reported for this head.");
+  }).pipe(
+    Effect.provide(
+      withClient((url) => {
+        assert.include(url, `/commits/${head}/check-runs?`);
+        return json({ total_count: 0, check_runs: [] });
+      }),
+    ),
+  ),
+);
 // PR #827, Actions job 125150736388: the log retains the assertion and subsequent cleanup.
 const recordedJob = readFileSync(
   new URL("./fixtures/ci-failure/job.json", import.meta.url),

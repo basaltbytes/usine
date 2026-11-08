@@ -71,11 +71,19 @@ export class CiPassed extends Schema.TaggedClass<
   Brand.Brand<"@usine/core/ci/CiPassed">
 >()("CiPassed", {}) {}
 
-/** CI failed or exceeded its deadline. */
+/** CI failed without an admitted fix. */
 export class CiFailed extends Schema.TaggedClass<
   CiFailed,
   Brand.Brand<"@usine/core/ci/CiFailed">
 >()("CiFailed", {
+  message: Schema.NonEmptyString,
+}) {}
+
+/** CI remained pending past its deadline because infrastructure did not finish. */
+export class CiTimedOut extends Schema.TaggedClass<
+  CiTimedOut,
+  Brand.Brand<"@usine/core/ci/CiTimedOut">
+>()("CiTimedOut", {
   message: Schema.NonEmptyString,
 }) {}
 
@@ -97,5 +105,11 @@ export class CiSuperseded extends Schema.TaggedClass<
 }) {}
 
 /** A terminal observation of the recorded head's CI. */
-export const CiResolution = Schema.Union([CiPassed, CiFailed, CiHandedOff, CiSuperseded]);
+export const CiResolution = Schema.Union([
+  CiPassed,
+  CiFailed,
+  CiTimedOut,
+  CiHandedOff,
+  CiSuperseded,
+]);
 export type CiResolution = typeof CiResolution.Type;

@@ -11,6 +11,31 @@ const root = new URL("../../", import.meta.url);
 const testTasks = (plan) =>
   plan.tasks.filter(({ task }) => task === "test").map(({ taskId }) => taskId);
 
+test("browser test jobs use preinstalled matching Playwright browsers and bounded execution", () => {
+  const job = workflow.jobs.test;
+  assert.ok(job["timeout-minutes"] > 0 && job["timeout-minutes"] <= 15);
+  assert.equal(job.container, "${{ matrix.container }}");
+  for (const name of ["web", "server"]) {
+    const leg = job.strategy.matrix.include.find(({ leg }) => leg === name);
+    const pkg = JSON.parse(
+      readFileSync(new URL(`../../apps/${name}/package.json`, import.meta.url)),
+    );
+    assert.equal(
+      leg.container,
+      `mcr.microsoft.com/playwright:v${pkg.devDependencies.playwright}-noble`,
+    );
+  }
+  for (const step of job.steps) {
+    assert.doesNotMatch(
+      step.run ?? "",
+      /playwright install.*(?:--with-deps|install-deps)|playwright install-deps/u,
+    );
+    if (step.run?.includes("turbo run test") || step.run?.includes("playwright install")) {
+      assert.ok(step["timeout-minutes"] > 0 && step["timeout-minutes"] <= 10);
+    }
+  }
+});
+
 test("the CI matrix runs every package test task exactly once", () => {
   const expected = testTasks(
     JSON.parse(
