@@ -75,6 +75,15 @@ export class RunSpec extends Schema.Class<
   botLogin: Schema.OptionFromNullOr(BotLogin).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
   ),
+  /**
+   * Whether the Run's Loop has a CI policy. If true, harvesting a success without a CI handoff
+   * verifies the pull request of the checkout's branch on origin. Decodes as `false` for older
+   * Attempts.
+   */
+  requiresCi: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 }) {}
 
 /** The start of an Attempt, with the parent model selected at launch, which can differ from the roster. */

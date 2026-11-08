@@ -507,6 +507,7 @@ const makeRunStore = Effect.gen(function* () {
       permissions: current.permissions,
       resume,
       reattach,
+      requiresCi: Option.isSome(current.ciPolicy),
     });
 
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
