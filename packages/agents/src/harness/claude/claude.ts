@@ -348,11 +348,13 @@ const makeClaudeChild = Effect.gen(function* () {
         login,
         retained,
         acknowledge: (message: Schema.Json) =>
-          Effect.sync(() => checkpoint.handled(message)).pipe(
-            Effect.flatMap(({ bytes, covered }) =>
-              owner.acknowledge(bytes).pipe(Effect.as(covered)),
+          checkpoint
+            .handled(message)
+            .pipe(
+              Effect.flatMap(({ bytes, covered }) =>
+                owner.acknowledge(bytes).pipe(Effect.as(covered)),
+              ),
             ),
-          ),
       } satisfies Omit<ClaudeLaunch, "scope">;
     }).pipe(Effect.ensuring(release));
   });
