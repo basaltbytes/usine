@@ -1,8 +1,11 @@
+import type { ManagedRepo } from "@usine/config/factory";
+import type { LoadedInstance } from "@usine/config/instance";
+import type { LoopFile } from "@usine/config/loop";
 import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
 import { matchesLoop } from "@usine/config/project";
 import { canonicalRepositoryName } from "@usine/core/repository";
-import type { Submission } from "@usine/engine/engine";
-import { TriggerCondition } from "@usine/engine/trigger-condition";
+import { Submission } from "@usine/engine/engine";
+import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
   ChangedIssue,
@@ -10,17 +13,27 @@ import {
   GitHubPolling,
   PullRequestSnapshot,
 } from "@usine/github/polling";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Option, Result, Schema } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
+import { needsCiFix } from "./polling/ci-fix-state.ts";
 import { repositoryFailureLogFields } from "./polling/cycle.ts";
+import { loopSettings, resolveTriggerLoop } from "./trigger-submission.ts";
 import { GitHubItemKey } from "@usine/core/item";
 
 const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
 
+const logFields = (submission: Submission) => ({
+  loop: submission.loop,
+  repository: submission.repository,
+  itemKey: submission.itemKey,
+});
+
 /**
  * Re-evaluates a queued Event's trigger against a fresh GitHub snapshot of its Item. Returns
- * `item-gone` if the Item no longer exists, and `matches` on any other failure or after five
- * seconds.
+ * `ItemGone` if the Item no longer exists, and `Matches` on any other failure or after five
+ * seconds. A queued CI fix keeps its task and failure evidence but takes approval, Agent,
+ * models, permissions, CI policy, outcome labels, and cycle limit from its Loop's current
+ * configuration.
  */
 export const triggerConditionLayer: Layer.Layer<
   TriggerCondition,
@@ -33,37 +46,53 @@ export const triggerConditionLayer: Layer.Layer<
     const expressions = yield* ExpressionEngine;
     const instances = yield* CurrentInstance;
 
-    const evaluate = Effect.fn("TriggerCondition.evaluate")(function* (submission: Submission) {
-      const fields = {
-        loop: submission.loop,
-        repository: submission.repository,
-        itemKey: submission.itemKey,
-      };
-      const instance = yield* instances.get;
-      const loop = instance.loops.find(({ name }) => name === submission.loop);
-      if (loop === undefined) {
-        yield* Effect.logInfo("Queued Event belongs to a Loop that is no longer loaded", fields);
-        return "no-longer-matches";
-      }
-      const repository = instance.config.repos.find(
-        ({ name }) =>
-          canonicalRepositoryName(name) === canonicalRepositoryName(submission.repository),
-      );
-      if (repository === undefined || !matchesLoop(instance.config, loop, repository)) {
-        yield* Effect.logInfo("Queued Event's repository is no longer watched by its Loop", {
-          ...fields,
-          managed: repository !== undefined,
+    /** Returns the CI fix with its Loop's current settings, or `None` if the Loop lost its Agent. */
+    const withCurrentSettings = Effect.fn("TriggerCondition.withCurrentSettings")(function* (
+      instance: LoadedInstance,
+      loop: LoopFile,
+      repository: ManagedRepo,
+      submission: Submission,
+    ) {
+      const resolved = yield* Effect.result(resolveTriggerLoop(instance, loop));
+      if (Result.isFailure(resolved)) {
+        yield* Effect.logWarning("Queued CI fix's Loop lost its rostered Agent; revoking it", {
+          ...logFields(submission),
+          agent: resolved.failure.agent,
+          errorTag: resolved.failure._tag,
         });
-        return "no-longer-matches";
+        return Option.none<Submission>();
       }
-      if (loop.trigger.on === "schedule") return "matches";
+      const settings = yield* loopSettings(
+        expressions,
+        resolved.success,
+        repository,
+        submission.event.payload,
+      );
+      yield* Effect.logInfo("Queued CI fix takes its Loop's current settings", {
+        ...logFields(submission),
+        approval: settings.approval,
+        agent: settings.agent.name,
+        permissions: settings.permissions,
+        cycleLimit: Option.getOrNull(settings.cycleLimit),
+      });
+      return Option.some(Submission.make({ ...submission, ...settings }));
+    });
+
+    const evaluate = Effect.fn("TriggerCondition.evaluate")(function* (
+      loop: LoopFile,
+      repository: ManagedRepo,
+      submission: Submission,
+    ) {
+      const fields = logFields(submission);
+      const matches = TriggerRecheck.Matches({ submission });
+      if (loop.trigger.on === "schedule") return matches;
       const item = decodeItemKey(submission.itemKey);
       if (Option.isNone(item)) {
         yield* Effect.logWarning(
           "Queued Event's Item key is not a GitHub Item; opening as before",
           fields,
         );
-        return "matches";
+        return matches;
       }
       const [, , number] = item.value;
       const changed =
@@ -77,16 +106,11 @@ export const triggerConditionLayer: Layer.Layer<
             ...fields,
             head: submission.ciFailureHead.value,
           });
-          return "no-longer-matches";
+          return TriggerRecheck.NoLongerMatches();
         }
         const holds =
-          snapshot.payload.state === "OPEN" &&
           snapshot.payload.headRefOid === submission.ciFailureHead.value &&
-          (snapshot.payload.statusCheckRollup?.state === "FAILURE" ||
-            snapshot.payload.statusCheckRollup?.state === "ERROR" ||
-            (snapshot.payload.statusCheckRollup === null &&
-              (snapshot.payload.mergeable === "CONFLICTING" ||
-                snapshot.payload.mergeable === "UNKNOWN")));
+          needsCiFix(snapshot.payload);
         yield* Effect.logInfo("Queued CI fix rechecked against its recorded head", {
           ...fields,
           head: submission.ciFailureHead.value,
@@ -94,7 +118,7 @@ export const triggerConditionLayer: Layer.Layer<
           mergeable: snapshot.payload.mergeable,
           checkState: snapshot.payload.statusCheckRollup?.state ?? "absent",
         });
-        return holds ? "matches" : "no-longer-matches";
+        return holds ? matches : TriggerRecheck.NoLongerMatches();
       }
       const holds = yield* expressions.evaluateBoolean(
         loop.trigger.if,
@@ -107,44 +131,55 @@ export const triggerConditionLayer: Layer.Layer<
         contentHash: snapshot.contentHash,
         holds,
       });
-      return holds ? "matches" : "no-longer-matches";
+      return holds ? matches : TriggerRecheck.NoLongerMatches();
     });
 
-    const recheck = Effect.fn("TriggerCondition.recheck")(
-      function* (submission: Submission) {
-        yield* Effect.annotateCurrentSpan({
-          loop: submission.loop,
-          repository: submission.repository,
-          itemKey: submission.itemKey,
+    const recheck = Effect.fn("TriggerCondition.recheck")(function* (submission: Submission) {
+      const fields = logFields(submission);
+      yield* Effect.annotateCurrentSpan(fields);
+      const instance = yield* instances.get;
+      const loop = instance.loops.find(({ name }) => name === submission.loop);
+      if (loop === undefined) {
+        yield* Effect.logInfo("Queued Event belongs to a Loop that is no longer loaded", fields);
+        return TriggerRecheck.NoLongerMatches();
+      }
+      const repository = instance.config.repos.find(
+        ({ name }) =>
+          canonicalRepositoryName(name) === canonicalRepositoryName(submission.repository),
+      );
+      if (repository === undefined || !matchesLoop(instance.config, loop, repository)) {
+        yield* Effect.logInfo("Queued Event's repository is no longer watched by its Loop", {
+          ...fields,
+          managed: repository !== undefined,
         });
-        // Bound the whole re-check so a stalled read cannot retain the closed
-        // Run's continuation and block the Item or an operator retry.
-        return yield* evaluate(submission).pipe(Effect.timeout("5 seconds"));
-      },
-      (effect, submission) =>
-        effect.pipe(
-          Effect.catchTag("GitHubItemNotFoundError", (error) =>
-            Effect.logInfo("Queued Event's Item is gone from GitHub; its Events are revoked", {
-              loop: submission.loop,
-              repository: submission.repository,
-              itemKey: submission.itemKey,
-              item: error.item,
-              errorTag: error._tag,
-              message: error.message,
-            }).pipe(Effect.as("item-gone" as const)),
-          ),
-          Effect.catch((error) =>
-            Effect.logWarning("Trigger re-check failed; opening the queued Event as before", {
-              loop: submission.loop,
-              repository: submission.repository,
-              itemKey: submission.itemKey,
-              ...(error._tag === "TimeoutError"
-                ? { errorTag: error._tag, message: "Trigger re-check exceeded five seconds" }
-                : repositoryFailureLogFields(error)),
-            }).pipe(Effect.as("matches" as const)),
-          ),
+        return TriggerRecheck.NoLongerMatches();
+      }
+      const current = Option.isSome(submission.ciFailureHead)
+        ? yield* withCurrentSettings(instance, loop, repository, submission)
+        : Option.some(submission);
+      if (Option.isNone(current)) return TriggerRecheck.NoLongerMatches();
+      // Bound the GitHub read so a stalled request cannot retain the closed Run's continuation
+      // and block the Item or an operator retry.
+      return yield* evaluate(loop, repository, current.value).pipe(
+        Effect.timeout("5 seconds"),
+        Effect.catchTag("GitHubItemNotFoundError", (error) =>
+          Effect.logInfo("Queued Event's Item is gone from GitHub; its Events are revoked", {
+            ...fields,
+            item: error.item,
+            errorTag: error._tag,
+            message: error.message,
+          }).pipe(Effect.as(TriggerRecheck.ItemGone())),
         ),
-    );
+        Effect.catch((error) =>
+          Effect.logWarning("Trigger re-check failed; opening the queued Event as before", {
+            ...fields,
+            ...(error._tag === "TimeoutError"
+              ? { errorTag: error._tag, message: "Trigger re-check exceeded five seconds" }
+              : repositoryFailureLogFields(error)),
+          }).pipe(Effect.as(TriggerRecheck.Matches({ submission: current.value }))),
+        ),
+      );
+    });
 
     return { recheck };
   }),

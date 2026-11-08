@@ -68,7 +68,8 @@ import {
 import { TestClock } from "effect/testing";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
-import { fixedInstanceLayer } from "./support/current-instance.ts";
+import { fixedInstance } from "./support/current-instance.ts";
+import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { CiMonitor } from "../src/ci.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { triggerSubmission } from "../src/trigger-submission.ts";
@@ -154,6 +155,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     prefix: "usine-ci-",
   });
   const directory = InstanceDirectory.make(currentDirectory);
+  const currentInstance = yield* Ref.make(selectedInstance);
   const observed = yield* Ref.make(CheckSnapshot.make({ head, state: "pending" }));
   const itemState = yield* Ref.make<"OPEN" | "CLOSED" | "MERGED" | "gone">("OPEN");
   const observationFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
@@ -289,7 +291,12 @@ const scenario = Effect.fn("test.ciScenario")(function* (
       triggerConditionLayer.pipe(
         Layer.provide(polling),
         Layer.provide(MarcbachmannCelLayer),
-        Layer.provide(fixedInstanceLayer(selectedInstance)),
+        Layer.provide(
+          Layer.succeed(CurrentInstance)({
+            ...fixedInstance(selectedInstance),
+            get: Ref.get(currentInstance),
+          }),
+        ),
       ),
     ),
   );
@@ -304,6 +311,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   );
   const runtime = CiMonitor.layer.pipe(Layer.provideMerge(dependencies));
   return {
+    currentInstance,
     observed,
     itemState,
     observationFailure,
@@ -1003,6 +1011,88 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
           } else {
             assert(Option.isNone(fixId));
           }
+        }).pipe(
+          Effect.provide(
+            PollingTriggers.layer.pipe(
+              Layer.provideMerge(Layer.merge(setup.runtime, inertLabelReconcilerLayer)),
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each([
+  { recorded: "none", current: "required" },
+  { recorded: "required", current: "none" },
+] as const)(
+  "a replayed CI fix recorded with approval $recorded takes approval $current from the current loop",
+  ({ recorded, current }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const configured = (approval: "none" | "required") =>
+          LoadedInstance.make({
+            ...fixtureInstance,
+            loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1), approval })],
+          });
+        const setup = yield* scenario(3600, configured(recorded));
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const budgets = yield* CycleBudgets;
+          const reader = yield* RunReader;
+          const sourceId = yield* openWait(setup.timeoutSeconds, true);
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* (yield* CiMonitor).reconcile(configured(recorded), Option.none());
+          const source = yield* engine.inspect(sourceId);
+          assert.strictEqual(source.run.state._tag, "Failed");
+          const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+          const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+          const unlinked = yield* reader.ciFixRuns([sourceId]);
+          assert.strictEqual(unlinked.size, 0);
+          const edited = configured(current);
+          yield* Ref.set(setup.currentInstance, edited);
+
+          const replayed = yield* budgets.reset(
+            ask.id,
+            Event.make({
+              id: EventId.make("reset-edited-ci-fix"),
+              dedupKey: DedupKey.make("reset-edited-ci-fix"),
+              receivedAt: yield* DateTime.now,
+              payload: {},
+            }),
+          );
+          const cycle = yield* (yield* PollingTriggers).poll(edited);
+
+          assert.deepStrictEqual(replayed, [blocked.eventId]);
+          assert.deepStrictEqual(cycle.failures, []);
+          const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+          assert(Option.isSome(fixId));
+          const fix = yield* engine.inspect(fixId.value).pipe(
+            Effect.repeat({
+              until: ({ run }) =>
+                run.state._tag === "Waiting" ||
+                run.state._tag === "Succeeded" ||
+                run.state._tag === "Failed",
+              schedule: Schedule.spaced("10 millis"),
+            }),
+            Effect.timeout("5 seconds"),
+          );
+          const reason = Option.getOrElse(fix.approvalReason, () => "");
+          if (current === "required") {
+            assert.strictEqual(fix.run.state._tag, "Waiting");
+            assert.deepStrictEqual(fix.attempts, []);
+            assert.include(reason, "the loop requires approval");
+          } else {
+            assert.strictEqual(fix.run.state._tag, "Succeeded");
+            assert(Option.isNone(fix.approval));
+            assert.include(reason, "the loop allows automatic starts");
+            const tasks = yield* Ref.get(setup.tasks);
+            assert.include(tasks[1] ?? "", "TypeError: failing CI log");
+          }
+          const linked = yield* reader.ciFixRuns([sourceId]);
+          assert.strictEqual(linked.get(sourceId), fixId.value);
+          yield* engine.drain;
         }).pipe(
           Effect.provide(
             PollingTriggers.layer.pipe(

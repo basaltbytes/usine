@@ -6,7 +6,7 @@ import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { RunEngine } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition } from "@usine/engine/trigger-condition";
+import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { GitHubApiError } from "@usine/github/github-app";
 import {
   GitHubPolling,
@@ -300,7 +300,7 @@ it.live.each(["recovers", "exhausts"] as const)(
             Layer.provide(executor),
             Layer.provide(check),
             Layer.provide(
-              Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+              Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) }),
             ),
           ),
         ),

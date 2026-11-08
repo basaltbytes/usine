@@ -6,7 +6,7 @@ import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunEngine } from "@usine/engine/engine";
 import { ItemProjectionReader, ItemProjectionWriter } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
-import { TriggerCondition } from "@usine/engine/trigger-condition";
+import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
@@ -68,9 +68,9 @@ const noItemProjections: ItemProjectionReader["Service"] = {
 
 export const itemProjectionReaderLayer = Layer.succeed(ItemProjectionReader)(noItemProjections);
 
-/** A `TriggerCondition` whose recheck always returns `matches`. */
+/** A `TriggerCondition` whose recheck always matches with the saved settings. */
 export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
-  recheck: () => Effect.succeed("matches"),
+  recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
 });
 
 export const emptyCycleBudgets: CycleBudgets["Service"] = {
