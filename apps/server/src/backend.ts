@@ -23,6 +23,7 @@ import {
   attentionAudiences,
   type RunDetailView,
   type RunGitHubChangesView,
+  type CycleBudgetResetView,
   type TranscriptRequest,
   type Operator,
   type OperatorConfiguration,
@@ -61,7 +62,9 @@ export class FactoryBackend extends Context.Service<
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly dismissNeed: (key: AttentionKey) => Effect.Effect<void, BackendError>;
     readonly undoDismissNeed: (key: AttentionKey) => Effect.Effect<void, BackendError>;
-    readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, BackendError>;
+    readonly resetCycleBudget: (
+      askId: CycleBudgetAskId,
+    ) => Effect.Effect<CycleBudgetResetView, BackendError>;
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,

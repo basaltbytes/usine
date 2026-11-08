@@ -8538,25 +8538,11 @@
         ],
         "responses": {
           "200": {
-            "description": "The request was accepted. An asynchronous action may still be running.",
+            "description": "@usine/orchestrator/CycleBudgetResetView",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    }
-                  },
-                  "required": [
-                    "ok"
-                  ],
-                  "additionalProperties": false,
-                  "title": "Acknowledgement",
-                  "description": "The request was accepted. An asynchronous action may still be running."
+                  "$ref": "#/components/schemas/_usine_orchestrator_CycleBudgetResetViewEncoded"
                 }
               }
             }
@@ -9138,7 +9124,7 @@
             }
           }
         },
-        "description": "Answers an open cycle budget ask and allows the item to run again.",
+        "description": "Answers an open cycle budget ask and allows the item to run again. Returns the blocked CI fix events that the reset replayed; a repeated answer returns an empty list.",
         "summary": "Reset an item cycle budget",
         "requestBody": {
           "content": {
@@ -49887,6 +49873,22 @@
         ],
         "additionalProperties": false
       },
+      "_usine_orchestrator_CycleBudgetResetViewEncoded": {
+        "type": "object",
+        "properties": {
+          "replayedCiFixEventIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "replayedCiFixEventIds"
+        ],
+        "additionalProperties": false
+      },
       "_usine_orchestrator_SessionInterventionEncoded": {
         "type": "object",
         "properties": {
@@ -50866,6 +50868,17 @@
                 "$ref": "#/components/schemas/_usine_orchestrator_ChildSessionBudgetFailureViewEncoded"
               }
             ]
+          },
+          "fixRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -50874,7 +50887,8 @@
           "repository",
           "runId",
           "loop",
-          "failure"
+          "failure",
+          "fixRunId"
         ],
         "additionalProperties": false
       },

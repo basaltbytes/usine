@@ -34,7 +34,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition } from "@usine/engine/trigger-condition";
+import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -169,7 +169,7 @@ const seed = (directory: string) =>
       layer(InstanceDirectory.make(directory)).pipe(
         Layer.provide(executor),
         Layer.provide(
-          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+          Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) }),
         ),
       ),
     ),

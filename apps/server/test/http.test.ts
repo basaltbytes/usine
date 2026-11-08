@@ -118,6 +118,7 @@ import {
   StatisticsView,
   type StatisticsWindow,
   WorkerConfigurationView,
+  CycleBudgetResetView,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Context, DateTime, Effect, Layer, Option, Redacted, Schema, FileSystem } from "effect";
@@ -981,7 +982,8 @@ describe("operator HTTP API", () => {
           ),
         dismissNeed: () => Effect.void,
         undoDismissNeed: () => Effect.void,
-        resetCycleBudget: () => Effect.void,
+        resetCycleBudget: () =>
+          Effect.succeed(CycleBudgetResetView.make({ replayedCiFixEventIds: [] })),
         retry: (id: RunId) =>
           Effect.fail(
             RunRetryBlockedError.make({
@@ -1280,7 +1282,13 @@ describe("operator HTTP API", () => {
           undoDismissNeed: (key) => record(`undo:${key.id}:${key.revision}`),
           resetCycleBudget: (id) =>
             id === "current-ask"
-              ? record(`reset:${id}`)
+              ? record(`reset:${id}`).pipe(
+                  Effect.as(
+                    CycleBudgetResetView.make({
+                      replayedCiFixEventIds: [EventId.make("blocked-ci-fix")],
+                    }),
+                  ),
+                )
               : Effect.fail(CycleBudgetResetRejectedError.make({ askId: id })),
           retry: (id) => record(`retry:${id}`),
           cancel: (id) => record(`cancel:${id}`),
@@ -1376,7 +1384,9 @@ describe("operator HTTP API", () => {
           const resetResult = yield* client.resetCycleBudget({
             payload: { askId: CycleBudgetAskId.make("current-ask") },
           });
-          assert.deepStrictEqual(resetResult, { ok: true });
+          assert.deepStrictEqual(resetResult.replayedCiFixEventIds, [
+            EventId.make("blocked-ci-fix"),
+          ]);
           const resolution = yield* client.resolveFailure({
             params: { runId },
             payload: { attemptId: AttemptId.make("attempt/1") },

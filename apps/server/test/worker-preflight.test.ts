@@ -20,7 +20,7 @@ import { BotAccount, BotLogin, BotUserId, WorkerName } from "@usine/core/worker"
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition } from "@usine/engine/trigger-condition";
+import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { Executor, ExecutorOperationError, fullPreflight } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApp } from "@usine/github/github-app";
@@ -167,7 +167,7 @@ it.live(
         const engine = engineLayer(directory).pipe(
           Layer.provideMerge(scheduler),
           Layer.provide(
-            Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+            Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) }),
           ),
         );
         const observation = Layer.mergeAll(
