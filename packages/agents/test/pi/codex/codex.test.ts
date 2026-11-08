@@ -134,12 +134,11 @@ const successfulResponses = (
       account: { type: "chatgpt", email: "operator@example.com" },
       requiresOpenaiAuth: true,
     },
-    "model/list": { data: models, nextCursor: null },
+    "model/list": { data: models },
     "thread/start": {
       modelProvider: "openai",
       thread: { id: "thread-1" },
       model: "gpt-5.6-terra",
-      instructionSources: ["/workspace/repo/AGENTS.md"],
     },
     "turn/start": { turn: { id: "turn-1" } },
     "turn/steer": {},

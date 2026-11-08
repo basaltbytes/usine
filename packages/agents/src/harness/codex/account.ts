@@ -7,7 +7,7 @@ import {
   AccountResponse,
   type GetAccountParams,
   type InitializeParams,
-} from "../../protocol/codex.ts";
+} from "../../protocol/codex/codex.ts";
 import type { CodexConnection } from "./app-server.ts";
 
 /** Sends `initialize` and `initialized` to the app server; must run before account checks or creating a child. */

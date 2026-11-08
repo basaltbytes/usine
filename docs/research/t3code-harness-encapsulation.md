@@ -177,7 +177,7 @@ usine doesn't need t3code's forks, rollback, snapshots, or provider switching, w
 
 ### Versions and protocol types
 
-**Codex protocol: usine already does this.** t3code generates schemas from upstream at a pinned commit; usine copies the request types and fails `pnpm check` on drift ([`protocol/codex.ts:5-11`](../../packages/agents/src/protocol/codex.ts)). **Harness versions: t3code differs.** Ranges with statuses sit between usine's exact Codex pin and the owner's decision to accept any Claude Code version (decision 8 in the [harness adapter study](./harness-adapters.md#decisions-owner-2026-11-04)). It is an option if version skew becomes a problem; it isn't one now.
+**Codex protocol: usine already does this.** t3code generates schemas from upstream at a pinned commit; usine copies the request types and fails `pnpm check` on drift ([`protocol/codex/codex.ts`](../../packages/agents/src/protocol/codex/codex.ts)). **Harness versions: t3code differs.** Ranges with statuses sit between usine's exact Codex pin and the owner's decision to accept any Claude Code version (decision 8 in the [harness adapter study](./harness-adapters.md#decisions-owner-2026-11-04)). It is an option if version skew becomes a problem; it isn't one now.
 
 ### Testing
 

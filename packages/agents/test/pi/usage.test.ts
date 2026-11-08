@@ -9,7 +9,7 @@ import {
   codexTokenBreakdown,
   piMessageUsage,
 } from "../../src/harness/usage.ts";
-import { CodexTokenUsage } from "../../src/protocol/codex.ts";
+import { CodexTokenUsage } from "../../src/protocol/codex/codex.ts";
 
 describe("Claude query tokens", () => {
   it("restores a retained process's usage separately from earlier processes", () => {
@@ -201,6 +201,10 @@ describe("Codex thread tokens", () => {
         outputTokens: 7,
       }).input,
       0,
+    );
+    assert.deepStrictEqual(
+      codexTokenBreakdown({ inputTokens: 100, cachedInputTokens: 40, outputTokens: 7 }),
+      TokenBreakdown.make({ input: 60, cachedInput: 40, cacheWrite: 0, output: 7 }),
     );
   });
 });

@@ -10,7 +10,7 @@ import { LocalProcess } from "../../src/child-host/child-host.ts";
 import { initializeCodex, verifyCodexAccount } from "../../src/harness/codex/account.ts";
 import { CodexAppServer, codexAppServerLive } from "../../src/harness/codex/app-server.ts";
 import { WorkingDirectory } from "../../src/runtime.ts";
-import { AccountResponse } from "../../src/protocol/codex.ts";
+import { AccountResponse } from "../../src/protocol/codex/codex.ts";
 
 it.live(
   "local preflight and children use the managed file with keyring storage configured, including after disconnect",

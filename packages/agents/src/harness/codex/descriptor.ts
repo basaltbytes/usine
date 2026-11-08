@@ -1,6 +1,6 @@
 import { Harness } from "@usine/core/agent/brain";
 import { Option } from "effect";
-import { CODEX_PROTOCOL } from "../../protocol/codex-version.ts";
+import { CODEX_PROTOCOL } from "../../protocol/codex/version.ts";
 import { CapabilityProfile, Lacking } from "../capability.ts";
 import {
   CredentialWiring,

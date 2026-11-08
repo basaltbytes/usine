@@ -1,7 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Option, Schema } from "effect";
 import {
+  AccountResponse,
   AgentMessageItem,
+  ModelListResponse,
+  ThreadStartResponse,
   ThreadResumeResponse,
   TurnStartResponse,
   TurnCompleted,
@@ -11,30 +14,91 @@ import {
   CodexTokenUsage,
   isTurnStatus,
   isToolStatus,
+  isApprovalToolStatus,
   isMessagePhase,
   isAuthMode,
-} from "../src/protocol/codex.ts";
-import { CODEX_PROTOCOL } from "../src/protocol/codex-version.ts";
+  isCodexErrorCode,
+  replaces,
+} from "../src/protocol/codex/codex.ts";
+import packageJson from "../package.json" with { type: "json" };
+import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
 import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
-import { ImageGenerationThreadItem } from "../src/protocol/codex.generated.ts";
+import {
+  ImageGenerationThreadItem,
+  ThreadTokenUsageUpdatedNotification,
+} from "../src/protocol/codex/generated.ts";
+import { UsageCount } from "../src/protocol/count.ts";
 import { expectTypeOf } from "vitest";
 
 describe("generated Codex protocol selections", () => {
+  it("requires replacements to accept the generated field's encoded type and nullability", () => {
+    // @ts-expect-error A numeric replacement cannot decode a generated string field.
+    replaces(Schema.String, Schema.Finite);
+    // @ts-expect-error A replacement must preserve the generated field's null values.
+    replaces(Schema.NullOr(Schema.String), Schema.String);
+
+    expect(replaces(Schema.String, Schema.NonEmptyString)).toBe(Schema.NonEmptyString);
+    const nullable = Schema.NullOr(Schema.String);
+    expect(replaces(Schema.NullOr(Schema.NonEmptyString), nullable)).toBe(nullable);
+  });
+
+  it("requires replacements to preserve optional generated keys", () => {
+    // @ts-expect-error A required replacement cannot decode an absent generated key.
+    replaces(Schema.optionalKey(Schema.String), Schema.String);
+    const count =
+      ThreadTokenUsageUpdatedNotification.fields.tokenUsage.fields.total.fields
+        .cacheWriteInputTokens;
+    // @ts-expect-error The upstream token count key is optional.
+    replaces(count, UsageCount);
+
+    const optional = Schema.optionalKey(Schema.String);
+    expect(replaces(Schema.optionalKey(Schema.NonEmptyString), optional)).toBe(optional);
+  });
+
   it("restricts comparison targets to generated enum values while allowing unknown input", () => {
     expectTypeOf<"waitingForInput">().not.toExtend<Parameters<typeof isTurnStatus>[1]>();
-    expectTypeOf<"waitingForApproval">().not.toExtend<Parameters<typeof isToolStatus>[1]>();
+    expectTypeOf<Parameters<typeof isToolStatus>[1]>().toEqualTypeOf<
+      "inProgress" | "completed" | "failed"
+    >();
+    expectTypeOf<Parameters<typeof isApprovalToolStatus>[1]>().toEqualTypeOf<
+      "inProgress" | "completed" | "failed" | "declined"
+    >();
+    expectTypeOf<"serverOverloaded" | "other">().toExtend<Parameters<typeof isCodexErrorCode>[1]>();
+    expectTypeOf<"futureCode">().not.toExtend<Parameters<typeof isCodexErrorCode>[1]>();
     expectTypeOf<"new_phase">().not.toExtend<Parameters<typeof isMessagePhase>[1]>();
     expectTypeOf<"new_auth">().not.toExtend<Parameters<typeof isAuthMode>[1]>();
     expect(isTurnStatus("waitingForInput", "completed")).toBe(false);
     expect(isTurnStatus("completed", "completed")).toBe(true);
     expect(isToolStatus(undefined, "failed")).toBe(false);
-    expect(isToolStatus("declined", "declined")).toBe(true);
+    expect(isApprovalToolStatus("declined", "declined")).toBe(true);
+    expect(isCodexErrorCode("futureCode", "other")).toBe(false);
     expect(isMessagePhase("new_phase", "final_answer")).toBe(false);
     expect(isMessagePhase("final_answer", "final_answer")).toBe(true);
     expect(isAuthMode(null, "chatgpt")).toBe(false);
     expect(isAuthMode("chatgpt", "chatgpt")).toBe(true);
   });
+
+  it.effect("requires comparison inputs to be strings rather than whole protocol objects", () =>
+    Effect.gen(function* () {
+      const item = yield* Schema.decodeEffect(ToolItem)({
+        type: "commandExecution",
+        id: "command",
+        status: "failed",
+      });
+      const { turn } = yield* Schema.decodeEffect(TurnCompleted)({
+        turn: {
+          id: "turn",
+          status: "failed",
+          error: { message: "Failed", codexErrorInfo: "other" },
+        },
+      });
+      // @ts-expect-error Compare the item's status, not the item object.
+      isToolStatus(item, "failed");
+      // @ts-expect-error Compare the narrowed error code, not the error object.
+      isCodexErrorCode(turn.error, "other");
+    }),
+  );
 
   it.effect("keeps common fields on generated image payload alternatives", () =>
     Effect.gen(function* () {
@@ -54,6 +118,43 @@ describe("generated Codex protocol selections", () => {
       }
     }),
   );
+
+  it("requires the common fields on each image payload alternative", () => {
+    const image = { id: "image", type: "imageGeneration", status: "completed", fileId: "file" };
+    for (const field of ["id", "type", "status"] as const) {
+      const { [field]: _, ...missing } = image;
+      expect(Schema.is(ImageGenerationThreadItem)(missing)).toBe(false);
+    }
+    expect(Schema.is(ImageGenerationThreadItem)(image)).toBe(true);
+    expect(Schema.is(ToolItem)({ type: "imageGeneration", id: "image" })).toBe(true);
+  });
+
+  it.effect("accepts responses that omit keys the upstream protocol marks optional", () =>
+    Effect.gen(function* () {
+      const models = yield* Schema.decodeEffect(ModelListResponse)({ data: [] });
+      expect(models).toEqual({ data: [] });
+      const started = yield* Schema.decodeEffect(ThreadStartResponse)({
+        modelProvider: "openai",
+        thread: { id: "thread" },
+        model: "gpt-5.6-terra",
+      });
+      expect(started.thread.id).toBe("thread");
+      const completion = yield* Schema.decodeEffect(TurnCompleted)({
+        turn: { id: "turn", status: "completed" },
+      });
+      expect(completion.turn.error).toBeUndefined();
+      const account = yield* Schema.decodeEffect(AccountResponse)({
+        requiresOpenaiAuth: true,
+      });
+      expect(account.account).toBeUndefined();
+      const usage = yield* Schema.decodeEffect(CodexTokenUsage)({
+        threadId: "thread",
+        tokenUsage: { total: { inputTokens: 10, cachedInputTokens: 2, outputTokens: 1 } },
+      });
+      expect(usage.tokenUsage.total.cacheWriteInputTokens).toBeUndefined();
+    }),
+  );
+
   it.effect("decodes new enum members in saved turns and assistant messages", () =>
     Effect.gen(function* () {
       const response = yield* Schema.decodeUnknownEffect(ThreadResumeResponse)({
@@ -142,6 +243,9 @@ describe("generated Codex protocol selections", () => {
 
   it("matches the preflight baseline and refuses a newer worker protocol", () => {
     expect(CODEX_PROTOCOL.version).toBe(CODEX_CLI_VERSION);
+    expect(packageJson.devDependencies["@pwrdrvr/codex-app-server-protocol"]).toBe(
+      CODEX_PROTOCOL.version,
+    );
     expect(Option.isNone(unsupportedCodexVersion(`codex-cli ${CODEX_PROTOCOL.version}`))).toBe(
       true,
     );
