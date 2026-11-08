@@ -2,6 +2,9 @@
   "$schema": "https://turborepo.com/schema.json",
   "extends": ["//"],
   "tasks": {
+    "build": {
+      "outputs": ["$TURBO_EXTENDS$", "src/child-host/programs.ts"]
+    },
     "test": {
       "inputs": [
         "$TURBO_EXTENDS$",

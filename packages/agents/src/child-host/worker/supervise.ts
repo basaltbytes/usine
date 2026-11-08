@@ -30,7 +30,10 @@ export const supervise = (files: OwnerFiles, launch: Launch, lifeline: string) =
   if (child.pid !== undefined) {
     const childIdentity = files.readIdentity(child.pid);
     if (childIdentity === null) {
-      signal(-child.pid, "SIGTERM");
+      // Exiting closes the lifeline pipe, which stops the harness.
+      files.append({ exitCode: 1, stderrTail: "Could not identify the child process lifeline" });
+      rmSync(files.pidFile, { force: true });
+      writeFileSync(files.ready, "");
       process.exit(1);
     }
     writeFileSync(files.identityFile(files.lifelinePid), childIdentity, { mode: 0o600 });

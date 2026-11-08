@@ -76,12 +76,12 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node build-worker.mjs && tsc -b",
-    "check": "node build-worker.mjs && effect-tsgo tsc -p tsconfig.check.json && effect-tsgo tsc -p tsconfig.conformance.json",
-    "test": "node build-worker.mjs && vitest run --exclude 'test/integration/**'",
-    "test:integration:claude": "node build-worker.mjs && vitest run test/integration/claude.test.ts",
-    "test:integration:codex": "node build-worker.mjs && vitest run test/integration/codex.test.ts",
-    "test:integration:pi": "node build-worker.mjs && vitest run test/integration/pi.test.ts",
+    "build": "node --experimental-strip-types build-worker.mjs --dist && tsc -b",
+    "check": "node --experimental-strip-types build-worker.mjs && effect-tsgo tsc -p tsconfig.check.json && effect-tsgo tsc -p tsconfig.conformance.json",
+    "test": "vitest run --exclude 'test/integration/**'",
+    "test:integration:claude": "vitest run test/integration/claude.test.ts",
+    "test:integration:codex": "vitest run test/integration/codex.test.ts",
+    "test:integration:pi": "vitest run test/integration/pi.test.ts",
     "codex:generate": "node --experimental-strip-types scripts/codex/generate.mjs",
     "codex:check": "node --experimental-strip-types scripts/codex/generate.mjs --check"
   },
