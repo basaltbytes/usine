@@ -6,8 +6,8 @@ import type { RepositoryName } from "@usine/core/repository";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import type { Submission } from "@usine/engine/engine";
 import { githubBotLogin } from "@usine/executor";
-import { GitHubApp, isServerError } from "@usine/github/github-app";
-import { GitHubItemHistory } from "@usine/github/item-history";
+import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
+import { GitHubItemHistory, type GitHubItemNotFoundError } from "@usine/github/item-history";
 import { GitHubPolling } from "@usine/github/polling";
 import { type Brand, DateTime, Duration, Effect, Layer, Result, Schedule, Schema } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
@@ -34,18 +34,20 @@ const logFields = (attempt: Attempt, submission: Submission) => ({
 type LogFields = ReturnType<typeof logFields>;
 
 /**
- * Bounds `read` and retries it twice, after one and two seconds, when it times out or GitHub
- * answers with a server error. Other failures, such as 401, 403, and 404, end the read.
+ * Bounds `read` and retries it twice, after one and two seconds, unless GitHub
+ * refuses the request or the Item is missing. Transport failures and timeouts are retryable.
  */
 const transientlyRetried =
   (fields: LogFields, read: "label events" | "current labels") =>
-  <A, E extends { readonly _tag: string; readonly message: string }>(effect: Effect.Effect<A, E>) =>
+  <A, E extends GitHubAppError | GitHubItemNotFoundError>(effect: Effect.Effect<A, E>) =>
     effect.pipe(
       Effect.timeout(READ_TIMEOUT),
       Effect.retry(($) =>
         $(Schedule.exponential("1 second")).pipe(
           Schedule.while(
-            ({ input: error }) => error._tag === "TimeoutError" || isServerError(error),
+            ({ input: error }) =>
+              error._tag === "TimeoutError" ||
+              (error._tag !== "GitHubItemNotFoundError" && !isRefusal(error)),
           ),
           Schedule.upTo({ times: 2 }),
           Schedule.tap(({ input: error, attempt, duration }) =>
@@ -69,9 +71,9 @@ const matching = (submission: Submission, names: ReadonlyArray<string>) => {
 
 /**
  * Verifies the outcome labels of an Attempt on the Run's GitHub issue or pull request. Accepts an
- * outcome label that the Attempt's GitHub writer added at or after the Attempt started, even if a
- * later change removed it. If the Item's label events can't be read, accepts an outcome label
- * that is on the Item now.
+ * outcome label that the Attempt's GitHub writer added since the Run's first Attempt started,
+ * even if a later change removed it. If the Item's label events can't be read, accepts an outcome
+ * label that is on the Item now.
  */
 export const completionCheckLayer: Layer.Layer<
   CompletionCheck,
@@ -96,15 +98,16 @@ export const completionCheckLayer: Layer.Layer<
       return githubBotLogin(worker.kind, login);
     });
 
-    /** Returns the names of the labels that the Attempt's writer added since the Attempt started. */
+    /** Returns labels added by the Attempt's writer since the Run's first Attempt started. */
     const addedLabels = Effect.fn("CompletionCheck.addedLabels")(function* (
       attempt: Attempt,
       repository: RepositoryName,
       item: ItemNumber,
       fields: LogFields,
+      firstAttemptStartedAt: DateTime.Utc,
     ) {
       // GitHub records label events to the second.
-      const since = DateTime.startOf(attempt.startedAt, "second");
+      const since = DateTime.startOf(firstAttemptStartedAt, "second");
       const writer = yield* writerOf(attempt);
       const changes = yield* history
         .appChanges(repository, item, since, writer)
@@ -119,6 +122,7 @@ export const completionCheckLayer: Layer.Layer<
     const verify = Effect.fn("CompletionCheck.verify")(function* (
       attempt: Attempt,
       submission: Submission,
+      firstAttemptStartedAt: DateTime.Utc,
     ) {
       const fields = logFields(attempt, submission);
       yield* Effect.annotateCurrentSpan(fields);
@@ -136,17 +140,21 @@ export const completionCheckLayer: Layer.Layer<
         ),
       );
       const expected = submission.outcomeLabels.join(", ");
-      const added = yield* addedLabels(attempt, submission.repository, item, fields).pipe(
-        Effect.result,
-      );
+      const added = yield* addedLabels(
+        attempt,
+        submission.repository,
+        item,
+        fields,
+        firstAttemptStartedAt,
+      ).pipe(Effect.result);
       if (Result.isSuccess(added)) {
         const label = matching(submission, added.success);
         if (label === undefined) {
-          const message = `The attempt added no outcome label; expected one of: ${expected}.`;
+          const message = `The run added no outcome label; expected one of: ${expected}.`;
           yield* Effect.logWarning(message, { ...fields, addedLabels: added.success });
           return yield* AgentFailure.make({ message });
         }
-        yield* Effect.logInfo("The attempt added an outcome label", { ...fields, label });
+        yield* Effect.logInfo("The run added an outcome label", { ...fields, label });
         return;
       }
       yield* Effect.logWarning(

@@ -21,7 +21,7 @@ The names below identify fields in the text editor. The form provides controls f
 | `max_cycles` | integer ≥ 1 | `3` | Runs this loop can open on one item between operator resets. |
 | `permissions` | `write` or `read` | `write` | Repository content access of each attempt's GitHub token. |
 | `priority` | integer or integer CEL expression | `0` | Queue priority, with higher values first. |
-| `outcome_labels` | list of label names | `[]` | At least one must be added to the item by the attempt before the agent completes. |
+| `outcome_labels` | list of label names | `[]` | At least one must be added to the item during the run before the agent completes. |
 | `ci` | CI policy | omitted | Required checks and fix loop after an agent pushes. |
 
 For example, choose the issue stream, agent `developer`, approval `required`, and this condition:
@@ -87,11 +87,11 @@ The setting limits the attempt's token. Local children run as the orchestrator's
 
 ## Outcome labels
 
-Set `outcome_labels: [review-passed, agent-review-findings]` for a review loop that must publish a verdict. Before usine accepts the agent's completion, it reads the item's label events from GitHub. One of the configured labels must have been added by the GitHub account that the attempt writes as, at or after the attempt started. The label counts even if it was removed before the attempt settled, for example by a fix loop that removes `agent-review-findings` when it starts its run. A label left on the item from an earlier run doesn't count. Label names match without case sensitivity.
+Set `outcome_labels: [review-passed, agent-review-findings]` for a review loop that must publish a verdict. Before usine accepts the agent's completion, it reads the item's label events from GitHub. One of the configured labels must have been added by the GitHub account that the attempt writes as, at or after the run's first attempt started. Retries in the same run can reuse a verdict from an earlier attempt, even when adding the label again produces no new GitHub event. The label counts even if it was removed before the attempt settled, for example by a fix loop that removes `agent-review-findings` when it starts its run. A label left on the item from an earlier run doesn't count. Label names match without case sensitivity.
 
 If usine can't read the label events, it checks the item's current labels instead. If no configured label counts, the attempt and run fail with `AgentFailure` and appear in **Needs attention**; the attempt keeps the agent's final message and recorded facts.
 
-Each GitHub read has a 15-second timeout. usine retries a read twice, after one and two seconds, only after a timeout or a GitHub server error; a 401, 403, or 404 response ends the read. If the current labels can't be read either, the attempt and run fail with `AgentFailure` in **Needs attention**. Verification retries only the reads; it doesn't rerun the agent.
+Each GitHub read has a 15-second timeout. usine retries a read twice, after one and two seconds, after timeouts, transport failures, server errors, and other failures that GitHub does not classify as definite refusals. A missing item or a definite refusal, such as a 401, 403, or 404 response, ends the read. If the current labels can't be read either, the attempt and run fail with `AgentFailure` in **Needs attention**. Verification retries only the reads; it doesn't rerun the agent.
 
 The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the handoff's `on_green` actions instead. Schedule events cannot satisfy an item label requirement.
 

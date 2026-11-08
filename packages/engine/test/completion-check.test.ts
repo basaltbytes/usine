@@ -13,7 +13,7 @@ import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Comment, StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { Context, Effect, Layer, Option, Result } from "effect";
+import { Context, DateTime, Effect, Layer, Logger, Option, Result } from "effect";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { RunEngine } from "../src/engine/engine.ts";
 import { discardedSuccess } from "../src/engine/lifecycle.ts";
@@ -115,6 +115,7 @@ it.live.each(["missing", "present", "blocked", "disabled"] as const)(
           }
           assert.strictEqual(outcome.failure._tag, "AgentFailure");
           assert.strictEqual(outcome.failure.message, "The review ended without an outcome label.");
+          assert(Option.isNone(finished.step.result));
           // The rejected report keeps its message and facts on the Attempt.
           assert(Option.isSome(attempt.result));
           assert.strictEqual(attempt.result.value.message, reviewed.message);
@@ -142,15 +143,96 @@ it.live.each(["missing", "present", "blocked", "disabled"] as const)(
 it.live("accepts outcome labels unverified on a host that provides the unverified check", () =>
   withInstance((directory) =>
     Effect.gen(function* () {
+      const warnings: Array<ReadonlyArray<unknown>> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(Array.isArray(message) ? message : [message]);
+      });
       const worker = yield* slottedExecutor([Effect.succeed(stepResult("Finished."))]);
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const accepted = yield* engine.submit(requiringLabels);
         assert(accepted._tag === "Claimed");
-        yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Succeeded");
-      }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
+        const finished = yield* waitFor(
+          engine,
+          accepted.runId,
+          ({ run }) => run.state._tag === "Succeeded",
+        );
+        const [attempt] = finished.attempts;
+        assert(attempt !== undefined);
+        const acceptedWarnings = warnings.filter(([message]) =>
+          String(message).includes("This host doesn't verify outcome labels"),
+        );
+        assert.deepStrictEqual(acceptedWarnings, [
+          [
+            "This host doesn't verify outcome labels; accepting the completion",
+            {
+              runId: accepted.runId,
+              attemptId: attempt.id,
+              loop: requiringLabels.loop,
+              outcomeLabels: requiringLabels.outcomeLabels,
+            },
+          ],
+        ]);
+      }).pipe(Effect.provide(engineLayer(directory, worker.executor)), Effect.withLogger(logger));
     }),
   ),
+);
+
+it.live.each(["automatic", "operator"] as const)(
+  "verifies an %s retry from the Run's first Attempt start",
+  (retry) =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const failure =
+          retry === "automatic"
+            ? InfraFailure.make({
+                message: "Worker lost after writing the verdict.",
+                cause: "test",
+              })
+            : AgentFailure.make({ message: "Session failed after writing the verdict." });
+        const worker = yield* slottedExecutor([
+          Effect.sleep("1100 millis").pipe(Effect.andThen(Effect.fail(failure))),
+          Effect.succeed(reviewed),
+        ]);
+        const starts: Array<DateTime.Utc> = [];
+        const check = Layer.succeed(CompletionCheck)({
+          verify: (_attempt, _submission, firstAttemptStartedAt) =>
+            Effect.sync(() => {
+              starts.push(firstAttemptStartedAt);
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(requiringLabels);
+          assert(accepted._tag === "Claimed");
+          if (retry === "operator") {
+            yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Failed");
+            yield* engine.retry(accepted.runId);
+          }
+          const finished = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 2);
+          const [first, second] = finished.attempts;
+          assert(first !== undefined && second !== undefined);
+          assert(
+            DateTime.isGreaterThan(second.startedAt, DateTime.add(first.startedAt, { seconds: 1 })),
+          );
+          assert.deepStrictEqual(starts, [first.startedAt]);
+        }).pipe(
+          Effect.provide(
+            engineLayer(
+              directory,
+              worker.executor,
+              conditionLayer(Effect.succeed("matches")),
+              check,
+            ),
+          ),
+        );
+      }),
+    ),
 );
 
 it.live("checks saved outcome labels before accepting a completion recovered after restart", () =>

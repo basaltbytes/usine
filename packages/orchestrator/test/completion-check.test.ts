@@ -179,10 +179,14 @@ const fakeGitHub = (options: {
   };
 };
 
-const verify = (attempt: Attempt, saved: Submission) =>
+const verify = (
+  attempt: Attempt,
+  saved: Submission,
+  firstAttemptStartedAt: DateTime.Utc = attempt.startedAt,
+) =>
   Effect.gen(function* () {
     const check = yield* CompletionCheck;
-    return yield* check.verify(attempt, saved).pipe(Effect.result);
+    return yield* check.verify(attempt, saved, firstAttemptStartedAt).pipe(Effect.result);
   });
 
 const refused = GitHubApiError.make({
@@ -281,8 +285,45 @@ describe("label events", () => {
       assert.strictEqual(result.failure._tag, "AgentFailure");
       assert.strictEqual(
         result.failure.message,
-        "The attempt added no outcome label; expected one of: ready-to-merge, agent-review-findings, ready-for-review.",
+        "The run added no outcome label; expected one of: ready-to-merge, agent-review-findings, ready-for-review.",
       );
+      assert.strictEqual(fake.reads.labels, 0);
+    }),
+  );
+
+  it.effect("counts a verdict from an earlier Attempt in the same Run", () =>
+    Effect.gen(function* () {
+      const fake = fakeGitHub({
+        timeline: () =>
+          Effect.succeed([added(appActor, "ready-to-merge", at("2026-11-08T15:55:00Z"))]),
+        labels: Effect.succeed(["ready-to-merge"]),
+      });
+      const retry = Attempt.make({
+        ...attemptOn("local"),
+        id: AttemptId.make("run-1/review/2"),
+        number: AttemptNumber.make(2),
+        startedAt: at("2026-11-08T16:00:00Z"),
+      });
+      const result = yield* verify(retry, review(), startedAt).pipe(Effect.provide(fake.check));
+      assert.strictEqual(result._tag, "Success");
+      assert.deepStrictEqual(fake.reads.timeline, [
+        { actor: appActor, since: "2026-11-08T15:50:10.000Z", item: 1 },
+      ]);
+      assert.strictEqual(fake.reads.labels, 0);
+    }),
+  );
+
+  it.effect("rejects a review that only removes its outcome trigger label", () =>
+    Effect.gen(function* () {
+      const fake = fakeGitHub({
+        timeline: () =>
+          Effect.succeed([removed(appActor, "ready-for-review", at("2026-11-08T15:51:00Z"))]),
+        labels: Effect.succeed([]),
+      });
+      const result = yield* verify(attemptOn("local"), review()).pipe(Effect.provide(fake.check));
+      assert(result._tag === "Failure");
+      assert.strictEqual(result.failure._tag, "AgentFailure");
+      assert.include(result.failure.message, "added no outcome label");
       assert.strictEqual(fake.reads.labels, 0);
     }),
   );
@@ -379,8 +420,11 @@ describe("current label fallback", () => {
   );
 
   it.effect.each([
+    [401, 1],
     [403, 1],
     [404, 1],
+    [408, 3],
+    [429, 3],
     [502, 3],
   ] as const)("reads label events once more per retry after HTTP %d", ([status, reads]) =>
     Effect.gen(function* () {
@@ -414,6 +458,8 @@ describe("current label fallback", () => {
     [401, 1],
     [403, 1],
     [404, 1],
+    [408, 3],
+    [429, 3],
     [503, 3],
   ] as const)("fails after %d on the current labels with %d reads", ([status, reads]) =>
     Effect.gen(function* () {
@@ -442,6 +488,44 @@ describe("current label fallback", () => {
       assert.include(result.failure.message, `HTTP status ${status}`);
       assert.strictEqual(fake.reads.labels, reads);
     }),
+  );
+
+  it.effect.each(["label events", "current labels"] as const)(
+    "recovers from a transport failure reading %s",
+    (read) =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        let calls = 0;
+        const transport = GitHubApiError.make({
+          operation: read === "label events" ? "fetch-item-timeline" : "fetch-item-labels",
+          status: Option.none(),
+          message: "connection reset",
+        });
+        const once = <A>(value: A) =>
+          Effect.suspend(() => {
+            calls += 1;
+            return calls === 1
+              ? Deferred.succeed(started, undefined).pipe(Effect.andThen(transport))
+              : Effect.succeed(value);
+          });
+        const fake = fakeGitHub({
+          timeline: () =>
+            read === "label events"
+              ? once([added(appActor, "ready-to-merge", at("2026-11-08T15:55:00Z"))])
+              : Effect.fail(refused),
+          labels: once(["ready-to-merge"]),
+        });
+        const fiber = yield* verify(attemptOn("local"), review()).pipe(
+          Effect.provide(fake.check),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("3 seconds");
+        assert.strictEqual((yield* Fiber.join(fiber))._tag, "Success");
+        assert.strictEqual(calls, 2);
+        assert.strictEqual(fake.reads.timeline.length, read === "label events" ? 2 : 1);
+        assert.strictEqual(fake.reads.labels, read === "label events" ? 0 : 2);
+      }),
   );
 
   it.effect("bounds each read and retries three timeouts before falling back", () =>
