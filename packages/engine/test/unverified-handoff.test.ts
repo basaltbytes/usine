@@ -194,6 +194,36 @@ it.live.each([
     reads: 1,
   },
   {
+    reason: "GitHubReadFailed on timeout",
+    message: handoff(HEAD),
+    checkout: {
+      branch: BRANCH,
+      origin: [branchAt(HEAD), PULL_REF],
+      github: [[PULL_REQUEST, [Effect.never]]],
+    },
+    failure: "InfraFailure",
+    detail: "GitHub couldn't be read: the reads didn't finish within 10 seconds",
+    reads: 1,
+  },
+  {
+    reason: "GitHubReadFailed on invalid output without retrying",
+    message: handoff(HEAD),
+    checkout: {
+      branch: BRANCH,
+      origin: [branchAt(HEAD), PULL_REF],
+      github: [
+        [
+          PULL_REQUEST,
+          [Effect.succeed(["invalid JSON"]), pullRequest(BRANCH, "basaltbytes/usine")],
+        ],
+      ],
+    },
+    failure: "InfraFailure",
+    detail:
+      "GitHub couldn't be read: HarvestError: GitHub returned invalid CI handoff pull request",
+    reads: 1,
+  },
+  {
     reason: "GitHubReadFailed",
     message: handoff(HEAD),
     checkout: {
@@ -356,7 +386,7 @@ it.live.each([
   Effect.gen(function* () {
     const finished = yield* finishHarvested("Finished the change.", {
       branch: "",
-      origin: [branchAt(HEAD)],
+      origin: [PULL_REF],
       github: [[INDEX, [index]]],
     });
     assert.strictEqual(finished.decision._tag, decision);
@@ -365,5 +395,90 @@ it.live.each([
       failure,
     );
     assert.notInclude(finished.commands, BRANCH_PULL_REQUESTS);
+  }),
+);
+
+it.live.each([
+  {
+    origin: [branchAt(OTHER)],
+    detail: `is at ${OTHER} on origin, not at the checkout's HEAD ${HEAD}`,
+  },
+  { origin: [PULL_REF], detail: "isn't on origin" },
+])("a plain success fails when its branch $detail", ({ origin, detail }) =>
+  Effect.gen(function* () {
+    const finished = yield* finishHarvested("Finished the change.", {
+      branch: BRANCH,
+      origin,
+      github: [
+        [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])])]],
+      ],
+    });
+    assert.strictEqual(finished.decision._tag, "RunFailed");
+    assert(Option.isSome(finished.failure));
+    assert.strictEqual(finished.failure.value._tag, "AgentFailure");
+    assert.strictEqual(
+      finished.failure.value.message,
+      `CI can't wait on the pushed pull request: branch ${BRANCH} ${detail}`,
+    );
+  }),
+);
+
+it.live("an unpushed detached HEAD fails as an agent mistake without reading GitHub", () =>
+  Effect.gen(function* () {
+    const finished = yield* finishHarvested("Finished the change.", {
+      branch: "",
+      origin: [branchAt(OTHER)],
+      github: [[INDEX, [ghFailed]]],
+    });
+    assert.strictEqual(finished.decision._tag, "RunFailed");
+    assert(Option.isSome(finished.failure));
+    assert.strictEqual(finished.failure.value._tag, "AgentFailure");
+    assert.strictEqual(
+      finished.failure.value.message,
+      `CI can't wait on the pushed pull request: no open pull request has the checkout's HEAD ${HEAD} as its head`,
+    );
+    assert.isFalse(finished.commands.some((command) => command.startsWith("gh ")));
+  }),
+);
+
+it.live.each([
+  {
+    outcome: "waits despite a lagging commit index",
+    open: [{ number: 815, html_url: URL_815 }],
+    decision: "RunAwaitingCi",
+  },
+  {
+    outcome: "fails when no candidate branch has an open pull request",
+    open: [],
+    decision: "RunFailed",
+  },
+])("a detached success $outcome", ({ open, decision }) =>
+  Effect.gen(function* () {
+    const finished = yield* finishHarvested("Finished the change.", {
+      branch: "",
+      origin: [`${HEAD}\trefs/heads/no-pr`, branchAt(HEAD), `${OTHER}\trefs/heads/old`],
+      github: [
+        [
+          "gh api repos/basaltbytes/usine/pulls?head=basaltbytes:no-pr&state=open&per_page=100",
+          [Effect.succeed([jsonKey([])])],
+        ],
+        [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey(open)])]],
+        [INDEX, [Effect.succeed([jsonKey([[]])])]],
+      ],
+    });
+    assert.strictEqual(finished.decision._tag, decision);
+    assert.notInclude(finished.commands, INDEX);
+    if (decision === "RunAwaitingCi") {
+      assert(finished.state._tag === "AwaitingCi");
+      assert.strictEqual(finished.state.handoff.pullRequest, 815);
+      assert.strictEqual(finished.state.handoff.head, HEAD);
+    } else {
+      assert(Option.isSome(finished.failure));
+      assert.strictEqual(finished.failure.value._tag, "AgentFailure");
+      assert.strictEqual(
+        finished.failure.value.message,
+        `CI can't wait on the pushed pull request: no open pull request has the checkout's HEAD ${HEAD} as its head`,
+      );
+    }
   }),
 );

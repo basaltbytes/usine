@@ -160,7 +160,7 @@ export class BranchNotAtHead extends Schema.TaggedClass<
   head: CommitSha,
 }) {}
 
-/** Reading GitHub or origin failed or timed out, after retries. */
+/** A GitHub API read failed after retries, a git read failed, or verification timed out. */
 export class GitHubReadFailed extends Schema.TaggedClass<
   GitHubReadFailed,
   Brand.Brand<"@usine/core/ci/GitHubReadFailed">

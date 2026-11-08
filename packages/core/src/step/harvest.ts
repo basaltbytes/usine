@@ -496,8 +496,8 @@ const verifyHandoff = Effect.fn("StepResult.verifyHandoff")(function* <
 
 /**
  * Returns the open pull requests whose head is the checkout's branch, if that branch is at the
- * checkout's HEAD on origin. A detached checkout asks GitHub's commit-to-pull-request index
- * instead. Fails with the reason no pull request verifies.
+ * checkout's HEAD on origin. A detached checkout queries branches on origin at HEAD, or the
+ * commit-to-pull-request index if only pull request refs match. Fails with the reason otherwise.
  */
 const verifyBranch = Effect.fn("StepResult.verifyBranch")(function* <
   E extends { readonly _tag: string; readonly message: string },
@@ -505,33 +505,55 @@ const verifyBranch = Effect.fn("StepResult.verifyBranch")(function* <
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const { head, branch } = yield* checkoutHead(run);
   const refs = yield* originRefs(run);
+  const branches =
+    branch === ""
+      ? [...refs].flatMap(([ref, commit]) =>
+          ref.startsWith("refs/heads/") && commit === head ? [ref.slice("refs/heads/".length)] : [],
+        )
+      : [branch];
   if (branch === "") {
     if (![...refs.values()].includes(head)) {
       return yield* Effect.fail(
         PullRequestNotFound.make({ pullRequest: Option.none(), branch: Option.none(), head }),
       );
     }
-    return yield* verifyIndexed(spec, run, head);
+    if (branches.length === 0) return yield* verifyIndexed(spec, run, head);
+  } else {
+    const branchHead = branchHeadOn(refs, branch);
+    if (!Option.contains(branchHead, head)) {
+      return yield* Effect.fail(
+        BranchNotAtHead.make({ pullRequest: Option.none(), branch, branchHead, head }),
+      );
+    }
   }
-  const branchHead = branchHeadOn(refs, branch);
-  if (!Option.contains(branchHead, head)) {
-    return yield* Effect.fail(
-      BranchNotAtHead.make({ pullRequest: Option.none(), branch, branchHead, head }),
-    );
-  }
+  yield* Effect.logInfo("Reading open pull requests for origin branches at the checkout's HEAD", {
+    attemptId: spec.attemptId,
+    head,
+    branches,
+  });
   const { owner } = splitRepositoryName(spec.repository);
-  const open = yield* askGitHub(
-    run,
-    [
-      "api",
-      `repos/${spec.repository}/pulls?head=${owner}:${encodeURIComponent(branch)}&state=open&per_page=100`,
-    ],
-    decodeBranchPullRequests,
-    "branch pull requests",
-  ).pipe(retryRead<E>(spec, `the pull requests of branch ${branch}`));
+  const listed = yield* Effect.forEach(
+    branches,
+    (candidate) =>
+      askGitHub(
+        run,
+        [
+          "api",
+          `repos/${spec.repository}/pulls?head=${owner}:${encodeURIComponent(candidate)}&state=open&per_page=100`,
+        ],
+        decodeBranchPullRequests,
+        "branch pull requests",
+      ).pipe(retryRead<E>(spec, `the pull requests of branch ${candidate}`)),
+    { concurrency: 4 },
+  );
+  const open = [...new Map(listed.flat().map((pr) => [pr.number, pr])).values()];
   if (open.length === 0) {
     return yield* Effect.fail(
-      PullRequestNotFound.make({ pullRequest: Option.none(), branch: Option.some(branch), head }),
+      PullRequestNotFound.make({
+        pullRequest: Option.none(),
+        branch: branch === "" ? Option.none() : Option.some(branch),
+        head,
+      }),
     );
   }
   return open.map(({ number, url }) => pullRequestAt(spec, number, url, head));
