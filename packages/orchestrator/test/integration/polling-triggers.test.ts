@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { webRequest } from "../../../../tooling/test/http.mts";
 import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
@@ -138,6 +139,7 @@ const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) =
   const engine = localEngineLayer(directory).pipe(
     Layer.provide(executor),
     Layer.provide(alwaysHoldsLayer),
+    Layer.provide(CompletionCheck.unverified),
   );
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(Layer.succeed(GitHubApp, app)),

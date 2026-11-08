@@ -6,7 +6,7 @@ import { type ChildHost, type HostInvocation, sshArguments } from "./child-host.
 /**
  * Returns the local process command that runs `invocation` on `host`: the command itself with
  * exactly `environment` on a local host, or one SSH command whose client gets only `sshEnvironment`
- * on a remote host.
+ * on a remote host. Throws if `environment` is not empty on a remote host.
  */
 export const hostCommand = (
   host: ChildHost,
@@ -21,12 +21,16 @@ export const hostCommand = (
         env: { ...invocation.environment },
         extendEnv: false,
       });
-    case "RemoteShell":
+    case "RemoteShell": {
+      const names = Object.keys(invocation.environment);
+      if (names.length > 0)
+        throw new Error(`Cannot pass ${names.join(", ")} to a remote command on its command line`);
       return ChildProcess.make(host.ssh.command, sshArguments(host, invocation), {
         ...options,
         env: { ...host.sshEnvironment },
         extendEnv: false,
       });
+    }
   }
 };
 

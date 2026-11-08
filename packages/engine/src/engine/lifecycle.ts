@@ -9,7 +9,13 @@ import {
   pendingProviderRetry,
   shouldAutoRetry,
 } from "@usine/core/attempt";
-import { ciHandoff, CiHandoff, type CiLabelMutation, type CiPolicy } from "@usine/core/ci";
+import {
+  ciHandoff,
+  CiHandoff,
+  type CiLabelMutation,
+  type CiPolicy,
+  unverifiedHandoffFailure,
+} from "@usine/core/ci";
 import { AttemptFailure, AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   AttemptAwaitingCi,
@@ -30,7 +36,7 @@ import { EventId } from "@usine/core/event";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
-import { Array as EffectArray, Match, Option, Result } from "effect";
+import { Array as EffectArray, Data, Match, Option, Result } from "effect";
 import type { IgnoreReason } from "./submission.ts";
 
 /** A Run and its Attempts, ordered by Attempt number. */
@@ -48,6 +54,8 @@ type RetryAttempt = {
   readonly _tag: "RetryAttempt";
   readonly attempt: Attempt;
   readonly outcome: AttemptFailed;
+  /** The result of a rejected report, which the failed Attempt keeps. */
+  readonly harvested: Option.Option<StepResult>;
 };
 
 type RunFailed = {
@@ -55,6 +63,8 @@ type RunFailed = {
   readonly attempt: Attempt;
   readonly outcome: AttemptFailed;
   readonly state: RunState.Failed;
+  /** The result of a rejected report, which the failed Attempt keeps. */
+  readonly harvested: Option.Option<StepResult>;
 };
 
 type RunSucceeded = {
@@ -76,20 +86,62 @@ type RunAwaitingCi = {
 /** The changes committed together when an Attempt finishes. */
 export type FinishDecision = RetryAttempt | RunFailed | RunSucceeded | RunAwaitingCi | Unchanged;
 
+/**
+ * A successful report that the completion check rejected. The Attempt fails with `failure` and
+ * keeps `result`.
+ */
+export class RejectedCompletion extends Data.TaggedClass("RejectedCompletion")<{
+  readonly failure: AgentFailure;
+  readonly result: StepResult;
+}> {}
+
+/** The executor result of an Attempt, or its successful report that the completion check rejected. */
+export type AttemptResult = Result.Result<StepResult, AttemptFailure | RejectedCompletion>;
+
 const openAttempt = (current: RunProgress): Option.Option<Attempt> =>
   Option.fromNullishOr(current.attempts.at(-1)).pipe(
     Option.filter((attempt) => Option.isNone(attempt.outcome)),
   );
+
+/** Returns the open Attempt `attemptId` of the running Run, or why its result changes nothing. */
+const runningAttempt = (
+  current: RunProgress,
+  attemptId: AttemptId,
+): Result.Result<{ readonly state: RunState.Running; readonly attempt: Attempt }, Unchanged> => {
+  const state = current.run.state;
+  if (state._tag !== "Running") return Result.fail({ _tag: "Unchanged", reason: "RunNotRunning" });
+  const attempt = openAttempt(current);
+  if (Option.isNone(attempt)) return Result.fail({ _tag: "Unchanged", reason: "NoOpenAttempt" });
+  // A result from before a restart or retry doesn't apply to the replacement Attempt.
+  if (attempt.value.id !== attemptId)
+    return Result.fail({ _tag: "Unchanged", reason: "AttemptReplaced" });
+  return Result.succeed({ state, attempt: attempt.value });
+};
 
 const pushFailureOf = (attempt: Attempt) =>
   Option.flatMap(attempt.salvage, (salvage) =>
     salvage._tag === "Retained" ? salvage.pushFailure : Option.none(),
   );
 
+/**
+ * Returns why `finishAttempt` would not record a success of `attemptId`: the Run isn't running,
+ * another Attempt replaced it, or its push failed. Returns `None` if it can record one.
+ */
+export const discardedSuccess = (
+  current: RunProgress,
+  attemptId: AttemptId,
+): Option.Option<Unchanged["reason"] | "PushFailed"> =>
+  Result.match(runningAttempt(current, attemptId), {
+    onFailure: ({ reason }) => Option.some(reason),
+    onSuccess: ({ attempt }) =>
+      Option.isSome(pushFailureOf(attempt)) ? Option.some("PushFailed" as const) : Option.none(),
+  });
+
 const failRunningAttempt = (
   state: RunState.Running,
   attempt: Attempt,
   failure: AttemptFailure,
+  harvested: Option.Option<StepResult> = Option.none(),
 ): RetryAttempt | RunFailed => {
   const outcome = AttemptFailed.make({ failure });
   if (
@@ -99,39 +151,40 @@ const failRunningAttempt = (
       maxAutoAttempts: MAX_AUTO_ATTEMPTS,
     })
   ) {
-    return { _tag: "RetryAttempt", attempt, outcome };
+    return { _tag: "RetryAttempt", attempt, outcome, harvested };
   }
-  return { _tag: "RunFailed", attempt, outcome, state: RunState.fail(state) };
+  return { _tag: "RunFailed", attempt, outcome, state: RunState.fail(state), harvested };
 };
 
 /**
  * Returns the changes for the executor result of `attemptId`. Infrastructure and capacity failures
- * allow up to 3 Attempts in total; a late or repeated result returns `Unchanged`.
+ * allow up to 3 Attempts in total; a late or repeated result returns `Unchanged`. A success that
+ * CI must wait on, without a verified pull request at its head, fails with the failure for the
+ * result's `unverifiedHandoff`.
  */
 export const finishAttempt = (
   current: RunProgress,
   attemptId: AttemptId,
-  result: Result.Result<StepResult, AttemptFailure>,
+  result: AttemptResult,
   policy: Option.Option<CiPolicy> = Option.none(),
   inheritedOnGreen: ReadonlyArray<CiLabelMutation> = [],
 ): FinishDecision => {
-  if (current.run.state._tag !== "Running") {
-    return { _tag: "Unchanged", reason: "RunNotRunning" };
-  }
-  const attempt = openAttempt(current);
-  if (Option.isNone(attempt)) return { _tag: "Unchanged", reason: "NoOpenAttempt" };
-  // A result from before a restart or retry doesn't apply to the replacement Attempt.
-  if (attempt.value.id !== attemptId) return { _tag: "Unchanged", reason: "AttemptReplaced" };
-  const completed = Option.match(pushFailureOf(attempt.value), {
+  const running = runningAttempt(current, attemptId);
+  if (Result.isFailure(running)) return running.failure;
+  const { state, attempt } = running.success;
+  const completed = Option.match(pushFailureOf(attempt), {
     onNone: () => result,
     onSome: (failure) => Result.fail(failure),
   });
   if (Result.isFailure(completed)) {
-    return failRunningAttempt(current.run.state, attempt.value, completed.failure);
+    const failed = completed.failure;
+    return failed._tag === "RejectedCompletion"
+      ? failRunningAttempt(state, attempt, failed.failure, Option.some(failed.result))
+      : failRunningAttempt(state, attempt, failed);
   }
   const handoff = ciHandoff(completed.success.message);
   if (Result.isFailure(handoff)) {
-    return failRunningAttempt(current.run.state, attempt.value, handoff.failure);
+    return failRunningAttempt(state, attempt, handoff.failure);
   }
   const pullRequest = completed.success.facts.find(
     (fact) => fact._tag === "PullRequest" && Option.isSome(fact.head),
@@ -154,12 +207,19 @@ export const finishAttempt = (
             : Option.none(),
       }),
   });
+  // A result without a recorded reason was harvested before harvesting verified pull requests.
+  const { unverifiedHandoff } = completed.success;
   if (Option.isSome(policy) && Option.isNone(required))
     return failRunningAttempt(
-      current.run.state,
-      attempt.value,
-      AgentFailure.make({
-        message: "This loop requires CI, but the successful report has no pushed pull request head",
+      state,
+      attempt,
+      Option.match(unverifiedHandoff, {
+        onSome: unverifiedHandoffFailure,
+        onNone: () =>
+          AgentFailure.make({
+            message:
+              "This loop requires CI, but the successful report has no pushed pull request head",
+          }),
       }),
     );
   if (Option.isSome(required)) {
@@ -176,17 +236,22 @@ export const finishAttempt = (
       )
     ) {
       return failRunningAttempt(
-        current.run.state,
-        attempt.value,
-        InfraFailure.make({
-          message: "The CI handoff has no harvested pull request for the checkout's pushed head",
-          cause: { pullRequest: request.pullRequest, head: request.head },
+        state,
+        attempt,
+        Option.match(unverifiedHandoff, {
+          onSome: unverifiedHandoffFailure,
+          onNone: () =>
+            InfraFailure.make({
+              message:
+                "The CI handoff has no harvested pull request for the checkout's pushed head",
+              cause: { pullRequest: request.pullRequest, head: request.head },
+            }),
         }),
       );
     }
     return {
       _tag: "RunAwaitingCi",
-      attempt: attempt.value,
+      attempt,
       outcome: AttemptAwaitingCi.make(),
       state: RunState.AwaitingCi.make({ handoff: request }),
       result: completed.success,
@@ -194,9 +259,9 @@ export const finishAttempt = (
   }
   return {
     _tag: "RunSucceeded",
-    attempt: attempt.value,
+    attempt,
     outcome: AttemptSucceeded.make(),
-    state: RunState.succeed(current.run.state),
+    state: RunState.succeed(state),
     result: completed.success,
   };
 };
@@ -392,7 +457,7 @@ export type OperatorStop = "question" | "blocker";
 /** Preserves the original operator stop when a push failure replaces its displayed outcome (ADR 0017). */
 export const operatorStop = (
   decision: FinishDecision,
-  result: Result.Result<StepResult, AttemptFailure>,
+  result: AttemptResult,
 ): Option.Option<OperatorStop> => {
   if (decision._tag !== "RunFailed") return Option.none();
   if (Result.isSuccess(result)) return Option.none();

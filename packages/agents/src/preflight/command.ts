@@ -23,7 +23,7 @@ export const probeFailed = (
 /**
  * Runs a readiness command on `host` with a 30-second timeout and returns its trimmed stdout and
  * exit code; stderr is discarded. If the remote host is unreachable or the command times out, fails
- * with `SessionOperationError`.
+ * with `SessionOperationError`. Dies if `host` is a remote shell and `environment` is not empty.
  */
 export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   host: ChildHost,

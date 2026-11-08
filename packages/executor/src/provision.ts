@@ -593,6 +593,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         conflictingSalvage: checkout.conflicting,
         preparedAt: Option.some(preparedAt),
         botLogin: request.botLogin,
+        requiresCi: request.requiresCi,
       }),
       worktree: WorktreePath.make(layout.worktree),
     }),

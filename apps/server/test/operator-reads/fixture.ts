@@ -27,6 +27,7 @@ import {
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { idleTriggersLayer } from "@usine/orchestrator/idle-triggers";
@@ -232,6 +233,7 @@ export const checkReads = ({
           recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
         }),
       ),
+      Layer.provide(CompletionCheck.unverified),
     );
     const observation = OperatorObservation.layer.pipe(
       Layer.provide(Layer.mock(ConfigurationStore)({})),

@@ -1,6 +1,8 @@
 import { completionCheckLayer } from "./completion-check.ts";
 import { GitHubFiles } from "@usine/github/files";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
+import type { CompletionCheck } from "@usine/engine/completion-check";
+import type { TriggerCondition } from "@usine/engine/trigger-condition";
 import { GitHubChecks } from "@usine/github/checks";
 import { CiMonitor } from "./ci.ts";
 import { WebhookHealth } from "./webhooks.ts";
@@ -68,6 +70,18 @@ export const operatorObservationLayer = (
   );
 
 /**
+ * Provides the engine's checks of GitHub Items: the trigger recheck of queued Events and the
+ * outcome label verification of successful Attempts. Requires `CurrentInstance`.
+ */
+export const engineItemChecksLayer = <E, R>(
+  github: Layer.Layer<GitHubApp | GitHubItemHistory | GitHubPolling, E, R>,
+): Layer.Layer<CompletionCheck | TriggerCondition, E, CurrentInstance | R> =>
+  Layer.mergeAll(
+    completionCheckLayer,
+    triggerConditionLayer.pipe(Layer.provide(MarcbachmannCelLayer)),
+  ).pipe(Layer.provide(github));
+
+/**
  * Provides the full Node composition for one factory: trigger streams, the durable engine, Worker
  * execution, and the operator surface. Requires the GitHub credentials and `CurrentInstance`.
  */
@@ -89,10 +103,11 @@ export const runtimeLayer = (
     Layer.provide(externalHttpClientLayer),
     Layer.provide(NodeServices.layer),
   );
-  const triggerCondition = triggerConditionLayer.pipe(
-    Layer.provide(polling),
-    Layer.provide(MarcbachmannCelLayer),
+  const itemHistory = GitHubItemHistory.layer.pipe(
+    Layer.provide(app),
+    Layer.provide(externalHttpClientLayer),
   );
+  const itemChecks = engineItemChecksLayer(Layer.mergeAll(app, itemHistory, polling));
   // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
   // executor's preflight and the Attempts' Claude children.
   const attemptRuntime = Layer.unwrap(
@@ -123,8 +138,7 @@ export const runtimeLayer = (
   ).pipe(
     Layer.provide(credentials),
     Layer.provide(app),
-    Layer.provide(triggerCondition),
-    Layer.provide(completionCheckLayer.pipe(Layer.provide(polling))),
+    Layer.provide(itemChecks),
     Layer.provide(attemptRuntime),
     Layer.provide(MarcbachmannCelLayer),
   );
@@ -133,10 +147,6 @@ export const runtimeLayer = (
     Layer.provide(externalHttpClientLayer),
   );
   const files = GitHubFiles.layer.pipe(Layer.provide(app), Layer.provide(externalHttpClientLayer));
-  const itemHistory = GitHubItemHistory.layer.pipe(
-    Layer.provide(app),
-    Layer.provide(externalHttpClientLayer),
-  );
   const labelWriter = GitHubLabelWriter.layer.pipe(
     Layer.provide(app),
     Layer.provide(externalHttpClientLayer),

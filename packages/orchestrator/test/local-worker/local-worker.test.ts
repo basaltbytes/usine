@@ -1,4 +1,5 @@
 import { harnessesLive } from "@usine/agents/harness/node";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -232,6 +233,7 @@ const withGitHubEngine = <A, E, R>(
         ),
       ),
       Layer.provide(alwaysHoldsLayer),
+      Layer.provide(CompletionCheck.unverified),
     );
     return yield* Effect.gen(function* () {
       return yield* use({ engine: yield* RunEngine, remote });
@@ -257,6 +259,7 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(CompletionCheck.unverified),
           Layer.provide(fixedConfigLayer(decodedValue5)),
           Layer.provide(testAppLayer),
         );
@@ -800,6 +803,7 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(CompletionCheck.unverified),
           Layer.provide(fixedConfigLayer(decodedValue17)),
           Layer.provide(testAppLayer),
         );
@@ -959,7 +963,7 @@ describe("local worker", () => {
   );
 
   it.effect(
-    "commits as the App's bot on every Worker kind, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
+    "commits as the App's bot on every Worker kind, passes the Run's CI requirement, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
     () =>
       Effect.gen(function* () {
         const missing = InstallationDiscoveryError.make({
@@ -1052,6 +1056,7 @@ describe("local worker", () => {
                   parentModel: selected.parentModel,
                   permissions: selected.permissions,
                   resume: Option.none(),
+                  requiresCi: true,
                 }),
                 {
                   append: () => Effect.void,
@@ -1083,6 +1088,7 @@ describe("local worker", () => {
             ],
           );
           assert.deepStrictEqual(writers, expected);
+          assert.isTrue(requested.every(({ requiresCi }) => requiresCi));
           assert.strictEqual(failed._tag, failure);
           // The engine reconciles a checkout kept for a reattachment until preparation acquires it
           // (#180).

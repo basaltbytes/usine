@@ -8,6 +8,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { Executor, ExecutorError } from "@usine/executor";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import {
@@ -127,6 +128,7 @@ it.live(
             recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
           }),
         ),
+        Layer.provide(CompletionCheck.unverified),
       );
       const listener = yield* startupListener("0.5.1-next.341");
       const starting = yield* Layer.build(runtime).pipe(Effect.forkChild);

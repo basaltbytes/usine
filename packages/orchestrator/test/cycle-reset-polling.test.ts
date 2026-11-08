@@ -1,4 +1,5 @@
 import { Harness } from "@usine/core/agent/brain";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { jsonKey } from "@usine/core/json-key";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
@@ -473,6 +474,7 @@ it.live(
       const engineLayer = localEngineLayer(directory).pipe(
         Layer.provide(executor),
         Layer.provide(alwaysHoldsLayer),
+        Layer.provide(CompletionCheck.unverified),
       );
       const dependencies = Layer.mergeAll(
         engineLayer,

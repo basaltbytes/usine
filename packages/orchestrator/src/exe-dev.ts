@@ -10,7 +10,7 @@ import { withSshWorkerDiscard } from "./ssh.ts";
 
 /**
  * Provides the full engine and `WorkerStatus` for exe.dev Workers. Requires `GitHubApp`,
- * `TriggerCondition`, `AttemptRuntime` (built before the engine), `Harnesses`, and
+ * `TriggerCondition`, `CompletionCheck`, `AttemptRuntime` (built before the engine), `Harnesses`, and
  * `CurrentInstance`.
  */
 export const layer = (

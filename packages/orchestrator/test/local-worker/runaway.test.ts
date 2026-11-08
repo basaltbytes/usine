@@ -1,4 +1,5 @@
 import { harnessesLive } from "@usine/agents/harness/node";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -112,6 +113,7 @@ describe("local worker runaway guard", () => {
             Layer.provide(stubAttemptRuntime(storage, spender)),
             Layer.provide(hostLoginLockLayer),
             Layer.provide(alwaysHoldsLayer),
+            Layer.provide(CompletionCheck.unverified),
             Layer.provide(fixedConfigLayer(ceiling)),
             Layer.provide(testAppLayer),
           );

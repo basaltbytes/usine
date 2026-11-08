@@ -40,6 +40,7 @@ const spec: HarvestSpec = {
     parentEffort: Option.none(),
     persona: AgentPersona.make("Implement the issue."),
   }),
+  requiresCi: false,
 };
 
 class CommandFailed extends Schema.TaggedError<CommandFailed, { readonly Brand: unique symbol }>()(
@@ -100,7 +101,7 @@ const harvest = (
     windows,
     handoff,
   ).pipe(
-    Effect.map((facts) => ({ facts, commands, warnings, infos })),
+    Effect.map(({ facts }) => ({ facts, commands, warnings, infos })),
     Effect.provide(
       Logger.layer([
         Logger.make(({ logLevel, message }) => {

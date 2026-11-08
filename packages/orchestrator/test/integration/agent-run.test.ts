@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { webRequest } from "../../../../tooling/test/http.mts";
 import { idleCiMonitor } from "../support/ci.ts";
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
@@ -224,6 +225,7 @@ const runtimeLayer = (
     Layer.provide(credentials),
     Layer.provide(app),
     Layer.provide(triggerCondition),
+    Layer.provide(CompletionCheck.unverified),
     Layer.provide(
       durableAttemptRuntimeLayer(runtimeDirectory).pipe(
         Layer.provideMerge(harnessesLive),

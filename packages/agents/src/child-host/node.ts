@@ -13,6 +13,10 @@ import {
   remoteProcess,
 } from "./process.ts";
 
+/**
+ * Returns the command that starts `command` for `target` without a process owner. Throws if
+ * `target` is a remote shell and its environment is not empty.
+ */
 export const childProcessCommand = (
   target: ProcessTarget,
   command: ProcessCommand,

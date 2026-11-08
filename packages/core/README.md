@@ -15,7 +15,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/event` | `Event`, `EventId`, `DedupKey` |
 | `@usine/core/run`, `@usine/core/run/state` | `Run`, `RunId`; the run state machine as a tagged union with typestate transitions (`RunState.start`, `RunState.supersede`, and others) |
 | `@usine/core/step`, `@usine/core/step/result` | `Step`, `StepName`; `StepResult` and its facts (`Commit`, `PullRequest`, `Comment`) |
-| `@usine/core/step/harvest` | `harvestFacts`, `harvestPostedComments`, `HarvestError`, `HarvestSpec`, `AttemptWindowsRead`: the commits and pull requests in an attempt's finished checkout, and the comments and reviews it posted on its item, read with the caller's `git`/`gh` runner |
+| `@usine/core/step/harvest` | `harvestFacts`, `harvestPostedComments`, `Harvest`, `HarvestError`, `HarvestSpec`, `AttemptWindowsRead`: the commits and pull requests in an attempt's finished checkout, and the comments and reviews it posted on its item, read with the caller's `git`/`gh` runner |
 | `@usine/core/attempt` | `Attempt`, `FailureResolution` (the time and operator of a failure resolution), `AttemptId`, `AttemptNumber`, `AttemptTask`, `MemoryKilledProcess` (a kernel task name and host PID), `OutOfMemoryKills` (the processes the kernel killed in an attempt's containers for memory), `ContainerOutOfMemoryKills` (those of one container, by `ContainerId`), `totalOutOfMemoryKills`, `shouldAutoRetry`, `MAX_AUTO_ATTEMPTS`, `ProviderRetry`, `pendingProviderRetry`, and `AttemptWindow`, `windowOf`, `windowHolds`, `windowsOverlap`, `AttemptWindows` |
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptAwaitingCi`, `AttemptHandedOff`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `GitHubPushFailure`, `InfraFailure`, `DefectFailure`, `ProviderCapacityFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
@@ -27,6 +27,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `safeSegment`, `splitRepositoryName`, `canonicalRepositoryName` |
 | `@usine/core/worker`, `/item`, `/loop`, `/instance` | `WorkerName`, `WorkerKind`, `GatewayCredentialKind`, `ContainerId`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory`, `InstanceId` |
 | `@usine/core/cycle-budget` | `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, `CycleBudgetBlock`, `CycleBudgetAsk` |
+| `@usine/core/retry` | `retryTransient`: at most two retries, about 1 and 3 seconds apart with jitter, of the failures that a predicate accepts. GitHub polling reads and harvest reads share it. |
 
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
@@ -107,7 +108,19 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 
 ## CI waits
 
-`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The branch must belong to the attempt's repository and point at the checkout's final commit; the pull request API can report an older head.
+`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The branch must belong to the attempt's repository and point at the checkout's final commit; the pull request API can report an older head. Without a handoff, a `HarvestSpec` with `requiresCi` verifies the open pull requests of the checkout's branch the same way; a detached checkout queries branches on origin at its HEAD. An unchanged detached checkout fails with `PullRequestNotFound` unless its revision is the fixed base commit. When only pull request refs match, it keeps the open pull requests from the attempt's repository that GitHub's commit-to-pull-request index lists at that HEAD. The pull request read retries with `retryTransient` while origin has the pull request's `refs/pull/<n>/head`.
+
+A verification that fails returns no pull request and sets `Harvest.unverifiedHandoff`, which the executor copies to `StepResult.unverifiedHandoff`:
+
+| Reason | Meaning | `unverifiedHandoffFailure` |
+| --- | --- | --- |
+| `HeadMismatch` | The handoff's `head` isn't the checkout's HEAD. | `AgentFailure` |
+| `PullRequestNotFound` | Origin has no such pull request, or no open pull request heads the branch or detached HEAD. | `AgentFailure` |
+| `RepositoryMismatch` | The pull request, or every open one at a detached HEAD, comes from another repository. | `AgentFailure` |
+| `BranchNotAtHead` | The branch on origin is missing or at another commit. | `AgentFailure` |
+| `GitHubReadFailed` | A GitHub API read failed after retries, a git read failed, or the reads took longer than 10 seconds. | `InfraFailure` |
+
+`describeUnverifiedHandoff` returns the reason as the failure message shows it.
 
 `HandedOff` is a closed, neutral run state with the failed head, reason, fix loop, and fix run ID. `CiHandedOff` settles a CI wait into this state and ends its attempt as `AttemptHandedOff`.
 

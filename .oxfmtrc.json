@@ -11,6 +11,7 @@
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
     "**/route-tree.gen.ts",
-    "apps/docs/public/openapi.json"
+    "apps/docs/public/openapi.json",
+    "packages/agents/src/protocol/codex/upstream-schema.json"
   ]
 }

@@ -21,6 +21,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { Executor, ExecutorOperationError, fullPreflight } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApp } from "@usine/github/github-app";
@@ -171,6 +172,7 @@ it.live(
               recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
             }),
           ),
+          Layer.provide(CompletionCheck.unverified),
         );
         const observation = Layer.mergeAll(
           OperatorObservation.layer,

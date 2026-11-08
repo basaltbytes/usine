@@ -25,6 +25,7 @@ import { layer } from "../src/database/local-sqlite.ts";
 import { transcriptCodecLayer } from "../src/database/transcript-codec.ts";
 import { RunEngine, Submission } from "../src/engine/engine.ts";
 import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
+import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 import {
@@ -82,6 +83,7 @@ describe("Run evidence reader", () => {
             recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
           }),
         ),
+        Layer.provide(CompletionCheck.unverified),
       );
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;

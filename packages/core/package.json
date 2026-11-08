@@ -79,6 +79,10 @@
       "types": "./dist/repository.d.ts",
       "default": "./dist/repository.js"
     },
+    "./retry": {
+      "types": "./dist/retry.d.ts",
+      "default": "./dist/retry.js"
+    },
     "./run": {
       "types": "./dist/run/run.d.ts",
       "default": "./dist/run/run.js"

@@ -350,7 +350,7 @@ The registry is the component library, and the theme is the only place for color
 
 Needs attention groups unresponsive workers with their last answer time and buttons to open each affected run. Entries appear after three consecutive unanswered probes and clear when the worker answers or its affected attempts end. Dismiss and Undo apply to these entries.
 
-Loop form and text edits preserve configured `outcome_labels`. These labels require a successful run to leave at least one verdict label on the item.
+Loop form and text edits preserve configured `outcome_labels`. These labels require a successful run to add at least one verdict label through a GitHub account used by one of its attempts. A label added since the run's first attempt counts even if another loop removes it before settlement; a label from an earlier run does not count. If label events cannot be read, verification checks the current labels.
 
 Loop forms provide stream-specific payload completion for CEL conditions and Markdown prompt expressions, with debounced server checks. New loops select a project before the loop name. Loop lists and details link to that project. Repository and tag selectors offer only repositories and tags in that project, and agent choices use the roster. **Preview** lists up to 20 matching stored items, links each to its task, and renders the prompt for a selected item. Editing the draft clears the displayed preview. A schedule loop explains that it has no polled items. **Resume** requires confirmation after loading the saved loop's current match count; new loops remain paused until this action.
 

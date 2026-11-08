@@ -615,7 +615,7 @@ describe("Task view", () => {
         yield* git("merge", "--no-ff", "main", "-m", "Merge main");
         const headOutput = yield* git("rev-parse", "HEAD");
         const head = CommitSha.make(headOutput);
-        const facts = yield* harvestFacts(
+        const { facts } = yield* harvestFacts(
           {
             attemptId: AttemptId.make("run-plan/2"),
             repository,
@@ -625,6 +625,7 @@ describe("Task view", () => {
             preparedAt: Option.none(),
             botLogin: Option.none(),
             agent: developer,
+            requiresCi: false,
           },
           (command, args) =>
             command === "git"

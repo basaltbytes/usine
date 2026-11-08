@@ -49087,6 +49087,25 @@
               ]
             }
           },
+          "unverifiedHandoff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadMismatchEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/PullRequestNotFoundEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/RepositoryMismatchEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/BranchNotAtHeadEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/GitHubReadFailedEncoded"
+              }
+            ]
+          },
           "outputs": {
             "type": "array",
             "items": {
@@ -49128,6 +49147,145 @@
         "required": [
           "message",
           "facts"
+        ],
+        "additionalProperties": false
+      },
+      "GitHubReadFailedEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "GitHubReadFailed"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "_tag",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "BranchNotAtHeadEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "BranchNotAtHead"
+            ]
+          },
+          "pullRequest": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "branchHead": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          },
+          "head": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          }
+        },
+        "required": [
+          "_tag",
+          "branch",
+          "head"
+        ],
+        "additionalProperties": false
+      },
+      "RepositoryMismatchEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RepositoryMismatch"
+            ]
+          },
+          "pullRequest": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "headRepository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+          }
+        },
+        "required": [
+          "_tag",
+          "pullRequest"
+        ],
+        "additionalProperties": false
+      },
+      "PullRequestNotFoundEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "PullRequestNotFound"
+            ]
+          },
+          "pullRequest": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "head": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          }
+        },
+        "required": [
+          "_tag",
+          "head"
+        ],
+        "additionalProperties": false
+      },
+      "HeadMismatchEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "HeadMismatch"
+            ]
+          },
+          "pullRequest": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "handedOff": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          },
+          "head": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+          }
+        },
+        "required": [
+          "_tag",
+          "pullRequest",
+          "handedOff",
+          "head"
         ],
         "additionalProperties": false
       },

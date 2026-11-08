@@ -35,6 +35,7 @@ import { layer } from "@usine/engine/local-sqlite";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -173,6 +174,7 @@ const seed = (directory: string) =>
             recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
           }),
         ),
+        Layer.provide(CompletionCheck.unverified),
       ),
     ),
   );

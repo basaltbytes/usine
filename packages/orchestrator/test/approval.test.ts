@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { ManagedRepo } from "@usine/config/factory";
@@ -154,6 +155,7 @@ for (const scenario of [
       const runtime = layer(directory).pipe(
         Layer.provide(executor),
         Layer.provide(alwaysHoldsLayer),
+        Layer.provide(CompletionCheck.unverified),
       );
       const runId = yield* Effect.gen(function* () {
         const engine = yield* RunEngine;

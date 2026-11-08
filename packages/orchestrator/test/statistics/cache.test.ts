@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { WorkerStatus } from "../../src/worker-status.ts";
 import { sqliteTempDirectory } from "../../../../tooling/test/sqlite.mts";
 import { configurationLayer } from "../support/configuration.ts";
@@ -290,6 +291,7 @@ describe("Statistics cache", () => {
       const engineLayer = localEngineLayer(directory).pipe(
         Layer.provide(executor),
         Layer.provide(alwaysHoldsLayer),
+        Layer.provide(CompletionCheck.unverified),
       );
       const services = OperatorStatistics.layer.pipe(
         Layer.provide(WorkerStatus.idle),

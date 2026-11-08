@@ -1,4 +1,5 @@
 import { harnessesLive } from "@usine/agents/harness/node";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -240,6 +241,7 @@ export const localRuntime = (
         Layer.provide(harnessesLive.pipe(Layer.provide(options.platform ?? NodeServices.layer))),
         Layer.provide(hostLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
+        Layer.provide(CompletionCheck.unverified),
       ),
     ),
   );

@@ -54,8 +54,8 @@ describe("durable session settlement", () => {
         const completed = yield* session.launch(workspace, recording().sink, {
           ...checkout,
           harvest: (_windows, handoff) =>
-            Effect.succeed(
-              Option.toArray(handoff).map((request) =>
+            Effect.succeed({
+              facts: Option.toArray(handoff).map((request) =>
                 PullRequest.make({
                   number: request.pullRequest,
                   url: new URL(
@@ -64,7 +64,8 @@ describe("durable session settlement", () => {
                   head: Option.some(request.head),
                 }),
               ),
-            ),
+              unverifiedHandoff: Option.none(),
+            }),
         });
         assert.strictEqual(completed.result.message, message);
         const fact = completed.result.facts[0];

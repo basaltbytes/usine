@@ -28,8 +28,10 @@ import {
   RunawayFailure,
 } from "@usine/core/attempt/failure";
 import { CommitSha } from "@usine/core/repository";
+import { HeadMismatch } from "@usine/core/ci";
+import { ItemNumber } from "@usine/core/item";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
-import { Commit, StepCompletion, StepResult } from "@usine/core/step/result";
+import { Commit, StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { ChildBackend, ChildSessionLifecycle, SessionOperationError } from "@usine/agents/runtime";
 import {
@@ -83,6 +85,12 @@ import {
   trace,
   workerEnvironment,
 } from "./support.ts";
+
+/** Returns a harvest of `facts` that left no CI handoff unverified. */
+const harvested = (facts: ReadonlyArray<StepResultFact>) => ({
+  facts,
+  unverifiedHandoff: Option.none(),
+});
 
 /** Captures each log line as its level and JSON-encoded message. */
 const capturedLogs = () => {
@@ -1514,7 +1522,7 @@ describe("durable AttemptRuntime", () => {
           const report = yield* Fiber.join(execution);
           assert.isFalse(report.answeredOperator);
           assert.deepStrictEqual(
-            harvestedResult(report, []),
+            harvestedResult(report, harvested([])),
             Result.succeed(
               StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [] })),
             ),
@@ -1588,12 +1596,27 @@ describe("durable AttemptRuntime", () => {
       }).pipe(Effect.scoped),
   );
 
+  it("preserves the unverified handoff reason in the harvested completion", () => {
+    const report = AttemptReport.make({ message: "Pushed the change." });
+    const reason = HeadMismatch.make({
+      pullRequest: ItemNumber.make(815),
+      handedOff: CommitSha.make("a".repeat(40)),
+      head: CommitSha.make("b".repeat(40)),
+    });
+    const completion = harvestedResult(report, {
+      facts: [],
+      unverifiedHandoff: Option.some(reason),
+    });
+    assert(Result.isSuccess(completion));
+    assert.deepStrictEqual(completion.success.result.unverifiedHandoff, Option.some(reason));
+  });
+
   it("fails an Attempt whose parent ended on its answer to the operator with nothing delivered", () => {
     const report = AttemptReport.make({
       message: "The child returned no details.",
       answeredOperator: true,
     });
-    const failed = harvestedResult(report, []);
+    const failed = harvestedResult(report, harvested([]));
     assert(Result.isFailure(failed));
     assert.include(failed.failure.message, "The child returned no details.");
     const commit = Commit.make({
@@ -1601,7 +1624,7 @@ describe("durable AttemptRuntime", () => {
       summary: "Fix the flaky test",
     });
     assert.deepStrictEqual(
-      harvestedResult(report, [commit]),
+      harvestedResult(report, harvested([commit])),
       Result.succeed(
         StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [commit] })),
       ),
@@ -1615,7 +1638,7 @@ describe("durable AttemptRuntime", () => {
       sha256: StepOutputSha256.make("a".repeat(64)),
     });
     assert.deepStrictEqual(
-      harvestedResult(report, [], [output]),
+      harvestedResult(report, harvested([]), [output]),
       Result.succeed(
         StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [] }), [
           output,

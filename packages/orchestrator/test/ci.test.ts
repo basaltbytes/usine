@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { assert, it } from "@effect/vitest";
 // The retention assertion must run after Node’s check phase releases native async handles.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
@@ -31,7 +32,7 @@ import { RunReader } from "@usine/engine/run-reader";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
-import { CompletionCheck, StepExecutor } from "@usine/engine/step-executor";
+import { StepExecutor } from "@usine/engine/step-executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import {
@@ -294,9 +295,10 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const engine = engineLayer(directory).pipe(
     Layer.provide(executor),
     Layer.provide(
-      Layer.succeed(CompletionCheck)((submission) =>
-        Ref.update(verifiedSubmissions, (all) => [...all, submission]),
-      ),
+      Layer.succeed(CompletionCheck)({
+        verify: (_attempt, submission) =>
+          Ref.update(verifiedSubmissions, (all) => [...all, submission]),
+      }),
     ),
     Layer.provide(
       triggerConditionLayer.pipe(
@@ -884,6 +886,59 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
 
         assert.strictEqual((yield* (yield* CycleBudgets).asks).length, 1);
 
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a cycle reset revokes a blocked CI fix when the PR moves to a failing head", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const limited = LoadedInstance.make({
+        ...fixtureInstance,
+        loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) })],
+      });
+      const setup = yield* scenario(3600, limited);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const budgets = yield* CycleBudgets;
+        const reader = yield* RunReader;
+        yield* openWait(setup.timeoutSeconds, true);
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* (yield* CiMonitor).reconcile(limited, Option.none());
+        const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+        const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ head: CommitSha.make("c".repeat(40)), state: "failure" }),
+        );
+        const replayed = yield* budgets.reset(
+          ask.id,
+          Event.make({
+            id: EventId.make("reset-superseded-ci-fix"),
+            dedupKey: DedupKey.make("reset-superseded-ci-fix"),
+            receivedAt: yield* DateTime.now,
+            payload: {},
+          }),
+        );
+        assert.deepStrictEqual(replayed, [blocked.eventId]);
+
+        yield* engine.reconcile;
+        yield* engine.drain;
+        const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+        assert(Option.isNone(fixId));
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        const remainingAsks = yield* budgets.asks;
+        assert.deepStrictEqual(remainingAsks, []);
+
+        yield* engine.reconcile;
+        yield* engine.drain;
+        const laterFixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+        assert(Option.isNone(laterFixId));
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
       }).pipe(Effect.provide(setup.runtime));
     }),

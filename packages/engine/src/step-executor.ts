@@ -10,18 +10,10 @@ import { Run, type RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { type Brand, Schema, Context, Effect, type Option, type Result } from "effect";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
+import type { AttemptFailure } from "@usine/core/attempt/failure";
 import type { WorkerName } from "@usine/core/worker";
 import type { StepCompletion } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
-
-/** Verifies outcome labels; failures require operator attention without re-running the agent. */
-export const CompletionCheck = Context.Reference<
-  (submission: Submission) => Effect.Effect<void, AgentFailure>
->("@usine/engine/CompletionCheck", {
-  defaultValue: () => () =>
-    Effect.fail(AgentFailure.make({ message: "Outcome labels require a completion verifier." })),
-});
 
 /** The saved Event, effective task and Agent, and Step of one Attempt. */
 export class StepExecution extends Schema.Class<
@@ -52,6 +44,8 @@ export class StepExecution extends Schema.Class<
   resume: Schema.Option(SalvagePushed),
   /** Whether to reattach to the Attempt's live parent task instead of starting it. */
   reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /** Whether the Run has a CI policy, so the Attempt's pull request must be verified on origin. */
+  requiresCi: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
 /** A reservation of one Worker slot for an Attempt, freed by `release`. */
