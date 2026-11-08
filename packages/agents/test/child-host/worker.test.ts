@@ -9,7 +9,16 @@ import { build } from "esbuild";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHILD_LIFELINE } from "../../src/child-host/lifeline.ts";
@@ -227,6 +236,25 @@ describe("standalone worker owner", () => {
       expect(existsSync(root)).toBe(false);
     },
   );
+
+  it("reports a stdin read error as its exit message", () => {
+    const { dir, pidFile, root } = temporary();
+    // Reading a write-only descriptor fails with EBADF.
+    const stdin = openSync(join(dir, "stdin"), "w");
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ["-e", program, "attach", pidFile, "0", "30000", process.execPath, "-e", "0"],
+        { stdio: [stdin, "pipe", "pipe"], encoding: "utf8", timeout: 5000 },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toBe("EBADF: bad file descriptor, read\n");
+    } finally {
+      closeSync(stdin);
+    }
+    expect(existsSync(root)).toBe(false);
+  });
 
   it("deduplicates input replay across relay replacement and resumes its output checkpoint", async () => {
     const { pidFile, root } = temporary();
