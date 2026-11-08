@@ -4,7 +4,7 @@
 // Fixture JSON is decoded synchronously at the test boundary.
 // @effect-diagnostics schemaSync:off
 import { assert } from "@effect/vitest";
-import { Deferred, Effect, Exit, Predicate, Schema } from "effect";
+import { Deferred, Effect, Exit, Option, Predicate, Schema } from "effect";
 
 export const Scenario = Schema.Literals([
   "simple",
@@ -51,7 +51,7 @@ export type Transcript = typeof Transcript.Type;
 
 const isJsonArray = (value: Schema.Json): value is ReadonlyArray<Schema.Json> =>
   Array.isArray(value);
-const isJsonObject = (value: Schema.Json): value is Readonly<Record<string, Schema.Json>> =>
+export const isJsonObject = (value: Schema.Json): value is Readonly<Record<string, Schema.Json>> =>
   Predicate.isObject(value);
 
 const json = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
@@ -83,6 +83,7 @@ export class Tape {
   readonly entries: Array<Entry> = [];
   readonly #inboxes = new Map<string, Inbox>();
   readonly #bindings = new Map<string, string>();
+  #progress = Deferred.makeUnsafe<void>();
   readonly #groups = new Map<
     string,
     { entries: Array<{ entry: Entry; index: number }>; cursor: number }
@@ -154,6 +155,7 @@ export class Tape {
     this.entries.push({ type: "expect_outbound", port, payload });
     if (group !== undefined) group.cursor += 1;
     this.#pump();
+    this.#advance();
   }
 
   inbound(port: string, value: Schema.Json): void {
@@ -172,7 +174,10 @@ export class Tape {
     if (this.#failure !== undefined) return Promise.reject(this.#failure.cause);
     const inbox = this.#inbox(port);
     this.#pump();
-    return inbox.take();
+    return inbox.take().then((entry) => {
+      this.#advance();
+      return entry;
+    });
   }
 
   fail(cause: unknown): void {
@@ -204,8 +209,34 @@ export class Tape {
     return inbox;
   }
 
-  readonly guard = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    Effect.raceFirst(effect, Deferred.await(this.failure));
+  readonly guard = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => {
+    const idle = Effect.gen({ self: this }, function* () {
+      for (;;) {
+        const progress = yield* Deferred.await(this.#progress).pipe(
+          Effect.timeoutOption("5 seconds"),
+        );
+        if (Option.isSome(progress)) continue;
+        const pending = [...this.#groups.values()].flatMap((group) => {
+          const next = group.entries[group.cursor];
+          return next === undefined
+            ? []
+            : [`transcript entry ${next.index} on ${next.entry.port}: ${encode(next.entry)}`];
+        });
+        this.fail(new Error(`replay idle for 5 seconds; missing requests:\n${pending.join("\n")}`));
+      }
+    });
+    return Effect.raceFirst(
+      effect,
+      this.source === "record"
+        ? Deferred.await(this.failure)
+        : Effect.raceFirst(Deferred.await(this.failure), idle),
+    );
+  };
+
+  #advance(): void {
+    Deferred.doneUnsafe(this.#progress, Effect.void);
+    this.#progress = Deferred.makeUnsafe<void>();
+  }
 
   #group(port: string): string {
     return port.split("/")[0] ?? port;

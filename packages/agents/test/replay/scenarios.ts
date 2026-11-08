@@ -135,6 +135,10 @@ export const runScenario = (
             : "REPLAY_GUIDED";
       assert.include(result.message, expected);
       assert.strictEqual(events[0]?._tag, "SessionStarted");
+      assert.lengthOf(
+        events.filter((event) => event._tag === "SessionStarted"),
+        1,
+      );
       assert.strictEqual(events.at(-1)?._tag, "SessionFinished");
       assert(events.some((event) => event._tag === "TextOutput" && event.text.includes(expected)));
       if (scenario === "interrupt-guidance") {

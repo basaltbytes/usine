@@ -166,15 +166,13 @@ export const restartReplays = (mode: "record" | "replay"): void => {
                 environments[1]?.[homeVariable],
                 fixture.tape.normalize(savedHome),
               );
-              if (scenario === "credential-changed") {
-                assert.strictEqual(environments[0]?.[tokenVariable], undefined);
-                assert.strictEqual(
-                  environments[1]?.[tokenVariable],
-                  fixture.tape.normalize(changedEnvironment[tokenVariable] ?? ""),
-                );
-              }
-              const child = starts[1]?.session;
-              assert(child !== undefined);
+              assert.deepStrictEqual(
+                starts[0]?.session.pool,
+                Option.some(provider === "claude" ? "claudePlan" : "chatgptPlan"),
+              );
+              const resumedStart = starts[1];
+              assert(resumedStart !== undefined);
+              const child = resumedStart.session;
               assert.deepStrictEqual(
                 child.pool,
                 Option.some(
@@ -185,6 +183,27 @@ export const restartReplays = (mode: "record" | "replay"): void => {
                       : "chatgptPlan",
                 ),
               );
+              if (scenario === "credential-changed") {
+                const resumedEvents = events
+                  .slice(events.indexOf(resumedStart))
+                  .filter((event) => event.session._tag === "ChildSession");
+                const usage = resumedEvents.filter(
+                  (event) => event._tag === "SessionTokensUpdated",
+                );
+                assert.isNotEmpty(usage);
+                for (const event of usage)
+                  assert.deepStrictEqual(event.session.pool, Option.some("apiKeys"));
+                if (provider === "codex") {
+                  const limits = resumedEvents.filter(
+                    (event) => event._tag === "PoolRateLimitsUpdated",
+                  );
+                  assert.isNotEmpty(limits);
+                  for (const event of limits) {
+                    assert.strictEqual(event.pool, "apiKeys");
+                    assert.deepStrictEqual(event.login, Option.none());
+                  }
+                }
+              }
               assert(
                 events.some(
                   (event) =>

@@ -99,9 +99,16 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     fs.appendFileSync('held-controls', message.request_id + '\\n');
     return;
   }
-  if (message.type === 'control_request') send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {
-    commands: [], agents: [], models: [{ value: ${model}, displayName: 'Replay', description: 'Recorded model' }], account: { apiKeySource: 'none' }, output_style: 'default', available_output_styles: ['default'],
-  } } });
+  if (message.type === 'control_request') {
+    send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {
+      commands: [], agents: [], models: [{ value: ${model}, displayName: 'Replay', description: 'Recorded model' }], account: { apiKeySource: 'none' }, output_style: 'default', available_output_styles: ['default'],
+    } } });
+    if (message.request.subtype === 'interrupt') {
+      waiting = false;
+      const result = messages.find(message => message.type === 'result');
+      sendBatch([{ ...result, result: 'Interrupted' }, sessionState('idle')]);
+    }
+  }
   else if (message.type === 'control_response') {
     if (message.response.request_id === 'pending-hook' && message.response.subtype === 'success') {
       hookPending = false;
