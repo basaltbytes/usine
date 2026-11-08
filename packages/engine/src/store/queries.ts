@@ -1131,7 +1131,7 @@ export const queriesFor = (
 
   /**
    * Returns the current unclaimed Events of a Loop's Item, newest first, with the newest as the
-   * submission to open. Every admission path picks the newest Event, CI fix or trigger match.
+   * submission to recheck. Every admission path starts with the newest Event, CI fix or trigger match.
    */
   const queuedOn = Effect.fn("RunStoreQueries.queuedOn")(function* (
     loop: LoopName,
@@ -1374,6 +1374,7 @@ export const queriesFor = (
     ignoredEvent,
     newestReopening,
     nextQueued,
+    queuedOn,
     reopenedEvent,
     recordRunAgain,
     pendingContinuations,

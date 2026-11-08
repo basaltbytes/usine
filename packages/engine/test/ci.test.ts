@@ -33,6 +33,7 @@ import {
 } from "effect";
 import { Event, type EventId } from "@usine/core/event";
 import { RunEngine } from "../src/engine/engine.ts";
+import { TriggerRecheck } from "../src/trigger-condition.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { RunStore } from "../src/store/store.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
@@ -656,13 +657,15 @@ it.live("a CI fix queued behind a running attempt is not rechecked until the att
 );
 
 it.live.each([
-  { newest: "CI fix", sameTime: false },
-  { newest: "trigger match", sameTime: false },
-  { newest: "CI fix", sameTime: true },
-  { newest: "trigger match", sameTime: true },
+  { newest: "CI fix", sameTime: false, newestMatches: true },
+  { newest: "trigger match", sameTime: false, newestMatches: true },
+  { newest: "CI fix", sameTime: true, newestMatches: true },
+  { newest: "trigger match", sameTime: true, newestMatches: true },
+  { newest: "CI fix", sameTime: false, newestMatches: false },
+  { newest: "trigger match", sameTime: false, newestMatches: false },
 ] as const)(
-  "the newest queued Event opens the next Run when it is a $newest (equal receive times: $sameTime)",
-  ({ newest, sameTime }) =>
+  "the newest matching queued Event opens the next Run ($newest newest, matches: $newestMatches, equal receive times: $sameTime)",
+  ({ newest, sameTime, newestMatches }) =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const storage = RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)));
@@ -688,7 +691,7 @@ it.live.each([
               Option.none(),
             );
             assert(started._tag === "AttemptStarted");
-            const ordered = sameTime ? [newer, older] : [older, newer];
+            const ordered = [older, newer];
             yield* Effect.forEach(ordered, (queued) =>
               store
                 .recordAndClaim(queued, RunId.make(queued.event.id))
@@ -727,9 +730,12 @@ it.live.each([
 
         const rechecks = yield* Ref.make<ReadonlyArray<EventId>>([]);
         const condition = conditionLayer((queued) =>
-          Ref.update(rechecks, (all) => [...all, queued.event.id]).pipe(
-            Effect.andThen(stillMatches(queued)),
-          ),
+          Effect.gen(function* () {
+            yield* Ref.update(rechecks, (all) => [...all, queued.event.id]);
+            if (!newestMatches && queued.event.id === newer.event.id)
+              return TriggerRecheck.NoLongerMatches();
+            return yield* stillMatches(queued);
+          }),
         );
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Effect.succeed(stepResult("newest")),
@@ -738,13 +744,23 @@ it.live.each([
           Effect.gen(function* () {
             const engine = yield* RunEngine;
             const reader = yield* RunReader;
-            const opened = yield* reader.runForEvent(newer.event.dedupKey);
+            const selected = newestMatches ? newer : older;
+            const ignored = newestMatches ? older : newer;
+            const opened = yield* reader.runForEvent(selected.event.dedupKey);
             assert(Option.isSome(opened));
             yield* waitFor(engine, opened.value, ({ run }) => run.state._tag === "Succeeded");
-            const superseded = yield* reader.runForEvent(older.event.dedupKey);
-            assert(Option.isNone(superseded));
+            const unopened = yield* reader.runForEvent(ignored.event.dedupKey);
+            assert(Option.isNone(unopened));
+            if (!newestMatches) {
+              const resubmitted = yield* engine.submit(newer);
+              assert(resubmitted._tag === "Ignored");
+              assert.strictEqual(resubmitted.reason, "revoked");
+            }
             const checked = yield* Ref.get(rechecks);
-            assert.deepStrictEqual(checked, [newer.event.id]);
+            assert.deepStrictEqual(
+              checked,
+              newestMatches ? [newer.event.id] : [newer.event.id, older.event.id],
+            );
             yield* engine.drain;
           }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans), condition))),
         );

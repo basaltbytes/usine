@@ -159,6 +159,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const observed = yield* Ref.make(CheckSnapshot.make({ head, state: "pending" }));
   const itemState = yield* Ref.make<"OPEN" | "CLOSED" | "MERGED" | "gone">("OPEN");
   const observationFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
+  const snapshotFailure = yield* Ref.make(Option.none<GitHubApiError>());
+  const snapshotIsDraft = yield* Ref.make(false);
   const mergeable = yield* Ref.make<PullRequestPayload["mergeable"]>("CONFLICTING");
   const tasks = yield* Ref.make<ReadonlyArray<string>>([]);
   const verifiedSubmissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
@@ -264,6 +266,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
       Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
     snapshot: () =>
       Effect.gen(function* () {
+        const failure = yield* Ref.get(snapshotFailure);
+        if (Option.isSome(failure)) return yield* failure.value;
         const { head, state } = yield* Ref.get(observed);
         const currentState = yield* Ref.get(itemState);
         if (currentState === "gone")
@@ -276,6 +280,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
           payload: PullRequestPayload.make({
             ...fixturePayload,
             state: currentState,
+            isDraft: yield* Ref.get(snapshotIsDraft),
             merged: currentState === "MERGED",
             headRefOid: head,
             mergeable: state === "conflict" ? yield* Ref.get(mergeable) : "UNKNOWN",
@@ -321,6 +326,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     observed,
     itemState,
     observationFailure,
+    snapshotFailure,
+    snapshotIsDraft,
     pendingFailure,
     pendingStarted,
     pendingStalled,
@@ -1030,15 +1037,28 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
 );
 
 it.live.each([
-  { recorded: "none", current: "required" },
-  { recorded: "required", current: "none" },
+  { recorded: "none", current: "required", expected: "required", snapshotFails: false },
+  { recorded: "required", current: "none", expected: "none", snapshotFails: false },
+  { recorded: "none", current: "required", expected: "required", snapshotFails: true },
+  {
+    recorded: "required",
+    current: Source.make("item.isDraft"),
+    expected: "none",
+    snapshotFails: false,
+  },
+  {
+    recorded: "none",
+    current: Source.make("!item.isDraft"),
+    expected: "required",
+    snapshotFails: false,
+  },
 ] as const)(
-  "a replayed CI fix recorded with approval $recorded takes approval $current from the current loop",
-  ({ recorded, current }) =>
+  "a replayed CI fix recorded with approval $recorded takes approval $current from the current loop (GitHub read fails: $snapshotFails)",
+  ({ recorded, current, expected, snapshotFails }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixtureInstance = yield* instance;
-        const configured = (approval: "none" | "required") =>
+        const configured = (approval: LoopFile["approval"]) =>
           LoadedInstance.make({
             ...fixtureInstance,
             loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1), approval })],
@@ -1059,6 +1079,7 @@ it.live.each([
           assert.strictEqual(unlinked.size, 0);
           const edited = configured(current);
           yield* Ref.set(setup.currentInstance, edited);
+          yield* Ref.set(setup.snapshotIsDraft, true);
 
           const replayed = yield* budgets.reset(
             ask.id,
@@ -1069,10 +1090,24 @@ it.live.each([
               payload: {},
             }),
           );
-          const cycle = yield* (yield* PollingTriggers).poll(edited);
+          if (snapshotFails) {
+            yield* Ref.set(
+              setup.snapshotFailure,
+              Option.some(
+                GitHubApiError.make({
+                  operation: "fetch-pull-request-snapshot",
+                  status: Option.some(503),
+                  message: "GitHub is temporarily unavailable",
+                }),
+              ),
+            );
+            yield* engine.reconcile;
+          } else {
+            const cycle = yield* (yield* PollingTriggers).poll(edited);
+            assert.deepStrictEqual(cycle.failures, []);
+          }
 
           assert.deepStrictEqual(replayed, [blocked.eventId]);
-          assert.deepStrictEqual(cycle.failures, []);
           const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
           assert(Option.isSome(fixId));
           const fix = yield* engine.inspect(fixId.value).pipe(
@@ -1086,16 +1121,20 @@ it.live.each([
             Effect.timeout("5 seconds"),
           );
           const reason = Option.getOrElse(fix.approvalReason, () => "");
-          if (current === "required") {
+          if (expected === "required") {
             assert.strictEqual(fix.run.state._tag, "Waiting");
             assert.deepStrictEqual(fix.attempts, []);
-            assert.include(reason, "the loop requires approval");
           } else {
             assert.strictEqual(fix.run.state._tag, "Succeeded");
             assert(Option.isNone(fix.approval));
-            assert.include(reason, "the loop allows automatic starts");
             const tasks = yield* Ref.get(setup.tasks);
             assert.include(tasks[1] ?? "", "TypeError: failing CI log");
+          }
+          if (current === "required") assert.include(reason, "the loop requires approval");
+          else if (current === "none") assert.include(reason, "the loop allows automatic starts");
+          else {
+            assert.include(reason, `condition evaluated to ${expected === "required"}`);
+            assert.include(reason, current);
           }
           const linked = yield* reader.ciFixRuns([sourceId]);
           assert.strictEqual(linked.get(sourceId), fixId.value);

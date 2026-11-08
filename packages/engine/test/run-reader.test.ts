@@ -294,10 +294,11 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
           });
         };
         yield* TestClock.setTime(1000);
-        const first = yield* engine.submit(fix(1, sourceId, "a"));
+        const first = yield* engine.submit(
+          Submission.make({ ...fix(1, sourceId, "a"), itemKey: ItemKey.make("first-fix") }),
+        );
         assert(first._tag === "Claimed");
         assert.strictEqual((yield* reader.ciFixRuns([sourceId])).get(sourceId), first.runId);
-        yield* engine.cancel(first.runId);
         yield* TestClock.setTime(2000);
         const second = yield* engine.submit(fix(2, sourceId, "b"));
         assert(second._tag === "Claimed");
@@ -338,6 +339,42 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
       }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
     }),
   ),
+);
+
+it.live.each(["canceled", "revoked"] as const)(
+  "omits a %s CI fix from its source Run's links",
+  (state) =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const sourceId = RunId.make("source-with-canceled-fix");
+          const original = supportSubmission({ number: 1, approval: "required" });
+          const head = CommitSha.make("a".repeat(40));
+          const key = ciFixDedupKey(sourceId, head);
+          const fix = Submission.make({
+            ...original,
+            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
+            ciFailureHead: Option.some(head),
+          });
+          const admitted = yield* engine.submit(fix);
+          assert(admitted._tag === "Claimed");
+          yield* waitFor(engine, admitted.runId, ({ run }) => run.state._tag === "Waiting");
+          assert.strictEqual((yield* reader.ciFixRuns([sourceId])).get(sourceId), admitted.runId);
+
+          if (state === "canceled") yield* engine.cancel(admitted.runId);
+          else yield* engine.revoke(fix.loop, fix.itemKey);
+
+          const stopped = yield* engine.inspect(admitted.runId);
+          assert.strictEqual(stopped.run.state._tag, "Canceled");
+          const links = yield* reader.ciFixRuns([sourceId]);
+          assert.deepStrictEqual(links, new Map());
+          yield* engine.drain;
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
 );
 
 describe("Attempts by Worker", () => {

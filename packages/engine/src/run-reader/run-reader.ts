@@ -9,7 +9,8 @@ import {
   Schema,
 } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
-import { and, asc, eq, gte, lt, or } from "drizzle-orm";
+import { and, asc, eq, gte, lt, ne, or } from "drizzle-orm";
+import { jsonExtract } from "../database/dialect.ts";
 import { events as storedEvents, runs } from "../database/schema.ts";
 import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
@@ -76,9 +77,12 @@ const makeRunReader = Effect.gen(function* () {
             .from(storedEvents)
             .innerJoin(runs, eq(runs.eventId, storedEvents.eventId))
             .where(
-              or(
-                ...chunk.map(({ from, to }) =>
-                  and(gte(storedEvents.dedupKey, from), lt(storedEvents.dedupKey, to)),
+              and(
+                ne(jsonExtract(runs.stateJson, "$._tag"), "Canceled"),
+                or(
+                  ...chunk.map(({ from, to }) =>
+                    and(gte(storedEvents.dedupKey, from), lt(storedEvents.dedupKey, to)),
+                  ),
                 ),
               ),
             )
@@ -241,7 +245,8 @@ export class RunReader extends Context.Service<
     ) => Effect.Effect<Option.Option<RunId>, RunStoreError>;
     /**
      * Returns the CI fix Run admitted for each source Run's failed head, keyed by source Run. Source
-     * Runs without an admitted fix are absent; a source Run with several fixes maps to the newest.
+     * Runs without an admitted fix are absent; canceled fixes, including revoked fixes, are
+     * excluded. A source Run with several eligible fixes maps to the newest.
      */
     readonly ciFixRuns: (
       sourceRunIds: ReadonlyArray<RunId>,

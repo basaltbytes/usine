@@ -8,8 +8,8 @@ import type { Submission } from "./engine/submission.ts";
  *   may replace the Loop settings saved with the Event, such as approval or Agent, and the task
  *   to reflect the Loop's current configuration. Admission persists these settings and the task
  *   for execution; the Event, Item, and CI evidence stay as recorded.
- * - `NoLongerMatches`: the Item, Loop, or repository changed, and the Item's queued Events are
- *   revoked.
+ * - `NoLongerMatches`: the Item, Loop, or repository changed. This Event is revoked, and the
+ *   next queued Event is rechecked.
  * - `ItemGone`: the Item no longer exists. The queued Events are revoked, and the Item's
  *   projection is marked gone.
  */

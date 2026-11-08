@@ -281,76 +281,87 @@ export class RunDriver extends Context.Service<
 
       /**
        * Rechecks the newest queued Event of a Loop's Item and opens its Run with the submission the
-       * recheck returns. Returns the opened Run, or `None` if the Event stays queued, is revoked,
-       * or could no longer be claimed. `completedRunId` is the closed Run that gave the queue its
-       * turn.
+       * recheck returns. A non-matching Event is revoked before trying the next queued Event.
+       * Returns the opened Run, or `None` if no Event can be admitted. `completedRunId` is the
+       * closed Run that gave the queue its turn.
        */
       const continueQueued = Effect.fn("RunDriver.continueQueued")(function* (
-        queued: QueuedEvents,
+        initial: QueuedEvents,
         completedRunId: Option.Option<RunId>,
       ) {
-        const submission = queued.submission;
-        const runId = yield* runIdFor(submission).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
-        );
-        const fields = {
-          ...Option.match(completedRunId, {
-            onNone: () => ({}),
-            onSome: (closed) => ({ completedRunId: closed }),
-          }),
-          eventId: submission.event.id,
-          loop: submission.loop,
-          itemKey: submission.itemKey,
-        };
-        yield* Effect.annotateCurrentSpan(fields);
-        if (
-          Option.isSome(submission.ciFailureHead) &&
-          (yield* controls
-            .isPaused(submission.loop)
-            .pipe(retryingStore(runId, "read whether the loop is paused")))
-        ) {
-          yield* Effect.logInfo("CI fix remains queued while its loop is paused", fields);
-          return Option.none<RunId>();
-        }
-        const recheck = yield* condition.recheck(submission);
-        if (recheck._tag !== "Matches") {
-          // Revoke only the queue read before the remote check.
-          const revoked = yield* store
-            .revokeQueued(queued)
-            .pipe(retryingStore(runId, "revoke the queued events"));
-          if (recheck._tag === "NoLongerMatches") {
-            yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
-              ...fields,
-              revokedEvents: revoked,
-            });
+        let pending = Option.some(initial);
+        while (Option.isSome(pending)) {
+          const queued = pending.value;
+          const submission = queued.submission;
+          const runId = yield* runIdFor(submission).pipe(
+            Effect.provideService(Crypto.Crypto, crypto),
+          );
+          const fields = {
+            ...Option.match(completedRunId, {
+              onNone: () => ({}),
+              onSome: (closed) => ({ completedRunId: closed }),
+            }),
+            eventId: submission.event.id,
+            loop: submission.loop,
+            itemKey: submission.itemKey,
+          };
+          yield* Effect.annotateCurrentSpan(fields);
+          if (
+            Option.isSome(submission.ciFailureHead) &&
+            (yield* controls
+              .isPaused(submission.loop)
+              .pipe(retryingStore(runId, "read whether the loop is paused")))
+          ) {
+            yield* Effect.logInfo("CI fix remains queued while its loop is paused", fields);
             return Option.none<RunId>();
           }
-          const projectionMarkedGone = yield* markItemGone(runId, submission);
-          yield* Effect.logInfo(
-            "Queued Event's Item is gone from its source; revoked its queued Events",
-            { ...fields, revokedEvents: revoked, projectionMarkedGone },
-          );
-          return Option.none<RunId>();
+          const recheck = yield* condition.recheck(submission);
+          if (recheck._tag !== "Matches") {
+            const revoked = yield* store
+              .revokeQueued(
+                recheck._tag === "ItemGone"
+                  ? queued
+                  : { ...queued, eventIds: [submission.event.id] },
+              )
+              .pipe(retryingStore(runId, "revoke the queued events"));
+            if (recheck._tag === "NoLongerMatches") {
+              yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
+                ...fields,
+                revokedEvents: revoked,
+              });
+              pending = yield* store
+                .queuedOn(submission.loop, submission.itemKey)
+                .pipe(retryingStore(runId, "read the remaining queued events"));
+              continue;
+            }
+            const projectionMarkedGone = yield* markItemGone(runId, submission);
+            yield* Effect.logInfo(
+              "Queued Event's Item is gone from its source; revoked its queued Events",
+              { ...fields, revokedEvents: revoked, projectionMarkedGone },
+            );
+            return Option.none<RunId>();
+          }
+          const claimed = yield* store
+            .claimQueued(recheck.submission, runId)
+            .pipe(retryingStore(runId, "claim the queued event"));
+          if (Option.isNone(claimed)) {
+            // During the check, the Event was ignored, another Run opened for the Item, or a cycle
+            // reset superseded the Event.
+            yield* Effect.logInfo(
+              "Queued Event still matches its trigger but could no longer be claimed; no Run opened",
+              fields,
+            );
+            return Option.none<RunId>();
+          }
+          yield* Effect.logInfo("Queued Event still matches its trigger; opening its Run", {
+            ...fields,
+            runId: claimed.value,
+            approval: recheck.submission.approval,
+          });
+          yield* launch(claimed.value);
+          return claimed;
         }
-        const claimed = yield* store
-          .claimQueued(recheck.submission, runId)
-          .pipe(retryingStore(runId, "claim the queued event"));
-        if (Option.isNone(claimed)) {
-          // During the check, the Event was ignored, another Run opened for the Item, or a cycle
-          // reset superseded the Event.
-          yield* Effect.logInfo(
-            "Queued Event still matches its trigger but could no longer be claimed; no Run opened",
-            fields,
-          );
-          return Option.none<RunId>();
-        }
-        yield* Effect.logInfo("Queued Event still matches its trigger; opening its Run", {
-          ...fields,
-          runId: claimed.value,
-          approval: recheck.submission.approval,
-        });
-        yield* launch(claimed.value);
-        return claimed;
+        return Option.none<RunId>();
       });
 
       const continueWithNewest = Effect.fn("RunDriver.continueWithNewest")(function* (

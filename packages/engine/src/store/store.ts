@@ -1147,6 +1147,8 @@ const makeRunStore = Effect.gen(function* () {
     claimQueued,
     finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
+    queuedOn: (loop: LoopName, itemKey: ItemKey) =>
+      queries.queuedOn(loop, itemKey).pipe(persistence("find queued events on a loop item")),
     parkForApproval,
     pendingCiFixes: queries.pendingCiFixes().pipe(persistence("list pending CI fixes")),
     pendingContinuations: queries
@@ -1238,6 +1240,11 @@ export class RunStore extends Context.Service<
     /** Returns the newest queued Event of the Run's Loop and Item, or `None` during a suppression. */
     readonly nextQueued: (
       runId: RunId,
+    ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
+    /** Returns the current unclaimed Events of the Loop's Item, newest first. */
+    readonly queuedOn: (
+      loop: LoopName,
+      itemKey: ItemKey,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
     /** Moves a pending Run to `Waiting` and returns the Run's state. */
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
