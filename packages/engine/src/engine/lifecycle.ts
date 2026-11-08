@@ -231,7 +231,7 @@ export const finishAttempt = (
     }
     return {
       _tag: "RunAwaitingCi",
-      attempt: attempt,
+      attempt,
       outcome: AttemptAwaitingCi.make(),
       state: RunState.AwaitingCi.make({ handoff: request }),
       result: completed.success,
@@ -239,7 +239,7 @@ export const finishAttempt = (
   }
   return {
     _tag: "RunSucceeded",
-    attempt: attempt,
+    attempt,
     outcome: AttemptSucceeded.make(),
     state: RunState.succeed(state),
     result: completed.success,
