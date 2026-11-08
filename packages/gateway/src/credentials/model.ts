@@ -24,6 +24,8 @@ export const ProviderConnection = Schema.Struct({
   credential: Schema.NullOr(Schema.Literals(["api-key", "subscription"])),
   expiresAt: Schema.NullOr(Schema.String),
   lastRefresh: Schema.NullOr(Schema.String),
+  /** Omitted when the destination does not report whether the credential can refresh. */
+  refreshable: Schema.optionalKey(Schema.Boolean),
 });
 export type ProviderConnection = typeof ProviderConnection.Type;
 export const ProviderConnections = Schema.Struct({ providers: Schema.Array(ProviderConnection) });

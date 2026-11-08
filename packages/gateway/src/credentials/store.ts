@@ -148,6 +148,8 @@ export class ProviderCredentials extends Context.Service<
                     credential: Option.getOrNull(Option.map(held, credentialKind)),
                     expiresAt,
                     lastRefresh,
+                    refreshable:
+                      Option.isSome(credential) && credential.value._tag === "ChatGptLogin",
                   };
                 }),
             );

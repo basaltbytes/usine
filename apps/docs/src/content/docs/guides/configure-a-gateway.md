@@ -67,6 +67,8 @@ Instance admin access, a matching usine checkout, a Hetzner project, the `hcloud
 
    Settings shows each credential kind, reported expiry, and last refresh. **Replace** starts a separate login and keeps the current credential until authorization succeeds. **Disconnect** removes the managed credential and worker routing. `usine logout claude` and `usine logout chatgpt` perform the same actions.
 
+   Claude uses a subscription token from `claude setup-token`, which expires after one year and has no refresh token. The token does not include its expiry date, so Settings shows **Not included with token** for expiry and **Not applicable** for last refresh, with a reminder to replace the login before it expires. ChatGPT uses a refreshable OAuth login and reports its expiry and last refresh. Gateways that omit refresh capability keep **Not reported** for missing dates; upgrade the gateway to get this distinction.
+
 ## Check the result
 
 Preflight reaches the admin API and the gateway from the worker. A test attempt receives a caller token and uses `git.gw.internal` and `llm.gw.internal`. Its run page attributes usage to the configured API key or subscription plan.

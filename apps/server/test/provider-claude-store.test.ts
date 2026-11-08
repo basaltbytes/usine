@@ -79,19 +79,26 @@ it.live("reads native Claude logins and clears an overridden Keychain login on d
         ),
       );
       const targets = Context.get(context, ProviderTargets);
-      const credential = Effect.map(targets.get("local"), ({ providers }) => {
+      const connection = Effect.map(targets.get("local"), ({ providers }) => {
         assert.notInclude(jsonKey(providers), "fixture-native-secret");
         const claude = providers.find(({ provider }) => provider === "anthropic-messages");
-        return claude !== undefined && "credential" in claude ? claude.credential : claude?.error;
+        assert(claude !== undefined && "credential" in claude);
+        return claude;
       });
+      const credential = Effect.map(connection, ({ credential }) => credential);
       const nativeCredential = yield* credential;
       assert.equal(nativeCredential, "subscription");
+      assert.isUndefined((yield* connection).refreshable);
       for (const kind of ["claude-subscription", "anthropic-api-key"] as const) {
         yield* targets.replace("local", { kind, secret: Redacted.make("fixture-managed-secret") });
         const connectedCredential = yield* credential;
         assert.equal(
           connectedCredential,
           kind === "claude-subscription" ? "subscription" : "api-key",
+        );
+        assert.equal(
+          (yield* connection).refreshable,
+          kind === "claude-subscription" ? false : undefined,
         );
       }
       yield* fs.writeFileString(
