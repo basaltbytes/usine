@@ -57,7 +57,7 @@ Logs record the verified authentication method and pool. On completion or interr
 
 ## Child hosts
 
-The supervisor and lifeline are TypeScript programs in `src/child-host/worker/`. `build`, `check`, and `test` bundle them with esbuild before loading their embedded source. The generated `programs.ts` stays out of git; `programs.d.ts` lets source tools resolve the module before generation. The published package includes the embedded programs and standalone bundles in `dist/child-host/worker/`. Workers need Node.js and their harness binaries.
+The supervisor and lifeline are TypeScript programs in `src/child-host/worker/`. `build-worker.mjs` bundles them with esbuild into `src/child-host/programs.ts`, using `ownerProgram` from `worker/program.ts` for the supervisor bootstrap. `build` and `check` run it first, and the Vitest global setup runs it before every run and watch rerun, so `vitest` never loads a stale bundle. The generated `programs.ts` stays out of git; `programs.d.ts` lets source tools resolve the module before generation. Only `build` writes the standalone bundles to `dist/child-host/worker/`, which the published package includes. Workers need Node.js and their harness binaries.
 
 Run `pnpm --filter @usine/agents test` for the direct worker tests and harness tests. The direct tests run real Node processes against temporary journals and inject a process identity reader that works on Linux and macOS. Production remote owners use Linux `/proc` boot IDs and process start times. The orchestrator relay keeps replay history and output checkpoints in Effect refs and separates connection, replay, streaming, and reattachment.
 
