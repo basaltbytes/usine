@@ -649,6 +649,7 @@ it("serves installation repositories, live labels and supported harnesses, and r
       });
       const polling = Layer.succeed(GitHubPolling)({
         changes: () => unused,
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: () => unused,
         snapshot: () => unused,
         missingIssues: () => unused,

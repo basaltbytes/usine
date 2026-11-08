@@ -84,6 +84,7 @@ describe("PollingTriggers label preflight", () => {
   it.effect("creates declarations before the first repository change poll", () => {
     const operations: Array<string> = [];
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
@@ -124,6 +125,7 @@ describe("PollingTriggers label preflight", () => {
   it.effect("defers provisioning when the first catalog request fails", () => {
     const operations: Array<string> = [];
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
@@ -160,6 +162,7 @@ describe("PollingTriggers label preflight", () => {
 
   it.effect("keeps the failed catalog request visible when change detection also fails", () => {
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
@@ -208,6 +211,7 @@ describe("PollingTriggers label preflight", () => {
     const retryAt = DateTime.makeUnsafe("2026-09-03T12:03:00Z");
     let rateLimited = false;
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
@@ -265,6 +269,7 @@ describe("PollingTriggers label preflight", () => {
   it.effect("reconciles against the stored catalog when GitHub reports it unchanged", () => {
     const operations: Array<string> = [];
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () => Effect.succeed(RepositoryLabelsNotModified.make()),
@@ -310,6 +315,7 @@ describe("PollingTriggers label preflight", () => {
   it.effect("drops the catalog ETag from the cursor after creating a declaration", () => {
     const cursors = memoryCursorStore();
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () =>
@@ -350,6 +356,7 @@ describe("PollingTriggers label preflight", () => {
       const cursors = memoryCursorStore();
       const catalogRequests: Array<string> = [];
       const github: GitHubPolling["Service"] = {
+        itemLabels: () => Effect.die("unused item labels"),
         baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: (_repository, entityTag) =>
@@ -403,6 +410,7 @@ describe("PollingTriggers label preflight", () => {
   it.effect("continues change detection after a declaration cannot be created", () => {
     const operations: Array<string> = [];
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () => Effect.succeed(emptyCatalog),
@@ -446,6 +454,7 @@ describe("PollingTriggers label preflight", () => {
     const creationRetryAt = DateTime.makeUnsafe("2026-09-03T12:01:00Z");
     const changesRetryAt = DateTime.makeUnsafe("2026-09-03T12:02:00Z");
     const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
       baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels: () => Effect.succeed(emptyCatalog),

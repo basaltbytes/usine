@@ -191,6 +191,7 @@ describe("PollingTriggers open-issue check", () => {
                 : RepositoryNotModified.make({ cursor, nextPollAt: Option.none() }),
             ),
           snapshot: () => Effect.succeed(issue28),
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: (_, numbers) =>
             Effect.sync(() => {
@@ -249,6 +250,7 @@ describe("PollingTriggers open-issue check", () => {
           changes: (_, cursor) =>
             Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
           snapshot: () => Effect.die("no Item changed"),
+          itemLabels: () => Effect.die("unused item labels"),
           baseRefHead: unmovedBaseRefHead,
           missingIssues: () =>
             Effect.gen(function* () {

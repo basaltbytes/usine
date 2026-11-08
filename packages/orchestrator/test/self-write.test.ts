@@ -153,6 +153,7 @@ describe("Board self-writes", () => {
           let writeFailure: Option.Option<GitHubAppError> = Option.none();
           let changeRequests = 0;
           const github: GitHubPolling["Service"] = {
+            itemLabels: () => Effect.die("unused item labels"),
             baseRefHead: unmovedBaseRefHead,
             missingIssues: () => Effect.succeed([]),
             changes: (_repository, cursor) =>

@@ -110,6 +110,7 @@ const layerWith = (
   );
 
 const failingGitHub: GitHubPolling["Service"] = {
+  itemLabels: () => Effect.die("unused item labels"),
   baseRefHead: unmovedBaseRefHead,
   missingIssues: () => Effect.succeed([]),
   changes: () => Effect.die("unused"),

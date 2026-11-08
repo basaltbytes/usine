@@ -87,7 +87,7 @@ The setting limits the attempt's token. Local children run as the orchestrator's
 
 ## Outcome labels
 
-Set `outcome_labels: [review-passed, agent-review-findings]` for a review loop that must publish a verdict. usine fetches the current item from GitHub before accepting the agent's completion and matches label names without case sensitivity. If none of the configured labels is present, the attempt and run fail with `AgentFailure` and appear in **Needs attention**. A GitHub read failure or a five-second timeout follows the bounded infrastructure retry policy.
+Set `outcome_labels: [review-passed, agent-review-findings]` for a review loop that must publish a verdict. usine fetches the current item's labels from GitHub before accepting the agent's completion and matches label names without case sensitivity. If none of the configured labels is present, the attempt and run fail with `AgentFailure` and appear in **Needs attention**. Label reads have a 15-second timeout and retry twice, after one and two seconds. If all three reads fail, the attempt and run fail with `AgentFailure` in **Needs attention**. Verification retries only the label read; it does not rerun the agent.
 
 The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the handoff's `on_green` actions instead. Schedule events cannot satisfy an item label requirement.
 

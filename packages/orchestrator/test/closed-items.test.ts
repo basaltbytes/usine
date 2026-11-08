@@ -200,6 +200,7 @@ const contentHash = (item: GitHubItem) =>
 
 /** Serves every Item in `items` as changed on each poll, with its current state. */
 const fakeGitHub = (items: Map<number, GitHubItem>): GitHubPolling["Service"] => ({
+  itemLabels: () => Effect.die("unused item labels"),
   baseRefHead: unmovedBaseRefHead,
   missingIssues: () => Effect.succeed([]),
   labels: () =>

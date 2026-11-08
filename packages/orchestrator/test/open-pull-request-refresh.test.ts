@@ -117,6 +117,7 @@ const fakeRepository = (
           nextPollAt: Option.none(),
         });
       }),
+    itemLabels: () => Effect.die("unused item labels"),
     baseRefHead: (repository, baseRefName, known) => {
       const conditional = Option.isSome(Option.flatMap(known, ({ entityTag }) => entityTag));
       baseRefReads.push(conditional ? `${baseRefName} if-none-match` : baseRefName);

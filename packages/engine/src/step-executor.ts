@@ -15,9 +15,9 @@ import type { WorkerName } from "@usine/core/worker";
 import type { StepCompletion } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
 
-/** Verifies required outcome labels before recording a successful agent completion. */
+/** Verifies outcome labels; failures require operator attention without re-running the agent. */
 export const CompletionCheck = Context.Reference<
-  (submission: Submission) => Effect.Effect<void, AttemptFailure>
+  (submission: Submission) => Effect.Effect<void, AgentFailure>
 >("@usine/engine/CompletionCheck", {
   defaultValue: () => () =>
     Effect.fail(AgentFailure.make({ message: "Outcome labels require a completion verifier." })),

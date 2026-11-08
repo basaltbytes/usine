@@ -1,20 +1,29 @@
 import { assert, it } from "@effect/vitest";
+import { NodeServices } from "@effect/platform-node";
+import { InstanceDirectory } from "@usine/core/instance";
+import { WorkerName } from "@usine/core/worker";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
+import { RunEngine } from "@usine/engine/engine";
+import { layer as engineLayer } from "@usine/engine/local-sqlite";
+import { StepExecutor } from "@usine/engine/step-executor";
+import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { GitHubApiError } from "@usine/github/github-app";
 import {
-  ContentHash,
   GitHubPolling,
   PullRequestPayload,
-  PullRequestSnapshot,
   IssuePayload,
-  IssueSnapshot,
+  RepositoryLabel,
+  RepositoryLabelName,
+  RepositoryLabelColor,
 } from "@usine/github/polling";
 import { CompletionCheck } from "@usine/engine/step-executor";
 import { Submission } from "@usine/engine/engine";
 import { Event } from "@usine/core/event";
-import { Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
+import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { completionCheckLayer } from "../src/completion-check.ts";
-import { submission } from "./local-worker/support.ts";
+import { submission, waitFor } from "./local-worker/support.ts";
+import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { unmovedBaseRefHead } from "./support/polling.ts";
 
 const payload = Schema.decodeEffect(PullRequestPayload)({
@@ -45,7 +54,7 @@ const payload = Schema.decodeEffect(PullRequestPayload)({
   reviewThreads: { totalCount: 0, nodes: [] },
 });
 
-const layerWith = (snapshot: GitHubPolling["Service"]["snapshot"]) =>
+const layerWith = (itemLabels: GitHubPolling["Service"]["itemLabels"]) =>
   completionCheckLayer.pipe(
     Layer.provide(
       Layer.succeed(GitHubPolling)({
@@ -53,7 +62,8 @@ const layerWith = (snapshot: GitHubPolling["Service"]["snapshot"]) =>
         missingIssues: () => Effect.succeed([]),
         changes: () => Effect.die("unused"),
         labels: () => Effect.die("unused"),
-        snapshot,
+        snapshot: () => Effect.die("Verification must only read labels"),
+        itemLabels,
       }),
     ),
   );
@@ -73,36 +83,36 @@ it.effect.each([
   ["agent-review-findings"],
   ["REVIEW-PASSED"],
   ["unrelated"],
-])("verifies a fresh PR snapshot with labels %j instead of trusting the event", (labels) =>
+])("verifies current PR labels %j instead of trusting the event", (labels) =>
   Effect.gen(function* () {
     const saved = yield* payload;
     const observed = request({
       ...saved,
       labels: { totalCount: 1, nodes: [{ name: "review-passed" }] },
     });
-    const calls: string[] = [];
+    const calls: number[] = [];
     const result = yield* Effect.gen(function* () {
       const verify = yield* CompletionCheck;
       return yield* verify(observed).pipe(Effect.result);
     }).pipe(
       Effect.provide(
         layerWith((repository, item) => {
-          calls.push(item._tag);
+          calls.push(item);
           assert.strictEqual(repository, observed.repository);
-          assert.strictEqual(item.number, 1);
+          assert.strictEqual(item, 1);
           return Effect.succeed(
-            PullRequestSnapshot.make({
-              contentHash: ContentHash.make("b".repeat(64)),
-              payload: PullRequestPayload.make({
-                ...saved,
-                labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
+            labels.map((name) =>
+              RepositoryLabel.make({
+                name: RepositoryLabelName.make(name),
+                color: RepositoryLabelColor.make("ededed"),
+                description: Option.none(),
               }),
-            }),
+            ),
           );
         }),
       ),
     );
-    assert.deepStrictEqual(calls, ["ChangedPullRequest"]);
+    assert.deepStrictEqual(calls, [1]);
     if (labels.length === 0 || labels[0] === "unrelated") {
       assert.strictEqual(result._tag, "Failure");
       if (result._tag === "Failure") {
@@ -113,7 +123,7 @@ it.effect.each([
   }),
 );
 
-it.effect("fetches issue outcomes through the issue stream", () =>
+it.effect("fetches issue outcome labels", () =>
   Effect.gen(function* () {
     const saved = yield* Schema.decodeEffect(IssuePayload)({
       number: 1,
@@ -139,60 +149,161 @@ it.effect("fetches issue outcomes through the issue stream", () =>
     }).pipe(
       Effect.provide(
         layerWith((_repository, item) => {
-          assert.strictEqual(item._tag, "ChangedIssue");
-          return Effect.succeed(
-            IssueSnapshot.make({
-              contentHash: ContentHash.make("b".repeat(64)),
-              payload: IssuePayload.make({
-                ...saved,
-                labels: { totalCount: 1, nodes: [{ name: "review-passed" }] },
-              }),
+          assert.strictEqual(item, 1);
+          return Effect.succeed([
+            RepositoryLabel.make({
+              name: RepositoryLabelName.make("review-passed"),
+              color: RepositoryLabelColor.make("ededed"),
+              description: Option.none(),
             }),
-          );
+          ]);
         }),
       ),
     );
   }),
 );
 
-it.effect("reports a GitHub read failure instead of accepting an unverified verdict", () =>
-  Effect.gen(function* () {
-    const saved = yield* payload;
-    const result = yield* Effect.gen(function* () {
-      const verify = yield* CompletionCheck;
-      return yield* verify(request(saved)).pipe(Effect.flip);
-    }).pipe(
-      Effect.provide(
-        layerWith(() =>
-          Effect.fail(
-            GitHubApiError.make({
-              operation: "fetch-pull-request-snapshot",
-              status: Option.none(),
-              message: "GitHub is unavailable",
-            }),
-          ),
-        ),
-      ),
-    );
-    assert.strictEqual(result._tag, "InfraFailure");
-  }),
-);
-
-it.effect("bounds a stalled outcome check at five seconds", () =>
+it.effect("exhausts label read retries with a non-retryable failure", () =>
   Effect.gen(function* () {
     const saved = yield* payload;
     const started = yield* Deferred.make<void>();
+    let reads = 0;
     const fiber = yield* Effect.gen(function* () {
       const verify = yield* CompletionCheck;
       return yield* verify(request(saved)).pipe(Effect.flip);
     }).pipe(
       Effect.provide(
-        layerWith(() => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))),
+        layerWith(() =>
+          Effect.gen(function* () {
+            reads += 1;
+            yield* Deferred.succeed(started, undefined);
+            return yield* GitHubApiError.make({
+              operation: "fetch-item-labels",
+              status: Option.none(),
+              message: "GitHub is unavailable",
+            });
+          }),
+        ),
       ),
       Effect.forkChild,
     );
     yield* Deferred.await(started);
-    yield* TestClock.adjust("5 seconds");
-    assert.strictEqual((yield* Fiber.join(fiber))._tag, "InfraFailure");
+    yield* TestClock.adjust("3 seconds");
+    const result = yield* Fiber.join(fiber);
+    assert.strictEqual(result._tag, "AgentFailure");
+    assert.include(result.message, "GitHub is unavailable");
+    assert.strictEqual(reads, 3);
   }),
+);
+
+it.effect("bounds each label read and stops after three timeouts", () =>
+  Effect.gen(function* () {
+    const saved = yield* payload;
+    const started = yield* Deferred.make<void>();
+    let reads = 0;
+    const fiber = yield* Effect.gen(function* () {
+      const verify = yield* CompletionCheck;
+      return yield* verify(request(saved)).pipe(Effect.flip);
+    }).pipe(
+      Effect.provide(
+        layerWith(() =>
+          Effect.gen(function* () {
+            reads += 1;
+            yield* Deferred.succeed(started, undefined);
+            return yield* Effect.never;
+          }),
+        ),
+      ),
+      Effect.forkChild,
+    );
+    yield* Deferred.await(started);
+    yield* TestClock.adjust("48 seconds");
+    assert.strictEqual((yield* Fiber.join(fiber))._tag, "AgentFailure");
+    assert.strictEqual(reads, 3);
+  }),
+);
+
+it.live.each(["recovers", "exhausts"] as const)(
+  "%s verification reads without executing the agent again",
+  (scenario) =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const temporaryDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        directory: sqliteTempDirectory(),
+        prefix: "usine-completion-",
+      });
+      const directory = InstanceDirectory.make(temporaryDirectory);
+      let executions = 0;
+      let reads = 0;
+      const worker = WorkerName.make("local");
+      const executor = Layer.succeed(StepExecutor)({
+        workers: Effect.succeed([worker]),
+        isLive: () => Effect.succeed(false),
+        outcome: () => Effect.succeedNone,
+        recover: () => Effect.void,
+        intervene: () => Effect.void,
+        interrupt: () => Effect.void,
+        occupy: () => Effect.succeed({ worker, release: Effect.void }),
+        sweep: Effect.void,
+        discard: () => Effect.void,
+        reserve: () => Effect.succeed({ worker, release: Effect.void }),
+        execute: () =>
+          Effect.sync(() => {
+            executions += 1;
+            return StepCompletion.fromResult(
+              StepResult.make({ message: "Review published.", facts: [] }),
+            );
+          }),
+      });
+      const check = layerWith(() =>
+        Effect.gen(function* () {
+          reads += 1;
+          if (scenario === "recovers" && reads === 3) {
+            return [
+              RepositoryLabel.make({
+                name: RepositoryLabelName.make("review-passed"),
+                color: RepositoryLabelColor.make("ededed"),
+                description: Option.none(),
+              }),
+            ];
+          }
+          return yield* GitHubApiError.make({
+            operation: "fetch-item-labels",
+            status: Option.none(),
+            message: "GitHub is unavailable",
+          });
+        }),
+      );
+      const saved = yield* payload;
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const accepted = yield* engine.submit(request(saved));
+        assert(accepted._tag === "Claimed");
+        const finished = yield* waitFor(
+          engine,
+          accepted.runId,
+          scenario === "recovers" ? "Succeeded" : "Failed",
+        );
+        assert.strictEqual(finished.attempts.length, 1);
+        assert.strictEqual(executions, 1);
+        assert.strictEqual(reads, 3);
+        if (scenario === "exhausts") {
+          const outcome = finished.attempts[0]?.outcome;
+          assert(
+            outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed",
+          );
+          assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
+        }
+      }).pipe(
+        Effect.provide(
+          engineLayer(directory).pipe(
+            Layer.provide(executor),
+            Layer.provide(check),
+            Layer.provide(
+              Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+            ),
+          ),
+        ),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
 );

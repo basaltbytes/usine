@@ -238,6 +238,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
       Ref.update(mutations, (all) => [...all, { item, mutation }]).pipe(Effect.as([])),
   });
   const polling = Layer.succeed(GitHubPolling)({
+    itemLabels: () => Effect.die("unused item labels"),
     baseRefHead: unmovedBaseRefHead,
     changes: (_repository, cursor) =>
       Effect.gen(function* () {
