@@ -56,6 +56,10 @@ it.effect("covers a handled message only once all earlier output is checkpointed
 
 it.effect("cancels only the control request with the matching request ID", () =>
   Effect.gen(function* () {
+    const logs: Array<unknown> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Info") logs.push(message);
+    });
     const hook = yield* hookRequest;
     const other = yield* encode({
       type: "control_request",
@@ -67,10 +71,14 @@ it.effect("cancels only the control request with the matching request ID", () =>
     const checkpoint = claudeOutputCheckpoint();
     const pending = yield* checkpoint.read(Buffer.concat([hook, other]));
     assert.strictEqual(pending, 0);
-    const ignored = yield* checkpoint.read(unknown);
+    const ignored = yield* checkpoint.read(unknown).pipe(Effect.provide(Logger.layer([logger])));
     assert.strictEqual(ignored, 0);
-    const cancelled = yield* checkpoint.read(cancel);
+    assert.deepStrictEqual(logs, []);
+    const cancelled = yield* checkpoint.read(cancel).pipe(Effect.provide(Logger.layer([logger])));
     assert.strictEqual(cancelled, 0);
+    assert.deepStrictEqual(logs, [
+      ["Claude cancelled a control request", { requestId: "other", released: true }],
+    ]);
     const response = yield* hookResponse;
     const answered = yield* checkpoint.inputAcknowledged(response);
     assert.strictEqual(answered, hook.length + other.length + unknown.length + cancel.length);
@@ -162,13 +170,15 @@ it.effect("keeps a blocked hook replayable after the main turn's result", () =>
     assert.strictEqual(answered, hook.length + other.length + assistantLine.length + line.length);
     const nextResult = { ...result, uuid: "next-result" };
     const nextLine = yield* encode(nextResult);
-    const nextRead = yield* checkpoint.read(nextLine);
+    const nextRead = yield* checkpoint.read(Buffer.concat([nextLine, hook]));
     assert.strictEqual(nextRead, 0);
     const nextHandled = yield* checkpoint
       .handled(nextResult)
       .pipe(Effect.provide(Logger.layer([logger])));
     assert.deepStrictEqual(nextHandled, { bytes: nextLine.length, covered: true });
     assert.lengthOf(logs, 1);
+    const nextAnswered = yield* checkpoint.inputAcknowledged(response);
+    assert.strictEqual(nextAnswered, hook.length);
   }),
 );
 

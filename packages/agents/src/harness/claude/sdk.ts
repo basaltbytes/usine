@@ -246,7 +246,8 @@ export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect
           if (Schema.is(ControlCancelRequest)(message)) {
             const request = unansweredRequest(message.request_id);
             if (request !== undefined) request.handled = true;
-            yield* Effect.logDebug("Claude cancelled a control request", {
+            const log = request !== undefined ? Effect.logInfo : Effect.logDebug;
+            yield* log("Claude cancelled a control request", {
               requestId: message.request_id,
               released: request !== undefined,
             });
@@ -296,15 +297,20 @@ export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect
     handled: (message: Schema.Json) =>
       Effect.gen(function* () {
         const key = messageKey(message);
-        const entry = pending.find(
+        const index = pending.findIndex(
           (entry) => !entry.handled && Option.isNone(entry.request) && entry.key === key,
         );
+        const entry = pending[index];
         if (entry === undefined) return { bytes: 0, covered: false };
         entry.handled = true;
         if (Schema.is(ClaudeResult)(message)) {
-          const unanswered = pending.flatMap(({ key, handled, request }) =>
-            !handled && Option.isSome(request) ? [{ requestId: key, subtype: request.value }] : [],
-          );
+          const unanswered = pending
+            .slice(0, index)
+            .flatMap(({ key, handled, request }) =>
+              !handled && Option.isSome(request)
+                ? [{ requestId: key, subtype: request.value }]
+                : [],
+            );
           if (unanswered.length > 0)
             yield* Effect.logInfo(
               "Claude finished a turn with unanswered control requests; the output checkpoint stays before them",
