@@ -248,7 +248,7 @@ const runtimeLayer = (
 };
 
 describe("PollingTriggers", () => {
-  it.live("opens a conflict Run within one poll after a sibling merge moves the base branch", () =>
+  it.live("refreshes legacy PR bases once across restarts and reacts to base branch moves", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const currentDirectory = yield* fileSystem.makeTempDirectoryScoped({
@@ -269,6 +269,7 @@ describe("PollingTriggers", () => {
         [28, { state: "OPEN", mergeable: "MERGEABLE", headRefOid: "a".repeat(40) }],
         [29, { state: "OPEN", mergeable: "MERGEABLE", headRefOid: "b".repeat(40) }],
       ]);
+      let recordBase = false;
       let detected = [28, 29];
       let detections = 0;
       const fetched: Array<number> = [];
@@ -312,7 +313,10 @@ describe("PollingTriggers", () => {
           Effect.gen(function* () {
             fetched.push(item.number);
             const pullRequest = remote.get(item.number) ?? assert.fail("unknown pull request");
-            const decodedValue16 = jsonKey([item.number, pullRequest]);
+            const decodedValue16 = jsonKey([item.number, pullRequest, recordBase]);
+            const comparisonBase: Pick<typeof PullRequestPayload.Encoded, "baseRefOid"> = recordBase
+              ? { baseRefOid: "c".repeat(40) }
+              : {};
             return PullRequestSnapshot.make({
               contentHash: ContentHash.make(
                 createHash("sha256").update(decodedValue16).digest("hex"),
@@ -325,6 +329,7 @@ describe("PollingTriggers", () => {
                 merged: pullRequest.state === "MERGED",
                 mergedAt: null,
                 baseRefName: "main",
+                ...comparisonBase,
                 headRefName: `feature-${item.number}`,
                 additions: 1,
                 deletions: 0,
@@ -363,13 +368,42 @@ describe("PollingTriggers", () => {
         assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, [28, 29]);
 
         assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, []);
+        const cursors = yield* CursorStore;
+        const key = CursorKey.make(`github-poll:${watchedRepository}`);
+        const stored = yield* cursors.read(key, Schema.Record(Schema.String, Schema.Json));
+        assert(Option.isSome(stored));
+        const entries = yield* Schema.decodeUnknownEffect(
+          Schema.Array(Schema.Record(Schema.String, Schema.Json)),
+        )(stored.value.openPullRequests);
+        yield* cursors.write(key, Schema.Json, {
+          ...stored.value,
+          openPullRequests: entries.map((entry) => {
+            const legacy = { ...entry };
+            delete legacy.changesRefreshed;
+            return legacy;
+          }),
+        });
+        recordBase = true;
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
 
-      // Rebuild the entire runtime: the open pull requests and base heads must be durable.
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const items = yield* ItemProjectionReader;
+        const upgraded = yield* fetchedDuring(polling.poll(instance));
+        assert.deepStrictEqual(upgraded.fetched, [28, 29]);
+        const projections = yield* items.list(watchedRepository, { limit: 10 });
+        assert.strictEqual(
+          projections.find(({ number }) => number === 28)?.payload.baseRefOid,
+          "c".repeat(40),
+        );
+      }).pipe(Effect.provide(runtimeLayer(directory, github)));
+
+      // Rebuild the entire runtime: the refresh, open pull requests, and base heads are durable.
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;
         const items = yield* ItemProjectionReader;
+        assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, []);
         const mergeableOf = Effect.fn("test.mergeableOf")(function* (number: number) {
           const projections = yield* items.list(watchedRepository, { limit: 10 });
           return projections.find((projection) => projection.number === number)?.payload.mergeable;
