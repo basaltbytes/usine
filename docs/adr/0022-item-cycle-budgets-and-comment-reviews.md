@@ -34,11 +34,17 @@ An ask on a merged pull request stayed in Needs attention with a reset as its on
 
 A CI fix can exhaust the cycle budget after its source run removes the trigger label. Refreshing label triggers then produces no work, although the ask identifies the blocked CI event. Reset moves only the ask's recorded, unclaimed CI fix events into the new generation, including events that earlier label polling marked revoked. Ordinary queued trigger matches retain their old generation and require fresh evaluation.
 
-CI fixes preserve their recorded task and failure evidence, along with inherited completion actions. Unlike fresh trigger events, replayed CI events also retain their saved approval decision, agent, model, parent model, permissions, CI policy, and cycle limit. This preserves the execution snapshot associated with the failure evidence; resetting changes the budget generation, not the event configuration. An approval or `max_cycles` change made before reset therefore applies to fresh events only.
+CI fixes preserve their recorded task and failure evidence, along with inherited completion actions. Their loop settings follow the 2026-11-08 amendment below.
 
 Reconciliation checks the current loop, repository selection, PR state, failed head, and checks before admission; paused loops keep the event queued. CI fixes bypass the loop's `if:` expression and can open its first run on an item. Open-PR revocation preserves queued and unstarted CI fixes only for the observed head while checks fail, or while checks are absent and mergeability is `CONFLICTING` or `UNKNOWN`. This exemption applies to every `if:` mismatch, including draft status and excluded labels. A new head or checks that stop failing revokes approval-waiting fixes as well as queued events. When the loop's `if:` rejects a closed or merged item, or the item is missing, polling revokes queued CI events and unstarted CI fix runs. A non-matching trigger observation still clears suppression, including an unanswered question; pausing the loop keeps queued fixes waiting independently of trigger observations.
 
 Reconciliation excludes events blocked by an open budget ask or suppression, preserving the ask's recorded blocks until a new trigger observation or reset. Polling requests reconciliation before acknowledging a reset, and startup and periodic reconciliation recover pending events after interruption. Admission still applies the cycle budget and approval gate atomically.
+
+## Amendment (2026-11-08, #1047): replayed CI fixes take the current loop settings
+
+Keeping the saved approval, agent, models, permissions, CI policy, and cycle limit on a replayed CI fix meant an operator who set `approval: required` and then reset got no gate, although new work after a reset uses current configuration. A queued CI fix now takes these settings, with outcome labels, from its loop when its run opens; the task, failure evidence, and completion actions stay as recorded, because they describe the failure the fix answers. The trigger recheck already reads the current loop, so it returns the refreshed submission and admission records it.
+
+When a CI fix and a trigger match wait on the same loop and item, the newest opens the next run, as `nextQueued` already decided for continuations. Reconciliation skips items with an open run, so a CI fix queued behind a running attempt costs no GitHub recheck. The reset answer returns the CI fix events it replayed, and a failed source run in Needs attention links to the fix run that carries its work.
 
 ## Amendment (2026-11-08, #1009): verified outcome labels
 
