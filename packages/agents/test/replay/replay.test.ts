@@ -385,6 +385,20 @@ for (const state of [
                 );
               }
               if (state === "buffered-result") {
+                const replayed = yield* Queue.unbounded<AgentSessionEvent>();
+                yield* resumed.events.pipe(
+                  Stream.runForEach((event) => Queue.offer(replayed, event)),
+                  Effect.forkScoped,
+                );
+                for (;;) {
+                  const event = yield* Queue.take(replayed);
+                  assert.notInclude(
+                    ["ToolFinished", "TextOutput"],
+                    event._tag,
+                    "output handled before the detach is not replayed",
+                  );
+                  if (event._tag === "SessionIdle") break;
+                }
                 yield* resumed.intervene(Release.make(), () => Effect.void);
                 assert.include((yield* resumed.result).message, "REPLAY_DONE");
                 return;
