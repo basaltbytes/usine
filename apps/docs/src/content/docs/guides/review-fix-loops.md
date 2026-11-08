@@ -44,7 +44,7 @@ Set the review loop's `outcome_labels` in its text editor to its two verdict lab
 outcome_labels: [review-passed, agent-review-findings]
 ```
 
-Replace `review-passed` with `ready-to-merge` if that is your loop's success label. usine verifies that the pull request has at least one configured label when the agent completes. If neither is present, the attempt and run fail in **Needs attention** with a missing-outcome diagnostic. A success message alone cannot satisfy this requirement. Existing loops use an empty list until you configure their verdict labels.
+Replace `review-passed` with `ready-to-merge` if that is your loop's success label. usine verifies that the review attempt added one of the configured labels to the pull request. The label counts even after the fix loop removes `agent-review-findings` to start its run; a verdict label left from an earlier review doesn't count. If the attempt added neither label, the attempt and run fail in **Needs attention** with a missing-outcome diagnostic. A success message alone cannot satisfy this requirement. Existing loops use an empty list until you configure their verdict labels.
 
 ## Check the result
 
