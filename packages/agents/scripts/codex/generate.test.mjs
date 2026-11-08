@@ -51,6 +51,19 @@ const copyPackage = (onTestFinished) => {
 };
 
 describe("codex generator", () => {
+  it("regenerates stale output from the local copy without fetching", ({ onTestFinished }) => {
+    const fixture = copyPackage(onTestFinished);
+    const expected = readFileSync(fixture.output, "utf8");
+    writeFileSync(fixture.output, "// Stale generated output\n");
+    const result = generate(fixture.script, unreachable);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(readFileSync(fixture.output, "utf8")).toBe(expected);
+    const checked = generate(fixture.script, unreachable, "--check");
+    expect(checked.stderr).toBe("");
+    expect(checked.status).toBe(0);
+  }, 60_000);
+
   it("checks the generated schemas against the local copy without fetching", () => {
     const result = generate(script, unreachable, "--check");
     expect(result.stderr).toBe("");
@@ -181,13 +194,20 @@ describe("codex generator", () => {
   it("bounds the upstream fetch and reports a timeout in one line", () => {
     const result = generate(
       script,
-      `async (_url, options) => {
-        if (!(options?.signal instanceof AbortSignal)) throw new Error("Missing timeout signal");
-        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
-      }`,
+      `(() => {
+        AbortSignal.timeout = (ms) => {
+          console.log(ms);
+          return AbortSignal.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+        };
+        return async (_url, options) => {
+          options.signal.throwIfAborted();
+          throw new Error("Expected an aborted timeout signal");
+        };
+      })()`,
       "--check",
       "--upstream",
     );
+    expect(result.stdout).toBe("60000\n");
     expect(result.stderr).toBe(
       "upstream fetch failed: The operation was aborted due to timeout; the local copy was checked\n",
     );
