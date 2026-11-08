@@ -93,7 +93,7 @@ it.effect("reports the missing transcript entry when a scenario stops sending re
         }).pipe(Effect.provide(fixture.backend), fixture.tape.guard);
       }),
     ).pipe(Effect.forkChild);
-    yield* Deferred.await(blocked);
+    yield* Effect.raceFirst(Deferred.await(blocked), Fiber.await(replay));
     yield* TestClock.adjust("5 seconds");
     const outcome = yield* Fiber.await(replay);
     assert(Exit.isFailure(outcome));

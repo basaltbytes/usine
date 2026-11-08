@@ -82,7 +82,7 @@ describe("recorded harness transports", () => {
                       Effect.provide(Logger.layer([logger], { mergeWithExisting: true })),
                       Effect.forkScoped,
                     );
-                    yield* Deferred.await(reconnecting);
+                    yield* Effect.raceFirst(Deferred.await(reconnecting), Fiber.join(fiber));
                     yield* TestClock.adjust("1 second");
                     return yield* Fiber.join(fiber);
                   })
