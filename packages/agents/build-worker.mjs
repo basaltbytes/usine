@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { ownerProgram } from "./src/child-host/worker/program.ts";
 
 const bundle = async (entry, globalName) => {
   const options = {
@@ -8,6 +9,7 @@ const bundle = async (entry, globalName) => {
     platform: "node",
     target: "node22",
     format: "iife",
+    minify: true,
     legalComments: "none",
     write: false,
   };
@@ -18,7 +20,7 @@ const bundle = async (entry, globalName) => {
 
 const lifeline = await bundle("lifeline");
 const owner = await bundle("owner", "ChildHostWorker");
-const program = `${owner}\nChildHostWorker.run(${JSON.stringify({ owner, lifeline })});`;
+const program = ownerProgram({ owner, lifeline });
 const generated = `export const PROCESS_OWNER: string = ${JSON.stringify(program)};\nexport const CHILD_LIFELINE: string = ${JSON.stringify(lifeline)};\n`;
 const generatedPath = "src/child-host/programs.ts";
 if (
@@ -28,6 +30,8 @@ if (
   })) !== generated
 )
   await writeFile(generatedPath, generated);
-await mkdir("dist/child-host/worker", { recursive: true });
-await writeFile("dist/child-host/worker/owner.cjs", program);
-await writeFile("dist/child-host/worker/lifeline.cjs", lifeline);
+if (process.argv.includes("--dist")) {
+  await mkdir("dist/child-host/worker", { recursive: true });
+  await writeFile("dist/child-host/worker/owner.cjs", program);
+  await writeFile("dist/child-host/worker/lifeline.cjs", lifeline);
+}

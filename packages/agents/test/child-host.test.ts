@@ -28,6 +28,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { PROCESS_OWNER } from "../src/child-host/supervisor.ts";
 import { CHILD_LIFELINE, startChildProcess } from "../src/child-host/node.ts";
+import { signal } from "../src/child-host/worker/files.ts";
 import { claudeOutputCheckpoint } from "../src/harness/claude/sdk.ts";
 import { ChildSessionLifecycle } from "../src/runtime.ts";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
@@ -190,6 +191,31 @@ describe("remote shell commands", () => {
     assert.strictEqual(existsSync(pidFile), false);
   });
 
+  it("keeps the contained owner launch within the Linux argument length limit", () => {
+    const contained = RemoteShell.make({
+      ...host,
+      container: { runtime: "docker", name: "usine-attempt" },
+    });
+    const [, , , , line] = sshArguments(contained, {
+      command: "node",
+      args: [
+        "-e",
+        PROCESS_OWNER,
+        "resume",
+        "/workspace/repository.child-1.pid",
+        "0",
+        "120000",
+        "claude",
+        "--output-format",
+        "stream-json",
+      ],
+      environment: {},
+    });
+    assert(line !== undefined);
+    // Linux MAX_ARG_STRLEN: the remote shell receives this line as one exec argument.
+    assert.isBelow(Buffer.byteLength(line), 128 * 1024);
+  });
+
   it("refuses a variable name the shell would not read as one", () => {
     assert.throws(
       () => remoteLine({ environment: { "A;B": "x" }, command: "true", args: [] }),
@@ -222,15 +248,6 @@ const eventually = (predicate: () => boolean) =>
       yield* sleep(10);
     }
   });
-
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 const workerRelay = (
   pidFile: string,
@@ -494,7 +511,7 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
         );
         yield* eventually(() => replacement.frames.some((frame) => frame.stdout));
         assert.notStrictEqual(Number(readFileSync(pidFile, "utf8")), owner);
-        assert.isFalse(alive(owner));
+        assert.isFalse(signal(owner, 0));
         assert.strictEqual(
           Buffer.from(
             replacement.frames.find((frame) => frame.stdout)?.stdout ?? "",
@@ -561,17 +578,17 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
               reattached.frames.find((frame) => frame.exitCode === 1)?.stderrTail ?? "",
               "owner disappeared",
             );
-            assert(alive(unrelated.pid), "reattachment must not signal a reused PID");
+            assert(signal(unrelated.pid, 0), "reattachment must not signal a reused PID");
             if (stale === "reused" || stale === "rebooted") {
               const identity = readFileSync(`${pidFile}.transport/identity`, "utf8");
               writeFileSync(pidFile, String(unrelated.pid));
               writeFileSync(`${pidFile}.transport/process`, String(unrelated.pid));
               execFileSync(process.execPath, ["-e", PROCESS_OWNER, "stop", pidFile, "0", "10000"]);
-              assert(alive(unrelated.pid), "owner stop must not signal a reused PID");
+              assert(signal(unrelated.pid, 0), "owner stop must not signal a reused PID");
               writeFileSync(pidFile, String(unrelated.pid));
               writeFileSync(`${pidFile}.transport/identity`, identity);
               execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", cwd]);
-              assert(alive(unrelated.pid), "attempt cleanup must not signal a reused PID");
+              assert(signal(unrelated.pid, 0), "attempt cleanup must not signal a reused PID");
             }
             const recovered = workerRelay(pidFile, "resume", 0, 10_000, process.execPath, [
               "-e",
@@ -669,9 +686,9 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
             "base64",
           ).toString(),
         );
-        assert(alive(pid));
+        assert(signal(pid, 0));
         yield* eventually(() => relay.frames.some((frame) => frame.exitCode !== undefined));
-        assert.isFalse(alive(pid));
+        assert.isFalse(signal(pid, 0));
         assert.isFalse(existsSync(pidFile));
         assert.isTrue(existsSync(`${pidFile}.transport`));
         execFileSync("sh", ["-c", CHILD_KILL_SCRIPT, "sh", cwd]);
@@ -700,7 +717,7 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
           "process.stdin.resume();",
         ]);
         yield* eventually(() => relay.frames.some((frame) => frame.ready));
-        for (const child of legacy) assert.isFalse(alive(child.pid ?? 0));
+        for (const child of legacy) assert.isFalse(signal(child.pid ?? 0, 0));
         assert.isFalse(existsSync(pidFile.replace(/\.pid$/u, "-resume.pid")));
         assert(Number(readFileSync(pidFile, "utf8")) > 0);
         relay.child.stdin.write(encodeOwnerFrame({ sequence: 1, eof: true }) + "\n");
@@ -1022,7 +1039,7 @@ describe("local process lifeline", () => {
         yield* eventually(() => output.length > 0);
         const pid = Number(output);
         orchestrator.kill("SIGKILL");
-        yield* eventually(() => !alive(pid));
+        yield* eventually(() => !signal(pid, 0));
         yield* eventually(() => !existsSync(pidFile));
       }),
     10_000,
@@ -1057,7 +1074,7 @@ describe("local process lifeline", () => {
         assert(lifeline !== null && lifeline !== undefined);
         lifeline.destroy();
         yield* sleep(5100);
-        yield* eventually(() => !alive(pid));
+        yield* eventually(() => !signal(pid, 0));
         yield* eventually(() => !existsSync(pidFile));
       }),
     10_000,

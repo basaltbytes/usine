@@ -22,7 +22,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
-import { Transform } from "node:stream";
+import { pipeline, Transform } from "node:stream";
 import { hasCode, type OwnerFiles } from "./files.ts";
 import { ownerProgram, type Launch, type WorkerSources } from "./program.ts";
 import { checkpoint, environment, inputFrame, outputFrame, relayFrame } from "./protocol.ts";
@@ -46,10 +46,9 @@ const terminatedLines = () => {
 };
 
 export const relay = async (files: OwnerFiles, launch: Launch, sources: WorkerSources) => {
-  const lines = createInterface({
-    input: process.stdin.pipe(terminatedLines()),
-    crlfDelay: Infinity,
-  });
+  // A stdin error rejects the line iterator, so the pipeline callback has nothing to report.
+  const stdin = pipeline(process.stdin, terminatedLines(), () => {});
+  const lines = createInterface({ input: stdin, crlfDelay: Infinity });
   const input = lines[Symbol.asyncIterator]();
   const first = await input.next();
   if (first.done === true) throw new Error("Missing child process environment");
@@ -173,7 +172,7 @@ export const relay = async (files: OwnerFiles, launch: Launch, sources: WorkerSo
     }
     if (ending) {
       clearInterval(timer);
-      process.stdin.destroy();
+      stdin.destroy();
       process.exitCode = 0;
     }
   }, 25);
@@ -190,6 +189,6 @@ export const relay = async (files: OwnerFiles, launch: Launch, sources: WorkerSo
     }
   } finally {
     clearInterval(timer);
-    process.stdin.destroy();
+    stdin.destroy();
   }
 };
