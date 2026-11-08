@@ -28,6 +28,8 @@ import {
   RunawayFailure,
 } from "@usine/core/attempt/failure";
 import { CommitSha } from "@usine/core/repository";
+import { HeadMismatch } from "@usine/core/ci";
+import { ItemNumber } from "@usine/core/item";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import { Commit, StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
@@ -1593,6 +1595,21 @@ describe("durable AttemptRuntime", () => {
         );
       }).pipe(Effect.scoped),
   );
+
+  it("preserves the unverified handoff reason in the harvested completion", () => {
+    const report = AttemptReport.make({ message: "Pushed the change." });
+    const reason = HeadMismatch.make({
+      pullRequest: ItemNumber.make(815),
+      handedOff: CommitSha.make("a".repeat(40)),
+      head: CommitSha.make("b".repeat(40)),
+    });
+    const completion = harvestedResult(report, {
+      facts: [],
+      unverifiedHandoff: Option.some(reason),
+    });
+    assert(Result.isSuccess(completion));
+    assert.deepStrictEqual(completion.success.result.unverifiedHandoff, Option.some(reason));
+  });
 
   it("fails an Attempt whose parent ended on its answer to the operator with nothing delivered", () => {
     const report = AttemptReport.make({

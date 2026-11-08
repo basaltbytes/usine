@@ -504,6 +504,15 @@ const verifyBranch = Effect.fn("StepResult.verifyBranch")(function* <
 >(spec: HarvestSpec, run: HarvestCommand<E>) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const { head, branch } = yield* checkoutHead(run);
+  if (
+    head === spec.baseCommit &&
+    spec.revision !== RepositoryRevision.make(spec.baseCommit) &&
+    branch === ""
+  ) {
+    return yield* Effect.fail(
+      PullRequestNotFound.make({ pullRequest: Option.none(), branch: Option.none(), head }),
+    );
+  }
   const refs = yield* originRefs(run);
   const branches =
     branch === ""

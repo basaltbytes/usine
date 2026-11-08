@@ -53,6 +53,7 @@ const branchAt = (commit: CommitSha) => `${commit}\trefs/heads/${BRANCH}`;
 const PULL_REF = `${HEAD}\trefs/pull/815/head`;
 
 interface Checkout {
+  readonly head?: CommitSha;
   /** The checkout's branch, or `""` if HEAD is detached. */
   readonly branch: string;
   /** The `git ls-remote origin` lines. */
@@ -63,9 +64,13 @@ interface Checkout {
 
 /** Returns a runner that answers `git` and `gh` from `checkout` and records each command. */
 const scripted = (checkout: Checkout, commands: Array<string>) => {
+  const head = checkout.head ?? HEAD;
   const answers = new Map<string, ReadonlyArray<Answer>>([
-    [`git log --reverse --format=%H %s ${BASE}..HEAD`, [Effect.succeed([`${HEAD} Fix it`])]],
-    ["git rev-parse HEAD", [Effect.succeed([HEAD])]],
+    [
+      `git log --reverse --format=%H %s ${BASE}..HEAD`,
+      [Effect.succeed(head === BASE ? [] : [`${head} Fix it`])],
+    ],
+    ["git rev-parse HEAD", [Effect.succeed([head])]],
     [
       "git branch --show-current",
       [Effect.succeed(checkout.branch === "" ? [] : [checkout.branch])],
@@ -151,6 +156,38 @@ const finishHarvested = (message: string, checkout: Checkout) =>
 
 const tries = (commands: ReadonlyArray<string>, command: string) =>
   commands.filter((run) => run === command).length;
+
+it.live(
+  "an unchanged detached checkout fails instead of waiting on an unrelated pull request",
+  () =>
+    Effect.gen(function* () {
+      const finished = yield* finishHarvested("No changes needed.", {
+        head: BASE,
+        branch: "",
+        origin: [`${BASE}\trefs/heads/revision-1`],
+        github: [
+          [
+            "gh api repos/basaltbytes/usine/pulls?head=basaltbytes:revision-1&state=open&per_page=100",
+            [
+              Effect.succeed([
+                jsonKey([
+                  { number: 900, html_url: "https://github.com/basaltbytes/usine/pull/900" },
+                ]),
+              ]),
+            ],
+          ],
+        ],
+      });
+      assert.strictEqual(finished.decision._tag, "RunFailed");
+      assert(Option.isSome(finished.failure));
+      assert.strictEqual(finished.failure.value._tag, "AgentFailure");
+      assert.strictEqual(
+        finished.failure.value.message,
+        `CI can't wait on the pushed pull request: no open pull request has the checkout's HEAD ${BASE} as its head`,
+      );
+      assert.isFalse(finished.commands.some((command) => command.startsWith("gh ")));
+    }),
+);
 
 it.live.each([
   {
