@@ -31,6 +31,7 @@ import {
   CodexTokenUsage,
   ErrorNotification,
   ItemNotification,
+  isApprovalToolStatus,
   isAuthMode,
   isMessagePhase,
   isToolStatus,
@@ -205,7 +206,7 @@ const makeCodexChild = Effect.gen(function* () {
           response,
         );
         models.push(...page.data);
-        cursor = page.nextCursor;
+        cursor = page.nextCursor ?? null;
       } while (cursor !== null);
       const requestedModel = request.session.brain.model;
       const catalogModel = models.find(
@@ -654,7 +655,7 @@ const makeCodexChild = Effect.gen(function* () {
                   output: item,
                   isError:
                     isToolStatus(item.status, "failed") ||
-                    isToolStatus(item.status, "declined") ||
+                    isApprovalToolStatus(item.status, "declined") ||
                     item.success === false,
                 }),
               );

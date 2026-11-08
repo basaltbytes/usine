@@ -8,8 +8,10 @@ import {
   AgentMessageThreadItem,
   AuthModeValues,
   ChatgptAccount,
+  CodexErrorInfoValues,
   CommandExecutionThreadItem,
   CommandExecutionStatusValues,
+  DynamicToolCallStatusValues,
   DynamicToolCallThreadItem,
   ErrorNotification as GeneratedErrorNotification,
   FileChangeThreadItem,
@@ -17,11 +19,11 @@ import {
   ImageGenerationThreadItem,
   ImageViewThreadItem,
   ItemStartedNotification,
-  LegacyAppPathString,
+  McpToolCallStatusValues,
   McpToolCallThreadItem,
   MessagePhaseValues,
-  Model,
   ModelListResponse as GeneratedModelListResponse,
+  PatchApplyStatusValues,
   TextUserInput,
   ThreadResumeResponse as GeneratedThreadResumeResponse,
   ThreadStartResponse as GeneratedThreadStartResponse,
@@ -34,15 +36,43 @@ import {
   WebSearchThreadItem,
 } from "./generated.ts";
 
+type CommonValue<Lists extends ReadonlyArray<ReadonlyArray<string>>> = {
+  readonly [Index in keyof Lists]: (value: Lists[Index][number]) => void;
+}[number] extends (value: infer Value) => void
+  ? Value
+  : never;
+
+/** Returns a comparison whose expected value must be a member of every list. */
 const matchesKnownValue =
-  <Values extends ReadonlyArray<string>>(_values: Values) =>
-  (value: string | null | undefined, expected: Values[number]) =>
+  <Lists extends ReadonlyArray<ReadonlyArray<string>>>(..._lists: Lists) =>
+  <Value>(value: Value, expected: CommonValue<Lists>) =>
     value === expected;
 
+/**
+ * Returns `replacement` for a generated field. Fails to compile unless `replacement` decodes every
+ * encoded value of `field`.
+ */
+const replaces = <Replacement extends Schema.Top>(
+  _field: { readonly Encoded: Replacement["Encoded"] },
+  replacement: Replacement,
+): Replacement => replacement;
+
 export const isTurnStatus = matchesKnownValue(TurnStatusValues);
-export const isToolStatus = matchesKnownValue(CommandExecutionStatusValues);
+/** Compares a status that every tool item kind with a status reports. */
+export const isToolStatus = matchesKnownValue(
+  CommandExecutionStatusValues,
+  PatchApplyStatusValues,
+  McpToolCallStatusValues,
+  DynamicToolCallStatusValues,
+);
+/** Compares a status of command and file-change items, the tool kinds that require approval. */
+export const isApprovalToolStatus = matchesKnownValue(
+  CommandExecutionStatusValues,
+  PatchApplyStatusValues,
+);
 export const isMessagePhase = matchesKnownValue(MessagePhaseValues);
 export const isAuthMode = matchesKnownValue(AuthModeValues);
+export const isCodexErrorCode = matchesKnownValue(CodexErrorInfoValues);
 
 /** Request subsets and response selections for usine's Codex adapter. */
 export interface InitializeParams {
@@ -124,13 +154,18 @@ export const TurnInterruptParams = Schema.Struct({
 });
 export type TurnInterruptParams = typeof TurnInterruptParams.Type;
 
-export const AccountResponse = GetAccountResponse.mapFields(({ requiresOpenaiAuth }) => ({
+export const AccountResponse = GetAccountResponse.mapFields(({ requiresOpenaiAuth, account }) => ({
   requiresOpenaiAuth,
-  account: Schema.NullOr(
-    Schema.Struct({
-      type: Schema.String,
-      email: Schema.optionalKey(ChatgptAccount.fields.email),
-    }),
+  account: replaces(
+    account,
+    Schema.optionalKey(
+      Schema.NullOr(
+        Schema.Struct({
+          type: Schema.String,
+          email: Schema.optionalKey(ChatgptAccount.fields.email),
+        }),
+      ),
+    ),
   ),
 }));
 export const AccountUpdated = AccountUpdatedNotification.mapFields(({ authMode }) => ({
@@ -138,10 +173,10 @@ export const AccountUpdated = AccountUpdatedNotification.mapFields(({ authMode }
 }));
 
 /** The model catalog fields used to validate the model and reasoning effort. */
-export const ModelListResponse = GeneratedModelListResponse.mapFields(({ nextCursor }) => ({
-  nextCursor: Schema.requiredKey(nextCursor),
+export const ModelListResponse = GeneratedModelListResponse.mapFields(({ nextCursor, data }) => ({
+  nextCursor,
   data: Schema.Array(
-    Model.mapFields(({ id, model, supportedReasoningEfforts }) => ({
+    data.value.mapFields(({ id, model, supportedReasoningEfforts }) => ({
       id,
       model,
       supportedReasoningEfforts: Schema.optionalKey(
@@ -152,30 +187,31 @@ export const ModelListResponse = GeneratedModelListResponse.mapFields(({ nextCur
     })),
   ),
 }));
-export const ThreadStartResponse = GeneratedThreadStartResponse.mapFields(({ thread }) => ({
-  modelProvider: EndpointName,
-  thread: thread.mapFields(() => ({ id: HarnessSessionId })),
-  model: Schema.NonEmptyString,
-  instructionSources: Schema.Array(LegacyAppPathString),
-}));
+export const ThreadStartResponse = GeneratedThreadStartResponse.mapFields(
+  ({ modelProvider, thread, model }) => ({
+    modelProvider: replaces(modelProvider, EndpointName),
+    thread: thread.mapFields(({ id }) => ({ id: replaces(id, HarnessSessionId) })),
+    model: replaces(model, Schema.NonEmptyString),
+  }),
+);
 export const TurnStartResponse = GeneratedTurnStartResponse.mapFields(({ turn }) => ({
-  turn: turn.mapFields(() => ({ id: Schema.NonEmptyString })),
+  turn: turn.mapFields(({ id }) => ({ id: replaces(id, Schema.NonEmptyString) })),
 }));
 /** Item payloads are decoded separately so unrecognized item kinds can be ignored. */
-export const ItemNotification = ItemStartedNotification.mapFields(({ threadId, turnId }) => ({
-  item: Schema.Json,
+export const ItemNotification = ItemStartedNotification.mapFields(({ item, threadId, turnId }) => ({
+  item: replaces(item, Schema.Json),
   threadId,
   turnId,
 }));
-export const UserMessageItem = UserMessageThreadItem.mapFields(({ type }) => ({
-  id: Schema.NonEmptyString,
+export const UserMessageItem = UserMessageThreadItem.mapFields(({ id, type, content }) => ({
+  id: replaces(id, Schema.NonEmptyString),
   type,
-  content: Schema.Array(Schema.Json),
+  content: replaces(content, Schema.Array(Schema.Json)),
 }));
 export const UserTextInput = TextUserInput.mapFields(({ type, text }) => ({ type, text }));
-export const AgentMessageItem = AgentMessageThreadItem.mapFields(({ type, text, phase }) => ({
+export const AgentMessageItem = AgentMessageThreadItem.mapFields(({ type, id, text, phase }) => ({
   type,
-  id: Schema.NonEmptyString,
+  id: replaces(id, Schema.NonEmptyString),
   text,
   phase,
 }));
@@ -188,42 +224,55 @@ export const ToolItem = Schema.Struct({
     DynamicToolCallThreadItem.fields.type,
     WebSearchThreadItem.fields.type,
     ImageViewThreadItem.fields.type,
-    ImageGenerationThreadItem.members[0].fields.type,
+    Schema.Literal("imageGeneration" satisfies (typeof ImageGenerationThreadItem.Type)["type"]),
   ]),
-  id: Schema.NonEmptyString,
+  id: replaces(CommandExecutionThreadItem.fields.id, Schema.NonEmptyString),
   status: Schema.optionalKey(CommandExecutionThreadItem.fields.status),
   success: Schema.optionalKey(DynamicToolCallThreadItem.fields.success),
 });
-export const ThreadResumeResponse = GeneratedThreadResumeResponse.mapFields(({ thread }) => ({
-  modelProvider: EndpointName,
-  thread: thread.mapFields(({ turns }) => ({
-    id: HarnessSessionId,
-    turns: Schema.Array(
-      turns.value.mapFields(({ status }) => ({
-        id: Schema.NonEmptyString,
-        status,
-        items: Schema.Array(
-          Schema.Union([ToolItem, AgentMessageItem, Schema.Struct({ type: Schema.String })]),
-        ),
-      })),
-    ),
-  })),
-}));
+export const ThreadResumeResponse = GeneratedThreadResumeResponse.mapFields(
+  ({ modelProvider, thread }) => ({
+    modelProvider: replaces(modelProvider, EndpointName),
+    thread: thread.mapFields(({ id, turns }) => ({
+      id: replaces(id, HarnessSessionId),
+      turns: Schema.Array(
+        turns.value.mapFields(({ id, status, items }) => ({
+          id: replaces(id, Schema.NonEmptyString),
+          status,
+          items: replaces(
+            items,
+            Schema.Array(
+              Schema.Union([ToolItem, AgentMessageItem, Schema.Struct({ type: Schema.String })]),
+            ),
+          ),
+        })),
+      ),
+    })),
+  }),
+);
 export const TurnCompleted = TurnCompletedNotification.mapFields(({ turn }) => ({
-  turn: turn.mapFields(({ id, status }) => ({
+  turn: turn.mapFields(({ id, status, error }) => ({
     id,
     status,
-    error: Schema.NullOr(
-      TurnError.mapFields(({ message, additionalDetails }) => ({
-        message,
-        additionalDetails,
-        // Error objects can gain new variants; turnFailure classifies only known capacity errors.
-        codexErrorInfo: Schema.optionalKey(
-          Schema.NullOr(
-            Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Unknown)]),
-          ),
+    error: replaces(
+      error,
+      Schema.optionalKey(
+        Schema.NullOr(
+          TurnError.mapFields(({ message, additionalDetails, codexErrorInfo }) => ({
+            message,
+            additionalDetails,
+            // Error objects can gain new variants; turnFailure classifies only known capacity errors.
+            codexErrorInfo: replaces(
+              codexErrorInfo,
+              Schema.optionalKey(
+                Schema.NullOr(
+                  Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Unknown)]),
+                ),
+              ),
+            ),
+          })),
         ),
-      })),
+      ),
     ),
   })),
 }));
@@ -247,15 +296,19 @@ export const RateLimitsUpdated = AccountRateLimitsUpdatedNotification.mapFields(
   }),
 );
 /** Cumulative usage includes cache reads and writes in inputTokens. */
-export const CodexTokenUsage = ThreadTokenUsageUpdatedNotification.mapFields(({ tokenUsage }) => ({
-  threadId: Schema.NonEmptyString,
-  tokenUsage: tokenUsage.mapFields(({ total }) => ({
-    total: total.mapFields(() => ({
-      inputTokens: UsageCount,
-      cachedInputTokens: UsageCount,
-      cacheWriteInputTokens: UsageCount,
-      outputTokens: UsageCount,
+export const CodexTokenUsage = ThreadTokenUsageUpdatedNotification.mapFields(
+  ({ threadId, tokenUsage }) => ({
+    threadId: replaces(threadId, Schema.NonEmptyString),
+    tokenUsage: tokenUsage.mapFields(({ total }) => ({
+      total: total.mapFields(
+        ({ inputTokens, cachedInputTokens, cacheWriteInputTokens, outputTokens }) => ({
+          inputTokens: replaces(inputTokens, UsageCount),
+          cachedInputTokens: replaces(cachedInputTokens, UsageCount),
+          cacheWriteInputTokens: replaces(cacheWriteInputTokens, Schema.optionalKey(UsageCount)),
+          outputTokens: replaces(outputTokens, UsageCount),
+        }),
+      ),
     })),
-  })),
-}));
+  }),
+);
 export type CodexTokenUsage = typeof CodexTokenUsage.Type;

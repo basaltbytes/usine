@@ -2,6 +2,7 @@ import { AgentSessionId, RateLimitWindow as CoreRateLimitWindow } from "@usine/c
 import { DateTime, Effect, Option, Schema } from "effect";
 import {
   type ErrorNotification,
+  isCodexErrorCode,
   type RateLimitWindow,
   type ToolItem,
   type TurnCompleted,
@@ -99,10 +100,10 @@ export const turnFailure = (
   message: string,
 ): AgentResultError | AgentCapacityError => {
   const code = error?.codexErrorInfo;
-  if (code === undefined || code === null || code === "other")
+  if (code === undefined || code === null || isCodexErrorCode(code, "other"))
     return harnessFailure(Option.some(sessionId), message);
   const capacity = Schema.is(Schema.String)(code)
-    ? code === "serverOverloaded"
+    ? isCodexErrorCode(code, "serverOverloaded")
     : Object.values(code).some((detail) =>
         Option.exists(
           decodeHttpStatus(detail),

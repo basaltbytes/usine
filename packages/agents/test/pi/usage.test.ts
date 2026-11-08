@@ -202,6 +202,10 @@ describe("Codex thread tokens", () => {
       }).input,
       0,
     );
+    assert.deepStrictEqual(
+      codexTokenBreakdown({ inputTokens: 100, cachedInputTokens: 40, outputTokens: 7 }),
+      TokenBreakdown.make({ input: 60, cachedInput: 40, cacheWrite: 0, output: 7 }),
+    );
   });
 });
 
