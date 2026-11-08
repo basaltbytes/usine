@@ -22,7 +22,12 @@ class GhFailed extends Schema.TaggedError<GhFailed, { readonly Brand: unique sym
   { message: Schema.String },
 ) {}
 
-type Answer = Effect.Effect<ReadonlyArray<string>, GhFailed>;
+class GitFailed extends Schema.TaggedError<GitFailed, { readonly Brand: unique symbol }>()(
+  "GitFailed",
+  { message: Schema.String },
+) {}
+
+type Answer = Effect.Effect<ReadonlyArray<string>, GhFailed | GitFailed>;
 
 const BASE = CommitSha.make("0".repeat(40));
 const HEAD = CommitSha.make("a".repeat(40));
@@ -57,8 +62,8 @@ interface Checkout {
   readonly head?: CommitSha;
   /** The checkout's branch, or `""` if HEAD is detached. */
   readonly branch: string;
-  /** The `git ls-remote origin` lines. */
-  readonly origin: ReadonlyArray<string>;
+  /** The `git ls-remote origin` lines or read effect. */
+  readonly origin: ReadonlyArray<string> | Answer;
   /** The answers to each `gh` command, one per try; the last one repeats. */
   readonly github: ReadonlyArray<readonly [string, ReadonlyArray<Answer>]>;
 }
@@ -76,7 +81,10 @@ const scripted = (checkout: Checkout, commands: Array<string>) => {
       "git branch --show-current",
       [Effect.succeed(checkout.branch === "" ? [] : [checkout.branch])],
     ],
-    ["git ls-remote origin refs/heads/* refs/pull/*/head", [Effect.succeed(checkout.origin)]],
+    [
+      "git ls-remote origin refs/heads/* refs/pull/*/head",
+      [Effect.isEffect(checkout.origin) ? checkout.origin : Effect.succeed(checkout.origin)],
+    ],
     ...checkout.github,
   ]);
   return (command: "git" | "gh", args: ReadonlyArray<string>): Answer =>
@@ -192,6 +200,26 @@ const finishHarvested = (
 
 const tries = (commands: ReadonlyArray<string>, command: string) =>
   commands.filter((run) => run === command).length;
+
+it.live.each([
+  { report: "a plain success", message: "Finished the change." },
+  { report: "a CI handoff", message: handoff(HEAD) },
+])("$report retries the attempt as an InfraFailure when origin can't be read", ({ message }) =>
+  Effect.gen(function* () {
+    const finished = yield* finishHarvested(message, {
+      branch: BRANCH,
+      origin: Effect.fail(GitFailed.make({ message: "git: Could not resolve host" })),
+      github: [],
+    });
+    assert.strictEqual(finished.decision._tag, "RetryAttempt");
+    assert(Option.isSome(finished.failure));
+    assert.strictEqual(finished.failure.value._tag, "InfraFailure");
+    assert.strictEqual(
+      finished.failure.value.message,
+      "CI can't wait on the pushed pull request: GitHub couldn't be read: GitFailed: git: Could not resolve host",
+    );
+  }),
+);
 
 it.live(
   "an unchanged detached checkout fails instead of waiting on an unrelated pull request",
@@ -653,7 +681,7 @@ it.live.each([
     decision: "RunAwaitingCi",
   },
   {
-    outcome: "fails when no candidate branch has an open pull request",
+    outcome: "fails when candidate branches have no open pull request despite a matching PR ref",
     open: [],
     decision: "RunFailed",
   },
@@ -661,14 +689,14 @@ it.live.each([
   Effect.gen(function* () {
     const finished = yield* finishHarvested("Finished the change.", {
       branch: "",
-      origin: [`${HEAD}\trefs/heads/no-pr`, branchAt(HEAD), `${OTHER}\trefs/heads/old`],
+      origin: [`${HEAD}\trefs/heads/no-pr`, branchAt(HEAD), `${OTHER}\trefs/heads/old`, PULL_REF],
       github: [
         [
           "gh api repos/basaltbytes/usine/pulls?head=basaltbytes:no-pr&state=open&per_page=100",
           [Effect.succeed([jsonKey([])])],
         ],
         [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey(open)])]],
-        [INDEX, [Effect.succeed([jsonKey([[]])])]],
+        [INDEX, [indexed("open", "basaltbytes/usine")]],
       ],
     });
     assert.strictEqual(finished.decision._tag, decision);
