@@ -1,4 +1,5 @@
-import { type Brand, Duration, Effect, Match, Option, Schedule, Schema } from "effect";
+import { retryTransient } from "@usine/core/retry";
+import { type Brand, Duration, Effect, Match, Option, Schema } from "effect";
 import { type GitHubApiError, type GitHubAppError, InvalidGitHubResponseError } from "./error.ts";
 
 export class GraphqlServerError extends Schema.TaggedError<
@@ -30,22 +31,14 @@ export const retryTransientRequest = <A, E extends RequestFailure, R>(
   request: Effect.Effect<A, E, R>,
 ) =>
   request.pipe(
-    Effect.retry(($) =>
-      $(Schedule.exponential("1 second", 3)).pipe(
-        Schedule.jittered,
-        Schedule.while(({ input: error }) => isTransientFailure(error)),
-        Schedule.upTo({ times: 2 }),
-        Schedule.tap(({ input: error, attempt, duration }) => {
-          if (isTransientFailure(error)) {
-            return Effect.logWarning("Transient GitHub request failed; retrying", {
-              ...transientFailureLogFields(error),
-              errorTag: error._tag,
-              retry: attempt,
-              delayMs: Duration.toMillis(duration),
-            });
-          }
-          return Effect.void;
-        }),
-      ),
+    retryTransient(isTransientFailure, ({ error, retry, delay }) =>
+      isTransientFailure(error)
+        ? Effect.logWarning("Transient GitHub request failed; retrying", {
+            ...transientFailureLogFields(error),
+            errorTag: error._tag,
+            retry,
+            delayMs: Duration.toMillis(delay),
+          })
+        : Effect.void,
     ),
   );

@@ -933,6 +933,7 @@ export const stepExecutorLayer = (
                 resume: execution.resume,
                 reattach: execution.reattach,
                 botLogin: Option.some(botLogin),
+                requiresCi: execution.requiresCi,
                 commitAuthor,
               }),
             )

@@ -39,6 +39,10 @@ Claude Code children receive `ENABLE_CLAUDEAI_MCP_SERVERS=0` and `CLAUDE_CODE_DI
 
 `CheckoutRequest.permissions` is the loop's permission level. A `read` attempt's credential has `contents: read`, so it can't push. An exe.dev worker can't grant that, and refuses the attempt with a `credentials` `WorkerCapabilityError` before attaching the integration. A `read` checkout also gets a pre-push hook that stops `git push` with a message naming the loop, instead of GitHub's 403; `git push --no-verify` skips it, and the token still refuses. A `read` attempt is never salvaged.
 
+### Harvest
+
+After a successful parent report, every worker adapter harvests the checkout with `harvestFacts` from `@usine/core/step/harvest`, running `git` and `gh` in the attempt's environment. It passes the report's CI handoff, and the run spec carries `CheckoutRequest.requiresCi`, so harvesting verifies the pull request that CI waits on against origin, as the core README describes. The durable session records the harvest's `unverifiedHandoff` in the step result, and the engine fails the attempt with it.
+
 ### Salvage
 
 An attempt that ends without success is salvaged before its worktree is removed: uncommitted changes are committed as `wip(usine): salvage attempt <id>` by `CheckoutRequest.commitAuthor`, and HEAD is pushed to `CheckoutRequest.salvageRef` with the worker's credentials. The result reaches the engine through `Sink.salvage`.
@@ -90,8 +94,6 @@ It replaces exe.dev's `HarnessLoginCheck` and `harnessLoginChecks` options.
 The SSH adapter selects the runtime from `/etc/usine/container-runtime` (`podman` or `docker`). Without the file, it selects installed Podman first, then Docker. Podman must run locally in rootless mode with cgroup v2, systemd delegation of CPU, memory, and PID controllers, subordinate UID/GID ranges, and lingering. Preflight verifies those prerequisites and reads the enforced limits through `exec`. It logs runtime, OCI runtime, kernel, and cgroup details; failures return `WorkerCapabilityError` with remediation.
 
 Podman containers and helpers use `--userns=keep-id`; preflight requires matching host and image UID/GID. Attempts use a private cgroup namespace for OOM accounting and explicit proxy variables. Lifecycle, cancellation, salvage restart, and label-scoped cleanup use the selected runtime. Shared caches belong to that runtime's store. Drain attempts and rebuild the worker or snapshot when changing runtimes. See [Add a worker](https://docs.usine.dev/guides/add-a-worker/#move-a-worker-to-rootless-podman).
-
-All worker adapters pass explicit CI handoffs to harvesting, which verifies the pull request's source branch on origin even when GitHub's pull request head lags behind the pushed branch.
 
 ## Local worker
 

@@ -9,7 +9,13 @@ import {
   pendingProviderRetry,
   shouldAutoRetry,
 } from "@usine/core/attempt";
-import { ciHandoff, CiHandoff, type CiLabelMutation, type CiPolicy } from "@usine/core/ci";
+import {
+  ciHandoff,
+  CiHandoff,
+  type CiLabelMutation,
+  type CiPolicy,
+  unverifiedHandoffFailure,
+} from "@usine/core/ci";
 import { AttemptFailure, AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   AttemptAwaitingCi,
@@ -152,7 +158,9 @@ const failRunningAttempt = (
 
 /**
  * Returns the changes for the executor result of `attemptId`. Infrastructure and capacity failures
- * allow up to 3 Attempts in total; a late or repeated result returns `Unchanged`.
+ * allow up to 3 Attempts in total; a late or repeated result returns `Unchanged`. A success that
+ * CI must wait on, without a verified pull request at its head, fails with the failure for the
+ * result's `unverifiedHandoff`.
  */
 export const finishAttempt = (
   current: RunProgress,
@@ -199,12 +207,19 @@ export const finishAttempt = (
             : Option.none(),
       }),
   });
+  // A result without a recorded reason was harvested before harvesting verified pull requests.
+  const { unverifiedHandoff } = completed.success;
   if (Option.isSome(policy) && Option.isNone(required))
     return failRunningAttempt(
       state,
       attempt,
-      AgentFailure.make({
-        message: "This loop requires CI, but the successful report has no pushed pull request head",
+      Option.match(unverifiedHandoff, {
+        onSome: unverifiedHandoffFailure,
+        onNone: () =>
+          AgentFailure.make({
+            message:
+              "This loop requires CI, but the successful report has no pushed pull request head",
+          }),
       }),
     );
   if (Option.isSome(required)) {
@@ -223,9 +238,14 @@ export const finishAttempt = (
       return failRunningAttempt(
         state,
         attempt,
-        InfraFailure.make({
-          message: "The CI handoff has no harvested pull request for the checkout's pushed head",
-          cause: { pullRequest: request.pullRequest, head: request.head },
+        Option.match(unverifiedHandoff, {
+          onSome: unverifiedHandoffFailure,
+          onNone: () =>
+            InfraFailure.make({
+              message:
+                "The CI handoff has no harvested pull request for the checkout's pushed head",
+              cause: { pullRequest: request.pullRequest, head: request.head },
+            }),
         }),
       );
     }

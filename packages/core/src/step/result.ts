@@ -2,6 +2,7 @@ import { type Brand, Effect, Schema } from "effect";
 import { StepOutput, StepOutputRef } from "./output.ts";
 import { CommitSha } from "../repository.ts";
 import { AttemptId } from "../attempt/id.ts";
+import { UnverifiedHandoff } from "../ci.ts";
 
 /** A commit between the workspace base and the final HEAD. */
 export class Commit extends Schema.TaggedClass<
@@ -74,6 +75,13 @@ export class StepResult extends Schema.Class<
   message: Schema.NonEmptyString,
   /** The commits and GitHub writes retained as evidence after checkout cleanup. */
   facts: Schema.Array(StepResultFact),
+  /**
+   * Why harvesting couldn't verify the pull request that CI waits on, or `None` if it verified
+   * one, CI waits on none, or the result predates this field.
+   */
+  unverifiedHandoff: Schema.OptionFromOptionalKey(UnverifiedHandoff).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** Output metadata; document bodies are stored separately. */
   outputs: Schema.Array(StepOutputRef).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
