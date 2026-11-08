@@ -65,4 +65,5 @@ When only the human can act, write a script into `.scratchpad/orchestrating-usin
 - No outward action outside the instance's own repositories without the human's yes.
 - Secrets travel over SSH stdin or files with mode 0600, never on a command line or in the ledger.
 - Factory agents never dogfood; you do, after the merge.
+- Before queueing or briefing a follow-up batch, check each item against the default branch: `gh pr list --state merged --search "<issue number>"` and the merged PR bodies, which list the items they address. Comment the done items on the issue, then brief only what is left. Two briefs in one day went out for work already merged.
 - A send-back after the factory reviewer passed is a reviewer miss. In the same pass, amend the reviewer persona (`scripts/config-edit.sh agent reviewer`) with the check it skipped, such as a claim without a test, an unmutated safeguard, an unprobed exemption, a CI test total, or a critical-path seam; name the PR in the revision message and record both in the ledger. The human expects the factory to improve itself, not the overseer to keep catching the same class of miss. 
