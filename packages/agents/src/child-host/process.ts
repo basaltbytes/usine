@@ -3,6 +3,7 @@ import {
   type Brand,
   Cause,
   Deferred,
+  Duration,
   Effect,
   Fiber,
   Option,
@@ -64,6 +65,9 @@ const InputFrame = Schema.Union([
 const decodeFrame = Schema.decodeUnknownEffect(Schema.fromJsonString(Frame));
 const encoder = new TextEncoder();
 const PROCESS_LEASE_MS = 120_000;
+const DETACH_CHECKPOINT_TIMEOUT = Duration.seconds(5);
+// Leaves one second of the detach budget for the checkpoint round trip.
+const INPUT_DRAIN_TIMEOUT = Duration.subtract(DETACH_CHECKPOINT_TIMEOUT, Duration.seconds(1));
 
 /** Stops a retained child and removes its journals after confirming termination. */
 export const stopChildProcess = Effect.fn("ChildHost.stopChildProcess")(function* (
@@ -409,7 +413,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
               Stream.filter((entries) => entries.size === 0),
               Stream.take(1),
               Stream.runDrain,
-              Effect.timeoutOption("4 seconds"),
+              Effect.timeoutOption(INPUT_DRAIN_TIMEOUT),
             );
             if (Option.isNone(drained))
               yield* Effect.logWarning(
@@ -424,7 +428,7 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
           );
           yield* Deferred.await(checkpoint);
         }).pipe(
-          Effect.timeout("5 seconds"),
+          Effect.timeout(DETACH_CHECKPOINT_TIMEOUT),
           Effect.tapError((cause) =>
             Effect.logWarning("Could not save the child output checkpoint before detaching", {
               ...fields,
