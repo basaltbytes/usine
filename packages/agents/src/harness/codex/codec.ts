@@ -100,7 +100,11 @@ export const turnFailure = (
   message: string,
 ): AgentResultError | AgentCapacityError => {
   const code = error?.codexErrorInfo;
-  if (code === undefined || code === null || isCodexErrorCode(code, "other"))
+  if (
+    code === undefined ||
+    code === null ||
+    (Schema.is(Schema.String)(code) && isCodexErrorCode(code, "other"))
+  )
     return harnessFailure(Option.some(sessionId), message);
   const capacity = Schema.is(Schema.String)(code)
     ? isCodexErrorCode(code, "serverOverloaded")

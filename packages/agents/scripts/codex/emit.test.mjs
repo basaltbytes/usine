@@ -153,6 +153,35 @@ describe("emitDeclarations", () => {
     );
   });
 
+  it("rejects open type tags inherited by inline union variants", () => {
+    for (const keyword of ["oneOf", "anyOf"]) {
+      const definitions = {
+        Item: {
+          type: "object",
+          properties: { type: { type: "string" }, id: { type: "string" } },
+          required: ["type", "id"],
+          [keyword]: [
+            {
+              title: "A",
+              type: "object",
+              properties: { a: { type: "string" } },
+              required: ["a"],
+            },
+            {
+              title: "B",
+              type: "object",
+              properties: { b: { type: "string" } },
+              required: ["b"],
+            },
+          ],
+        },
+      };
+      expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+        "Variant A needs an inline single-value type tag",
+      );
+    }
+  });
+
   it("rejects reference wrappers with sibling constraints", () => {
     for (const wrapper of [ref("PlanItem"), { allOf: [ref("PlanItem")] }]) {
       for (const sibling of [

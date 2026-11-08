@@ -72,12 +72,33 @@ describe("generated Codex protocol selections", () => {
     expect(isTurnStatus("completed", "completed")).toBe(true);
     expect(isToolStatus(undefined, "failed")).toBe(false);
     expect(isApprovalToolStatus("declined", "declined")).toBe(true);
-    expect(isCodexErrorCode({ httpConnectionFailed: {} }, "other")).toBe(false);
+    expect(isCodexErrorCode("futureCode", "other")).toBe(false);
     expect(isMessagePhase("new_phase", "final_answer")).toBe(false);
     expect(isMessagePhase("final_answer", "final_answer")).toBe(true);
     expect(isAuthMode(null, "chatgpt")).toBe(false);
     expect(isAuthMode("chatgpt", "chatgpt")).toBe(true);
   });
+
+  it.effect("requires comparison inputs to be strings rather than whole protocol objects", () =>
+    Effect.gen(function* () {
+      const item = yield* Schema.decodeEffect(ToolItem)({
+        type: "commandExecution",
+        id: "command",
+        status: "failed",
+      });
+      const { turn } = yield* Schema.decodeEffect(TurnCompleted)({
+        turn: {
+          id: "turn",
+          status: "failed",
+          error: { message: "Failed", codexErrorInfo: "other" },
+        },
+      });
+      // @ts-expect-error Compare the item's status, not the item object.
+      isToolStatus(item, "failed");
+      // @ts-expect-error Compare the narrowed error code, not the error object.
+      isCodexErrorCode(turn.error, "other");
+    }),
+  );
 
   it.effect("keeps common fields on generated image payload alternatives", () =>
     Effect.gen(function* () {

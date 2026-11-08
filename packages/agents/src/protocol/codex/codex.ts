@@ -45,7 +45,7 @@ type CommonValue<Lists extends ReadonlyArray<ReadonlyArray<string>>> = {
 /** Returns a comparison whose expected value must be a member of every list. */
 const matchesKnownValue =
   <Lists extends ReadonlyArray<ReadonlyArray<string>>>(..._lists: Lists) =>
-  <Value>(value: Value, expected: CommonValue<Lists>) =>
+  (value: string | null | undefined, expected: CommonValue<Lists>) =>
     value === expected;
 
 /**
