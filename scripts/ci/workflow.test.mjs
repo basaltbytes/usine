@@ -36,6 +36,37 @@ test("browser test jobs use preinstalled matching Playwright browsers and bounde
   }
 });
 
+test("browser test tasks receive the container's Playwright browser registry", () => {
+  const plan = JSON.parse(
+    execFileSync(
+      "corepack",
+      [
+        "pnpm",
+        "turbo",
+        "run",
+        "test",
+        "--dry=json",
+        "--filter=@usine/web",
+        "--filter=@usine/server",
+      ],
+      {
+        cwd: root,
+        env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright" },
+        encoding: "utf8",
+      },
+    ),
+  );
+  for (const name of ["web", "server"]) {
+    const task = plan.tasks.find(({ taskId }) => taskId === `@usine/${name}#test`);
+    assert.ok(
+      task.environmentVariables.configured.some((value) =>
+        value.startsWith("PLAYWRIGHT_BROWSERS_PATH="),
+      ),
+      `${name} must receive the container browser registry in Turbo's strict environment`,
+    );
+  }
+});
+
 test("the CI matrix runs every package test task exactly once", () => {
   const expected = testTasks(
     JSON.parse(
