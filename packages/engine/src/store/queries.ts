@@ -108,6 +108,7 @@ import { transcriptQueries } from "./transcript/queries.ts";
 export interface QueuedEvents {
   readonly submission: Submission;
   readonly eventIds: ReadonlyArray<EventId>;
+  readonly triggerMatchEventIds: ReadonlyArray<EventId>;
 }
 
 const newestRunFirst = (left: RunSummaryRow, right: RunSummaryRow) =>
@@ -1159,6 +1160,9 @@ export const queriesFor = (
       Option.map((newest): QueuedEvents => ({
         submission: submissionFromRow(newest),
         eventIds: queued.map((row) => row.eventId),
+        triggerMatchEventIds: queued
+          .filter((row) => row.ciFailureHead === null)
+          .map((row) => row.eventId),
       })),
     );
   });

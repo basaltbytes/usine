@@ -281,7 +281,8 @@ export class RunDriver extends Context.Service<
 
       /**
        * Rechecks the newest queued Event of a Loop's Item and opens its Run with the submission the
-       * recheck returns. A non-matching Event is revoked before trying the next queued Event.
+       * recheck returns. A trigger mismatch revokes the queued trigger matches from the queue read;
+       * a CI fix mismatch revokes only that fix before trying the next queued Event.
        * Returns the opened Run, or `None` if no Event can be admitted. `completedRunId` is the
        * closed Run that gave the queue its turn.
        */
@@ -317,16 +318,19 @@ export class RunDriver extends Context.Service<
           }
           const recheck = yield* condition.recheck(submission);
           if (recheck._tag !== "Matches") {
+            const eventIds =
+              recheck._tag === "ItemGone"
+                ? queued.eventIds
+                : Option.isNone(submission.ciFailureHead)
+                  ? queued.triggerMatchEventIds
+                  : [submission.event.id];
             const revoked = yield* store
-              .revokeQueued(
-                recheck._tag === "ItemGone"
-                  ? queued
-                  : { ...queued, eventIds: [submission.event.id] },
-              )
+              .revokeQueued({ ...queued, eventIds })
               .pipe(retryingStore(runId, "revoke the queued events"));
             if (recheck._tag === "NoLongerMatches") {
               yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
                 ...fields,
+                revokedEventIds: eventIds,
                 revokedEvents: revoked,
               });
               pending = yield* store
