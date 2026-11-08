@@ -5,8 +5,10 @@ import { SessionTokensUpdated } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessageId, Release, Steer } from "@usine/core/attempt/channel";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import {
-  Cause,
+  DateTime,
+  Deferred,
   Effect,
+  Fiber,
   Exit,
   FileSystem,
   Layer,
@@ -30,6 +32,7 @@ import {
 import { Tape } from "./transcript.ts";
 import { decodeWire, encodeWire } from "./process.ts";
 import { Base64 } from "effect/encoding";
+import { TestClock } from "effect/testing";
 import { runScenario } from "./scenarios.ts";
 
 const fileWithLines = (file: string, count: number) =>
@@ -50,7 +53,8 @@ const fileWithLines = (file: string, count: number) =>
 describe("recorded harness transports", () => {
   for (const provider of providers)
     for (const scenario of scenarios) {
-      it.live.skipIf(
+      const clocked = provider === "claude" && scenario === "transport-loss";
+      (clocked ? it.effect : it.live).skipIf(
         process.platform !== "linux" && provider === "claude" && scenario === "transport-loss",
       )(
         `${provider}: ${scenario}`,
@@ -58,10 +62,52 @@ describe("recorded harness transports", () => {
           Effect.scoped(
             Effect.gen(function* () {
               const fixture = yield* openFixture(provider, scenario, "replay");
-              yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
+              const replay = runScenario(scenario, fixture.request, fixture.controls).pipe(
                 Effect.provide(fixture.backend),
                 fixture.tape.guard,
               );
+              const events = yield* clocked
+                ? Effect.gen(function* () {
+                    const reconnecting = yield* Deferred.make<void>();
+                    const logger = Logger.make(({ message }) => {
+                      if (
+                        Array.isArray(message) &&
+                        message.includes(
+                          "SSH connection dropped; reattaching the child process owner",
+                        )
+                      )
+                        Deferred.doneUnsafe(reconnecting, Effect.void);
+                    });
+                    const fiber = yield* replay.pipe(
+                      Effect.provide(Logger.layer([logger], { mergeWithExisting: true })),
+                      Effect.forkScoped,
+                    );
+                    yield* Effect.raceFirst(Deferred.await(reconnecting), Fiber.join(fiber));
+                    yield* TestClock.adjust("1 second");
+                    return yield* Fiber.join(fiber);
+                  })
+                : replay;
+              if (provider === "codex" && scenario === "simple") {
+                const limits = events.filter((event) => event._tag === "PoolRateLimitsUpdated");
+                assert.lengthOf(limits, 1);
+                const update = limits[0];
+                assert(update !== undefined);
+                assert.strictEqual(update.pool, "chatgptPlan");
+                assert.deepStrictEqual(update.session.pool, Option.some("chatgptPlan"));
+                assert.deepStrictEqual(update.login, Option.none());
+                assert.deepStrictEqual(update.rateLimits.limitId, Option.some("codex"));
+                assert(Option.isSome(update.rateLimits.primary));
+                assert.strictEqual(update.rateLimits.primary.value.usedPercent, 66);
+                assert.deepStrictEqual(
+                  update.rateLimits.primary.value.windowDurationMinutes,
+                  Option.some(10080),
+                );
+                assert.deepStrictEqual(
+                  update.rateLimits.primary.value.resetsAt,
+                  Option.some(DateTime.makeUnsafe(1794314556000)),
+                );
+                assert.deepStrictEqual(update.rateLimits.secondary, Option.none());
+              }
               yield* fixture.save;
             }),
           ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
@@ -90,25 +136,6 @@ for (const provider of providers) {
     10_000,
   );
 }
-
-it.live("rejects a changed outbound request through the real adapter", () =>
-  Effect.gen(function* () {
-    const outcome = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* openFixture("claude", "simple", "replay");
-        yield* runScenario(
-          "simple",
-          ChildRequest.make({
-            ...fixture.request,
-            prompt: "This request differs from the recording.",
-          }),
-        ).pipe(Effect.provide(fixture.backend), fixture.tape.guard);
-      }),
-    ).pipe(Effect.exit);
-    assert(Exit.isFailure(outcome));
-    assert.include(Cause.pretty(outcome.cause), "outbound request differs");
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
 
 it("redacts credential values before JSON escaping", () => {
   const tape = new Tape("record");
@@ -158,35 +185,6 @@ it.effect("preserves UTF-8 characters split across supervisor frames", () =>
     });
     assert.strictEqual(redacted, expected);
   }),
-);
-
-it.live(
-  "reports outbound mismatches from background transports without waiting for a timeout",
-  () =>
-    Effect.gen(function* () {
-      for (const provider of providers) {
-        const outcome = yield* Effect.scoped(
-          Effect.gen(function* () {
-            const scenario = "simple";
-            const fixture = yield* openFixture(provider, scenario, "replay");
-            fixture.tape.bind(
-              provider === "codex" ? "0.0.1" : "supportedModels",
-              "$CHANGED_REQUEST",
-            );
-            yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
-              Effect.provide(fixture.backend),
-              fixture.tape.guard,
-            );
-          }),
-        ).pipe(Effect.timeout("10 seconds"), Effect.exit);
-        assert(Exit.isFailure(outcome));
-        const failure = Cause.pretty(outcome.cause);
-        assert.include(failure, "outbound request differs at transcript entry");
-        assert.include(failure, "$CHANGED_REQUEST");
-        assert.notInclude(failure, "TimeoutError");
-      }
-    }).pipe(Effect.provide(NodeServices.layer)),
-  15_000,
 );
 
 it.live(

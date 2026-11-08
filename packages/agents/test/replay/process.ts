@@ -15,10 +15,7 @@ import { Base64 } from "effect/encoding";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { CHILD_LIFELINE } from "../../src/child-host/node.ts";
 import { PROCESS_OWNER } from "../../src/child-host/supervisor.ts";
-import { Tape } from "./transcript.ts";
-
-const isJsonObject = (value: Schema.Json): value is { readonly [key: string]: Schema.Json } =>
-  Predicate.isObject(value);
+import { isJsonObject, Tape } from "./transcript.ts";
 
 // Spawn options contain optional fields that JSON omits at this boundary.
 // @effect-diagnostics-next-line schemaSync:off
@@ -158,6 +155,11 @@ export const processTransport = (
           ChildProcessSpawner.ExitCode,
           PlatformError.PlatformError
         >();
+        yield* Deferred.await(tape.failure).pipe(
+          Effect.exit,
+          Effect.andThen(Deferred.succeed(exited, ChildProcessSpawner.ExitCode(1))),
+          Effect.forkScoped,
+        );
         const feeding = hasInput
           ? yield* input.pipe(Stream.runDrain, Effect.forkScoped)
           : undefined;
@@ -183,6 +185,13 @@ export const processTransport = (
         const stdout = Stream.fromEffectRepeat(
           Effect.promise(() => tape.read(`${port}/stdout`)),
         ).pipe(
+          Stream.catchCause((cause) =>
+            Stream.unwrap(
+              Deferred.isDone(tape.failure).pipe(
+                Effect.map((failed) => (failed ? Stream.empty : Stream.failCause(cause))),
+              ),
+            ),
+          ),
           Stream.takeWhile((entry) => entry.type !== "runtime_exit"),
           Stream.mapEffect((entry) => {
             assert(entry.type === "emit_inbound");
