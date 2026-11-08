@@ -5,6 +5,30 @@ import { TestClock } from "effect/testing";
 import { ChildRequest } from "../../src/runtime.ts";
 import { openFixture } from "./fixture.ts";
 import { runScenario } from "./scenarios.ts";
+import { Tape } from "./transcript.ts";
+
+for (const type of ["expect_outbound", "emit_inbound"] as const)
+  it.effect(`resets the replay idle deadline after ${type} progress`, () =>
+    Effect.gen(function* () {
+      const tape = new Tape({
+        protocol: "claude-sdk",
+        harnessVersion: "2.1.311",
+        model: "recorded-model",
+        scenario: "simple",
+        environment: {},
+        entries: [{ type, port: "claude:1", payload: "progress" }],
+      });
+      const completed = yield* Deferred.make<void>();
+      const replay = yield* Deferred.await(completed).pipe(tape.guard, Effect.forkChild);
+      yield* TestClock.adjust("4 seconds");
+      if (type === "expect_outbound") tape.outbound("claude:1", "progress");
+      else yield* Effect.promise(() => tape.read("claude:1"));
+      yield* TestClock.adjust("4 seconds");
+      yield* Deferred.succeed(completed, undefined);
+      yield* Fiber.join(replay);
+      tape.assertComplete();
+    }),
+  );
 
 it.live("rejects a changed outbound request through the real adapter", () =>
   Effect.gen(function* () {
