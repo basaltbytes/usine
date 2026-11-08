@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { idleCiMonitor } from "./support/ci.ts";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { testAppLayer } from "./support/github-app.ts";
@@ -278,6 +279,7 @@ const withFactory = <A, E>(
     const engine = localEngineLayer(directory).pipe(
       Layer.provide(executor),
       Layer.provide(alwaysHoldsLayer),
+      Layer.provide(CompletionCheck.unverified),
     );
     const dependencies = Layer.mergeAll(
       testAppLayer,

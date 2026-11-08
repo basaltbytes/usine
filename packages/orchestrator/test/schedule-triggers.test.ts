@@ -1,4 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -201,6 +202,7 @@ const runtimeLayer = (directory: InstanceDirectory) => {
   const engine = localEngineLayer(directory).pipe(
     Layer.provide(executor),
     Layer.provide(alwaysHoldsLayer),
+    Layer.provide(CompletionCheck.unverified),
   );
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, parser);

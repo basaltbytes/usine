@@ -26,6 +26,7 @@ import { WorkerName } from "@usine/core/worker";
 import { RunEngine, RetryRequest, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { DateTime, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
@@ -196,7 +197,11 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
       const condition = Layer.succeed(TriggerCondition)({
         recheck: () => Effect.succeed("matches"),
       });
-      const runtime = layer(directory).pipe(Layer.provide(executor), Layer.provide(condition));
+      const runtime = layer(directory).pipe(
+        Layer.provide(executor),
+        Layer.provide(condition),
+        Layer.provide(CompletionCheck.unverified),
+      );
       const first = yield* Effect.scoped(
         Effect.gen(function* () {
           const engine = yield* RunEngine;

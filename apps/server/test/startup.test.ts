@@ -7,6 +7,7 @@ import { StepResult } from "@usine/core/step/result";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { Executor, ExecutorError } from "@usine/executor";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -125,6 +126,7 @@ it.live(
         Layer.provide(
           Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
         ),
+        Layer.provide(CompletionCheck.unverified),
       );
       const listener = yield* startupListener("0.5.1-next.341");
       const starting = yield* Layer.build(runtime).pipe(Effect.forkChild);

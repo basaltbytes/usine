@@ -34,6 +34,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 
@@ -171,6 +172,7 @@ const seed = (directory: string) =>
         Layer.provide(
           Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
         ),
+        Layer.provide(CompletionCheck.unverified),
       ),
     ),
   );

@@ -26,6 +26,7 @@ import {
 } from "@usine/engine/item-projection";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -228,6 +229,7 @@ export const checkReads = ({
     const engine = engineLayer(InstanceDirectory.make(root)).pipe(
       Layer.provide(slowWorker),
       Layer.provide(Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") })),
+      Layer.provide(CompletionCheck.unverified),
     );
     const observation = OperatorObservation.layer.pipe(
       Layer.provide(Layer.mock(ConfigurationStore)({})),

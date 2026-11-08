@@ -1,4 +1,5 @@
 import { harnessesLive } from "@usine/agents/harness/node";
+import { CompletionCheck } from "@usine/engine/completion-check";
 import { jsonKey } from "@usine/core/json-key";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
@@ -232,6 +233,7 @@ const withGitHubEngine = <A, E, R>(
         ),
       ),
       Layer.provide(alwaysHoldsLayer),
+      Layer.provide(CompletionCheck.unverified),
     );
     return yield* Effect.gen(function* () {
       return yield* use({ engine: yield* RunEngine, remote });
@@ -257,6 +259,7 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(CompletionCheck.unverified),
           Layer.provide(fixedConfigLayer(decodedValue5)),
           Layer.provide(testAppLayer),
         );
@@ -800,6 +803,7 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(hostLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(CompletionCheck.unverified),
           Layer.provide(fixedConfigLayer(decodedValue17)),
           Layer.provide(testAppLayer),
         );
