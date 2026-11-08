@@ -186,6 +186,12 @@ export class StatisticsView extends Schema.Class<
   periods: Schema.Array(TaskPeriodView),
   /** The tasks with no Loop that succeeded twice on one of their Items. */
   firstTimeRight: Count,
+  /** Processes killed for memory across the completed tasks' attempts. */
+  memoryKills: Count.pipe(Schema.withConstructorDefault(Effect.succeed(0))),
+  /** Attempts on completed tasks with at least one recorded memory kill. */
+  memoryKillAttempts: Count.pipe(Schema.withConstructorDefault(Effect.succeed(0))),
+  /** Attempts on completed tasks with more than one recorded memory kill. */
+  repeatedMemoryKillAttempts: Count.pipe(Schema.withConstructorDefault(Effect.succeed(0))),
   /**
    * The approvals, operator retries, failures marked resolved, and cycle-budget resets on the
    * tasks' Runs and Items.

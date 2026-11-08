@@ -52,3 +52,5 @@ GitHub request failures appear in **Needs attention** after three consecutive fa
 Open-issue checks run at most once every 10 minutes after a successful check. Failed checks retry on the next poll cycle, respecting GitHub's backoff, so repeated failures appear in **Needs attention** until the check succeeds. A rate-limited open-issue check preserves the failure count and any existing entry until polling resumes.
 
 A GitHub server error (HTTP 5xx) for one item's snapshot doesn't fail the poll. usine logs a warning with the item, operation, and status, processes the other items, and fetches that item again in the next poll.
+
+Memory warnings below an attempt's outcome show the total processes killed across its containers and the last affected container's memory limit. Available process details list kernel task names and host PIDs. These names can be truncated and exclude command-line arguments. A separate count identifies kills without process details, including older records and workers without readable kernel logs. A successful attempt can still have memory kills when its build or test subprocesses died.

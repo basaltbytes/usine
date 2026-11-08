@@ -205,6 +205,7 @@ interface FakeMachineState {
   limitsEnforced: boolean;
   runtimeExitCode: number;
   memoryEvents: "counted" | "unreadable" | "empty";
+  kernelMemory: "readable" | "unreadable";
   hostGroupId: string;
   imageGroupId: string;
   docker: "absent" | "running" | "unusable" | "socket-only";
@@ -361,6 +362,7 @@ export const fakeMachine = () => {
     limitsEnforced: true,
     runtimeExitCode: 0,
     memoryEvents: "counted",
+    kernelMemory: "unreadable",
     hostGroupId: "1000",
     imageGroupId: "1000",
     docker: "absent",
@@ -501,6 +503,17 @@ export const fakeMachine = () => {
           (container.running
             ? `low 0\nhigh 0\nmax 9\noom ${container.oomKills}\noom_kill ${container.oomKills}\noom_group_kill 0\n`
             : "oom_kill 1\n"),
+        0,
+      );
+    }
+    if (line.includes("journalctl -k")) {
+      if (state.kernelMemory === "unreadable")
+        return oneShotHandle("", 1, "dmesg: read kernel buffer failed: Operation not permitted");
+      const container = state.containers.get(words.at(-1) ?? "");
+      return oneShotHandle(
+        container === undefined
+          ? ""
+          : `oom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=1234,uid=1000\n`,
         0,
       );
     }

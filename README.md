@@ -57,6 +57,8 @@ pnpm lint      # oxlint
 pnpm format    # oxfmt
 ```
 
+The root build, check, and test commands serialize Turborepo tasks to fit attempt containers with at least 6 GiB of memory. Web Vitest uses at most two workers.
+
 Tests import other workspace packages from their `dist`, and the `@usine/server` tests also run its own `dist/main.js`. turbo builds both before it tests. To test one package, run `pnpm turbo run test --filter <package>`; `pnpm --filter <package> test` skips the builds, so it fails or tests stale code until you run `pnpm build`.
 
 The script tests invoke `corepack pnpm` to use the version pinned in `package.json`. Enable Corepack on the test machine; the global pnpm version does not affect these subprocesses.

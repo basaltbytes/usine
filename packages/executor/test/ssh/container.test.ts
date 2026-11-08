@@ -2,7 +2,11 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AttemptId, type ContainerOutOfMemoryKills } from "@usine/core/attempt";
+import {
+  AttemptId,
+  MemoryKilledProcess,
+  type ContainerOutOfMemoryKills,
+} from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
@@ -861,6 +865,7 @@ describe("SSH Worker with Docker", () => {
     "records the processes the kernel killed in the container of a stopping process apart from those in the container that reattaches the Attempt",
     () => {
       const machine = dockerMachine();
+      machine.state.kernelMemory = "readable";
       const credentials = mintingProvider();
       const storage = new StubStorage();
       const kills: Array<ContainerOutOfMemoryKills> = [];
@@ -901,6 +906,13 @@ describe("SSH Worker with Docker", () => {
           new Set(ran).size,
           2,
           "reattachment runs the Attempt in a new container",
+        );
+        assert.deepStrictEqual(
+          kills.map(({ processes }) => processes),
+          [
+            [MemoryKilledProcess.make({ command: "vitest worker", pid: 1234 })],
+            [MemoryKilledProcess.make({ command: "vitest worker", pid: 1234 })],
+          ],
         );
         assert.deepStrictEqual(
           kills.map(({ container, kills }) => ({ container, kills })),
@@ -1050,6 +1062,11 @@ describe("SSH Worker with Docker", () => {
         assert.deepStrictEqual(
           kills.map(({ container, kills, memoryMib }) => ({ container, kills, memoryMib })),
           [{ container: ran, kills: 2, memoryMib: 4096 }],
+        );
+        assert.deepStrictEqual(
+          kills[0]?.processes,
+          [],
+          "unreadable host logs preserve the counter",
         );
         const { childrenStopped, containerGone } = releaseSteps(machine);
         assertInOrder([

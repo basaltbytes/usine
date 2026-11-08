@@ -27,3 +27,9 @@ Orchestrator heartbeats renew a two-minute lease. When the lease expires, the wo
 2. [Connect Boat to a gateway](/guides/connect-boat-to-a-gateway/)
 3. [Run worker preflight](/guides/run-worker-preflight/)
 4. [Remove a worker](/guides/remove-a-worker/)
+
+## Memory for repository checks
+
+The usine repository gate needs at least 6 GiB per attempt (`memory_mib: 6144`). On a worker with about 7.7 GiB of RAM, use one attempt slot; a 6656 MiB limit leaves about 1 GiB for the host. `pnpm check`, `pnpm build`, and `pnpm test` run Turborepo tasks one at a time with `--concurrency=1`; web Vitest uses at most two workers. Preserve those limits when running the full gate. Memory-backed `/tmp` and `/dev/shm` also count against the container limit.
+
+Memory kills appear below the attempt outcome even when the attempt succeeds. To collect process details, the worker's SSH user needs access to the host kernel journal or `dmesg`. On a systemd host, an administrator can run `sudo usermod -aG systemd-journal <ssh-user>`, then reconnect SSH. New Hetzner workers include this membership. Kernel diagnostics report task names and host PIDs, with no command-line arguments; unavailable details are counted separately.

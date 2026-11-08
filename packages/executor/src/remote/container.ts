@@ -16,6 +16,7 @@ import { Duration, Effect, Option, Redacted, Ref, Schema } from "effect";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import type { RemoteCommands } from "./commands.ts";
 import { type ContainerRuntime, runtimeOptions } from "./runtime.ts";
+import { readKilledProcesses } from "./memory.ts";
 
 export const PNPM_STORE_VOLUME = "usine-pnpm-store";
 export const PNPM_STORE_PATH = "/home/usine/.local/share/pnpm/store";
@@ -651,10 +652,26 @@ export const containersFor = (commands: RemoteCommands) => {
         const { container, kills: counted } = yield* outOfMemoryKills("cleanup", shell, spec);
         const kills = counted + (yield* Ref.get(killedInits));
         if (kills === 0) return;
+        const processes = yield* readKilledProcesses(
+          commands,
+          shell,
+          spec.settings.runtime,
+          spec.name,
+          container,
+        );
+        if (processes.length < kills)
+          yield* Effect.logWarning("Kernel OOM details are incomplete", {
+            ...fields,
+            container,
+            kills,
+            identified: processes.length,
+          });
         yield* record.value(
           ContainerOutOfMemoryKills.make({
             container,
-            kills,
+            // Restarts reset cgroup counters; host diagnostics retain earlier victims.
+            kills: Math.max(kills, processes.length),
+            processes,
             memoryMib: spec.settings.limits.memoryMib,
           }),
         );

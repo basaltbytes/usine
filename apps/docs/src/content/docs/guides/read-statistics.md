@@ -24,3 +24,5 @@ A completed task has a merged pull request in the window and at least one usine 
 Open statistics refresh at UTC midnight, including expanded **Details**. The 7-day and 30-day windows advance automatically, so tasks and runs outside the selected window leave the counts and charts.
 
 **First time right** counts tasks without the same loop succeeding twice on one item. Operator actions include approvals, retries, resolutions, and budget resets. Subscription cost has an estimate marker. Worker utilization divides occupied attempt time by available slot-time using configuration revisions. Machine-start counts survive machine deletion and restarts.
+
+Beside **First time right**, memory-kill statistics count killed processes, affected attempts, and attempts with more than one kill. They cover all attempts of tasks merged in the selected window, including successful attempts. Open tasks and tasks merged outside the window do not contribute. Open an affected task's run to inspect the killed processes.

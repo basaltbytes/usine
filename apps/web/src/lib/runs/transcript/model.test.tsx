@@ -25,6 +25,7 @@ import {
   AttemptNumber,
   AttemptTask,
   ContainerOutOfMemoryKills,
+  MemoryKilledProcess,
   OutOfMemoryKills,
   totalOutOfMemoryKills,
 } from "@usine/core/attempt";
@@ -299,6 +300,7 @@ describe("run transcript", () => {
         container: ContainerId.make("a".repeat(64)),
         kills: 2,
         memoryMib: ContainerMemoryMib.make(4096),
+        processes: [MemoryKilledProcess.make({ command: "vitest worker", pid: 1234 })],
       }),
       ContainerOutOfMemoryKills.make({
         container: ContainerId.make("b".repeat(64)),
@@ -314,6 +316,8 @@ describe("run transcript", () => {
       ended(OutOfMemoryKills.make({ kills: 1, memoryMib: ContainerMemoryMib.make(4096) })),
       "Warning: The kernel killed 1 process for memory across containers in this attempt. The last container with recorded kills had a 4096 MiB memory limit",
     );
+    assert.include(ended(total), "vitest worker (host PID 1234)");
+    assert.include(ended(total), "Process details unavailable for 2 kills.");
     assert.notInclude(ended(null), "The kernel killed");
   });
 

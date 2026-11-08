@@ -267,3 +267,7 @@ Run `pnpm --filter @usine/engine check` after building dependencies to check Typ
 The local database composition provides `StepOutputStore` alongside `RunDatabase`. `layerWithDatabase` requires both ports. The engine writes documents before `finishAttempt`; replay preserves one row per output. Run reads and exports include only `StepResult.outputs` refs.
 
 `Submission.outcomeLabels` saves a loop's required verdict labels with its event. Before a successful completion, including a stored completion recovered after a restart, the engine invokes `CompletionCheck` (`/step-executor`). A rejected verdict fails the attempt and run. Already failed attempts retain their original failure. Custom hosts provide this reference to verify labels; a required check without a verifier fails with `AgentFailure`. Retry retains the saved requirement, while Run again uses the loop's current requirement.
+
+## Memory-kill records
+
+`RunStore.recordOutOfMemory` persists each container's available kernel task names and host PIDs with its kill count. Re-recording a container replaces its record; reattachment adds another container. Attempt snapshots aggregate both the counts and process lists. Older stored records decode with empty process lists.

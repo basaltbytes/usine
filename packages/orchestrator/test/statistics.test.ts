@@ -19,6 +19,7 @@ import {
   AttemptNumber,
   AttemptTask,
   FailureResolution,
+  OutOfMemoryKills,
 } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
@@ -41,7 +42,7 @@ import { Run, RunId } from "@usine/core/run";
 import { RunApproval } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
 import { StepName } from "@usine/core/step";
-import { WorkerName } from "@usine/core/worker";
+import { ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 import { ProjectionRevision, RunSummary } from "@usine/engine/run-reader";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -106,6 +107,7 @@ interface AttemptPlan {
   readonly outcome?: AttemptOutcome;
   readonly endedAt?: string;
   readonly start?: AttemptStart;
+  readonly memoryKills?: number;
 }
 
 const attempts = (runId: string, agent: Agent, plans: ReadonlyArray<AttemptPlan>) =>
@@ -120,6 +122,15 @@ const attempts = (runId: string, agent: Agent, plans: ReadonlyArray<AttemptPlan>
       task: AttemptTask.make("Work on it."),
       agent: agent.name,
       operatorIntervened: false,
+      outOfMemory:
+        plan.memoryKills === undefined
+          ? Option.none()
+          : Option.some(
+              OutOfMemoryKills.make({
+                kills: plan.memoryKills,
+                memoryMib: ContainerMemoryMib.make(6656),
+              }),
+            ),
       parentModel: Option.none(),
       startedAt: at(plan.startedAt),
       outcome: Option.fromUndefinedOr(plan.outcome),
@@ -420,6 +431,41 @@ const tasks = [
 const done = taskStatisticsView({ window: "7d", now, tasks, usage });
 
 describe("Task statistics", () => {
+  it("counts repeated memory kills once per attempt, including successful attempts, within the task window", () => {
+    const withKills = (id: string, kills: number) =>
+      summary({
+        id,
+        item: 1,
+        loop: startDev,
+        agent: developer,
+        state: RunState.Succeeded.make(),
+        openedAt: "21T08:00",
+        closedAt: "21T09:00",
+        attempts: [
+          {
+            worker: "w1",
+            startedAt: "21T08:01",
+            outcome: succeeded,
+            endedAt: "21T09:00",
+            memoryKills: kills,
+          },
+        ],
+      });
+    const view = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        mergedTask(1, at("22T08:00"), [withKills("one", 2), withKills("two", 1)]),
+        mergedTask(2, at("10T08:00"), [withKills("excluded", 9)]),
+      ],
+    });
+    assert.strictEqual(view.memoryKills, 3);
+    assert.strictEqual(view.memoryKillAttempts, 2);
+    assert.strictEqual(view.repeatedMemoryKillAttempts, 1);
+    assert.strictEqual(done.memoryKills, 0);
+  });
+
   it("counts the tasks merged in the window, from the first Run's opening to the last Run's close", () => {
     assert.strictEqual(done.from, "2026-10-19T00:00:00.000Z");
     assert.deepStrictEqual(

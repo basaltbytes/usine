@@ -148,6 +148,9 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
   await expect.element(statistics.getByText("review-fix about 4 min")).toBeVisible();
   await expect.element(statistics.getByText("75% of tasks", { exact: true })).toBeVisible();
   await expect
+    .element(statistics.getByText("5 memory kills across 2 attempts; 1 with repeated kills"))
+    .toBeVisible();
+  await expect
     .element(statistics.getByText("1.5 operator actions per task", { exact: true }))
     .toBeVisible();
   await expect.element(statistics.getByText("620K median", { exact: true })).toBeVisible();

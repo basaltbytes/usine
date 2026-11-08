@@ -1,5 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ContainerOutOfMemoryKills, OutOfMemoryKills } from "@usine/core/attempt";
+import {
+  ContainerOutOfMemoryKills,
+  MemoryKilledProcess,
+  OutOfMemoryKills,
+} from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import {
   SalvagePartlyPushed,
@@ -247,6 +251,9 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
                 ContainerOutOfMemoryKills.make({
                   container: ContainerId.make(container.repeat(64)),
                   kills,
+                  processes: [
+                    MemoryKilledProcess.make({ command: `worker-${container}`, pid: 1234 }),
+                  ],
                   memoryMib: ContainerMemoryMib.make(memoryMib),
                 }),
               );
@@ -277,7 +284,14 @@ export const attemptRecordsContract = (adapter: PersistenceAdapter) => {
             assert.deepStrictEqual(
               attempts[0]?.outOfMemory,
               Option.some(
-                OutOfMemoryKills.make({ kills: 3, memoryMib: ContainerMemoryMib.make(7168) }),
+                OutOfMemoryKills.make({
+                  kills: 3,
+                  memoryMib: ContainerMemoryMib.make(7168),
+                  processes: [
+                    MemoryKilledProcess.make({ command: "worker-a", pid: 1234 }),
+                    MemoryKilledProcess.make({ command: "worker-b", pid: 1234 }),
+                  ],
+                }),
               ),
             );
             assert.deepStrictEqual(attempts[1]?.outOfMemory, Option.none());

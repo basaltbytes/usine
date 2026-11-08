@@ -195,3 +195,6 @@ export const machineStartsCopy = {
 
 export const machineReuseLine = (machine: MachineView, now: number): string =>
   `${machine.id ?? "Creating"}: ${machine.attempts} ${machine.attempts === 1 ? "attempt" : "attempts"}, ${elapsedLabel(machine.since, now)} old${machine.state === "idle" ? ", idle" : ""}`;
+
+export const memoryKillsLine = (kills: number, attempts: number, repeated: number): string =>
+  `${countLabel(kills, "memory kill", "memory kills")} across ${countLabel(attempts, "attempt", "attempts")}; ${repeated} with repeated kills`;

@@ -3,6 +3,8 @@ import { Effect, DateTime, Option, Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
+  ContainerOutOfMemoryKills,
+  OutOfMemoryKills,
   ProviderRetry,
   FailureResolution,
   AttemptNumber,
@@ -183,5 +185,20 @@ describe("retained push refusal", () => {
         const decodedValue2 = yield* Schema.decodeEffect(json)(decodedValue1);
         expect(decodedValue2).toEqual(retained);
       }),
+  );
+});
+
+describe("older OOM records", () => {
+  it.effect("decodes records from before process details were collected", () =>
+    Effect.gen(function* () {
+      const fields = { kills: 2, memoryMib: 6656 };
+      const total = yield* Schema.decodeEffect(OutOfMemoryKills)(fields);
+      const container = yield* Schema.decodeEffect(ContainerOutOfMemoryKills)({
+        ...fields,
+        container: "a".repeat(64),
+      });
+      expect(total.processes).toEqual([]);
+      expect(container.processes).toEqual([]);
+    }),
   );
 });

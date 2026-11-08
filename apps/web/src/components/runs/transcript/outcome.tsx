@@ -5,7 +5,13 @@ import { Match, Option } from "effect";
 import { Markdown } from "~/components/markdown";
 import { StateMark } from "~/components/status-badge";
 import { cn } from "~/lib/utils";
-import { failureMessage, failureReason, outOfMemoryLine } from "~/lib/runs/strings";
+import {
+  failureMessage,
+  failureReason,
+  memoryProcessesLabel,
+  missingMemoryProcessesLine,
+  outOfMemoryLine,
+} from "~/lib/runs/strings";
 import type { AttemptEnd } from "~/lib/runs/transcript/document/model";
 
 type FailureNoteProps = {
@@ -98,10 +104,27 @@ const End = ({ end }: EndProps) =>
 type OutOfMemoryLineProps = { readonly kills: OutOfMemoryKills };
 
 const OutOfMemoryLine = ({ kills }: OutOfMemoryLineProps) => (
-  <p className="text-xs text-warning wrap-anywhere">
-    <span className="sr-only">Warning: </span>
-    {outOfMemoryLine(kills)}
-  </p>
+  <div className="space-y-1 text-xs text-warning wrap-anywhere">
+    <p>
+      <span className="sr-only">Warning: </span>
+      {outOfMemoryLine(kills)}
+    </p>
+    {kills.processes.length > 0 && (
+      <div>
+        <p>{memoryProcessesLabel}</p>
+        <ul aria-label={memoryProcessesLabel}>
+          {kills.processes.map(({ command, pid }, index) => (
+            <li key={index}>
+              <code>{command}</code> (host PID {pid})
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+    {kills.processes.length < kills.kills && (
+      <p>{missingMemoryProcessesLine(kills.kills - kills.processes.length)}</p>
+    )}
+  </div>
 );
 
 type OutcomeProps = {
