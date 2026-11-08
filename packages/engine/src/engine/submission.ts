@@ -102,6 +102,19 @@ export const runIdFor = Effect.fn("Submission.runIdFor")(function* (submission: 
   return RunId.make(Hex.encode(digest.subarray(0, 16)));
 });
 
+/** Returns the dedup key of the CI fix Event for the failed `head` of the source Run. */
+export const ciFixDedupKey = (sourceRunId: RunId, head: CommitSha): DedupKey =>
+  DedupKey.make(jsonKey(["ci-failure", sourceRunId, head]));
+
+/**
+ * Returns the bounds of every CI fix dedup key of the source Run: the keys start with the
+ * returned `from` and sort below `to`, since `-` follows `,` in code point order.
+ */
+export const ciFixDedupKeyRange = (sourceRunId: RunId) => {
+  const from = `${jsonKey(["ci-failure", sourceRunId]).slice(0, -1)},`;
+  return { from: DedupKey.make(from), to: DedupKey.make(`${from.slice(0, -1)}-`) };
+};
+
 /**
  * Returns the Submission recorded when the Item returns to the state of an Event whose Run was
  * canceled. Its dedup key combines the original key and the reopening number, so the new Run

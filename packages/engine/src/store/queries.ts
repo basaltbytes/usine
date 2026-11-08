@@ -138,6 +138,24 @@ const eventRouteSelection = {
   parentModel: triggerEvents.parentModel,
 } as const;
 
+/** The trigger Event columns that hold the Loop's settings when the Event matched. */
+const loopSettingColumns = Effect.fnUntraced(function* (submission: Submission) {
+  const ciPolicyJson = yield* Option.match(submission.ciPolicy, {
+    onNone: () => Effect.succeed(null),
+    onSome: Schema.encodeEffect(CiPolicy),
+  }).pipe(Effect.orDie);
+  return {
+    approval: submission.approval,
+    approvalReason: Option.getOrNull(submission.approvalReason),
+    permissions: submission.permissions,
+    ciPolicyJson,
+    outcomeLabelsJson: [...submission.outcomeLabels],
+    cycleLimit: Option.getOrNull(submission.cycleLimit),
+    agentJson: yield* encodeAgent(submission.agent),
+    parentModel: Option.getOrNull(submission.parentModel),
+  };
+});
+
 const approvalEvents = alias(events, "approval_event");
 
 const runSelection = {
@@ -1084,11 +1102,7 @@ export const queriesFor = (
       const ciOnGreenJson = yield* Schema.encodeEffect(Submission.fields.ciOnGreen)(
         submission.ciOnGreen,
       ).pipe(Effect.orDie);
-      const ciPolicyJson = yield* Option.match(submission.ciPolicy, {
-        onNone: () => Effect.succeed(null),
-        onSome: Schema.encodeEffect(CiPolicy),
-      }).pipe(Effect.orDie);
-      const agentJson = yield* encodeAgent(submission.agent);
+      const settings = yield* loopSettingColumns(submission);
       yield* database
         .insert(triggerEvents)
         .values({
@@ -1096,20 +1110,13 @@ export const queriesFor = (
           itemKey: submission.itemKey,
           loopName: submission.loop,
           stepName: submission.step,
-          approval: submission.approval,
-          approvalReason: Option.getOrNull(submission.approvalReason),
-          permissions: submission.permissions,
+          ...settings,
           ciFailureHead: Option.getOrNull(submission.ciFailureHead),
           ciOnGreenJson: ciOnGreenJson,
-          ciPolicyJson: ciPolicyJson,
-          outcomeLabelsJson: [...submission.outcomeLabels],
-          cycleLimit: Option.getOrNull(submission.cycleLimit),
           cycleGeneration: submission.cycleGeneration,
           repository: submission.repository,
           revision: submission.revision,
           task: submission.task,
-          agentJson: agentJson,
-          parentModel: Option.getOrNull(submission.parentModel),
           reopensEventId: Option.getOrNull(Option.map(reopens, ({ eventId }) => eventId)),
           reopening: Option.match(reopens, {
             onNone: () => 0,
@@ -1122,13 +1129,53 @@ export const queriesFor = (
     return submissionFromRow(existing);
   });
 
-  const pendingCiFixes = Effect.fn("RunStoreQueries.pendingCiFixes")(function* () {
-    const rows = yield* database
+  /**
+   * Returns the current unclaimed Events of a Loop's Item, newest first, with the newest as the
+   * submission to open. Every admission path picks the newest Event, CI fix or trigger match.
+   */
+  const queuedOn = Effect.fn("RunStoreQueries.queuedOn")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+  ) {
+    const queuedRows = yield* database
       .select(eventRouteSelection)
       .from(events)
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
       .leftJoin(runs, eq(runs.eventId, events.eventId))
       .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, events.eventId))
+      .where(
+        and(
+          eq(triggerEvents.loopName, loop),
+          eq(triggerEvents.itemKey, itemKey),
+          cycleQueries(database, record).currentEvent,
+          isNull(runs.runId),
+          isNull(ignoredEvents.eventId),
+        ),
+      )
+      .orderBy(desc(events.receivedAt), desc(events.eventId))
+      .execute();
+    const queued = yield* decodeEventRoutes(queuedRows);
+    return Option.fromNullishOr(queued[0]).pipe(
+      Option.map((newest): QueuedEvents => ({
+        submission: submissionFromRow(newest),
+        eventIds: queued.map((row) => row.eventId),
+      })),
+    );
+  });
+
+  /**
+   * Returns the Loops' Items with a current queued Event and no open Run, excluding Items waiting
+   * for a cycle-budget reset or under a suppression. `ciFix` limits the Items to those with a
+   * queued CI fix.
+   */
+  const admissibleItems = Effect.fn("RunStoreQueries.admissibleItems")(function* (
+    ciFix: boolean,
+  ) {
+    const items = yield* database
+      .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
+      .from(triggerEvents)
+      .leftJoin(runs, eq(runs.eventId, triggerEvents.eventId))
+      .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, triggerEvents.eventId))
       .leftJoin(itemCycleBudgets, eq(itemCycleBudgets.itemKey, triggerEvents.itemKey))
       .leftJoin(
         loopItems,
@@ -1139,20 +1186,35 @@ export const queriesFor = (
       )
       .where(
         and(
-          isNotNull(triggerEvents.ciFailureHead),
-          cycleQueries(database, record).currentEvent,
+          ciFix ? isNotNull(triggerEvents.ciFailureHead) : undefined,
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
           isNull(itemCycleBudgets.askJson),
           isNull(loopItems.suppressedByRunId),
+          cycleQueries(database, record).currentEvent,
         ),
       )
-      .orderBy(desc(events.receivedAt))
       .execute();
-    return (yield* decodeEventRoutes(rows)).map((row): QueuedEvents => ({
-      submission: submissionFromRow(row),
-      eventIds: [row.eventId],
-    }));
+    const decoded = yield* Schema.decodeEffect(
+      Schema.Array(Schema.Struct({ loop: LoopName, itemKey: ItemKey })),
+    )(items);
+    const unblocked = yield* Effect.forEach(decoded, (item) =>
+      blockingRun(item.loop, item.itemKey).pipe(
+        Effect.map((blocking) => (blocking.length === 0 ? [item] : [])),
+      ),
+    );
+    return unblocked.flat();
+  });
+
+  // The queues whose newest Event is a CI fix; `pendingContinuations` takes the others.
+  const pendingCiFixes = Effect.fn("RunStoreQueries.pendingCiFixes")(function* () {
+    const items = yield* admissibleItems(true);
+    const queues = yield* Effect.forEach(items, ({ loop, itemKey }) => queuedOn(loop, itemKey));
+    return queues.flatMap((queued) =>
+      Option.isSome(queued) && Option.isSome(queued.value.submission.ciFailureHead)
+        ? [queued.value]
+        : [],
+    );
   });
 
   const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: RunId) {
@@ -1169,30 +1231,7 @@ export const queriesFor = (
       });
       return Option.none<QueuedEvents>();
     }
-    const queuedRows = yield* database
-      .select(eventRouteSelection)
-      .from(events)
-      .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
-      .leftJoin(runs, eq(runs.eventId, events.eventId))
-      .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, events.eventId))
-      .where(
-        and(
-          eq(triggerEvents.loopName, current.loop),
-          eq(triggerEvents.itemKey, current.itemKey),
-          cycleQueries(database, record).currentEvent,
-          isNull(runs.runId),
-          isNull(ignoredEvents.eventId),
-        ),
-      )
-      .orderBy(desc(events.receivedAt))
-      .execute();
-    const queued = yield* decodeEventRoutes(queuedRows);
-    return Option.fromNullishOr(queued[0]).pipe(
-      Option.map((newest): QueuedEvents => ({
-        submission: submissionFromRow(newest),
-        eventIds: queued.map((row) => row.eventId),
-      })),
-    );
+    return yield* queuedOn(current.loop, current.itemKey);
   });
 
   const runIdsToDrive = Effect.fn("RunStoreQueries.runIdsToDrive")(function* () {
@@ -1206,38 +1245,15 @@ export const queriesFor = (
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
 
-  // The newest closed Run of each Item that has a current queued Event and no open Run, excluding
-  // Items waiting for a cycle-budget reset or under a suppression.
+  // The newest closed Run of each queue whose newest Event is a trigger match; `pendingCiFixes`
+  // takes the queues whose newest Event is a CI fix.
   const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
-    const items = yield* database
-      .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
-      .from(triggerEvents)
-      .leftJoin(runs, eq(runs.eventId, triggerEvents.eventId))
-      .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, triggerEvents.eventId))
-      .leftJoin(itemCycleBudgets, eq(itemCycleBudgets.itemKey, triggerEvents.itemKey))
-      .leftJoin(
-        loopItems,
-        and(
-          eq(loopItems.loopName, triggerEvents.loopName),
-          eq(loopItems.itemKey, triggerEvents.itemKey),
-        ),
-      )
-      .where(
-        and(
-          isNull(runs.runId),
-          isNull(ignoredEvents.eventId),
-          isNull(itemCycleBudgets.askJson),
-          isNull(loopItems.suppressedByRunId),
-          cycleQueries(database, record).currentEvent,
-        ),
-      )
-      .execute();
-    const decoded = yield* Schema.decodeEffect(
-      Schema.Array(Schema.Struct({ loop: LoopName, itemKey: ItemKey })),
-    )(items);
-    const closed = yield* Effect.forEach(decoded, ({ loop, itemKey }) =>
+    const items = yield* admissibleItems(false);
+    const closed = yield* Effect.forEach(items, ({ loop, itemKey }) =>
       Effect.gen(function* () {
-        if ((yield* blockingRun(loop, itemKey)).length > 0) return [];
+        const queued = yield* queuedOn(loop, itemKey);
+        if (Option.isNone(queued) || Option.isSome(queued.value.submission.ciFailureHead))
+          return [];
         const rows = yield* database
           .select({ runId: runs.runId })
           .from(runs)
@@ -1250,6 +1266,21 @@ export const queriesFor = (
       }),
     );
     return closed.flat().map(({ runId }) => runId);
+  });
+
+  /**
+   * Replaces the Loop settings saved with a queued Event by `submission`'s: approval, permissions,
+   * CI policy, outcome labels, cycle limit, Agent, and parent model.
+   */
+  const recordSettings = Effect.fn("RunStoreQueries.recordSettings")(function* (
+    submission: Submission,
+  ) {
+    const settings = yield* loopSettingColumns(submission);
+    yield* database
+      .update(triggerEvents)
+      .set(settings)
+      .where(eq(triggerEvents.eventId, submission.event.id))
+      .execute();
   });
 
   const revokeQueued = Effect.fn("RunStoreQueries.revokeQueued")(function* (
@@ -1349,6 +1380,7 @@ export const queriesFor = (
     recordRunAgain,
     pendingContinuations,
     pendingCiFixes,
+    recordSettings,
     recordTriggerEvent,
     runIdsToDrive,
     recordApproval,

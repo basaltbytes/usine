@@ -21,7 +21,7 @@ import type { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
-import { TriggerCondition, type TriggerRecheck } from "../src/trigger-condition.ts";
+import { TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 
 export const stepResult = (message: string) => StepResult.make({ message, facts: [] });
 export const testAgent = Agent.make({
@@ -38,9 +38,14 @@ export const testAgent = Agent.make({
 
 export type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
 
-/** Returns a `TriggerCondition` layer that gives every queued Event the same answer. */
-export const conditionLayer = (recheck: Effect.Effect<TriggerRecheck>) =>
-  Layer.succeed(TriggerCondition)({ recheck: () => recheck });
+/** Returns a `TriggerCondition` layer that answers each recheck with `recheck`. */
+export const conditionLayer = (
+  recheck: (submission: Submission) => Effect.Effect<TriggerRecheck>,
+) => Layer.succeed(TriggerCondition)({ recheck });
+
+/** A recheck that matches the queued Event with its saved settings. */
+export const stillMatches = (submission: Submission) =>
+  Effect.succeed(TriggerRecheck.Matches({ submission }));
 
 /**
  * Returns the local engine over a scripted `StepExecutor`. Queued Events still match unless the
@@ -49,7 +54,7 @@ export const conditionLayer = (recheck: Effect.Effect<TriggerRecheck>) =>
 export const engineLayer = (
   directory: InstanceDirectory,
   executor: Layer.Layer<StepExecutor>,
-  condition: Layer.Layer<TriggerCondition> = conditionLayer(Effect.succeed("matches")),
+  condition: Layer.Layer<TriggerCondition> = conditionLayer(stillMatches),
 ) => layer(directory).pipe(Layer.provide(executor), Layer.provide(condition));
 
 export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>

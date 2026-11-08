@@ -24,7 +24,7 @@ import { transcriptCodecLayer } from "../src/database/transcript-codec.ts";
 import { RunEngine, Submission } from "../src/engine/engine.ts";
 import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
-import { TriggerCondition } from "../src/trigger-condition.ts";
+import { TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 import {
   type AttemptPlan,
   engineLayer,
@@ -76,7 +76,9 @@ describe("Run evidence reader", () => {
       const writer = layer(directory).pipe(
         Layer.provide(executor),
         Layer.provide(
-          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+          Layer.succeed(TriggerCondition)({
+            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+          }),
         ),
       );
       yield* Effect.gen(function* () {

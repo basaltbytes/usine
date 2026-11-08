@@ -19,7 +19,8 @@ import { CycleBudgets } from "../src/cycle-budget/cycle-budget.ts";
 import { CommitSha } from "@usine/core/repository";
 import { LoopName } from "@usine/core/loop";
 import { PullRequest, StepResult } from "@usine/core/step/result";
-import { Context, Effect, Exit, Option, Scope, Layer, TxRef } from "effect";
+import { Context, Deferred, Effect, Exit, Option, Ref, Schedule, Scope, Layer, TxRef } from "effect";
+import type { EventId } from "@usine/core/event";
 import { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { RunStore } from "../src/store/store.ts";
@@ -29,9 +30,13 @@ import { RunId } from "@usine/core/run";
 import { Result } from "effect";
 import {
   approvalEvent,
+  type AttemptPlan,
+  conditionLayer,
   engineLayer,
+  executorLayer,
   slottedExecutor,
   stepResult,
+  stillMatches,
   submission,
   waitFor,
   withInstance,
@@ -448,8 +453,10 @@ it.live(
             assert.deepStrictEqual(waitingForReset, []);
             yield* store.revoke(current.loop, current.itemKey);
             const answer = approvalEvent(1);
-            yield* budgets.reset(blocked.result.ask.id, answer);
-            yield* budgets.reset(blocked.result.ask.id, answer);
+            const replayed = yield* budgets.reset(blocked.result.ask.id, answer);
+            assert.deepStrictEqual(replayed, [current.event.id]);
+            const repeated = yield* budgets.reset(blocked.result.ask.id, answer);
+            assert.deepStrictEqual(repeated, []);
             const pending = yield* store.pendingCiFixes;
             assert.strictEqual(pending.length, 1);
             assert.strictEqual(pending[0]?.submission.event.id, current.event.id);
@@ -585,4 +592,129 @@ it.live("a suppressed CI fix stays queued until the operator resolves the blocke
       }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
     ),
   ),
+);
+
+it.live("a CI fix queued behind a running attempt is not rechecked until the attempt ends", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const finish = yield* Deferred.make<void>();
+      const rechecks = yield* Ref.make<ReadonlyArray<EventId>>([]);
+      const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+        Deferred.await(finish).pipe(Effect.as(stepResult("first"))),
+        Effect.succeed(stepResult("fixed")),
+      ]);
+      const condition = conditionLayer((queued) =>
+        Ref.update(rechecks, (all) => [...all, queued.event.id]).pipe(
+          Effect.andThen(stillMatches(queued)),
+        ),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const running = yield* engine.submit(submission({ number: 1 }));
+          assert(running._tag === "Claimed");
+          yield* waitFor(engine, running.runId, ({ run }) => run.state._tag === "Running");
+          const fix = Submission.make({
+            ...submission({ number: 2 }),
+            ciFailureHead: Option.some(head),
+          });
+          const queued = yield* engine.submit(fix);
+          assert.strictEqual(queued._tag, "Queued");
+
+          yield* engine.reconcile;
+
+          const behindRunning = yield* Ref.get(rechecks);
+          assert.deepStrictEqual(behindRunning, []);
+          yield* Deferred.succeed(finish, undefined);
+          const reader = yield* RunReader;
+          const opened = yield* reader.runForEvent(fix.event.dedupKey).pipe(
+            Effect.repeat({
+              until: Option.isSome,
+              schedule: Schedule.spaced("10 millis"),
+              times: 500,
+            }),
+          );
+          assert(Option.isSome(opened));
+          const afterClose = yield* Ref.get(rechecks);
+          assert.deepStrictEqual(afterClose, [fix.event.id]);
+          yield* engine.drain;
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans), condition))),
+      );
+    }),
+  ),
+);
+
+it.live.each(["CI fix", "trigger match"] as const)(
+  "the newest queued Event opens the next Run when it is a %s",
+  (newest) =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const storage = RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)));
+        const ciFix = (number: number) =>
+          Submission.make({ ...submission({ number }), ciFailureHead: Option.some(head) });
+        const older = newest === "CI fix" ? submission({ number: 2 }) : ciFix(2);
+        const newer = newest === "CI fix" ? ciFix(3) : submission({ number: 3 });
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const sourceId = RunId.make("closed-source");
+            yield* store.recordAndClaim(submission({ number: 1 }), sourceId);
+            const started = yield* store.beginAttempt(
+              sourceId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
+            assert(started._tag === "AttemptStarted");
+            const queuedOlder = yield* store.recordAndClaim(older, RunId.make("older"));
+            assert.strictEqual(queuedOlder.result._tag, "Queued");
+            const queuedNewer = yield* store.recordAndClaim(newer, RunId.make("newer"));
+            assert.strictEqual(queuedNewer.result._tag, "Queued");
+            const whileRunning = yield* store.pendingCiFixes;
+            assert.deepStrictEqual(whileRunning, []);
+            yield* store.finishAttempt(
+              started.execution.attempt,
+              Result.succeed(stepResult("first")),
+            );
+
+            const fixes = yield* store.pendingCiFixes;
+            const continuations = yield* store.pendingContinuations;
+
+            if (newest === "CI fix") {
+              assert.deepStrictEqual(
+                fixes.map(({ submission, eventIds }) => [submission.event.id, eventIds]),
+                [[newer.event.id, [newer.event.id, older.event.id]]],
+              );
+              assert.deepStrictEqual(continuations, []);
+            } else {
+              assert.deepStrictEqual(fixes, []);
+              assert.deepStrictEqual(continuations, [sourceId]);
+            }
+          }).pipe(Effect.provide(storage)),
+        );
+
+        const rechecks = yield* Ref.make<ReadonlyArray<EventId>>([]);
+        const condition = conditionLayer((queued) =>
+          Ref.update(rechecks, (all) => [...all, queued.event.id]).pipe(
+            Effect.andThen(stillMatches(queued)),
+          ),
+        );
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("newest")),
+        ]);
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const reader = yield* RunReader;
+            const opened = yield* reader.runForEvent(newer.event.dedupKey);
+            assert(Option.isSome(opened));
+            yield* waitFor(engine, opened.value, ({ run }) => run.state._tag === "Succeeded");
+            const superseded = yield* reader.runForEvent(older.event.dedupKey);
+            assert(Option.isNone(superseded));
+            const checked = yield* Ref.get(rechecks);
+            assert.deepStrictEqual(checked, [newer.event.id]);
+            yield* engine.drain;
+          }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans), condition))),
+        );
+      }),
+    ),
 );

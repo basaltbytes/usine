@@ -12,7 +12,7 @@ import {
   ItemProjectionSource,
   ItemProjectionWriter,
 } from "../src/item-projection/item-projection.ts";
-import { TriggerCondition, type TriggerRecheck } from "../src/trigger-condition.ts";
+import { TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 import { runIdFor } from "../src/engine/submission.ts";
 import {
   approvalEvent,
@@ -22,6 +22,7 @@ import {
   engineLayer,
   executorLayer,
   stepResult,
+  stillMatches,
   submission,
   waitFor,
   withInstance,
@@ -40,7 +41,7 @@ describe("queued Event trigger re-check", () => {
         const runtime = engineLayer(
           directory,
           executorLayer(plans),
-          conditionLayer(Effect.succeed("no-longer-matches")),
+          conditionLayer(() => Effect.succeed(TriggerRecheck.NoLongerMatches())),
         );
         const path = yield* Path.Path;
         const database = path.join(directory, ".usine", "runtime.sqlite");
@@ -105,7 +106,7 @@ describe("queued Event trigger re-check", () => {
           const runtime = engineLayer(
             directory,
             executorLayer(plans),
-            conditionLayer(Effect.succeed("item-gone")),
+            conditionLayer(() => Effect.succeed(TriggerRecheck.ItemGone())),
           );
           const repository = RepositoryName.make("basaltbytes/usine");
           yield* Effect.gen(function* () {
@@ -170,7 +171,7 @@ describe("queued Event trigger re-check", () => {
                 ? Deferred.succeed(checking, undefined).pipe(
                     Effect.andThen(Deferred.await(checked)),
                   )
-                : Effect.succeed("matches"),
+                : stillMatches(candidate),
           }),
         );
         const path = yield* Path.Path;
@@ -187,7 +188,7 @@ describe("queued Event trigger re-check", () => {
           assert(third._tag === "Claimed");
           yield* waitFor(engine, third.runId, ({ run }) => run.state._tag === "Running");
           assert.strictEqual((yield* engine.submit(fourth))._tag, "Queued");
-          yield* Deferred.succeed(checked, "no-longer-matches");
+          yield* Deferred.succeed(checked, TriggerRecheck.NoLongerMatches());
 
           // Wait for B's delayed revocation to commit before allowing C to close.
           const revoked = Effect.gen(function* () {

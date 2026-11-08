@@ -1,7 +1,7 @@
 import { TranscriptCodec } from "../store/transcript/codec.ts";
 import { Context, type DateTime, Effect, Layer, Option, Schema } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
-import { eq } from "drizzle-orm";
+import { and, asc, eq, gte, lt, or } from "drizzle-orm";
 import { events as storedEvents, runs } from "../database/schema.ts";
 import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
@@ -22,6 +22,7 @@ import {
 import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { RunStoreError } from "../engine/error.ts";
 import { persistence } from "../store/codec.ts";
+import { ciFixDedupKeyRange } from "../engine/submission.ts";
 import { leftoverQueries } from "../store/leftovers.ts";
 import { queriesFor } from "../store/queries.ts";
 
@@ -47,6 +48,44 @@ const makeRunReader = Effect.gen(function* () {
     yield* Effect.logDebug("Read the run admitted for an event", { dedupKey, run });
     return Option.map(run, ({ runId }) => runId);
   }, persistence("read the run admitted for an event"));
+  const ciFixRuns = Effect.fn("RunReader.ciFixRuns")(function* (
+    sourceRunIds: ReadonlyArray<RunId>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ sourceRunIds });
+    const ranges = sourceRunIds.map((sourceRunId) => ({
+      sourceRunId,
+      ...ciFixDedupKeyRange(sourceRunId),
+    }));
+    const rows =
+      ranges.length === 0
+        ? []
+        : yield* database
+            .select({ runId: runs.runId, dedupKey: storedEvents.dedupKey })
+            .from(storedEvents)
+            .innerJoin(runs, eq(runs.eventId, storedEvents.eventId))
+            .where(
+              or(
+                ...ranges.map(({ from, to }) =>
+                  and(gte(storedEvents.dedupKey, from), lt(storedEvents.dedupKey, to)),
+                ),
+              ),
+            )
+            .orderBy(asc(runs.openedAt))
+            .execute();
+    const decoded = yield* Schema.decodeEffect(
+      Schema.Array(Schema.Struct({ runId: RunId, dedupKey: Schema.String })),
+    )(rows);
+    const fixes = new Map<RunId, RunId>();
+    for (const { runId, dedupKey } of decoded) {
+      const source = ranges.find(({ from, to }) => dedupKey >= from && dedupKey < to);
+      if (source !== undefined) fixes.set(source.sourceRunId, runId);
+    }
+    yield* Effect.logDebug("Read the CI fix runs of source runs", {
+      sourceRunIds: sourceRunIds.length,
+      fixRuns: fixes.size,
+    });
+    return fixes;
+  }, persistence("read the CI fix runs of source runs"));
   const evidence = Effect.fn("RunReader.evidence")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     const evidence = yield* snapshot
@@ -155,6 +194,7 @@ const makeRunReader = Effect.gen(function* () {
     inspect,
     summary,
     runForEvent,
+    ciFixRuns,
     evidence,
     list,
     closed,
@@ -185,6 +225,13 @@ export class RunReader extends Context.Service<
     readonly runForEvent: (
       dedupKey: DedupKey,
     ) => Effect.Effect<Option.Option<RunId>, RunStoreError>;
+    /**
+     * Returns the CI fix Run admitted for each source Run's failed head, keyed by source Run. Source
+     * Runs without an admitted fix are absent; a source Run with several fixes maps to the newest.
+     */
+    readonly ciFixRuns: (
+      sourceRunIds: ReadonlyArray<RunId>,
+    ) => Effect.Effect<ReadonlyMap<RunId, RunId>, RunStoreError>;
     /** Returns a Run snapshot and all its transcript entries, in append order, from one snapshot. */
     readonly evidence: (runId: RunId) => Effect.Effect<RunEvidence, RunStoreError>;
     /** Returns every open Run plus the newest `closedLimit` closed ones and their Attempts from one snapshot, newest first. */
