@@ -1,6 +1,6 @@
 import { EndpointName, HarnessSessionId } from "@usine/core/agent/session";
 import { Schema } from "effect";
-import { UsageCount } from "./count.ts";
+import { UsageCount } from "../count.ts";
 import {
   AccountRateLimitsUpdatedNotification,
   AccountUpdatedNotification,
@@ -32,7 +32,7 @@ import {
   TurnStatusValues,
   UserMessageThreadItem,
   WebSearchThreadItem,
-} from "./codex.generated.ts";
+} from "./generated.ts";
 
 const matchesKnownValue =
   <Values extends ReadonlyArray<string>>(_values: Values) =>
@@ -235,7 +235,7 @@ export const ErrorNotification = GeneratedErrorNotification.mapFields(
   }),
 );
 export const TurnActivity = AgentMessageDeltaNotification.mapFields(({ turnId }) => ({ turnId }));
-export { RateLimitWindow } from "./codex.generated.ts";
+export { RateLimitWindow } from "./generated.ts";
 export const RateLimitsUpdated = AccountRateLimitsUpdatedNotification.mapFields(
   ({ rateLimits }) => ({
     rateLimits: rateLimits.mapFields(({ limitId, limitName, primary, secondary }) => ({

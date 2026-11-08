@@ -1,6 +1,6 @@
 import { TokenBreakdown, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { flow, Option, Schema } from "effect";
-import type { CodexTokenUsage } from "../protocol/codex.ts";
+import type { CodexTokenUsage } from "../protocol/codex/codex.ts";
 import { UsageCount } from "../protocol/count.ts";
 
 const Dollars = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));

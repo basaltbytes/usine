@@ -13,11 +13,11 @@ import {
   isToolStatus,
   isMessagePhase,
   isAuthMode,
-} from "../src/protocol/codex.ts";
-import { CODEX_PROTOCOL } from "../src/protocol/codex-version.ts";
+} from "../src/protocol/codex/codex.ts";
+import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
 import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
-import { ImageGenerationThreadItem } from "../src/protocol/codex.generated.ts";
+import { ImageGenerationThreadItem } from "../src/protocol/codex/generated.ts";
 import { expectTypeOf } from "vitest";
 
 describe("generated Codex protocol selections", () => {

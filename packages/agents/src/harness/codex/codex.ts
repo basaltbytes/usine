@@ -50,7 +50,7 @@ import {
   TurnSteerParams,
   TurnStartResponse,
   UserMessageItem,
-} from "../../protocol/codex.ts";
+} from "../../protocol/codex/codex.ts";
 import {
   userMessageText,
   decodeResponse,

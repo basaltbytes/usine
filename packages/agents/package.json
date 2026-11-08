@@ -82,8 +82,8 @@
     "test:integration:claude": "node build-worker.mjs && vitest run test/integration/claude.test.ts",
     "test:integration:codex": "node build-worker.mjs && vitest run test/integration/codex.test.ts",
     "test:integration:pi": "node build-worker.mjs && vitest run test/integration/pi.test.ts",
-    "codex:generate": "node --experimental-strip-types scripts/generate-codex.mjs",
-    "codex:check": "node --experimental-strip-types scripts/generate-codex.mjs --check"
+    "codex:generate": "node --experimental-strip-types scripts/codex/generate.mjs",
+    "codex:check": "node --experimental-strip-types scripts/codex/generate.mjs --check"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.311",

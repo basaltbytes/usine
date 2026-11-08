@@ -7,7 +7,7 @@ import {
   type TurnCompleted,
   type UserMessageItem,
   UserTextInput,
-} from "../../protocol/codex.ts";
+} from "../../protocol/codex/codex.ts";
 import {
   AgentCapacityError,
   AgentResultError,

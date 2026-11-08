@@ -1,5 +1,5 @@
 /**
- * Type check of `src/protocol/codex.ts` against the pinned `@pwrdrvr/codex-app-server-protocol`
+ * Type check of `src/protocol/codex/codex.ts` against the pinned `@pwrdrvr/codex-app-server-protocol`
  * package. `tsconfig.conformance.json` compiles it with bundler module resolution, which that
  * package requires because its internal imports are extensionless; `pnpm check` fails here if the
  * types drift.
@@ -21,7 +21,7 @@ import type {
   TurnSteerParams,
   UserInput,
 } from "@pwrdrvr/codex-app-server-protocol/v2";
-import type * as Ours from "../src/protocol/codex.ts";
+import type * as Ours from "../src/protocol/codex/codex.ts";
 
 type Mutable<T> =
   T extends ReadonlyArray<infer E>

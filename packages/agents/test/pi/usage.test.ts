@@ -9,7 +9,7 @@ import {
   codexTokenBreakdown,
   piMessageUsage,
 } from "../../src/harness/usage.ts";
-import { CodexTokenUsage } from "../../src/protocol/codex.ts";
+import { CodexTokenUsage } from "../../src/protocol/codex/codex.ts";
 
 describe("Claude query tokens", () => {
   it("restores a retained process's usage separately from earlier processes", () => {
