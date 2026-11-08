@@ -13,6 +13,8 @@ export const GranularAskForApproval = Schema.Struct({
   }),
 });
 
+export const AskForApprovalValues = ["untrusted", "on-request", "never"] as const;
+
 export const AskForApproval = Schema.Union([Schema.String, GranularAskForApproval]);
 
 export const ApprovalsReviewerValues = ["user", "auto_review", "guardian_subagent"] as const;
@@ -109,6 +111,8 @@ export const ThreadSpawnSubAgentSource = Schema.Struct({
 
 export const OtherSubAgentSource = Schema.Struct({ other: Schema.String });
 
+export const SubAgentSourceValues = ["review", "compact", "memory_consolidation"] as const;
+
 export const SubAgentSource = Schema.Union([
   Schema.String,
   ThreadSpawnSubAgentSource,
@@ -116,6 +120,8 @@ export const SubAgentSource = Schema.Union([
 ]);
 
 export const SubAgentSessionSource = Schema.Struct({ subAgent: SubAgentSource });
+
+export const SessionSourceValues = ["cli", "vscode", "exec", "appServer", "unknown"] as const;
 
 export const SessionSource = Schema.Union([
   Schema.String,
@@ -178,6 +184,24 @@ export const NonSteerableTurnKind = Schema.String;
 export const ActiveTurnNotSteerableCodexErrorInfo = Schema.Struct({
   activeTurnNotSteerable: Schema.Struct({ turnKind: NonSteerableTurnKind }),
 });
+
+export const CodexErrorInfoValues = [
+  "contextWindowExceeded",
+  "sessionBudgetExceeded",
+  "usageLimitExceeded",
+  "rateLimitExceeded",
+  "flexUnavailable",
+  "serverOverloaded",
+  "cyberPolicy",
+  "misalignmentPolicyViolation",
+  "tooManyDenials",
+  "internalServerError",
+  "unauthorized",
+  "badRequest",
+  "threadRollbackFailed",
+  "sandboxError",
+  "other",
+] as const;
 
 export const CodexErrorInfo = Schema.Union([
   Schema.String,

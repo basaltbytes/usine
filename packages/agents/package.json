@@ -104,6 +104,7 @@
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
     "esbuild": "0.28.2",
+    "oxfmt": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
