@@ -19,6 +19,10 @@ export const disconnected = "Not connected";
 export const expires = "Expires";
 export const lastRefresh = "Last refresh";
 export const unknownTime = "Not reported";
+export const tokenExpiryUnknown = "Not included with token";
+export const noRefresh = "Not applicable";
+export const tokenReplacementHelp =
+  "This subscription token cannot refresh automatically. Replace the login before it expires.";
 export const keyKind = "API key";
 export const subscriptionKind = "Subscription";
 export const working = "Saving…";

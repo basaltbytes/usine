@@ -75,6 +75,15 @@ it.live(
           state.providers.map(({ credential }) => credential),
           ["subscription", "subscription"],
         );
+        assert.deepEqual(state.providers[0], {
+          provider: "anthropic-messages",
+          credential: "subscription",
+          expiresAt: null,
+          lastRefresh: null,
+          refreshable: false,
+        });
+        assert.isTrue(state.providers[1]?.refreshable);
+        assert.equal(state.providers[1]?.lastRefresh, "2026-10-01T00:00:00.000Z");
         assert.equal(
           state.providers[1]?.expiresAt,
           DateTime.formatIso(expiry).replace(/\.\d{3}Z$/u, ".000Z"),
@@ -98,6 +107,10 @@ it.live(
         assert.deepEqual(
           (yield* credentials.status).map(({ credential }) => credential),
           ["subscription", "subscription"],
+        );
+        assert.deepEqual(
+          (yield* credentials.status).map(({ refreshable }) => refreshable),
+          [false, true],
         );
         const beforeDisconnect = yield* SettingsInForce.pipe(
           Effect.provideContext(restarted),

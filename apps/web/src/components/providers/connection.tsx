@@ -27,6 +27,7 @@ import {
   keyKind,
   keyLabel,
   lastRefresh,
+  noRefresh,
   opening,
   pending,
   providerNames,
@@ -35,6 +36,8 @@ import {
   starting,
   submitCode,
   subscriptionKind,
+  tokenExpiryUnknown,
+  tokenReplacementHelp,
   unknownTime,
   useKey,
   working,
@@ -107,6 +110,8 @@ export const ProviderConnectionRow = ({
   const waiting = state?.status === "starting" || state?.status === "authorizing";
   const busy = action.isPending || begin.isPending;
   const failure = actionError ?? (begin.error === null ? null : rejectionMessage(begin.error));
+  const unreportedExpiry = connection.refreshable === false ? tokenExpiryUnknown : unknownTime;
+  const unreportedRefresh = connection.refreshable === false ? noRefresh : unknownTime;
   return (
     <section className="flex flex-col gap-3 border-t py-4" aria-label={name}>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -150,7 +155,7 @@ export const ProviderConnectionRow = ({
           <dt>{expires}</dt>
           <dd>
             {connection.expiresAt === null ? (
-              unknownTime
+              unreportedExpiry
             ) : (
               <time dateTime={connection.expiresAt} className="font-mono tabular-nums">
                 {timestampLabel(connection.expiresAt)}
@@ -160,7 +165,7 @@ export const ProviderConnectionRow = ({
           <dt>{lastRefresh}</dt>
           <dd>
             {connection.lastRefresh === null ? (
-              unknownTime
+              unreportedRefresh
             ) : (
               <time dateTime={connection.lastRefresh} className="font-mono tabular-nums">
                 {timestampLabel(connection.lastRefresh)}
@@ -168,6 +173,9 @@ export const ProviderConnectionRow = ({
             )}
           </dd>
         </dl>
+      )}
+      {connection.credential === "subscription" && connection.refreshable === false && (
+        <p className="text-xs text-muted-foreground">{tokenReplacementHelp}</p>
       )}
       {state?.status === "starting" && (
         <p role="status" className="text-muted-foreground">

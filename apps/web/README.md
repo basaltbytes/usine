@@ -2,6 +2,8 @@
 
 The usine web UI, served by `@usine/server`. Internal; never published.
 
+Provider connections distinguishes subscription tokens that cannot refresh from logins with missing refresh metadata. Claude setup tokens show **Not included with token** for expiry and **Not applicable** for last refresh, with a reminder to replace the login before expiry. Reported OAuth dates remain visible; destinations that omit refresh capability retain **Not reported** for missing dates.
+
 Harness labels and saved-session resume commands load from `GET /api/configuration/capabilities` through the shared configuration capabilities query. The UI uses each command’s home variable and gateway availability metadata when rendering resume details.
 
 ## Issues and pull requests

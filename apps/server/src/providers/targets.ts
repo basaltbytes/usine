@@ -233,7 +233,7 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
         expiresAt: Schema.optionalKey(Schema.Finite),
       }),
     )(nativeClaude.claudeAiOauth);
-    return {
+    const connection = {
       provider: "anthropic-messages" as const,
       credential:
         !claude.loggedIn || claude.apiProvider !== "firstParty"
@@ -254,6 +254,9 @@ const makeProviderTargets = Effect.fn("ProviderTargets.make")(function* (
           : null,
       lastRefresh: null,
     };
+    if (connection.credential === "subscription" && claude.authMethod === "oauth_token")
+      return { ...connection, refreshable: false };
+    return connection;
   });
   const codexConnection = Effect.gen(function* () {
     const exit = yield* spawner

@@ -126,6 +126,8 @@ The gateway checks the followed request like any other. An attachment learns the
 
 ## Managed provider connections
 
+Provider connection reports include `refreshable`: `false` for Claude setup tokens and API keys, and `true` for ChatGPT logins. Claude setup tokens expire after one year, contain no expiry metadata, and have no refresh token, so their `expiresAt` and `lastRefresh` remain `null`. Replace the Claude login before the token expires. ChatGPT reports its OAuth expiry and last refresh. Clients accept reports from older gateways that omit `refreshable`.
+
 Instance admins connect, replace, and disconnect Claude and ChatGPT from usine setup, Configuration > Settings, or `usine login` and `usine logout`. The orchestrator invokes the installed provider CLI in a private temporary directory and transfers the result through the gateway admin API over SSH. The gateway needs `curl` for this transfer.
 
 `PUT /v1/provider-credentials` accepts one credential kind (`claude-subscription`, `anthropic-api-key`, `chatgpt-subscription`, or `openai-api-key`) and a `secret`. A ChatGPT subscription secret is the dedicated Codex auth-file JSON. `DELETE /v1/provider-credentials/:provider` disconnects `anthropic` or `openai`. Both operations require the admin bearer token. `GET /v1/provider-credentials` returns both providers with credential kind, reported expiry, and last refresh, excluding secrets. Failed writes return 503.

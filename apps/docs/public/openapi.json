@@ -37366,6 +37366,9 @@
                                               "type": "null"
                                             }
                                           ]
+                                        },
+                                        "refreshable": {
+                                          "type": "boolean"
                                         }
                                       },
                                       "required": [
