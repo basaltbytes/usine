@@ -23,7 +23,9 @@ export const RunFailureAsk = ({ need, dismiss }: RunFailureAskProps) => {
       description={fixRunId === null ? null : fixRunContinues(fixRunId)}
       menu={
         fixRunId !== null && (
-          <DropdownMenuItem onClick={() => openRun(fixRunId)}>{needOpenFixRunLabel}</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => openRun(fixRunId)}>
+            {needOpenFixRunLabel}
+          </DropdownMenuItem>
         )
       }
     />

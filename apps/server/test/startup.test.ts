@@ -123,7 +123,9 @@ it.live(
       const runtime = engineLayer(directory).pipe(
         Layer.provide(scheduler),
         Layer.provide(
-          Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) }),
+          Layer.succeed(TriggerCondition)({
+            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+          }),
         ),
       );
       const listener = yield* startupListener("0.5.1-next.341");

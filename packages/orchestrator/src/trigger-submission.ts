@@ -124,12 +124,7 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
   options: TriggerSubmissionOptions,
 ) {
   yield* Effect.annotateCurrentSpan({ eventId: options.dedupKey, itemKey: options.itemKey });
-  const settings = yield* loopSettings(
-    expressions,
-    options,
-    options.repository,
-    options.payload,
-  );
+  const settings = yield* loopSettings(expressions, options, options.repository, options.payload);
   return Submission.make({
     event: Event.make({
       id: EventId.make(options.dedupKey),

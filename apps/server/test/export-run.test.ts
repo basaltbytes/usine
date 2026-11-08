@@ -169,7 +169,9 @@ const seed = (directory: string) =>
       layer(InstanceDirectory.make(directory)).pipe(
         Layer.provide(executor),
         Layer.provide(
-          Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) }),
+          Layer.succeed(TriggerCondition)({
+            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+          }),
         ),
       ),
     ),

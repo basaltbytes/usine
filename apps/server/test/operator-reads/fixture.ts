@@ -227,7 +227,11 @@ export const checkReads = ({
     });
     const engine = engineLayer(InstanceDirectory.make(root)).pipe(
       Layer.provide(slowWorker),
-      Layer.provide(Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) })),
+      Layer.provide(
+        Layer.succeed(TriggerCondition)({
+          recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+        }),
+      ),
     );
     const observation = OperatorObservation.layer.pipe(
       Layer.provide(Layer.mock(ConfigurationStore)({})),

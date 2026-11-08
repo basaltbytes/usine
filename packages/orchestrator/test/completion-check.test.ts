@@ -300,7 +300,9 @@ it.live.each(["recovers", "exhausts"] as const)(
             Layer.provide(executor),
             Layer.provide(check),
             Layer.provide(
-              Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) }),
+              Layer.succeed(TriggerCondition)({
+                recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+              }),
             ),
           ),
         ),

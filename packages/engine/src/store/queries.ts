@@ -1168,9 +1168,7 @@ export const queriesFor = (
    * for a cycle-budget reset or under a suppression. `ciFix` limits the Items to those with a
    * queued CI fix.
    */
-  const admissibleItems = Effect.fn("RunStoreQueries.admissibleItems")(function* (
-    ciFix: boolean,
-  ) {
+  const admissibleItems = Effect.fn("RunStoreQueries.admissibleItems")(function* (ciFix: boolean) {
     const items = yield* database
       .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
       .from(triggerEvents)

@@ -167,7 +167,9 @@ it.live(
         const engine = engineLayer(directory).pipe(
           Layer.provideMerge(scheduler),
           Layer.provide(
-            Layer.succeed(TriggerCondition)({ recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })) }),
+            Layer.succeed(TriggerCondition)({
+              recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+            }),
           ),
         );
         const observation = Layer.mergeAll(

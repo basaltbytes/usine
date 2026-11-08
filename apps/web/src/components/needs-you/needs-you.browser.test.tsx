@@ -360,7 +360,9 @@ it("offers no fix run for a failed run without one", async () => {
   await expect.element(held).toBeVisible();
   await expect.element(held.getByText(/continues the work/)).not.toBeInTheDocument();
   await held.getByRole("button", { name: /^Actions for/ }).click();
-  await expect.element(page.getByRole("menuitem", { name: "Open fix run" })).not.toBeInTheDocument();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Open fix run" }))
+    .not.toBeInTheDocument();
 });
 
 const bell = (count: number) =>
