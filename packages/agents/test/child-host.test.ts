@@ -249,7 +249,6 @@ const eventually = (predicate: () => boolean) =>
     }
   });
 
-
 const workerRelay = (
   pidFile: string,
   mode: "attach" | "resume",
