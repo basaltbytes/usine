@@ -72,11 +72,17 @@ export class HarvestError extends Schema.TaggedError<
   cause: Schema.Defect(),
 }) {}
 
+// `state` and `head.repo` are optional, so only verification depends on them.
 const PullRequestResponse = Schema.Struct({
   number: PullRequest.fields.number,
   url: Schema.URLFromString,
-  head: Schema.Struct({ sha: CommitSha }),
+  state: Schema.optionalKey(Schema.String),
+  head: Schema.Struct({
+    sha: CommitSha,
+    repo: Schema.optionalKey(Schema.NullOr(Schema.Struct({ full_name: RepositoryName }))),
+  }),
 }).pipe(Schema.encodeKeys({ url: "html_url" }));
+type IndexedPullRequest = typeof PullRequestResponse.Type;
 const decodePullRequestPages = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(Schema.Array(PullRequestResponse))),
 );
@@ -282,7 +288,10 @@ const branchHeadOn = (refs: ReadonlyMap<string, CommitSha>, branch: string) =>
 const pullRequestAt = (spec: HarvestSpec, number: number, url: URL, head: CommitSha) =>
   PullRequest.make({ number, url, base: Option.some(spec.baseCommit), head: Option.some(head) });
 
-/** Returns the pull requests whose head is `head` in GitHub's commit-to-pull-request index. */
+/**
+ * Returns the pull requests whose head is `head` in GitHub's commit-to-pull-request index,
+ * without duplicates.
+ */
 const indexedPullRequests = Effect.fn("StepResult.indexedPullRequests")(function* <E>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
@@ -295,17 +304,17 @@ const indexedPullRequests = Effect.fn("StepResult.indexedPullRequests")(function
     "pull request results",
   );
   // The response also has pull requests that contain the commit as an ancestor.
-  const facts = new Map<number, PullRequest>();
+  const atHead = new Map<number, IndexedPullRequest>();
   for (const pr of pages.flat()) {
-    if (pr.head.sha === head) facts.set(pr.number, pullRequestAt(spec, pr.number, pr.url, head));
+    if (pr.head.sha === head) atHead.set(pr.number, pr);
   }
   yield* Effect.logInfo("Collected Attempt pull request results", {
     attemptId: spec.attemptId,
     head,
     base: spec.baseCommit,
-    pullRequests: [...facts.keys()],
+    pullRequests: [...atHead.keys()],
   });
-  return [...facts.values()];
+  return [...atHead.values()];
 });
 
 /** Returns the pull requests whose head is the checkout's pushed final commit, from GitHub's index. */
@@ -339,7 +348,8 @@ const findPullRequests = Effect.fn("StepResult.findPullRequests")(function* <E>(
       return [];
     }
   }
-  return yield* indexedPullRequests(spec, run, head);
+  const indexed = yield* indexedPullRequests(spec, run, head);
+  return indexed.map(({ number, url }) => pullRequestAt(spec, number, url, head));
 });
 
 const isHarvestError = Schema.is(HarvestError);
@@ -365,6 +375,46 @@ const retryRead = <E extends { readonly _tag: string; readonly message: string }
         delayMs: Duration.toMillis(delay),
       }),
   );
+
+const fromRunRepository = (spec: HarvestSpec, repository: Option.Option<RepositoryName>): boolean =>
+  Option.exists(
+    repository,
+    (name) => canonicalRepositoryName(name) === canonicalRepositoryName(spec.repository),
+  );
+
+const headRepositoryOf = (pr: {
+  readonly head: { readonly repo?: { readonly full_name: RepositoryName } | null };
+}) => Option.fromNullishOr(pr.head.repo).pipe(Option.map(({ full_name }) => full_name));
+
+/**
+ * Returns the open pull requests at `head` in GitHub's commit-to-pull-request index whose head
+ * repository is the Run's. Fails with `PullRequestNotFound` if none is open, or with
+ * `RepositoryMismatch` for the first open one if all come from other repositories.
+ */
+const verifyIndexed = Effect.fn("StepResult.verifyIndexed")(function* <
+  E extends { readonly _tag: string; readonly message: string },
+>(spec: HarvestSpec, run: HarvestCommand<E>, head: CommitSha) {
+  const indexed = yield* indexedPullRequests(spec, run, head).pipe(
+    retryRead<E>(spec, "the final commit's pull requests"),
+  );
+  const open = indexed.filter(({ state }) => state === "open");
+  const [first] = open;
+  if (first === undefined) {
+    return yield* Effect.fail(
+      PullRequestNotFound.make({ pullRequest: Option.none(), branch: Option.none(), head }),
+    );
+  }
+  const own = open.filter((pr) => fromRunRepository(spec, headRepositoryOf(pr)));
+  if (own.length === 0) {
+    return yield* Effect.fail(
+      RepositoryMismatch.make({
+        pullRequest: ItemNumber.make(first.number),
+        headRepository: headRepositoryOf(first),
+      }),
+    );
+  }
+  return own.map(({ number, url }) => pullRequestAt(spec, number, url, head));
+});
 
 /**
  * Reads the handoff's pull request and logs its branch's commit on origin against its head on
@@ -426,16 +476,8 @@ const verifyHandoff = Effect.fn("StepResult.verifyHandoff")(function* <
   }
   const refs = yield* originRefs(run);
   const pr = yield* readHandoffPullRequest(spec, run, handoff, refs);
-  const headRepository = Option.fromNullOr(pr.head.repo).pipe(
-    Option.map(({ full_name }) => full_name),
-  );
-  if (
-    !Option.exists(
-      headRepository,
-      (repository) =>
-        canonicalRepositoryName(repository) === canonicalRepositoryName(spec.repository),
-    )
-  ) {
+  const headRepository = headRepositoryOf(pr);
+  if (!fromRunRepository(spec, headRepository)) {
     return yield* Effect.fail(RepositoryMismatch.make({ pullRequest, headRepository }));
   }
   const branchHead = branchHeadOn(refs, pr.head.ref);
@@ -464,17 +506,12 @@ const verifyBranch = Effect.fn("StepResult.verifyBranch")(function* <
   const { head, branch } = yield* checkoutHead(run);
   const refs = yield* originRefs(run);
   if (branch === "") {
-    const indexed = [...refs.values()].includes(head)
-      ? yield* indexedPullRequests(spec, run, head).pipe(
-          retryRead<E>(spec, "the final commit's pull requests"),
-        )
-      : [];
-    if (indexed.length === 0) {
+    if (![...refs.values()].includes(head)) {
       return yield* Effect.fail(
         PullRequestNotFound.make({ pullRequest: Option.none(), branch: Option.none(), head }),
       );
     }
-    return indexed;
+    return yield* verifyIndexed(spec, run, head);
   }
   const branchHead = branchHeadOn(refs, branch);
   if (!Option.contains(branchHead, head)) {

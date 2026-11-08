@@ -308,3 +308,62 @@ it.live.each([
     }
   }),
 );
+
+/** GitHub's commit-to-pull-request index listing pull request 815 at `HEAD`. */
+const indexed = (state: "open" | "closed", repository: string): Answer =>
+  Effect.succeed([
+    jsonKey([
+      [
+        {
+          number: 815,
+          html_url: URL_815,
+          state,
+          head: { sha: HEAD, repo: { full_name: repository } },
+        },
+      ],
+    ]),
+  ]);
+
+it.live.each([
+  {
+    outcome: "waits on the open pull request from the Run's repository",
+    index: indexed("open", "basaltbytes/usine"),
+    decision: "RunAwaitingCi",
+    failure: Option.none<string>(),
+  },
+  {
+    outcome: "fails with an AgentFailure for an open pull request from a fork",
+    index: indexed("open", "someone/usine"),
+    decision: "RunFailed",
+    failure: Option.some(
+      "CI can't wait on the pushed pull request: pull request #815 comes from someone/usine, not from the Run's repository",
+    ),
+  },
+  {
+    outcome: "fails with an AgentFailure for a closed pull request",
+    index: indexed("closed", "basaltbytes/usine"),
+    decision: "RunFailed",
+    failure: Option.some(
+      `CI can't wait on the pushed pull request: no open pull request has the checkout's HEAD ${HEAD} as its head`,
+    ),
+  },
+] satisfies ReadonlyArray<{
+  readonly outcome: string;
+  readonly index: Answer;
+  readonly decision: string;
+  readonly failure: Option.Option<string>;
+}>)("a CI loop's success from a detached checkout $outcome", ({ index, decision, failure }) =>
+  Effect.gen(function* () {
+    const finished = yield* finishHarvested("Finished the change.", {
+      branch: "",
+      origin: [branchAt(HEAD)],
+      github: [[INDEX, [index]]],
+    });
+    assert.strictEqual(finished.decision._tag, decision);
+    assert.deepStrictEqual(
+      Option.map(finished.failure, ({ message }) => message),
+      failure,
+    );
+    assert.notInclude(finished.commands, BRANCH_PULL_REQUESTS);
+  }),
+);

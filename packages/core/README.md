@@ -108,15 +108,15 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 
 ## CI waits
 
-`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The branch must belong to the attempt's repository and point at the checkout's final commit; the pull request API can report an older head. Without a handoff, a `HarvestSpec` with `requiresCi` verifies the open pull requests of the checkout's branch the same way; a detached checkout falls back to GitHub's commit-to-pull-request index. The pull request read retries with `retryTransient` while origin has the pull request's `refs/pull/<n>/head`.
+`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The branch must belong to the attempt's repository and point at the checkout's final commit; the pull request API can report an older head. Without a handoff, a `HarvestSpec` with `requiresCi` verifies the open pull requests of the checkout's branch the same way; a detached checkout pushed to origin keeps the open pull requests from the attempt's repository that GitHub's commit-to-pull-request index lists at its HEAD. The pull request read retries with `retryTransient` while origin has the pull request's `refs/pull/<n>/head`.
 
 A verification that fails returns no pull request and sets `Harvest.unverifiedHandoff`, which the executor copies to `StepResult.unverifiedHandoff`:
 
 | Reason | Meaning | `unverifiedHandoffFailure` |
 | --- | --- | --- |
 | `HeadMismatch` | The handoff's `head` isn't the checkout's HEAD. | `AgentFailure` |
-| `PullRequestNotFound` | Origin has no such pull request, or the branch has no open pull request. | `AgentFailure` |
-| `RepositoryMismatch` | The pull request comes from another repository. | `AgentFailure` |
+| `PullRequestNotFound` | Origin has no such pull request, or no open pull request heads the branch or detached HEAD. | `AgentFailure` |
+| `RepositoryMismatch` | The pull request, or every open one at a detached HEAD, comes from another repository. | `AgentFailure` |
 | `BranchNotAtHead` | The branch on origin is missing or at another commit. | `AgentFailure` |
 | `GitHubReadFailed` | A GitHub or origin read failed after retries, or the reads took longer than 10 seconds. | `InfraFailure` |
 

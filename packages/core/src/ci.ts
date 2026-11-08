@@ -194,7 +194,7 @@ export const describeUnverifiedHandoff = (reason: UnverifiedHandoff): string =>
         ? `origin has no pull request #${pullRequest.value}`
         : Option.isSome(branch)
           ? `no open pull request has branch ${branch.value} as its head`
-          : `no pull request has the checkout's HEAD ${head} as its head`,
+          : `no open pull request has the checkout's HEAD ${head} as its head`,
     RepositoryMismatch: ({ pullRequest, headRepository }) =>
       `pull request #${pullRequest} comes from ${Option.getOrElse(headRepository, () => "a deleted repository")}, not from the Run's repository`,
     BranchNotAtHead: ({ pullRequest, branch, branchHead, head }) =>
