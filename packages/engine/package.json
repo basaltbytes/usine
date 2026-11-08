@@ -64,6 +64,10 @@
       "types": "./dist/repository-label-projection/repository-label-projection.d.ts",
       "default": "./dist/repository-label-projection/repository-label-projection.js"
     },
+    "./completion-check": {
+      "types": "./dist/completion-check.d.ts",
+      "default": "./dist/completion-check.js"
+    },
     "./cursor": {
       "types": "./dist/cursor/cursor.d.ts",
       "default": "./dist/cursor/cursor.js"

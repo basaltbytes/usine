@@ -19,6 +19,7 @@ import { DateTime, Effect, FileSystem, Layer, Option, Ref, TxRef } from "effect"
 import { layer, localSqliteLayer } from "../src/database/local-sqlite.ts";
 import type { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
+import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
 import { TriggerCondition, type TriggerRecheck } from "../src/trigger-condition.ts";
@@ -44,13 +45,15 @@ export const conditionLayer = (recheck: Effect.Effect<TriggerRecheck>) =>
 
 /**
  * Returns the local engine over a scripted `StepExecutor`. Queued Events still match unless the
- * test provides a `TriggerCondition`.
+ * test provides a `TriggerCondition`, and completions aren't verified unless it provides a
+ * `CompletionCheck`.
  */
 export const engineLayer = (
   directory: InstanceDirectory,
   executor: Layer.Layer<StepExecutor>,
   condition: Layer.Layer<TriggerCondition> = conditionLayer(Effect.succeed("matches")),
-) => layer(directory).pipe(Layer.provide(executor), Layer.provide(condition));
+  check: Layer.Layer<CompletionCheck> = CompletionCheck.unverified,
+) => layer(directory).pipe(Layer.provide(executor), Layer.provide(condition), Layer.provide(check));
 
 export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   Layer.succeed(StepExecutor)({

@@ -41,6 +41,7 @@ import {
   RepositoryLabelProjectionWriter,
 } from "../repository-label-projection/repository-label-projection.ts";
 import { StepExecutor } from "../step-executor.ts";
+import type { CompletionCheck } from "../completion-check.ts";
 import { TriggerCondition } from "../trigger-condition.ts";
 import { CursorStore } from "../cursor/cursor.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
@@ -432,7 +433,8 @@ export class RunEngine extends Context.Service<
 
 /**
  * Returns the engine layers on `database`, which stores all durable Run state. Requires `Crypto`
- * for Run IDs, `StepExecutor` for Workers, and `TriggerCondition` to re-check queued Events.
+ * for Run IDs, `StepExecutor` for Workers, `TriggerCondition` to re-check queued Events, and
+ * `CompletionCheck` to verify outcome labels.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<
@@ -455,7 +457,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   | StepOutputStore
   | UnconfirmedStops,
   RunEngineError | DatabaseError,
-  Crypto.Crypto | StepExecutor | TriggerCondition | DatabaseRequirements
+  Crypto.Crypto | CompletionCheck | StepExecutor | TriggerCondition | DatabaseRequirements
 > => {
   const store = RunStore.layer.pipe(Layer.provide(database));
   const itemWriter = ItemProjectionWriter.layer.pipe(Layer.provide(database));

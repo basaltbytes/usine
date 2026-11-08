@@ -51,6 +51,7 @@ import {
 } from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
+import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import type { TriggerRecheck } from "../src/trigger-condition.ts";
 import { runIdFor, Submission } from "../src/engine/submission.ts";
@@ -1357,10 +1358,12 @@ const flakyEngineLayer = (
   directory: InstanceDirectory,
   failures: Failures,
   executor: Layer.Layer<StepExecutor>,
+  check: Layer.Layer<CompletionCheck> = CompletionCheck.unverified,
 ) =>
   layerWithDatabase(flakyDatabase(directory, failures)).pipe(
     Layer.provide(executor),
     Layer.provide(conditionLayer(Effect.succeed("matches"))),
+    Layer.provide(check),
     Layer.provide(NodeServices.layer),
   );
 
@@ -1387,6 +1390,39 @@ describe("store failures in a Run's fiber", () => {
           assert.strictEqual(finished.attempts.length, 1);
           assert.strictEqual(failures.left, 0);
         }).pipe(Effect.provide(flakyEngineLayer(directory, failures, executorLayer(plans))));
+      }),
+    ),
+  );
+
+  it.live("verifies outcome labels once when recording the outcome is retried", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const failures: Failures = { left: 0 };
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("verified once")),
+        ]);
+        let checks = 0;
+        // The next transaction, which records the verified outcome, fails once.
+        const check = Layer.succeed(CompletionCheck)({
+          verify: () =>
+            Effect.sync(() => {
+              checks += 1;
+              failures.left = 1;
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(
+            Submission.make({
+              ...submission({ number: 1, item: "verified" }),
+              outcomeLabels: ["passed"],
+            }),
+          );
+          assert(accepted._tag === "Claimed");
+          yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Succeeded");
+          assert.strictEqual(failures.left, 0);
+          assert.strictEqual(checks, 1);
+        }).pipe(Effect.provide(flakyEngineLayer(directory, failures, executorLayer(plans), check)));
       }),
     ),
   );
