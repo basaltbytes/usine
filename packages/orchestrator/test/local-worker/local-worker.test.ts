@@ -959,7 +959,7 @@ describe("local worker", () => {
   );
 
   it.effect(
-    "commits as the App's bot on every Worker kind, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
+    "commits as the App's bot on every Worker kind, passes the Run's CI requirement, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
     () =>
       Effect.gen(function* () {
         const missing = InstallationDiscoveryError.make({
@@ -1052,6 +1052,7 @@ describe("local worker", () => {
                   parentModel: selected.parentModel,
                   permissions: selected.permissions,
                   resume: Option.none(),
+                  requiresCi: true,
                 }),
                 {
                   append: () => Effect.void,
@@ -1083,6 +1084,7 @@ describe("local worker", () => {
             ],
           );
           assert.deepStrictEqual(writers, expected);
+          assert.isTrue(requested.every(({ requiresCi }) => requiresCi));
           assert.strictEqual(failed._tag, failure);
           // The engine reconciles a checkout kept for a reattachment until preparation acquires it
           // (#180).

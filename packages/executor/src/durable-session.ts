@@ -11,8 +11,8 @@ import {
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import { ciHandoff, type CiHandoff } from "@usine/core/ci";
 import type { GatewayCredentialKind, MachineId } from "@usine/core/worker";
-import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
-import type { Comment, StepCompletion, StepResultFact } from "@usine/core/step/result";
+import type { AttemptWindowsRead, Harvest, HarvestSpec } from "@usine/core/step/harvest";
+import type { Comment, StepCompletion } from "@usine/core/step/result";
 import type { StepOutput } from "@usine/core/step/output";
 import {
   type AttemptReport,
@@ -71,13 +71,14 @@ export interface DurableCheckout {
   readonly gatewayCredential: Effect.Effect<Option.Option<GatewayCredentialKind>>;
   /**
    * Returns the checkout's commits and pull requests, and the comments the Attempt posted on its
-   * Item within its own window and outside the windows of the Agent's other Attempts. Reads
-   * `windows` after GitHub lists the comments, and fails if they can't be read.
+   * Item within its own window and outside the windows of the Agent's other Attempts, with the
+   * reason the pull request that CI waits on isn't verified. Reads `windows` after GitHub lists
+   * the comments, and fails if they can't be read.
    */
   readonly harvest: (
     windows: AttemptWindowsRead<AttemptFailure>,
     handoff: Option.Option<CiHandoff>,
-  ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
+  ) => Effect.Effect<Harvest, AttemptFailure>;
   /** Reads validated documents through this checkout's command runner and container. */
   readonly readOutputs: Effect.Effect<ReadonlyArray<StepOutput>, AttemptFailure>;
   /**
@@ -393,9 +394,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         });
       }
       const handoff = Result.getOrElse(parsedHandoff, () => Option.none());
-      const facts = yield* checkout.harvest(io.windows, handoff);
+      const harvest = yield* checkout.harvest(io.windows, handoff);
       const outputs = yield* checkout.readOutputs;
-      const harvested = harvestedResult(report, facts, outputs);
+      const harvested = harvestedResult(report, harvest, outputs);
       if (Result.isFailure(harvested)) {
         yield* Effect.logWarning(
           "The parent's last turn answered the operator and the checkout holds no facts; the Attempt fails",

@@ -2,7 +2,8 @@ import { ChildHost } from "@usine/agents/child-host";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
-import { StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
+import type { Harvest } from "@usine/core/step/harvest";
+import { StepCompletion, StepResult } from "@usine/core/step/result";
 import type { StepOutput } from "@usine/core/step/output";
 import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Context, type Duration, Effect, type Option, Result, Schema } from "effect";
@@ -62,11 +63,11 @@ export class AttemptReport extends Schema.Class<
 
 /**
  * Returns the attempt's completion. Fails with `AgentFailure` if `answeredOperator` is true and
- * both `facts` and `outputs` are empty (ADR 0018).
+ * both the harvested facts and `outputs` are empty (ADR 0018).
  */
 export const harvestedResult = (
   report: AttemptReport,
-  facts: ReadonlyArray<StepResultFact>,
+  { facts, unverifiedHandoff }: Harvest,
   outputs: ReadonlyArray<StepOutput> = [],
 ): Result.Result<StepCompletion, AgentFailure> =>
   report.answeredOperator && facts.length === 0 && outputs.length === 0
@@ -76,7 +77,10 @@ export const harvestedResult = (
         }),
       )
     : Result.succeed(
-        StepCompletion.fromResult(StepResult.make({ message: report.message, facts }), outputs),
+        StepCompletion.fromResult(
+          StepResult.make({ message: report.message, facts, unverifiedHandoff }),
+          outputs,
+        ),
       );
 
 /** A successful parent report with no stored harvested result. */

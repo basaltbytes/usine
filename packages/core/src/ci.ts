@@ -1,9 +1,9 @@
-import { type Brand, Option, Result, Schema } from "effect";
-import { AgentFailure } from "./attempt/failure.ts";
+import { type Brand, Match, Option, Result, Schema } from "effect";
+import { AgentFailure, InfraFailure } from "./attempt/failure.ts";
 import { ItemNumber } from "./item.ts";
 import { LoopName } from "./loop.ts";
 import { RunId } from "./run/id.ts";
-import { CommitSha } from "./repository.ts";
+import { CommitSha, RepositoryName } from "./repository.ts";
 
 /** The final-answer marker that transfers CI waiting to the orchestrator. */
 export const AWAITING_CI_MARKER = "[usine:awaiting-ci]";
@@ -113,3 +113,108 @@ export const CiResolution = Schema.Union([
   CiSuperseded,
 ]);
 export type CiResolution = typeof CiResolution.Type;
+
+/** The checkout's HEAD isn't the head that the CI handoff names. */
+export class HeadMismatch extends Schema.TaggedClass<
+  HeadMismatch,
+  Brand.Brand<"@usine/core/ci/HeadMismatch">
+>()("HeadMismatch", {
+  pullRequest: ItemNumber,
+  /** The head that the handoff names. */
+  handedOff: CommitSha,
+  head: CommitSha,
+}) {}
+
+/** Origin has no pull request that the handoff names or that the checkout's branch heads. */
+export class PullRequestNotFound extends Schema.TaggedClass<
+  PullRequestNotFound,
+  Brand.Brand<"@usine/core/ci/PullRequestNotFound">
+>()("PullRequestNotFound", {
+  /** The pull request that the handoff names, or `None` for a success without a handoff. */
+  pullRequest: Schema.OptionFromOptionalKey(ItemNumber),
+  /** The checkout's branch, or `None` for a handoff or a detached checkout. */
+  branch: Schema.OptionFromOptionalKey(Schema.NonEmptyString),
+  head: CommitSha,
+}) {}
+
+/** The handoff's pull request comes from a repository other than the Run's. */
+export class RepositoryMismatch extends Schema.TaggedClass<
+  RepositoryMismatch,
+  Brand.Brand<"@usine/core/ci/RepositoryMismatch">
+>()("RepositoryMismatch", {
+  pullRequest: ItemNumber,
+  /** The pull request's head repository, or `None` if it was deleted. */
+  headRepository: Schema.OptionFromOptionalKey(RepositoryName),
+}) {}
+
+/** The pull request's branch on origin doesn't point at the checkout's HEAD. */
+export class BranchNotAtHead extends Schema.TaggedClass<
+  BranchNotAtHead,
+  Brand.Brand<"@usine/core/ci/BranchNotAtHead">
+>()("BranchNotAtHead", {
+  /** The pull request that the handoff names, or `None` for a success without a handoff. */
+  pullRequest: Schema.OptionFromOptionalKey(ItemNumber),
+  branch: Schema.NonEmptyString,
+  /** The branch's commit on origin, or `None` if origin has no such branch. */
+  branchHead: Schema.OptionFromOptionalKey(CommitSha),
+  head: CommitSha,
+}) {}
+
+/** Reading GitHub or origin failed or timed out, after retries. */
+export class GitHubReadFailed extends Schema.TaggedClass<
+  GitHubReadFailed,
+  Brand.Brand<"@usine/core/ci/GitHubReadFailed">
+>()("GitHubReadFailed", {
+  message: Schema.NonEmptyString,
+}) {}
+
+/** The reason harvesting couldn't verify the pull request that CI waits on. */
+export const UnverifiedHandoff = Schema.Union([
+  HeadMismatch,
+  PullRequestNotFound,
+  RepositoryMismatch,
+  BranchNotAtHead,
+  GitHubReadFailed,
+]);
+export type UnverifiedHandoff = typeof UnverifiedHandoff.Type;
+
+const ofPullRequest = (pullRequest: Option.Option<ItemNumber>) =>
+  Option.match(pullRequest, {
+    onNone: () => "",
+    onSome: (number) => ` of pull request #${number}`,
+  });
+
+/** Returns an operator-facing sentence fragment that explains `reason`. */
+export const describeUnverifiedHandoff = (reason: UnverifiedHandoff): string =>
+  Match.valueTags(reason, {
+    HeadMismatch: ({ pullRequest, handedOff, head }) =>
+      `the handoff names head ${handedOff} for pull request #${pullRequest}, but the checkout's HEAD is ${head}`,
+    PullRequestNotFound: ({ pullRequest, branch, head }) =>
+      Option.isSome(pullRequest)
+        ? `origin has no pull request #${pullRequest.value}`
+        : Option.isSome(branch)
+          ? `no open pull request has branch ${branch.value} as its head`
+          : `no pull request has the checkout's HEAD ${head} as its head`,
+    RepositoryMismatch: ({ pullRequest, headRepository }) =>
+      `pull request #${pullRequest} comes from ${Option.getOrElse(headRepository, () => "a deleted repository")}, not from the Run's repository`,
+    BranchNotAtHead: ({ pullRequest, branch, branchHead, head }) =>
+      Option.match(branchHead, {
+        onNone: () => `branch ${branch}${ofPullRequest(pullRequest)} isn't on origin`,
+        onSome: (commit) =>
+          `branch ${branch}${ofPullRequest(pullRequest)} is at ${commit} on origin, not at the checkout's HEAD ${head}`,
+      }),
+    GitHubReadFailed: ({ message }) => `GitHub couldn't be read: ${message}`,
+  });
+
+/**
+ * Returns the Attempt failure for `reason`. A GitHub read failure is a retryable `InfraFailure`.
+ * The other reasons are agent mistakes that a new Attempt would repeat, so they're `AgentFailure`s.
+ */
+export const unverifiedHandoffFailure = (
+  reason: UnverifiedHandoff,
+): AgentFailure | InfraFailure => {
+  const message = `CI can't wait on the pushed pull request: ${describeUnverifiedHandoff(reason)}`;
+  return reason._tag === "GitHubReadFailed"
+    ? InfraFailure.make({ message, cause: reason })
+    : AgentFailure.make({ message });
+};

@@ -29,7 +29,7 @@ import {
 } from "@usine/core/attempt/failure";
 import { CommitSha } from "@usine/core/repository";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
-import { Commit, StepCompletion, StepResult } from "@usine/core/step/result";
+import { Commit, StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { ChildBackend, ChildSessionLifecycle, SessionOperationError } from "@usine/agents/runtime";
 import {
@@ -83,6 +83,12 @@ import {
   trace,
   workerEnvironment,
 } from "./support.ts";
+
+/** Returns a harvest of `facts` that left no CI handoff unverified. */
+const harvested = (facts: ReadonlyArray<StepResultFact>) => ({
+  facts,
+  unverifiedHandoff: Option.none(),
+});
 
 /** Captures each log line as its level and JSON-encoded message. */
 const capturedLogs = () => {
@@ -1514,7 +1520,7 @@ describe("durable AttemptRuntime", () => {
           const report = yield* Fiber.join(execution);
           assert.isFalse(report.answeredOperator);
           assert.deepStrictEqual(
-            harvestedResult(report, []),
+            harvestedResult(report, harvested([])),
             Result.succeed(
               StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [] })),
             ),
@@ -1593,7 +1599,7 @@ describe("durable AttemptRuntime", () => {
       message: "The child returned no details.",
       answeredOperator: true,
     });
-    const failed = harvestedResult(report, []);
+    const failed = harvestedResult(report, harvested([]));
     assert(Result.isFailure(failed));
     assert.include(failed.failure.message, "The child returned no details.");
     const commit = Commit.make({
@@ -1601,7 +1607,7 @@ describe("durable AttemptRuntime", () => {
       summary: "Fix the flaky test",
     });
     assert.deepStrictEqual(
-      harvestedResult(report, [commit]),
+      harvestedResult(report, harvested([commit])),
       Result.succeed(
         StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [commit] })),
       ),
@@ -1615,7 +1621,7 @@ describe("durable AttemptRuntime", () => {
       sha256: StepOutputSha256.make("a".repeat(64)),
     });
     assert.deepStrictEqual(
-      harvestedResult(report, [], [output]),
+      harvestedResult(report, harvested([]), [output]),
       Result.succeed(
         StepCompletion.fromResult(StepResult.make({ message: report.message, facts: [] }), [
           output,
