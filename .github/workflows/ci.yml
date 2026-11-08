@@ -69,10 +69,14 @@ jobs:
       matrix:
         include:
           - leg: web
-            container: mcr.microsoft.com/playwright:v1.64.1-noble
+            container:
+              image: mcr.microsoft.com/playwright:v1.64.1-noble
+              options: --init
             filters: --filter=@usine/web
           - leg: server
-            container: mcr.microsoft.com/playwright:v1.64.1-noble
+            container:
+              image: mcr.microsoft.com/playwright:v1.64.1-noble
+              options: --init
             filters: --filter=@usine/server
             args: -- --project=server
           - leg: engine
@@ -95,6 +99,12 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
+      - name: Install server test tools
+        if: matrix.leg == 'server'
+        timeout-minutes: 3
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends jq lsof
       - run: pnpm turbo run test --concurrency=1 ${{ matrix.filters }} ${{ matrix.args }}
         timeout-minutes: 10
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

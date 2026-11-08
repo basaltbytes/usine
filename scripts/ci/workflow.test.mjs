@@ -21,7 +21,7 @@ test("browser test jobs use preinstalled matching Playwright browsers and bounde
       readFileSync(new URL(`../../apps/${name}/package.json`, import.meta.url)),
     );
     assert.equal(
-      leg.container,
+      leg.container.image,
       `mcr.microsoft.com/playwright:v${pkg.devDependencies.playwright}-noble`,
     );
   }
@@ -33,6 +33,24 @@ test("browser test jobs use preinstalled matching Playwright browsers and bounde
     if (step.run?.includes("turbo run test") || step.run?.includes("playwright install")) {
       assert.ok(step["timeout-minutes"] > 0 && step["timeout-minutes"] <= 10);
     }
+  }
+});
+
+test("the server container reaps detached processes and installs its required CLI tools", () => {
+  const job = workflow.jobs.test;
+  const server = job.strategy.matrix.include.find(({ leg }) => leg === "server");
+  assert.ok(server.container.options.split(/\s+/u).includes("--init"));
+  const testIndex = job.steps.findIndex(({ run }) => run?.includes("turbo run test"));
+  const setupIndex = job.steps.findIndex(
+    ({ run, if: condition }) =>
+      condition === "matrix.leg == 'server'" && run?.includes("apt-get install"),
+  );
+  assert.ok(setupIndex >= 0 && setupIndex < testIndex);
+  const setup = job.steps[setupIndex];
+  assert.ok(setup["timeout-minutes"] > 0 && setup["timeout-minutes"] <= 3);
+  assert.match(setup.run, /apt-get update/u);
+  for (const tool of ["jq", "lsof"]) {
+    assert.match(setup.run, new RegExp(`apt-get install[^\\n]*\\b${tool}\\b`, "u"));
   }
 });
 
