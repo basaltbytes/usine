@@ -116,6 +116,68 @@ describe("emitDeclarations", () => {
     expect(declarations.get("TextItem")).toBe('Schema.Struct({"text": Schema.String})');
   });
 
+  it("rejects reference wrappers with sibling constraints", () => {
+    for (const wrapper of [ref("PlanItem"), { allOf: [ref("PlanItem")] }]) {
+      for (const sibling of [
+        { properties: { type: tag("plan") } },
+        { required: ["type"] },
+        { type: "object" },
+        { anyOf: [variant("OtherItem", "other")] },
+      ]) {
+        const definitions = {
+          Item: { oneOf: [{ title: "WrappedItem", ...wrapper, ...sibling }] },
+          PlanItem: variant("PlanItem", "plan"),
+        };
+        expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+          "Wrapper sibling constraints need explicit support",
+        );
+      }
+    }
+  });
+
+  it("rejects common union fields that would be lost through a reference branch", () => {
+    for (const branch of [ref("PlanItem"), { allOf: [ref("PlanItem")] }]) {
+      const definitions = {
+        Item: {
+          type: "object",
+          properties: { id: { type: "string" }, type: tag("plan") },
+          required: ["id", "type"],
+          oneOf: [branch],
+        },
+        PlanItem: variant("PlanItem", "plan"),
+      };
+      expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+        "Wrapper sibling constraints need explicit support",
+      );
+    }
+  });
+
+  it("rejects simultaneous oneOf and anyOf constraints", () => {
+    const definitions = {
+      Item: {
+        oneOf: [variant("PlanItem", "plan")],
+        anyOf: [variant("OtherItem", "other")],
+      },
+    };
+    expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+      "Simultaneous oneOf and anyOf need explicit support",
+    );
+  });
+
+  it("keeps reference wrappers with annotation siblings", () => {
+    for (const wrapper of [ref("PlanItem"), { allOf: [ref("PlanItem")] }]) {
+      const definitions = {
+        Item: {
+          oneOf: [{ ...wrapper, title: "WrappedItem", description: "A plan", default: {} }],
+        },
+        PlanItem: variant("PlanItem", "plan"),
+      };
+      const declarations = emitDeclarations(definitions, ["Item"]);
+      expect(declarations.get("Item")).toBe("PlanItem");
+      expect(declarations.get("PlanItem")).toContain('"type": Schema.Literal("plan")');
+    }
+  });
+
   it("keeps the parent's required fields on merged variants", () => {
     const definitions = {
       Item: {

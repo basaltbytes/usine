@@ -50,10 +50,13 @@ const matchesKnownValue =
 
 /**
  * Returns `replacement` for a generated field. Fails to compile unless `replacement` decodes every
- * encoded value of `field`.
+ * encoded value of `field` and preserves its key optionality.
  */
 export const replaces = <Replacement extends Schema.Top>(
-  _field: { readonly Encoded: Replacement["Encoded"] },
+  _field: {
+    readonly Encoded: Replacement["Encoded"];
+    readonly "~encoded.optionality": Replacement["~encoded.optionality"];
+  },
   replacement: Replacement,
 ): Replacement => replacement;
 

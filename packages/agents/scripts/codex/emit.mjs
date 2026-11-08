@@ -61,12 +61,17 @@ export function emitDeclarations(definitions, roots) {
     if (schema === false) return "Schema.Never";
     assert(isJsonObject(schema), "Expected a JSON schema object");
     assert(!("const" in schema), "const schemas need explicit support");
-    if (schema.$ref) return reference(schema.$ref);
+    if (schema.$ref) {
+      assertWrapperSiblings(schema, "$ref");
+      return reference(schema.$ref);
+    }
     if (schema.allOf) {
+      assertWrapperSiblings(schema, "allOf");
       assert.equal(schema.allOf.length, 1, "Only reference wrappers are supported");
       return emit(schema.allOf[0]);
     }
     if (schema.oneOf || schema.anyOf) {
+      assert(!(schema.oneOf && schema.anyOf), "Simultaneous oneOf and anyOf need explicit support");
       return union(
         (schema.oneOf ?? schema.anyOf).map((branch) => {
           const member = schema.properties
@@ -152,4 +157,14 @@ function enumValues(schema) {
 function union(members) {
   const expressions = [...new Set(members)];
   return expressions.length === 1 ? expressions[0] : `Schema.Union([${expressions.join(", ")}])`;
+}
+
+function assertWrapperSiblings(schema, keyword) {
+  assert.deepEqual(
+    Object.keys(schema).filter(
+      (key) => ![keyword, "title", "description", "default"].includes(key),
+    ),
+    [],
+    "Wrapper sibling constraints need explicit support",
+  );
 }

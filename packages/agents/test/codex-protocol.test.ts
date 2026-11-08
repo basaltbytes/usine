@@ -24,7 +24,11 @@ import packageJson from "../package.json" with { type: "json" };
 import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
 import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
-import { ImageGenerationThreadItem } from "../src/protocol/codex/generated.ts";
+import {
+  ImageGenerationThreadItem,
+  ThreadTokenUsageUpdatedNotification,
+} from "../src/protocol/codex/generated.ts";
+import { UsageCount } from "../src/protocol/count.ts";
 import { expectTypeOf } from "vitest";
 
 describe("generated Codex protocol selections", () => {
@@ -37,6 +41,19 @@ describe("generated Codex protocol selections", () => {
     expect(replaces(Schema.String, Schema.NonEmptyString)).toBe(Schema.NonEmptyString);
     const nullable = Schema.NullOr(Schema.String);
     expect(replaces(Schema.NullOr(Schema.NonEmptyString), nullable)).toBe(nullable);
+  });
+
+  it("requires replacements to preserve optional generated keys", () => {
+    // @ts-expect-error A required replacement cannot decode an absent generated key.
+    replaces(Schema.optionalKey(Schema.String), Schema.String);
+    const count =
+      ThreadTokenUsageUpdatedNotification.fields.tokenUsage.fields.total.fields
+        .cacheWriteInputTokens;
+    // @ts-expect-error The upstream token count key is optional.
+    replaces(count, UsageCount);
+
+    const optional = Schema.optionalKey(Schema.String);
+    expect(replaces(Schema.optionalKey(Schema.NonEmptyString), optional)).toBe(optional);
   });
 
   it("restricts comparison targets to generated enum values while allowing unknown input", () => {
