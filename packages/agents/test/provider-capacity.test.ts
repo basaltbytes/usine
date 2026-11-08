@@ -12,6 +12,7 @@ it.effect.each([
     message: "The provider refused the request",
     expected: "AgentCapacityError",
   },
+  { code: "other", message: "Selected model is at capacity", expected: "AgentCapacityError" },
   { code: "unauthorized", message: "Selected model is at capacity", expected: "AgentResultError" },
   { code: "rateLimitExceeded", message: "Usage limit", expected: "AgentResultError" },
   {
