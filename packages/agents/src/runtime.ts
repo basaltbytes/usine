@@ -375,14 +375,17 @@ export type AgentReport =
   | AgentQuestionError;
 
 /**
- * Returns the report of a final answer that starts with a reserved report marker. Details can
- * follow on the same line or the next. Returns `None` if the answer has no marker.
+ * Returns a blocker or question report from any line of a final answer, including a report header
+ * appended to narration before a line break. Other report markers require the start of the answer.
  */
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
   answer: string,
 ): Option.Option<AgentReport> => {
-  const trimmed = answer.trim();
+  const report = answer.match(
+    /^[ \t]*\[usine:(?:blocked|question)\]|\[usine:(?:blocked|question)\](?=[ \t]*(?:\r?\n|\\n|$))/mu,
+  );
+  const trimmed = (report === null ? answer : answer.slice(report.index)).trim();
   if (trimmed.startsWith(CAPACITY_MARKER)) {
     return Option.some(
       AgentCapacityError.make({
