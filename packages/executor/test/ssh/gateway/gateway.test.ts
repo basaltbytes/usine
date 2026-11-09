@@ -538,37 +538,73 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect("pushes a failed Attempt's salvage through the Gateway before detaching", () => {
-    const machine = fakeMachine();
-    const credentials = mintingProvider();
-    const gateway = fakeGateway(machine);
-    machine.state.salvage = "dirty";
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      const prepared = yield* executor.prepare(request);
-      const recorded: Array<AttemptSalvage> = [];
-      yield* prepared
-        .launch({
-          append: () => Effect.void,
-          comments: () => Effect.void,
-          outOfMemory: () => Effect.void,
-          transcript: Effect.succeed([]),
-          windows: aloneOnItem(),
-          salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
-        })
-        .pipe(Effect.flip);
-      assert.strictEqual(recorded[0]?._tag, "Pushed");
-      const push = machine.state.calls.findIndex(({ line }) => line.includes("'push' '--force'"));
-      const pushed = machine.state.calls[push];
-      assert(pushed !== undefined);
-      assert.include(sentVariables(pushed.command), "GIT_CONFIG_VALUE_0");
-      const detach = gateway.calls.find(({ method }) => method === "DELETE");
-      assert((detach?.machineCalls ?? 0) > push, "the salvage push still has the attachment");
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(gatewayRuntime(machine, credentials, gateway, { parent: fails })),
+  for (const acceptsSentVariables of [true, false]) {
+    it.effect(
+      `pushes salvage before detaching with ${acceptsSentVariables ? "SendEnv" : "stdin"} variables`,
+      () => {
+        const machine = fakeMachine();
+        const credentials = mintingProvider();
+        const gateway = fakeGateway(machine);
+        machine.state.salvage = "dirty";
+        machine.state.acceptsSentVariables = acceptsSentVariables;
+        let given: AttemptRequest | undefined;
+        const parent: StubParent = (context) => {
+          given = context.request;
+          return fails(context);
+        };
+        const logs = capturedLogs();
+        return Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.preflight(WORKER, [], 1);
+          const prepared = yield* executor.prepare(request);
+          const recorded: Array<AttemptSalvage> = [];
+          yield* prepared
+            .launch({
+              append: () => Effect.void,
+              comments: () => Effect.void,
+              outOfMemory: () => Effect.void,
+              transcript: Effect.succeed([]),
+              windows: aloneOnItem(),
+              salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            })
+            .pipe(Effect.flip);
+          assert.strictEqual(recorded[0]?._tag, "Pushed");
+          const push = machine.state.calls.findIndex(({ line }) =>
+            line.includes("'push' '--force'"),
+          );
+          const pushed = machine.state.calls[push];
+          assert(pushed !== undefined);
+          if (acceptsSentVariables)
+            assert.include(sentVariables(pushed.command), "GIT_CONFIG_VALUE_0");
+          else {
+            assert(given !== undefined && Schema.is(RemoteShell)(given.host));
+            const token = given.host.stdinEnvironment?.GH_TOKEN;
+            assert(token !== undefined);
+            const value = Redacted.value(token);
+            assert.include(value, ".");
+            assert(!Object.keys(given.host.sshEnvironment).includes("GH_TOKEN"));
+            for (const { command } of machine.state.calls)
+              assert.notInclude(command.args.join(" "), value);
+            assert.notInclude(logs.lines.join("\n"), value);
+          }
+          assert.strictEqual(
+            logs.lines.filter((line) => line.includes("SSH Worker variable transport selected"))
+              .length,
+            1,
+          );
+          const detach = gateway.calls.find(({ method }) => method === "DELETE");
+          assert((detach?.machineCalls ?? 0) > push, "the salvage push still has the attachment");
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            gatewayRuntime(machine, credentials, gateway, { parent }).pipe(
+              Layer.provideMerge(logs.layer),
+            ),
+          ),
+        );
+      },
     );
-  });
+  }
 
   it.effect(
     "attaches a read token for a read Loop and points the children's git at its pre-push hook",
@@ -610,6 +646,46 @@ describe("SSH Worker behind a Gateway", () => {
         Effect.scoped,
         Effect.provide(gatewayRuntime(machine, credentials, gateway, { parent })),
       );
+    },
+  );
+
+  it.effect(
+    "recovers salvage over stdin when a restarted executor has no transport selection",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const gateway = fakeGateway(machine);
+      machine.state.acceptsSentVariables = false;
+      machine.state.cacheExists = true;
+      machine.state.salvage = "dirty";
+      const recorded: Array<AttemptSalvage> = [];
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.recover(
+          {
+            attemptId: request.attemptId,
+            repository: request.repository,
+            worker: WORKER,
+            ref: request.salvageRef,
+            permissions: "write",
+            succeeded: false,
+            open: false,
+            rejected: Option.none(),
+          },
+          {
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            comments: () => Effect.void,
+            windows: aloneOnItem(),
+          },
+          Effect.succeed(COMMIT_AUTHOR),
+        );
+        assert.strictEqual(recorded[0]?._tag, "Pushed");
+        const push = machine.state.calls.find(({ line }) => line.includes("'push' '--force'"));
+        assert(push !== undefined);
+        assert.deepStrictEqual(sentVariables(push.command), []);
+        assert.include(push.command.args.join(" "), "read -r usine_environment");
+        assert.strictEqual((yield* attachmentsInForce).length, 0);
+      }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
     },
   );
 
@@ -737,7 +813,7 @@ describe("SSH Worker behind a Gateway", () => {
   });
 
   it.effect(
-    "preflight checks the admin API, the machine's sshd, and git.<domain>, changing nothing",
+    "preflight checks the admin API, variable transports, and git.<domain>, changing nothing",
     () => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
@@ -768,26 +844,15 @@ describe("SSH Worker behind a Gateway", () => {
         machine.state.droppedSentVariables.clear();
 
         machine.state.droppedSentVariables.add("ANTHROPIC_AUTH_TOKEN");
-        const missingProviderToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
-        assert(missingProviderToken._tag === "WorkerCapabilityError");
-        assert.include(missingProviderToken.message, "doesn't accept ANTHROPIC_AUTH_TOKEN.");
-        assert.notInclude(missingProviderToken.message, "USINE_GATEWAY_TOKEN");
+        yield* executor.preflight(WORKER, [], 1);
         machine.state.droppedSentVariables.clear();
 
         machine.state.droppedSentVariables.add("GH_TOKEN");
-        const missingGitHubToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
-        assert(missingGitHubToken._tag === "WorkerCapabilityError");
-        assert.include(missingGitHubToken.message, "doesn't accept GH_TOKEN.");
+        yield* executor.preflight(WORKER, [], 1);
         machine.state.droppedSentVariables.clear();
 
         machine.state.acceptsSentVariables = false;
-        const dropped = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
-        assert(dropped._tag === "WorkerCapabilityError");
-        assert.strictEqual(dropped.capability, "gateway");
-        assert.include(
-          dropped.message,
-          "AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN",
-        );
+        yield* executor.preflight(WORKER, [], 1);
 
         machine.state.acceptsSentVariables = true;
         machine.state.gatewayReachable = false;

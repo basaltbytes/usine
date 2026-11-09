@@ -304,9 +304,10 @@ export const remoteWords = (line: string): Array<string> =>
 
 /** Returns the variables an SSH invocation sends to the machine that have a value in its environment. */
 export const sentVariables = (command: ChildProcess.StandardCommand): Array<string> => {
-  const option = command.args.find((arg) => arg.startsWith("SendEnv="));
-  const names = option === undefined ? [] : option.slice("SendEnv=".length).split(" ");
-  return names.filter((name) => command.options.env?.[name] !== undefined);
+  const names = command.args.flatMap((arg) =>
+    arg.startsWith("SendEnv=") ? arg.slice("SendEnv=".length).split(" ") : [],
+  );
+  return [...new Set(names)].filter((name) => command.options.env?.[name] !== undefined);
 };
 
 /** The remote line that stops the Attempt's children before its checkout is kept or removed. */
@@ -560,7 +561,12 @@ export const fakeMachine = () => {
     }
     return undefined;
   };
-  const respond = (command: ChildProcess.StandardCommand, line: string, input: string) => {
+  const respond = (
+    command: ChildProcess.StandardCommand,
+    line: string,
+    input: string,
+    stdinVariables: ReadonlyArray<string>,
+  ) => {
     const configIndex = command.args.indexOf("-F");
     const config = state.localFiles.get(command.args[configIndex + 1] ?? "") ?? "";
     const destination = command.args[command.args.indexOf("--") - 1] ?? "";
@@ -591,9 +597,12 @@ export const fakeMachine = () => {
       return oneShotHandle("", 1, `auth key refused: ${input}`);
     if (line === "exec 'true'") return oneShotHandle("", 0);
     if (line.includes("printenv")) {
-      const received = state.acceptsSentVariables
-        ? sentVariables(command).filter((name) => !state.droppedSentVariables.has(name))
-        : [];
+      const received = [
+        ...stdinVariables,
+        ...(state.acceptsSentVariables
+          ? sentVariables(command).filter((name) => !state.droppedSentVariables.has(name))
+          : []),
+      ];
       const expected = remoteWords(line).slice(4);
       const dropped = expected.filter((word, index) => index % 2 === 0 && !received.includes(word));
       return oneShotHandle(dropped.map((name) => `${name}\n`).join(""), 0);
@@ -780,8 +789,18 @@ export const fakeMachine = () => {
   const service = ChildProcessSpawner.make(
     Effect.fn("FakeMachine.spawn")(function* (command) {
       if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
-      const line = remoteLine(command);
-      const input = yield* standardInput(command);
+      let line = remoteLine(command);
+      let input = yield* standardInput(command);
+      let stdinVariables: ReadonlyArray<string> = [];
+      if (line.startsWith("set +x; IFS= read -r usine_environment")) {
+        const boundary = input.indexOf("\n");
+        const exports = Buffer.from(input.slice(0, boundary), "base64").toString("utf8");
+        stdinVariables = [...exports.matchAll(/export ([A-Za-z_][A-Za-z0-9_]*)=/gu)].map(
+          (match) => match[1] ?? "",
+        );
+        input = input.slice(boundary + 1);
+        line = line.slice(line.indexOf(" && ", line.indexOf('eval "unset usine_environment;')) + 4);
+      }
       if (command.args.includes("-N")) {
         state.calls.push({ command, line, input });
         return yield* startForward(command);
@@ -798,7 +817,7 @@ export const fakeMachine = () => {
             `Error response from daemon: No such container: ${container}`,
           );
         return running
-          ? respond(command, inner, input)
+          ? respond(command, inner, input, stdinVariables)
           : oneShotHandle("", 1, "Error response from daemon: container 4f0c2d is not running");
       }
       // Records `docker run` behind the pipe that gives it standard input as the docker command.
@@ -811,7 +830,7 @@ export const fakeMachine = () => {
         : line;
       state.calls.push({ command, line: direct, input });
       if (/^exec '(?:docker|podman)' 'pull' /u.test(direct)) yield* state.beforePull;
-      return respond(command, direct, input);
+      return respond(command, direct, input, stdinVariables);
     }),
   );
   const fileSystem = FileSystem.layerNoop({

@@ -49,6 +49,8 @@ max_concurrent_attempts: 1
 
 Set exactly one of `destination` or `provisioner`. SSH runs in batch mode and requires a trusted host key. Fixed destinations use your SSH configuration and known-hosts file. Provisioned machines use pinned keys in `.usine/known-hosts/`; the executor generates Hetzner keys before creation and obtains Boat keys and the boxd proxy key from their APIs.
 
+SSH workers use OpenSSH `SendEnv` when the required variables round-trip. If the server drops them, usine verifies and selects a secret environment block over stdin, consumed before command input or the child protocol starts. Values stay out of command arguments and credential files. boxd uses this stdin transport because its SSH proxy ignores `SendEnv`; `AcceptEnv` does not apply. The selected transport is logged at Info once per worker and is used for reuse and salvage too.
+
 ## Attempt container
 
 Fields belong to `container` on an SSH worker.
@@ -109,7 +111,7 @@ Each harness descriptor defines its credential environment and configuration fil
 
 The gateway stores the real installation token; the attempt receives a caller token. Listed model providers need no worker login. A provider using an API key counts under API keys on the run page; subscription credentials count under the matching plan. A harness without gateway injection uses its worker login through the forward proxy. See [Configure a gateway](/guides/configure-a-gateway/).
 
-A long-lived SSH worker can set `tailnet: { gateway_address: 100.64.0.2 }` alongside `gateway`. The machine joins Tailscale before preflight and uses its existing identity; OAuth variables are not accepted here. Preflight uses passwordless `sudo -n` to configure gateway host entries, sshd `AcceptEnv`, and gh's systemd HTTP socket, then checks the gateway's missing-caller-token refusal. Install OpenSSH server, systemd, `systemd-socket-proxyd`, and curl first. Containers receive the same gateway host entries, while downloads use direct internet access. Cleanup keeps the machine's tailnet identity. Worker-level `tailnet` is refused with a provisioner; Boat and boxd use `provisioner.tailnet`. See [Home worker on a Mac](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
+A long-lived SSH worker can set `tailnet: { gateway_address: 100.64.0.2 }` alongside `gateway`. The machine joins Tailscale before preflight and uses its existing identity; OAuth variables are not accepted here. Preflight uses passwordless `sudo -n` to configure gateway host entries, sshd `AcceptEnv` when sshd is running, and gh's systemd HTTP socket, then checks the gateway's missing-caller-token refusal. Install systemd, `systemd-socket-proxyd`, and curl first; direct SSH workers also need OpenSSH server. Containers receive the same gateway host entries, while downloads use direct internet access. Cleanup keeps the machine's tailnet identity. Worker-level `tailnet` is refused with a provisioner; Boat and boxd use `provisioner.tailnet`. See [Home worker on a Mac](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
 ## Provisioner
 

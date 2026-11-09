@@ -10,20 +10,12 @@ import { Effect, Option, Redacted, Ref } from "effect";
 import type { CommandResult } from "../../child-command.ts";
 import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts";
 import type { HarnessProbe } from "../../harness-preflight.ts";
-import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
+import { type RemoteCommands } from "../../remote/commands.ts";
 import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
 import { forwardProxyUrl, gatewayEnvironment } from "./environment.ts";
 
 /** A placeholder caller token that lets preflight check the sent variables without attaching anything. */
 const PROBE_TOKEN = Redacted.make("usine-preflight");
-
-/** A script that takes name and value pairs and prints each name whose variable doesn't have that value on the machine. */
-const SENT_VARIABLES_SCRIPT = `
-while [ "$#" -gt 1 ]; do
-  test "$(printenv "$1")" = "$2" || echo "$1"
-  shift 2
-done
-`.trim();
 
 /** Matches the Gateway's refusal header for a request without a caller token. */
 const REFUSED_WITHOUT_TOKEN = /^x-usine-gateway-refusal:\s*missing-caller-token\s*$/imu;
@@ -184,8 +176,8 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
 });
 
 /**
- * Verifies the Gateway from an SSH Worker's machine without attaching anything: the machine's
- * sshd accepts the caller-token variables, and the machine can connect to `git.<domain>`, which
+ * Verifies the Gateway from an SSH Worker's machine without attaching anything: the machine
+ * receives the caller-token variables, and the machine can connect to `git.<domain>`, which
  * rejects a request without a caller token.
  */
 const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine")(function* (
@@ -215,19 +207,7 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
       ),
     ),
   };
-  const received = yield* commands.run("preflight", sendingShell(machine.shell, sent), "sh", [
-    "-c",
-    SENT_VARIABLES_SCRIPT,
-    "sh",
-    ...Object.entries(sent).flatMap(([name, value]) => [name, Redacted.value(value)]),
-  ]);
-  const dropped = received.split("\n").filter((name) => name !== "");
-  if (dropped.length > 0)
-    return yield* gatewayGap(
-      worker,
-      `The sshd on SSH worker "${worker}" doesn't accept ${dropped.join(", ")}. Add AcceptEnv ${Object.keys(sent).join(" ")} to its sshd configuration.`,
-      new Error(`variables not received: ${dropped.join(" ")}`),
-    );
+  yield* commands.sendingShell(worker, machine.shell, sent, "probe");
 
   const probed = yield* commands.inspect("preflight", machine.shell, "curl", [
     "-sS",

@@ -100,12 +100,6 @@ test("snapshot setup sizes the machine by vCPU, bakes the worker key and image, 
   assert.match(calls, /boxd machine remove -y usine-snapshot-/u);
   assert.match(await read("removed"), /^usine-snapshot-\S+\n$/u);
   assert.match(calls, /volume create usine-pnpm-store/u);
-  assert.match(calls, /sudo install -d -m 0755 \/run\/sshd\nsudo sshd -t\n/u);
-  assert.match(calls, /sudo systemctl reload ssh 2>\/dev\/null \|\| sudo systemctl restart ssh/u);
-  assert.match(
-    calls,
-    /AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN/u,
-  );
 });
 
 test("snapshot setup maps the largest size to 8 vCPUs", async (t) => {

@@ -3,10 +3,11 @@ import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { BoxdSnapshotName, WorkerName } from "@usine/core/worker";
-import { Clock, Config, Effect, FileSystem, Layer, Option, Schedule } from "effect";
+import { Redacted, Clock, Config, Effect, FileSystem, Layer, Option, Schedule } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
+import { remoteCommandsFor } from "../../../src/remote/commands.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
 import { boxdSettings } from "./support.ts";
@@ -24,7 +25,7 @@ it.live.skipIf(
     Option.isNone(environment.snapshot) ||
     Option.isSome(environment.ci),
 )(
-  "creates a boxd machine, pins its endpoint, runs SSH true, and destroys it",
+  "creates a boxd machine, pins its endpoint, round-trips an SSH variable over stdin, and destroys it",
   () =>
     Effect.gen(function* () {
       if (Option.isNone(environment.token) || Option.isNone(environment.snapshot)) return;
@@ -60,26 +61,28 @@ it.live.skipIf(
               );
               const port = endpoint.port.value;
               const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+              const ssh = {
+                command: "ssh",
+                args: [
+                  "-o",
+                  "BatchMode=yes",
+                  "-o",
+                  "StrictHostKeyChecking=yes",
+                  "-o",
+                  "HostKeyAlias=boxd-live",
+                  "-o",
+                  `UserKnownHostsFile=${directory}/known_hosts`,
+                  "-o",
+                  "ConnectTimeout=15",
+                  "-i",
+                  `${homedir()}/.ssh/usine_worker`,
+                  "-p",
+                  String(port),
+                ],
+              };
               const connect = Effect.gen(function* () {
                 const child = yield* spawner.spawn(
-                  ChildProcess.make("ssh", [
-                    "-o",
-                    "BatchMode=yes",
-                    "-o",
-                    "StrictHostKeyChecking=yes",
-                    "-o",
-                    "HostKeyAlias=boxd-live",
-                    "-o",
-                    `UserKnownHostsFile=${directory}/known_hosts`,
-                    "-o",
-                    "ConnectTimeout=15",
-                    "-i",
-                    `${homedir()}/.ssh/usine_worker`,
-                    "-p",
-                    String(port),
-                    endpoint.destination,
-                    "true",
-                  ]),
+                  ChildProcess.make(ssh.command, [...ssh.args, endpoint.destination, "true"]),
                 );
                 return yield* child.exitCode.pipe(Effect.timeout("30 seconds"));
               }).pipe(Effect.scoped);
@@ -91,6 +94,20 @@ it.live.skipIf(
                 Effect.timeout("45 seconds"),
               );
               assert.strictEqual(Number(code), 0);
+              const commands = yield* remoteCommandsFor;
+              const base = commands.shellFor(ssh, endpoint.destination);
+              const value = `boxd-stdin-${now}`;
+              const shell = yield* commands.sendingShell(
+                WorkerName.make("boxd-live"),
+                base,
+                { USINE_BOXD_LIVE_TEST: Redacted.make(value) },
+                "probe",
+              );
+              assert(shell.stdinEnvironment !== undefined);
+              const received = yield* commands.run("preflight", shell, "printenv", [
+                "USINE_BOXD_LIVE_TEST",
+              ]);
+              assert.strictEqual(received, `${value}\n`);
             }),
           ({ id }) => driver.remove(id).pipe(Effect.orDie),
         );

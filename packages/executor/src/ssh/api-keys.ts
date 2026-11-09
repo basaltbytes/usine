@@ -3,7 +3,7 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { Effect, Option, Redacted } from "effect";
 import type { ExecutorOperation } from "../executor.ts";
-import { type RemoteCommands, sendingShell } from "../remote/commands.ts";
+import { type RemoteCommands } from "../remote/commands.ts";
 import type { RemoteAccess } from "../remote/machine.ts";
 import type { AttemptHomes } from "./attempt-homes.ts";
 import { writeMachineFiles } from "./gateway/attachments.ts";
@@ -99,7 +99,7 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
     ...access,
     // An Attempt container gets the secrets when it starts; without one, the SSH connection
     // sends them.
-    shell: sendingShell(access.shell, secrets),
+    shell: yield* commands.sendingShell(machine.address.name, access.shell, secrets),
     secrets: { ...access.secrets, ...secrets },
     apiKeyHarnesses: new Set([
       ...access.apiKeyHarnesses,

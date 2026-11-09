@@ -15,7 +15,7 @@ import {
   type ExecutorOperation,
   type WorkerCredential,
 } from "../../executor.ts";
-import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
+import { type RemoteCommands } from "../../remote/commands.ts";
 import type { RemoteAccess } from "../../remote/machine.ts";
 import { renewableCredential } from "../../renewable-credential.ts";
 import { attemptHomeIn, type AttemptHomes } from "../attempt-homes.ts";
@@ -315,7 +315,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       callerToken,
     });
     return {
-      shell: sendingShell(machine.shell, sent),
+      shell: yield* commands.sendingShell(worker, machine.shell, sent),
       secrets: sent,
       apiKeyHarnesses: new Set(),
       readOnlyPaths: [directories.ghConfigDirectory, GH_GATEWAY_SOCKET_DIRECTORY],

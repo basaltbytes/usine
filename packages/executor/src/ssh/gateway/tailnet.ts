@@ -16,10 +16,12 @@ trap 'rm -f "$work"' EXIT
 grep -v '# usine-tailnet$' /etc/hosts > "$work" || true
 printf '%s git.%s llm.%s # usine-tailnet\n' "$address" "$domain" "$domain" >> "$work"
 cat "$work" > /etc/hosts
-mkdir -p /etc/ssh/sshd_config.d
-printf 'AcceptEnv %s\n' "$variables" > /etc/ssh/sshd_config.d/40-usine-gateway.conf
-sshd -t
-systemctl reload ssh
+if pgrep -x sshd >/dev/null; then
+  mkdir -p /etc/ssh/sshd_config.d
+  printf 'AcceptEnv %s\n' "$variables" > /etc/ssh/sshd_config.d/40-usine-gateway.conf
+  sshd -t
+  systemctl reload ssh
+fi
 cat > /etc/systemd/system/usine-gateway-http.socket <<UNIT
 [Socket]
 ListenStream=/run/usine-gateway/http.sock
@@ -81,7 +83,7 @@ export const configureTailnetGateway = Effect.fn("SshExecutor.configureTailnetGa
         WorkerCapabilityError.make({
           worker,
           capability: "gateway",
-          message: `SSH worker "${worker}" could not configure its tailnet gateway. Check passwordless sudo, sshd, and systemd on the worker.`,
+          message: `SSH worker "${worker}" could not configure its tailnet gateway. Check passwordless sudo and systemd on the worker.`,
           cause,
         }),
       ),

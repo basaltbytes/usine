@@ -59,10 +59,7 @@ rm /tmp/usine-tailscale.sh
 sudo systemctl enable tailscaled
 sudo systemctl stop tailscaled
 sudo rm -f /var/lib/tailscale/tailscaled.state
-printf 'AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY\n' | sudo tee /etc/ssh/sshd_config.d/40-usine.conf >/dev/null
-sudo install -d -m 0755 /run/sshd
-sudo sshd -t
-sudo systemctl reload ssh 2>/dev/null || sudo systemctl restart ssh
+# boxd terminates SSH at its proxy and runs commands through its exec agent, without sshd.
 sync
 REMOTE
 boxd snapshots save "$machine" "$name" </dev/null >&2

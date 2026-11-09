@@ -49,6 +49,10 @@ Start a test run. usine disables auto-hibernate and auto-suspend, pins the SSH p
 
 Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication.
 
+## Environment variables
+
+boxd terminates SSH at its proxy and runs commands through its exec agent. It ignores OpenSSH `SendEnv` and `SetEnv`; sshd `AcceptEnv` settings do not apply. usine probes variable delivery and selects the stdin transport for boxd workers. Each command reads a secret environment block before its command input or child protocol starts. Values stay out of command arguments, logs, and credential files. Reused machines and salvage use the same transport. The selected transport is logged at Info once per worker.
+
 ## SSH recovery
 
 usine refreshes the machine's SSH endpoint during recovery because its proxy port can change. A deleted, stopped, failed, or destroyed machine ends the attempt as an infrastructure failure. For suspended, hibernated, migrating, or pending machines, usine reports a provider error and keeps the last endpoint for recovery. Unpushed work on a lost machine cannot be recovered; retries use the latest pushed salvage.
@@ -57,4 +61,4 @@ usine refreshes the machine's SSH endpoint during recovery because its proxy por
 
 boxd snapshots retain the pulled attempt image. Rebuild the snapshot after upgrading usine to a release with a different attempt image, or when changing a custom image. Preflight logs an absent image at warning level and downloads it before running attempts. Shared pnpm and Turbo cache volumes remain available while a machine is reused and disappear when it is deleted.
 
-To run the opt-in live test, set `BOXD_API_KEY` and `BOXD_TEST_SNAPSHOT` in a local checkout. The snapshot must be a ready `2x8` snapshot in `fra` containing `~/.ssh/usine_worker.pub`. Run `pnpm --filter @usine/executor exec vitest run test/ssh/provisioner/boxd-live.test.ts`. The test creates one machine, runs SSH `true`, and destroys it; it is skipped in CI.
+To run the opt-in live test, set `BOXD_API_KEY` and `BOXD_TEST_SNAPSHOT` in a local checkout. The snapshot must be a ready `2x8` snapshot in `fra` containing `~/.ssh/usine_worker.pub`. Run `pnpm --filter @usine/executor exec vitest run test/ssh/provisioner/boxd-live.test.ts`. The test creates one machine, checks SSH connectivity, sends a variable over stdin and reads it back, and destroys it; it is skipped in CI.

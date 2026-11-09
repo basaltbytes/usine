@@ -17,7 +17,7 @@ const GH_GATEWAY_SOCKET = `${GH_GATEWAY_SOCKET_DIRECTORY}/http.sock`;
 
 const FORWARD_PROXY_PORT = 3128;
 
-/** Caller-token variables that the worker's sshd must accept. */
+/** Caller-token variables transported to the worker. */
 export const gatewaySentVariables = (catalog: HarnessCatalog) => [
   "GIT_CONFIG_VALUE_0",
   "GH_ENTERPRISE_TOKEN",
