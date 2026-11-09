@@ -30,7 +30,7 @@ import {
   LOCAL_TEMPORARY_DIRECTORY,
   mintingProvider,
 } from "../support.ts";
-import { boatSettings, hetznerSettings } from "./support.ts";
+import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
 
 import { BOAT_TEST_API, fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
 
@@ -67,6 +67,18 @@ export const boatAddress: SshWorkerAddress = {
   },
 };
 
+export const boxdAddress: SshWorkerAddress = {
+  ...boatAddress,
+  root: WorkerRoot.make("/home/boxd/.usine"),
+  identityFile: Option.some(SshIdentityFile.make("/keys/usine_boxd")),
+  machine: {
+    _tag: "Provisioned",
+    provisioner: boxdSettings({
+      timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
+    }),
+  },
+};
+
 export const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
@@ -98,6 +110,7 @@ export const runtimeOf = (
     instance: INSTANCE,
     instanceId: INSTANCE_ID,
     interruptGrace: "2 seconds",
+    boxdClient: providers.boxdClient,
     providerEndpoints: { hetzner: HETZNER_TEST_API, boat: BOAT_TEST_API },
     machinePollInterval: "1 millis",
   }).pipe(
@@ -130,6 +143,7 @@ export const gatewayRuntimeOf = (
       instance: INSTANCE,
       instanceId: INSTANCE_ID,
       interruptGrace: "2 seconds",
+      boxdClient: providers.boxdClient,
       providerEndpoints: { hetzner: HETZNER_TEST_API },
       machinePollInterval: "1 millis",
       machineReadyTimeout: "1 second",

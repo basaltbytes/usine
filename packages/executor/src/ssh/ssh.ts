@@ -379,6 +379,8 @@ export const layer = (
 
 export type {
   BoatProvisioner,
+  BoxdProvisioner,
+  ProvisionerTailnet,
   BoatTailnet,
   HetznerProvisioner,
   ProviderApiKeys,

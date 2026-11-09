@@ -1,3 +1,4 @@
+import type { boxdApiLayer } from "./provisioner/boxd/grpc-client.ts";
 import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
@@ -5,6 +6,9 @@ import type {
   ProvisionerTimings,
   ProvisionerReuse,
   BoatSize,
+  BoxdSize,
+  BoxdRegion,
+  BoxdSnapshotName,
   BoatSnapshotName,
   TailnetAddress,
   ContainerCpus,
@@ -103,7 +107,7 @@ export interface SshTailnet {
 }
 
 /** Credentials for creating single-use auth keys tagged tag:usine-attempt. */
-export interface BoatTailnet extends SshTailnet {
+export interface ProvisionerTailnet extends SshTailnet {
   readonly clientId: Redacted.Redacted<string>;
   readonly clientSecret: Redacted.Redacted<string>;
 }
@@ -115,13 +119,30 @@ export interface BoatProvisioner {
   readonly token: Redacted.Redacted<string>;
   readonly size: BoatSize;
   readonly snapshot: Option.Option<BoatSnapshotName>;
-  readonly tailnet: Option.Option<BoatTailnet>;
+  readonly tailnet: Option.Option<ProvisionerTailnet>;
   readonly apiKeys: ProviderApiKeys;
   readonly timings: ProvisionerTimings;
   readonly reuse: Option.Option<ProvisionerReuse>;
 }
 
-export type SshProvisioner = HetznerProvisioner | BoatProvisioner;
+/** @deprecated Use ProvisionerTailnet. */
+export type BoatTailnet = ProvisionerTailnet;
+
+/** Restores each attempt's boxd machine from a prepared snapshot. */
+export interface BoxdProvisioner {
+  readonly provider: "boxd";
+  readonly token: Redacted.Redacted<string>;
+  readonly region: BoxdRegion;
+  readonly size: BoxdSize;
+  readonly snapshot: BoxdSnapshotName;
+  readonly isolated: boolean;
+  readonly tailnet: Option.Option<ProvisionerTailnet>;
+  readonly apiKeys: ProviderApiKeys;
+  readonly timings: ProvisionerTimings;
+  readonly reuse: Option.Option<ProvisionerReuse>;
+}
+
+export type SshProvisioner = HetznerProvisioner | BoatProvisioner | BoxdProvisioner;
 
 /** How the executor finds a Worker's machines: one long-lived machine, or one per Attempt. */
 export type SshWorkerMachine =
@@ -185,6 +206,8 @@ export interface SshExecutorOptions {
    * directory removed with the executor.
    */
   readonly workerRecordsDirectory?: string;
+  /** Builds the boxd transport. Defaults to the gRPC adapter. */
+  readonly boxdClient?: typeof boxdApiLayer;
   /** The provider API endpoints, which tests replace. Defaults to the providers' own. */
   readonly providerEndpoints?: Partial<Record<MachineProvider, string>>;
   /** The longest wait for a created machine to answer over SSH. Defaults to 10 minutes. */
@@ -216,12 +239,14 @@ export interface SshMachine extends RemoteMachine {
   readonly gateway: Option.Option<MachineGateway>;
 }
 
-/** Returns a Boat worker's tailnet settings, if configured. */
-export const boatTailnetOf = (address: SshWorkerAddress): Option.Option<BoatTailnet> =>
-  address.machine._tag === "Provisioned" && address.machine.provisioner.provider === "boat"
+/** Returns a provisioned worker's tailnet settings, if configured. */
+export const provisionerTailnetOf = (
+  address: SshWorkerAddress,
+): Option.Option<ProvisionerTailnet> =>
+  address.machine._tag === "Provisioned" && "tailnet" in address.machine.provisioner
     ? address.machine.provisioner.tailnet
     : Option.none();
 
-/** Returns the gateway routing for a fixed or Boat machine on the tailnet. */
+/** Returns the gateway routing for a fixed or provisioned machine on the tailnet. */
 export const tailnetOf = (address: SshWorkerAddress): Option.Option<SshTailnet> =>
-  address.machine._tag === "Fixed" ? address.machine.tailnet : boatTailnetOf(address);
+  address.machine._tag === "Fixed" ? address.machine.tailnet : provisionerTailnetOf(address);

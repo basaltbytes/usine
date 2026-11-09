@@ -1,5 +1,6 @@
 import {
   ProvisionerTimings,
+  BoxdSnapshotName,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
@@ -7,7 +8,11 @@ import {
   SshUser,
 } from "@usine/core/worker";
 import { Option, Redacted } from "effect";
-import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
+import type {
+  BoatProvisioner,
+  BoxdProvisioner,
+  HetznerProvisioner,
+} from "../../../src/ssh/model.ts";
 
 /** Returns the settings of a Hetzner provisioner that the fake Hetzner API accepts. */
 export const hetznerSettings = (
@@ -39,5 +44,16 @@ export const boatSettings = (overrides: Partial<BoatProvisioner> = {}): BoatProv
   apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
   timings: ProvisionerTimings.make({}),
   reuse: Option.none(),
+  ...overrides,
+});
+
+export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProvisioner => ({
+  ...boatSettings(),
+  provider: "boxd",
+  token: Redacted.make("bxd_test_key"),
+  region: "fra",
+  size: "2x8",
+  snapshot: BoxdSnapshotName.make("usine-attempt"),
+  isolated: true,
   ...overrides,
 });

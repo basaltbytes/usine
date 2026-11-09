@@ -40649,7 +40649,8 @@
             "type": "string",
             "enum": [
               "hetzner",
-              "boat"
+              "boat",
+              "boxd"
             ]
           },
           "day": {
@@ -41707,7 +41708,8 @@
             "type": "string",
             "enum": [
               "hetzner",
-              "boat"
+              "boat",
+              "boxd"
             ]
           },
           "state": {
@@ -43148,7 +43150,8 @@
             "type": "string",
             "enum": [
               "hetzner",
-              "boat"
+              "boat",
+              "boxd"
             ]
           }
         },
@@ -44606,6 +44609,9 @@
                 "$ref": "#/components/schemas/_usine_orchestrator_BoatProvisionerViewEncoded"
               },
               {
+                "$ref": "#/components/schemas/_usine_orchestrator_BoxdProvisionerViewEncoded"
+              },
+              {
                 "type": "null"
               }
             ]
@@ -44713,6 +44719,74 @@
         "required": [
           "harness",
           "check"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_BoxdProvisionerViewEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "boxd"
+            ]
+          },
+          "tokenEnv": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "fra",
+              "nyc"
+            ]
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "1x4",
+              "2x8",
+              "4x16",
+              "8x32"
+            ]
+          },
+          "snapshot": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "isolated": {
+            "type": "boolean"
+          },
+          "anthropicKeyEnv": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "openaiKeyEnv": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "_tag",
+          "tokenEnv",
+          "region",
+          "size",
+          "snapshot",
+          "isolated",
+          "anthropicKeyEnv",
+          "openaiKeyEnv"
         ],
         "additionalProperties": false
       },

@@ -49,6 +49,11 @@
     },
     "packages/engine": {
       "entry": ["src/database/sqlite-reader/worker.ts"]
+    },
+    "packages/executor": {
+      "ignoreIssues": {
+        "src/ssh/provisioner/boxd/api-pb.ts": ["exports", "types"]
+      }
     }
   }
 }

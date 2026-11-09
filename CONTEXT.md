@@ -169,7 +169,7 @@ A machine that runs an attempt's harness children in a checkout: local, an exe.d
 _Avoid_: runner, sandbox, executor
 
 **Provisioner**:
-The setting of an SSH worker that creates and retires machines at Hetzner Cloud or Boat (ADR 0029). A worker with one is a provisioned worker.
+The setting of an SSH worker that creates and retires machines at Hetzner Cloud, Boat, or boxd (ADR 0029). A worker with one is a provisioned worker.
 _Avoid_: autoscaler, pool, fleet
 
 **Run host**:

@@ -3,7 +3,7 @@ import { awaitMachineSsh, machineChecksFor, harnessCredentialGap } from "./check
 import { machineReuseFor } from "./reuse.ts";
 import { machineStartsFor } from "./starts.ts";
 import { machineHolds, machineStatusOf, type Held } from "./holds.ts";
-import { boatTailnetsFor } from "./tailnet/bootstrap.ts";
+import { provisionerTailnetsFor } from "./tailnet/bootstrap.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { safeSegment } from "@usine/core/repository";
@@ -85,7 +85,11 @@ export interface ProvisionedMachinesOptions {
   ) => Effect.Effect<void, WorkerCapabilityError>;
   readonly settings: Pick<
     SshExecutorOptions,
-    "knownHostsDirectory" | "providerEndpoints" | "machineReadyTimeout" | "machinePollInterval"
+    | "knownHostsDirectory"
+    | "providerEndpoints"
+    | "boxdClient"
+    | "machineReadyTimeout"
+    | "machinePollInterval"
   >;
 }
 
@@ -114,7 +118,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
 ) {
   const { catalog } = yield* Harnesses;
   const { instance, commands, settings } = options;
-  const tailnets = yield* boatTailnetsFor(commands);
+  const tailnets = yield* provisionerTailnetsFor(commands);
   const fs = yield* FileSystem.FileSystem;
   const connectionFor = yield* machineConnections;
   const path = yield* Path.Path;

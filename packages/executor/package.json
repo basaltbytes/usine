@@ -46,9 +46,13 @@
   "scripts": {
     "build": "tsc -b",
     "check": "effect-tsgo tsc -p tsconfig.check.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "boxd:generate": "buf generate src/ssh/provisioner/boxd/proto --template src/ssh/provisioner/boxd/proto/buf.gen.yaml && mv src/ssh/provisioner/boxd/api_pb.ts src/ssh/provisioner/boxd/api-pb.ts && oxfmt src/ssh/provisioner/boxd/api-pb.ts"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "2.17.0",
+    "@connectrpc/connect": "2.3.0",
+    "@connectrpc/connect-node": "2.3.0",
     "@usine/agents": "workspace:*",
     "@usine/cloudflare": "workspace:*",
     "@usine/core": "workspace:*",
@@ -56,6 +60,8 @@
     "@usine/gateway": "workspace:*"
   },
   "devDependencies": {
+    "@bufbuild/buf": "1.71.0",
+    "@bufbuild/protoc-gen-es": "2.17.0",
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/ws": "8.18.2",

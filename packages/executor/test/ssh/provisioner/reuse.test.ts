@@ -15,7 +15,14 @@ import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { sharedHarnesses } from "../harnesses.ts";
 import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
-import { MACHINE_RUN, boatAddress, hetznerAddress, runtimeOf, sink } from "./fixtures.ts";
+import {
+  MACHINE_RUN,
+  boxdAddress,
+  boatAddress,
+  hetznerAddress,
+  runtimeOf,
+  sink,
+} from "./fixtures.ts";
 import { fakeProviders } from "./fake-providers.ts";
 
 const policy = ProvisionerReuse.make({
@@ -41,7 +48,7 @@ const machineFixture = () => {
   return machine;
 };
 
-for (const address of [hetznerAddress, boatAddress]) {
+for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
   assert(address.machine._tag === "Provisioned");
   const provider = address.machine.provisioner.provider;
   describe(`${provider} machine reuse`, () => {
@@ -96,7 +103,14 @@ for (const address of [hetznerAddress, boatAddress]) {
           );
           assert.include(reset.line, "/codex'");
           assert.include(reset.line, "/claude'", "reset removes orphan Claude session directories");
+          if (provider === "boxd") providers.boxd.timers.length = 0;
           const reused = yield* machines.create(WORKER, MACHINE_RUN, second, [TEST_AGENT.brain]);
+          if (provider === "boxd") {
+            assert.deepStrictEqual(providers.boxd.timers, [
+              { id: first.id, kind: "hibernate", seconds: 0 },
+              { id: first.id, kind: "suspend", seconds: 0 },
+            ]);
+          }
           assert.isTrue(records.has(second));
           assert.strictEqual(reused.id, first.id);
           assert.notEqual(reused.hold, first.hold);
@@ -105,7 +119,11 @@ for (const address of [hetznerAddress, boatAddress]) {
           const assignment = providers.calls.find(
             ({ method }) => method === (provider === "boat" ? "PATCH" : "PUT"),
           );
-          const json1 = jsonKey(assignment?.body);
+          const json1 = jsonKey(
+            provider === "boxd"
+              ? [...providers.boxd.machines.values()].map((machine) => machine.labels)
+              : assignment?.body,
+          );
           assert.include(json1, attemptTag(second));
           yield* machines.release(first.hold);
           assert.strictEqual(

@@ -45,10 +45,16 @@ export const ProvisionerFields = (fields: FormFieldsProps) => {
                 { path: "provisioner.ssh_key", label: copy.sshKey },
                 { path: "provisioner.ssh_user", label: copy.sshUser, optional: true },
               ]
-            : [
-                { path: "provisioner.size", label: copy.size, optional: true },
-                { path: "provisioner.snapshot", label: copy.snapshot, optional: true },
-              ]),
+            : provider === "boxd"
+              ? [
+                  { path: "provisioner.region", label: copy.region, optional: true },
+                  { path: "provisioner.size", label: copy.size, optional: true },
+                  { path: "provisioner.snapshot", label: copy.snapshot },
+                ]
+              : [
+                  { path: "provisioner.size", label: copy.size, optional: true },
+                  { path: "provisioner.snapshot", label: copy.snapshot, optional: true },
+                ]),
           {
             path: "provisioner.api_keys.anthropic",
             label: copy.anthropic,
@@ -67,7 +73,18 @@ export const ProvisionerFields = (fields: FormFieldsProps) => {
       {provider === "hetzner" && (
         <Pairs {...fields} path="provisioner.labels" label={copy.labels} />
       )}
-      {provider === "boat" && (
+      {provider === "boxd" && (
+        <Label>
+          <Checkbox
+            checked={fieldValue(fields.value, "provisioner.isolated") !== false}
+            onCheckedChange={(checked) =>
+              fields.onChange(withField(fields.value, "provisioner.isolated", checked === true))
+            }
+          />
+          {copy.isolated}
+        </Label>
+      )}
+      {(provider === "boat" || provider === "boxd") && (
         <>
           <Label>
             <Checkbox

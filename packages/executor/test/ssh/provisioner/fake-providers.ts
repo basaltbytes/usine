@@ -1,5 +1,8 @@
+import { assert } from "@effect/vitest";
+import type { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { fakeBoxd } from "./fake-boxd.ts";
 import { jsonKey } from "@usine/core/json-key";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 
 /** The base URL of the fake Hetzner Cloud API. */
@@ -513,15 +516,23 @@ export const fakeProviders = () => {
         ),
       ),
     );
+  const boxd = fakeBoxd();
   return {
     calls,
     hetzner,
     boat,
-    layer: Layer.succeed(HttpClient.HttpClient, clientWith(unexpected)),
+    boxd: boxd.state,
+    boxdClient: ((token, region) => {
+      assert.strictEqual(Redacted.value(token), boxd.state.token);
+      assert.strictEqual(region, boxd.state.region);
+      return boxd.layer;
+    }) satisfies typeof boxdApiLayer,
+    layer: Layer.merge(Layer.succeed(HttpClient.HttpClient, clientWith(unexpected)), boxd.layer),
     /** Returns the providers' client that sends other origins to `underlying`'s client. */
     over: <E, R>(underlying: Layer.Layer<HttpClient.HttpClient, E, R>) =>
       Layer.effect(HttpClient.HttpClient, Effect.map(HttpClient.HttpClient, clientWith)).pipe(
         Layer.provide(underlying),
+        Layer.merge(boxd.layer),
       ),
   };
 };

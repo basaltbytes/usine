@@ -118,6 +118,7 @@ export const WorkerFields = (fields: FormFieldsProps) => {
               <option value="">{formCopy.existing}</option>
               <option value="hetzner">Hetzner</option>
               <option value="boat">Boat</option>
+              <option value="boxd">boxd</option>
             </NativeSelect>
           </Label>
           <Fields

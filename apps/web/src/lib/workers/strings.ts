@@ -7,12 +7,14 @@ export const preparingAttemptImage = "Preparing the attempt image";
 export const providerLabel = {
   hetzner: "Hetzner",
   boat: "Boat",
+  boxd: "boxd",
 } as const satisfies Record<MachineProvider, string>;
 
 /** The provider's word for one machine, as in `Hetzner server 52341896`. */
 export const providerMachineNoun = {
   hetzner: "server",
   boat: "sandbox",
+  boxd: "machine",
 } as const satisfies Record<MachineProvider, string>;
 
 /** Returns the status of a machine being created, such as `Creating a Hetzner machine, started 2m ago`. */

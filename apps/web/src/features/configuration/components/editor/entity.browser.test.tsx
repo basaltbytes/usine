@@ -790,6 +790,23 @@ it.each([
     expected: { provisioner: { provider: "boat", token_env: "NEW_BOAT_TOKEN" } },
   },
   {
+    kind: "boxd",
+    source:
+      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nidentity_file: /keys/id_ed25519\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  region: fra\n  size: 2x8\n  snapshot: usine-attempt\n  isolated: false\n",
+    label: "Provider token variable",
+    next: "NEW_BOXD_TOKEN",
+    expected: {
+      provisioner: {
+        provider: "boxd",
+        token_env: "NEW_BOXD_TOKEN",
+        region: "fra",
+        size: "2x8",
+        snapshot: "usine-attempt",
+        isolated: false,
+      },
+    },
+  },
+  {
     kind: "cloudflare",
     source:
       "name: local\nkind: cloudflare\nworker_url: https://worker.example.com\naccess_client_id_env: ACCESS_ID\naccess_client_secret_env: ACCESS_SECRET\nimage: usine\nllm_providers:\n  - provider: openai\n    api_key_env: OPENAI_KEY\n",

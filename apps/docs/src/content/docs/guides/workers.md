@@ -18,6 +18,7 @@ Orchestrator heartbeats renew a two-minute lease. When the lease expires, the wo
 1. [Add a local worker](/guides/add-a-worker/)
 2. [Add an SSH worker](/guides/add-an-ssh-worker/)
 3. [Add a Boat worker](/guides/add-a-boat-worker/)
+4. [Add a boxd worker](/guides/add-a-boxd-worker/)
 4. [Add a Hetzner worker](/guides/add-a-provisioned-worker/)
 5. [Run attempts in Cloudflare sandboxes](/guides/cloudflare-sandboxes/)
 

@@ -1,0 +1,67 @@
+#!/bin/sh
+# Captures the worker key, runtime, attempt image, and empty Tailscale state.
+set -eu
+usage() { echo "Usage: $0 [--size 1x4|2x8|4x16|8x32] <snapshot-name> <ssh-identity-file>" >&2; exit 2; }
+size=2x8
+if [ "${1:-}" = --size ]; then [ "$#" -ge 2 ] || usage; size=$2; shift 2; fi
+[ "$#" -eq 2 ] || usage
+name=$1
+identity=$2
+case "$size" in 1x4|2x8|4x16|8x32) ;; *) usage;; esac
+printf '%s\n' "$name" | LC_ALL=C grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' || usage
+[ -f "$identity" ] && [ -f "$identity.pub" ] || { echo 'The SSH identity and its .pub file must exist' >&2; exit 2; }
+here=$(cd "$(dirname "$0")" && pwd)
+image=${ATTEMPT_IMAGE:-ghcr.io/basaltbytes/usine-worker:$(cat "$here/../worker-image/tag.txt")}
+runtime=${USINE_CONTAINER_RUNTIME:-docker}
+case "$runtime" in docker|podman) ;; *) echo 'Invalid USINE_CONTAINER_RUNTIME' >&2; exit 2;; esac
+case "$image" in ''|*[!A-Za-z0-9./:@_-]*) echo 'Invalid ATTEMPT_IMAGE' >&2; exit 2;; esac
+machine=usine-snapshot-$(date -u +%Y%m%d%H%M%S)-$$
+created=false
+cleanup() {
+  if [ "$created" = true ]; then
+    boxd machine remove "$machine" >/dev/null || echo "Delete temporary machine $machine in boxd" >&2
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# The CLI uses its linked device key for this initial connection and pins the proxy key.
+boxd machine new "$machine" --size "$size" --isolated --auto-hibernate-timeout 0 >&2
+created=true
+tries=0
+until ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$machine.boxd" true 2>/dev/null; do
+  tries=$((tries + 1)); [ "$tries" -lt 60 ] || { echo 'SSH readiness timed out' >&2; exit 1; }
+  sleep 2
+done
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys' < "$identity.pub"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" "sh -s -- '$runtime' '$image'" <<'REMOTE'
+set -eu
+runtime=$1
+image=$2
+sudo install -d -m 0755 /etc/usine
+printf '%s\n' "$runtime" | sudo tee /etc/usine/container-runtime >/dev/null
+install -d -m 0700 /home/boxd/.usine /home/boxd/.cache/turbo
+if [ "$runtime" = podman ]; then
+  sudo apt-get update
+  sudo apt-get install -y podman crun uidmap dbus-user-session slirp4netns fuse-overlayfs
+  sudo loginctl enable-linger boxd
+  sudo systemctl start "user@$(id -u).service"
+  export XDG_RUNTIME_DIR=/run/user/$(id -u)
+fi
+"$runtime" pull "$image"
+"$runtime" volume create usine-pnpm-store >/dev/null
+"$runtime" volume create usine-turbo-cache >/dev/null
+curl -fsSL https://tailscale.com/install.sh -o /tmp/usine-tailscale.sh
+sudo sh /tmp/usine-tailscale.sh
+rm /tmp/usine-tailscale.sh
+sudo systemctl enable tailscaled
+sudo systemctl stop tailscaled
+sudo rm -f /var/lib/tailscale/tailscaled.state
+printf 'AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY\n' | sudo tee /etc/ssh/sshd_config.d/40-usine.conf >/dev/null
+sudo sshd -t
+sudo systemctl reload ssh
+sync
+REMOTE
+boxd snapshots save "$machine" "$name" >&2
+# A successful save is ready before the source machine is removed.
+printf '%s\n' "$name"

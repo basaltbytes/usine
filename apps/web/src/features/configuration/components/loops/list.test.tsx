@@ -221,7 +221,7 @@ describe("Agents page", () => {
 describe("Workers page", () => {
   it("lists each Worker with its slots in use and last preflight, then removed Workers", async () => {
     const page = text(await render(() => <WorkersList configuration={configurationFixture()} />));
-    assert.include(page, "5 workers");
+    assert.include(page, "6 workers");
     assert.include(page, "1 of 2");
     assert.include(page, "usine@eu-1");
     assert.include(page, "Failed");
@@ -234,6 +234,7 @@ describe("Workers page", () => {
     const page = text(await render(() => <WorkersList configuration={configurationFixture()} />));
     assert.include(page, "hetzner cx33 in nbg1, one machine per attempt");
     assert.include(page, "boat default, one machine per attempt");
+    assert.include(page, "boxd 2x8 fra, one machine per attempt");
     assert.include(page, "Machine creation failed: quota reached. Next try at ");
     assert.match(page, /boat-pool .* Deferred 20 Oct/u);
   });

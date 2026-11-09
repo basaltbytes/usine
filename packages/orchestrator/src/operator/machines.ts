@@ -3,6 +3,9 @@ import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import {
   BoatSize,
+  BoxdSize,
+  BoxdRegion,
+  BoxdSnapshotName,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
@@ -132,11 +135,25 @@ export class BoatProvisionerView extends Schema.TaggedClass<
   openaiKeyEnv: Schema.NullOr(Schema.String),
 }) {}
 
-/**
- * Provisioner settings safe to return to operator clients; credentials appear only as
- * environment-variable names.
- */
-export const ProvisionerView = Schema.Union([HetznerProvisionerView, BoatProvisionerView]);
+/** A boxd provisioner with credential variable names only. */
+export class BoxdProvisionerView extends Schema.TaggedClass<
+  BoxdProvisionerView,
+  Brand.Brand<"@usine/orchestrator/operator/machines/BoxdProvisionerView">
+>("@usine/orchestrator/BoxdProvisionerView")("boxd", {
+  tokenEnv: Schema.String,
+  region: BoxdRegion,
+  size: BoxdSize,
+  snapshot: BoxdSnapshotName,
+  isolated: Schema.Boolean,
+  anthropicKeyEnv: Schema.NullOr(Schema.String),
+  openaiKeyEnv: Schema.NullOr(Schema.String),
+}) {}
+
+export const ProvisionerView = Schema.Union([
+  HetznerProvisionerView,
+  BoatProvisionerView,
+  BoxdProvisionerView,
+]);
 /**
  * Provisioner settings safe to return to operator clients; credentials appear only as
  * environment-variable names.
@@ -184,10 +201,20 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
             anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
             openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
           })
-        : BoatProvisionerView.make({
-            tokenEnv: settings.tokenEnv,
-            size: settings.size,
-            anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
-            openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
-          }),
+        : settings.provider === "boxd"
+          ? BoxdProvisionerView.make({
+              tokenEnv: settings.tokenEnv,
+              region: settings.region,
+              size: settings.size,
+              snapshot: settings.snapshot,
+              isolated: settings.isolated,
+              anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
+              openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
+            })
+          : BoatProvisionerView.make({
+              tokenEnv: settings.tokenEnv,
+              size: settings.size,
+              anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
+              openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
+            }),
   });
