@@ -43,7 +43,9 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 ## Check the result
 
-Preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
+Preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. boxd serves SSH through its proxy, so the worker's variables can't reach the machine with `SendEnv`. Preflight reports the variables as not accepted, and a boxd worker can't run attempts yet.
+
+`size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 
 Start a test run. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
 
