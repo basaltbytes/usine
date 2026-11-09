@@ -148,3 +148,5 @@ A loop can set `ci: { fix_loop: widgets/fix, timeout_seconds: 3600 }` to require
 Configuration records use nominal Schema brands. `configurationEntities`, `formatAgent`, and `formatLoop` are pure functions over validated values. Configuration operations report decoding failures through `ConfigurationInvalid` or `ConfigFileError`.
 
 Run `pnpm --filter @usine/config check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
+
+SSH workers accept `provisioner.provider: boxd`, a required snapshot, a captured-size assertion (default `2x8`), region (default `fra`), isolation (default enabled), and optional gateway tailnet settings.

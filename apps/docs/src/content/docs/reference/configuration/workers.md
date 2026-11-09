@@ -47,7 +47,7 @@ root: /home/usine/.usine
 max_concurrent_attempts: 1
 ```
 
-Set exactly one of `destination` or `provisioner`. SSH runs in batch mode and requires a trusted host key. Fixed destinations use your SSH configuration and known-hosts file. Provisioned machines use pinned keys in `.usine/known-hosts/`; the executor generates Hetzner keys before creation and obtains Boat keys from its API.
+Set exactly one of `destination` or `provisioner`. SSH runs in batch mode and requires a trusted host key. Fixed destinations use your SSH configuration and known-hosts file. Provisioned machines use pinned keys in `.usine/known-hosts/`; the executor generates Hetzner keys before creation and obtains Boat keys and the boxd proxy key from their APIs.
 
 ## Attempt container
 
@@ -109,7 +109,7 @@ Each harness descriptor defines its credential environment and configuration fil
 
 The gateway stores the real installation token; the attempt receives a caller token. Listed model providers need no worker login. A provider using an API key counts under API keys on the run page; subscription credentials count under the matching plan. A harness without gateway injection uses its worker login through the forward proxy. See [Configure a gateway](/guides/configure-a-gateway/).
 
-A long-lived SSH worker can set `tailnet: { gateway_address: 100.64.0.2 }` alongside `gateway`. The machine joins Tailscale before preflight and uses its existing identity; OAuth variables are not accepted here. Preflight uses passwordless `sudo -n` to configure gateway host entries, sshd `AcceptEnv`, and gh's systemd HTTP socket, then checks the gateway's missing-caller-token refusal. Install OpenSSH server, systemd, `systemd-socket-proxyd`, and curl first. Containers receive the same gateway host entries, while downloads use direct internet access. Cleanup keeps the machine's tailnet identity. Worker-level `tailnet` is refused with a provisioner; Boat uses `provisioner.tailnet`. See [Home worker on a Mac](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
+A long-lived SSH worker can set `tailnet: { gateway_address: 100.64.0.2 }` alongside `gateway`. The machine joins Tailscale before preflight and uses its existing identity; OAuth variables are not accepted here. Preflight uses passwordless `sudo -n` to configure gateway host entries, sshd `AcceptEnv`, and gh's systemd HTTP socket, then checks the gateway's missing-caller-token refusal. Install OpenSSH server, systemd, `systemd-socket-proxyd`, and curl first. Containers receive the same gateway host entries, while downloads use direct internet access. Cleanup keeps the machine's tailnet identity. Worker-level `tailnet` is refused with a provisioner; Boat and boxd use `provisioner.tailnet`. See [Home worker on a Mac](/guides/add-an-ssh-worker/#home-worker-on-a-mac).
 
 ## Provisioner
 
@@ -117,7 +117,7 @@ Fields belong to `provisioner` on an SSH worker.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `provider` | `hetzner` or `boat` | required | Machine provider. |
+| `provider` | `hetzner`, `boat`, or `boxd` | required | Machine provider. |
 | `token_env` | environment variable name | required | Orchestrator variable containing the provider API token. |
 | `api_keys.anthropic` | environment variable name | omitted | Key delivered as `ANTHROPIC_API_KEY` unless the gateway injects it. |
 | `api_keys.openai` | environment variable name | omitted | Key delivered as `OPENAI_API_KEY` unless the gateway injects it. |
@@ -183,6 +183,33 @@ provisioner:
 ```
 
 Boat requires `identity_file` and its adjacent public key. Gateway settings require both `snapshot` and `tailnet`; `tailnet` is refused without a gateway. Boat supplies the SSH endpoint and host key and offers no region setting. Instances use no account secrets, automatic snapshots, command monitoring, or automatic stop. Without a gateway, tokens and provider keys are readable inside the attempt. With a gateway over Tailscale, package downloads still use Boat's direct internet access. See [Add a Boat worker](/guides/add-a-boat-worker/) and [Connect Boat to a gateway](/guides/connect-boat-to-a-gateway/).
+
+## boxd provisioner
+
+These fields also belong to `provisioner` when `provider` is `boxd`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `region` | `fra` or `nyc` | `fra` | Machine and snapshot region: Frankfurt or New York. |
+| `size` | `1x4`, `2x8`, `4x16`, or `8x32` | `2x8` | Required captured snapshot size, in vCPU × GiB. Preflight checks it; creation restores the captured size. |
+| `snapshot` | lowercase name, 1–63 characters | required | Ready snapshot containing the worker public key and attempt image. |
+| `isolated` | boolean | `true` | Excludes the in-machine boxd CLI, integrations, agent logins, and default private network. A snapshot's isolation is inherited even when this is false. |
+| `tailnet.gateway_address` | IPv4 address in `100.64.0.0/10` | required with a gateway | Gateway address reachable through Tailscale. |
+| `tailnet.client_id_env` | environment variable name | required with a gateway | Tailscale OAuth client ID variable. |
+| `tailnet.client_secret_env` | environment variable name | required with a gateway | OAuth secret variable with `auth_keys` write access for `tag:usine-attempt`. |
+
+```yaml
+provisioner:
+  provider: boxd
+  token_env: BOXD_API_KEY
+  region: fra
+  size: 2x8
+  snapshot: usine-attempt
+  isolated: true
+  api_keys: { anthropic: USINE_ANTHROPIC_API_KEY }
+```
+
+boxd requires `identity_file`, whose public key is baked into the snapshot's `/home/boxd/.ssh/authorized_keys`. The driver authenticates through the regional gRPC API and pins its SSH proxy key per machine. Auto-hibernate and auto-suspend are disabled on creation and reuse. A gateway requires `tailnet`; tailnet settings are refused without a gateway. Snapshots retain the attempt image, so rebuild after an upgrade changes the image. See [Add a boxd worker](/guides/add-a-boxd-worker/).
 
 ## Cloudflare connection
 

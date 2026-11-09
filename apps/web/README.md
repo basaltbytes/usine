@@ -419,3 +419,5 @@ Run `pnpm --filter @usine/web check` after building dependencies to check TypeSc
 **Provider connections** in setup and Configuration > Settings displays Claude and ChatGPT credential kinds, reported expiry, and last refresh for each gateway or local harness. Connect opens the provider authorization flow; replace preserves the saved credential until authorization succeeds. API keys use masked inputs. Cancel ends an unfinished sign-in. Disconnect removes the credential and the gateway provider routing. Only instance admins and setup sessions can access these controls.
 
 Expiry and last refresh use the app's local date-and-time format. A missing local Claude Code or Codex command displays an installation instruction in its provider's row in place of connection controls. The other provider's controls remain available when its harness is installed.
+
+Configuration > Workers supports the boxd SSH provisioner with region, captured size, required snapshot, isolation, and optional tailnet settings. Worker summaries identify boxd machines by size and region.

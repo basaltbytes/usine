@@ -1,8 +1,8 @@
-import { BoatSnapshotName } from "@usine/core/worker";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import {
+  BoatSnapshotName,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
@@ -12,7 +12,9 @@ import {
 } from "@usine/core/worker";
 import { Effect, Option, Redacted, Schema } from "effect";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
-import { boatSettings, hetznerSettings } from "./support.ts";
+import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
+import { fakeBoxd } from "./fake-boxd.ts";
+import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { hetznerDriverFor } from "../../../src/ssh/provisioner/hetzner.ts";
 import { tagValue, attemptTag, type MachineTags } from "../../../src/ssh/provisioner/model.ts";
@@ -404,4 +406,177 @@ describe("Boat driver", () => {
       assert.include(token.message, "refused the API key");
     }).pipe(Effect.provide(providers.layer));
   });
+});
+
+describe("boxd driver", () => {
+  it.effect(
+    "restores without sizing overrides, labels the machine, disables idle timers, and caches the proxy host key",
+    () => {
+      const boxd = fakeBoxd();
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+        const first = yield* driver.create("ignored", tags);
+        assert.isTrue(Option.isNone(first.hostKey));
+        assert.deepStrictEqual(boxd.state.creates[0], {
+          snapshot: "usine-attempt",
+          name: `usine-${attemptTag(ATTEMPT)}-1`,
+          isolated: true,
+          config: { network: { ssh: true } },
+          labels: {
+            "usine.instance": tags.instance,
+            "usine.worker": WORKER,
+            "usine.run": RUN,
+            "usine.process": tags.process,
+            "usine.attempt": attemptTag(ATTEMPT),
+            "usine.attempts": "1",
+          },
+        });
+        assert.deepStrictEqual(
+          boxd.state.timers.map(({ seconds }) => seconds),
+          [0, 0],
+        );
+        const endpoint = yield* driver.endpoint(first.id, Effect.void);
+        assert.strictEqual(endpoint.destination, "boxd@198.51.100.40");
+        assert.deepStrictEqual(endpoint.port, Option.some(12001));
+        assert.deepStrictEqual(endpoint.hostKey, Option.some(boxd.state.hostKey));
+        assert.strictEqual(boxd.state.reads, 0, "the create response contains the endpoint");
+        const second = yield* driver.create("ignored", { ...tags, attempts: 2 });
+        yield* Effect.all(
+          [driver.endpoint(second.id, Effect.void), driver.endpoint(first.id, Effect.void)],
+          { concurrency: 2 },
+        );
+        assert.strictEqual(boxd.state.hostKeyReads, 1);
+        yield* driver.assign(first.id, { ...tags, attempts: 2 });
+        assert.strictEqual(boxd.state.machines.get(first.id)?.labels["usine.attempts"], "2");
+        yield* driver.remove(first.id);
+        yield* driver.remove(first.id);
+      }).pipe(Effect.provide(boxd.layer));
+    },
+  );
+  it.effect(
+    "polls until running and refreshes a moving proxy port, distinguishing deletion from stopped machines",
+    () => {
+      const boxd = fakeBoxd();
+      boxd.state.createMachine = false;
+      boxd.state.provisioningReads = 2;
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+        const { id } = yield* driver.create("ignored", tags);
+        yield* driver.endpoint(id, Effect.void);
+        assert.strictEqual(boxd.state.reads, 3);
+        const machine = boxd.state.machines.get(id);
+        assert(machine !== undefined);
+        boxd.state.machines.set(id, { ...machine, status: "running", sshPort: 24001 });
+        assert.deepStrictEqual(
+          (yield* driver.refreshEndpoint(id)).pipe(Option.map((value) => value.port)),
+          Option.some(Option.some(24001)),
+        );
+        boxd.state.machines.set(id, { ...machine, status: "hibernated" });
+        assert.strictEqual(
+          (yield* driver.refreshEndpoint(id).pipe(Effect.flip))._tag,
+          "ProviderApiError",
+        );
+        boxd.state.machines.delete(id);
+        const gone = yield* driver.refreshEndpoint(id);
+        assert.isTrue(Option.isNone(gone));
+        assert.strictEqual(
+          (yield* driver.endpoint(id, Effect.void).pipe(Effect.flip)).reason,
+          "capacity",
+        );
+      }).pipe(Effect.provide(boxd.layer));
+    },
+  );
+  it.effect(
+    "lists machines by instance and worker selectors, including creation time and attempt count",
+    () => {
+      const boxd = fakeBoxd();
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+        const { id } = yield* driver.create("x", tags);
+        yield* driver.create("x", { ...tags, worker: WorkerName.make("other") });
+        yield* driver.create("x", { ...tags, instance: "another" });
+        const listed = yield* driver.list(tags.instance, Option.some(WORKER));
+        assert.deepStrictEqual(
+          listed.map((machine) => machine.id),
+          [id],
+        );
+        assert.strictEqual(listed[0]?.attempts, 1);
+        assert.deepStrictEqual(boxd.state.selectors[0], [
+          `usine.instance=${tags.instance}`,
+          `usine.worker=${WORKER}`,
+        ]);
+        const all = yield* driver.list(tags.instance, Option.none());
+        assert.lengthOf(all, 2);
+      }).pipe(Effect.provide(boxd.layer));
+    },
+  );
+  it.effect("deletes a new machine when disabling its idle timers fails", () => {
+    const boxd = fakeBoxd();
+    boxd.state.timerFails = Option.some("UNAVAILABLE");
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+      const failure = yield* driver.create("ignored", tags).pipe(Effect.flip);
+      assert.strictEqual(failure.reason, "unreachable");
+      assert.strictEqual(boxd.state.machines.size, 0);
+    }).pipe(Effect.provide(boxd.layer));
+  });
+  it.effect("classifies gRPC creation failures and pending snapshots for retry", () => {
+    const boxd = fakeBoxd();
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+      for (const [code, reason] of [
+        ["RESOURCE_EXHAUSTED", "quota"],
+        ["UNAVAILABLE", "unreachable"],
+        ["DEADLINE_EXCEEDED", "unreachable"],
+        ["UNAUTHENTICATED", "refused"],
+        ["PERMISSION_DENIED", "refused"],
+        ["INVALID_ARGUMENT", "refused"],
+        ["INTERNAL", "provider"],
+        ["ABORTED", "provider"],
+      ]) {
+        boxd.state.createFails = Option.some(code ?? "UNKNOWN");
+        assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, reason);
+      }
+      boxd.state.createFails = Option.none();
+      boxd.state.snapshot.status = "pending";
+      assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "provider");
+    }).pipe(Effect.provide(boxd.layer));
+  });
+  it.effect(
+    "verifies identity, snapshot status, region and captured size, and warns about machine limits",
+    () => {
+      const boxd = fakeBoxd();
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+        assert.deepStrictEqual((yield* driver.verify(WORKER, 2)).warnings, []);
+        boxd.state.maxVms = 2;
+        boxd.state.vmCount = 1;
+        assert.lengthOf((yield* driver.verify(WORKER, 2)).warnings, 1);
+        boxd.state.keyRefused = true;
+        assert.include(
+          (yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message,
+          "boxd auth keys create",
+        );
+        boxd.state.keyRefused = false;
+        boxd.state.snapshot.status = "pending";
+        assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, "pending");
+        boxd.state.snapshot.status = "ready";
+        boxd.state.snapshot.vcpu = 4;
+        boxd.state.snapshot.memoryBytes = 16 * 1024 ** 3;
+        const mismatch = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
+        assert.include(mismatch.message, "4 vCPU and 16 GiB");
+        assert.include(mismatch.message, "Rebuild the snapshot at 2x8 or change size");
+        boxd.state.snapshot.vcpu = 2;
+        boxd.state.snapshot.memoryBytes = 8 * 1024 ** 3;
+        boxd.state.snapshot.region = "nyc";
+        assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, "is in nyc");
+        boxd.state.snapshot.region = "fra";
+        boxd.state.region = "nyc";
+        assert.include(
+          (yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message,
+          "endpoint serves nyc",
+        );
+      }).pipe(Effect.provide(boxd.layer));
+    },
+  );
 });

@@ -3,49 +3,51 @@ import { Effect, Option } from "effect";
 import { HttpClient } from "effect/http";
 import { WorkerCapabilityError } from "../../../executor.ts";
 import type { RemoteCommands } from "../../../remote/commands.ts";
-import { boatTailnetOf, type SshMachine, type SshWorkerAddress } from "../../model.ts";
+import { provisionerTailnetOf, type SshMachine, type SshWorkerAddress } from "../../model.ts";
 import { configureTailnetGateway } from "../../gateway/tailnet.ts";
 import { tailscaleClientFor } from "./client.ts";
 
-/** Configures Boat machines before checkout and removes their ephemeral nodes at cleanup. */
-export const boatTailnetsFor = Effect.fn("SshExecutor.boatTailnetsFor")(function* (
+/** Configures provisioned machines before checkout and removes their ephemeral nodes at cleanup. */
+export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnetsFor")(function* (
   commands: RemoteCommands,
 ) {
   const { catalog } = yield* Harnesses;
   const http = yield* HttpClient.HttpClient;
   const clientFor = (address: SshWorkerAddress) =>
     Effect.transposeOption(
-      Option.map(boatTailnetOf(address), (settings) =>
+      Option.map(provisionerTailnetOf(address), (settings) =>
         tailscaleClientFor(address.name, settings).pipe(
           Effect.provideService(HttpClient.HttpClient, http),
         ),
       ),
     );
-  const verify = Effect.fn("SshExecutor.verifyBoatTailnet")(function* (address: SshWorkerAddress) {
+  const verify = Effect.fn("SshExecutor.verifyProvisionerTailnet")(function* (
+    address: SshWorkerAddress,
+  ) {
     yield* Effect.annotateCurrentSpan({ worker: address.name });
     const client = yield* clientFor(address);
     if (Option.isNone(client) || Option.isNone(address.gateway)) return;
     yield* client.value.withKey(() => Effect.void);
     yield* client.value.verifyGateway(address.gateway.value.domain);
   });
-  const leave = Effect.fn("SshExecutor.leaveBoatTailnet")(function* (machine: SshMachine) {
-    if (Option.isNone(boatTailnetOf(machine.address))) return;
+  const leave = Effect.fn("SshExecutor.leaveProvisionerTailnet")(function* (machine: SshMachine) {
+    if (Option.isNone(provisionerTailnetOf(machine.address))) return;
     const worker = machine.address.name;
     yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
     yield* commands.run("cleanup", machine.shell, "sudo", ["tailscale", "logout"]).pipe(
       Effect.timeout("15 seconds"),
-      Effect.tap(() => Effect.logInfo("Removed the sandbox's ephemeral tailnet node", { worker })),
+      Effect.tap(() => Effect.logInfo("Removed the machine's ephemeral tailnet node", { worker })),
       Effect.tapError(() =>
         Effect.logWarning(
-          "Could not log the sandbox out of Tailscale; its ephemeral node expires after sandbox deletion",
+          "Could not log the machine out of Tailscale; its ephemeral node expires after machine deletion",
           { worker },
         ),
       ),
       Effect.ignore,
     );
   });
-  const join = Effect.fn("SshExecutor.joinBoatTailnet")(function* (machine: SshMachine) {
-    const settings = boatTailnetOf(machine.address);
+  const join = Effect.fn("SshExecutor.joinProvisionerTailnet")(function* (machine: SshMachine) {
+    const settings = provisionerTailnetOf(machine.address);
     if (Option.isNone(settings) || Option.isNone(machine.gateway)) return;
     const worker = machine.address.name;
     const domain = machine.gateway.value.settings.domain;
@@ -90,10 +92,10 @@ export const boatTailnetsFor = Effect.fn("SshExecutor.boatTailnetsFor")(function
         return yield* WorkerCapabilityError.make({
           worker,
           capability: "gateway",
-          message: `Boat worker "${worker}" cannot reach the gateway over the tailnet`,
+          message: `Provisioned worker "${worker}" cannot reach the gateway over the tailnet`,
           cause: new Error("missing gateway response"),
         });
-      yield* Effect.logInfo("Joined the sandbox to the tailnet and configured gateway access", {
+      yield* Effect.logInfo("Joined the machine to the tailnet and configured gateway access", {
         worker,
         address: settings.value.gatewayAddress,
       });
@@ -103,7 +105,7 @@ export const boatTailnetsFor = Effect.fn("SshExecutor.boatTailnetsFor")(function
           WorkerCapabilityError.make({
             worker,
             capability: "gateway",
-            message: `Boat worker "${worker}" could not join the tailnet or configure the gateway. Check the snapshot's Tailscale service and tailnet policy.`,
+            message: `Provisioned worker "${worker}" could not join the tailnet or configure the gateway. Check the snapshot's Tailscale service and tailnet policy.`,
             cause: new Error("tailnet bootstrap failed"),
           }),
         ),

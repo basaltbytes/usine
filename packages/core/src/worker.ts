@@ -230,7 +230,7 @@ export const CloudflareLlmProvider = Schema.Literals(["anthropic", "openai"]);
 export type CloudflareLlmProvider = typeof CloudflareLlmProvider.Type;
 
 /** The cloud provider that creates one machine per Attempt for a provisioned SSH Worker. */
-export const MachineProvider = Schema.Literals(["hetzner", "boat"]);
+export const MachineProvider = Schema.Literals(["hetzner", "boat", "boxd"]);
 export type MachineProvider = typeof MachineProvider.Type;
 
 /**
@@ -329,6 +329,20 @@ export const BoatSnapshotName = Schema.String.check(
   ),
 ).pipe(Schema.brand("BoatSnapshotName"));
 export type BoatSnapshotName = typeof BoatSnapshotName.Type;
+
+/** A boxd snapshot's captured CPU and memory size. */
+export const BoxdSize = Schema.Literals(["1x4", "2x8", "4x16", "8x32"]);
+export type BoxdSize = typeof BoxdSize.Type;
+
+/** The region containing a boxd machine and its snapshot. */
+export const BoxdRegion = Schema.Literals(["fra", "nyc"]);
+export type BoxdRegion = typeof BoxdRegion.Type;
+
+/** A lowercase boxd snapshot name of at most 63 characters. */
+export const BoxdSnapshotName = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u),
+).pipe(Schema.brand("BoxdSnapshotName"));
+export type BoxdSnapshotName = typeof BoxdSnapshotName.Type;
 
 /** A Tailscale IPv4 address in 100.64.0.0/10. */
 export const TailnetAddress = Schema.String.check(

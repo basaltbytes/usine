@@ -1581,6 +1581,7 @@ export {
   ProvisioningPauseView,
   HetznerProvisionerView,
   BoatProvisionerView,
+  BoxdProvisionerView,
   ProvisionerView,
 } from "./machines.ts";
 export {

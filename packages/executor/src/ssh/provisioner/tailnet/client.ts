@@ -2,7 +2,7 @@ import type { GatewayDomain, WorkerName } from "@usine/core/worker";
 import { Effect, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { WorkerCapabilityError } from "../../../executor.ts";
-import type { BoatTailnet } from "../../model.ts";
+import type { ProvisionerTailnet } from "../../model.ts";
 
 const API = "https://api.tailscale.com/api/v2";
 const AccessToken = Schema.Struct({
@@ -15,7 +15,7 @@ const AuthKey = Schema.Struct({
 
 export const tailscaleClientFor = Effect.fn("Tailscale.clientFor")(function* (
   worker: WorkerName,
-  settings: BoatTailnet,
+  settings: ProvisionerTailnet,
 ) {
   yield* Effect.annotateCurrentSpan({ worker });
   const http = yield* HttpClient.HttpClient;

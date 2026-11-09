@@ -4,19 +4,29 @@ import { WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Layer } from "effect";
 import { WorkerMachines } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
+import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { hetznerDriverFor } from "../../../src/ssh/provisioner/hetzner.ts";
 import { capturedLogs, fakeMachine, INSTANCE, request, TEST_AGENT, WORKER } from "../support.ts";
-import { MACHINE_RUN, boatAddress, hetznerAddress, RUN, runtimeOf } from "./fixtures.ts";
+import {
+  MACHINE_RUN,
+  boxdAddress,
+  boatAddress,
+  hetznerAddress,
+  RUN,
+  runtimeOf,
+} from "./fixtures.ts";
 import { BOAT_TEST_API, fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
 
-for (const address of [hetznerAddress, boatAddress]) {
+for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
   if (address.machine._tag !== "Provisioned") continue;
   const settings = address.machine.provisioner;
   const driver =
     settings.provider === "hetzner"
       ? hetznerDriverFor(WORKER, settings, false, HETZNER_TEST_API)
-      : boatDriverFor(WORKER, settings, "ssh-ed25519 AAAATest", BOAT_TEST_API);
+      : settings.provider === "boxd"
+        ? boxdDriverFor(WORKER, settings)
+        : boatDriverFor(WORKER, settings, "ssh-ed25519 AAAATest", BOAT_TEST_API);
   const tags = {
     instance: INSTANCE,
     worker: WORKER,

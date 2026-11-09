@@ -1,3 +1,4 @@
+import { fakeBoxd } from "./fake-boxd.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
@@ -513,15 +514,18 @@ export const fakeProviders = () => {
         ),
       ),
     );
+  const boxd = fakeBoxd();
   return {
     calls,
     hetzner,
     boat,
-    layer: Layer.succeed(HttpClient.HttpClient, clientWith(unexpected)),
+    boxd: boxd.state,
+    layer: Layer.merge(Layer.succeed(HttpClient.HttpClient, clientWith(unexpected)), boxd.layer),
     /** Returns the providers' client that sends other origins to `underlying`'s client. */
     over: <E, R>(underlying: Layer.Layer<HttpClient.HttpClient, E, R>) =>
       Layer.effect(HttpClient.HttpClient, Effect.map(HttpClient.HttpClient, clientWith)).pipe(
         Layer.provide(underlying),
+        Layer.merge(boxd.layer),
       ),
   };
 };

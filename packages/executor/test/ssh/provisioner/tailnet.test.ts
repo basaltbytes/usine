@@ -34,6 +34,7 @@ import {
 } from "../../../src/executor.ts";
 import type { BoatTailnet, SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { tailscaleClientFor } from "../../../src/ssh/provisioner/tailnet/client.ts";
+import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { layer as sshLayer } from "../../../src/ssh/ssh.ts";
 import { fakeGateway, gatewayAddress } from "../gateway/support.ts";
@@ -49,7 +50,7 @@ import {
   WORKER,
 } from "../support.ts";
 import { BOAT_TEST_API, fakeProviders } from "./fake-providers.ts";
-import { boatSettings } from "./support.ts";
+import { boatSettings, boxdSettings } from "./support.ts";
 
 const tailnet: BoatTailnet = {
   gatewayAddress: TailnetAddress.make("100.64.0.2"),
@@ -124,7 +125,7 @@ const providers = {
   ),
 };
 
-const address: SshWorkerAddress = {
+const boatAddress: SshWorkerAddress = {
   ...gatewayAddress({ llmProviders: ["anthropic-messages", "openai-responses"] }),
   port: Option.none(),
   identityFile: Option.some(SshIdentityFile.make("/keys/boat")),
@@ -146,7 +147,17 @@ const sink = {
   windows: aloneOnItem(),
 };
 
-describe("Boat tailnet", () => {
+const boxdAddress: SshWorkerAddress = {
+  ...boatAddress,
+  machine: {
+    _tag: "Provisioned",
+    provisioner: boxdSettings({
+      tailnet: Option.some(tailnet),
+      apiKeys: { anthropic: Option.none(), openai: Option.none() },
+    }),
+  },
+};
+describe("Provisioner tailnet credentials", () => {
   it.effect("revokes and wipes the auth key when a join is interrupted", () => {
     const api = fakeTailnet();
     return Effect.gen(function* () {
@@ -160,48 +171,6 @@ describe("Boat tailnet", () => {
       assert.strictEqual(api.calls.filter((call) => call.method === "DELETE").length, 1);
       assert.throws(() => Redacted.value(key));
     }).pipe(Effect.provide(api.layer));
-  });
-
-  it.live("deletes an orphan Boat sandbox after a restart without needing tailnet access", () => {
-    const machine = fakeMachine();
-    machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
-    machine.state.reachable = false;
-    const boat = fakeProviders();
-    const api = fakeTailnet();
-    const gateway = fakeGateway(machine, providers);
-    const layer = sshLayer({
-      workers: [address],
-      instance: INSTANCE,
-      instanceId: INSTANCE_ID,
-      providerEndpoints: { boat: BOAT_TEST_API },
-    }).pipe(
-      Layer.provide(harnessesLive),
-      Layer.provide(machine.layer),
-      Layer.provide(mintingProvider().layer),
-      Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-      Layer.provide(hostLoginLockLayer),
-      Layer.provide(boat.over(api.over(gateway.layer))),
-    );
-    return Effect.gen(function* () {
-      const driver = yield* boatDriverFor(
-        WORKER,
-        boatSettings(),
-        "ssh-ed25519 AAAATest",
-        BOAT_TEST_API,
-      );
-      yield* driver.create("earlier-create", {
-        instance: INSTANCE,
-        worker: WORKER,
-        run: RunId.make("earlier-run"),
-        process: "earlier-process",
-        attempt: AttemptId.make("earlier-run/execute/1"),
-        attempts: 1,
-      });
-      assert.strictEqual(boat.boat.sandboxes.size, 1);
-      yield* (yield* WorkerMachines).sweep;
-      assert.strictEqual(boat.boat.sandboxes.size, 0);
-      assert.lengthOf(api.calls, 0);
-    }).pipe(Effect.scoped, Effect.provide(layer.pipe(Layer.provideMerge(boat.layer))));
   });
 
   it.effect("scrubs an auth key echoed by a failed SSH command before creating its error", () => {
@@ -270,89 +239,69 @@ describe("Boat tailnet", () => {
       }).pipe(Effect.provide(api.layer));
     },
   );
+});
 
-  it.live(
-    "revokes the auth key and deletes the sandbox after a refused join without reporting the key",
-    () => {
-      const machine = fakeMachine();
-      machine.state.tailscaleJoin = "refused";
-      machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
-      const boat = fakeProviders();
-      const api = fakeTailnet();
-      const gateway = fakeGateway(machine, providers);
-      const layer = sshLayer({
-        workers: [address],
-        instance: INSTANCE,
-        instanceId: INSTANCE_ID,
-        providerEndpoints: { boat: BOAT_TEST_API },
-        machinePollInterval: "1 millis",
-        machineReadyTimeout: "5 seconds",
-      }).pipe(
-        Layer.provide(harnessesLive),
-        Layer.provide(machine.layer),
-        Layer.provide(mintingProvider().layer),
-        Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
-        Layer.provide(hostLoginLockLayer),
-        Layer.provide(boat.over(api.over(gateway.layer))),
-      );
-      return Effect.gen(function* () {
-        const machines = yield* WorkerMachines;
-        const failure = yield* machines
-          .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [TEST_AGENT.brain])
-          .pipe(Effect.flip);
-        assert.include(failure.message, "could not join");
-        const json2 = jsonKey(failure);
-        assert.notInclude(json2, "tskey-auth-test");
-        assert.strictEqual(boat.boat.sandboxes.size, 0);
-        assert.isTrue(api.calls.some((call) => call.method === "DELETE"));
-        assert.isFalse(
-          gateway.calls.some((call) => call.method === "POST" && call.path === "/v1/attachments"),
-        );
-        assert.isTrue(
-          machine.state.calls.some((call) => call.line.includes("'tailscale' 'logout'")),
-        );
-      }).pipe(Effect.scoped, Effect.provide(layer));
-    },
-  );
-
-  for (const harness of ["claude", "codex"] as const) {
+for (const address of [boatAddress, boxdAddress]) {
+  assert(address.machine._tag === "Provisioned");
+  const provider = address.machine.provisioner.provider;
+  describe(`${provider} tailnet`, () => {
     it.live(
-      `runs ${harness} in a Boat container on the gateway subscription, then detaches and logs out`,
+      `deletes an orphan ${provider} machine after a restart without needing tailnet access`,
       () => {
         const machine = fakeMachine();
-        machine.state.docker = "running";
-        machine.state.forwardProxyReachable = false;
+        machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
+        machine.state.reachable = false;
+        const boat = fakeProviders();
+        const api = fakeTailnet();
+        const gateway = fakeGateway(machine, providers);
+        const layer = sshLayer({
+          workers: [address],
+          instance: INSTANCE,
+          instanceId: INSTANCE_ID,
+          providerEndpoints: { boat: BOAT_TEST_API },
+        }).pipe(
+          Layer.provide(harnessesLive),
+          Layer.provide(machine.layer),
+          Layer.provide(mintingProvider().layer),
+          Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
+          Layer.provide(hostLoginLockLayer),
+          Layer.provide(boat.over(api.over(gateway.layer))),
+        );
+        return Effect.gen(function* () {
+          const driver = yield* provider === "boxd"
+            ? boxdDriverFor(WORKER, boxdSettings())
+            : boatDriverFor(WORKER, boatSettings(), "ssh-ed25519 AAAATest", BOAT_TEST_API);
+          yield* driver.create("earlier-create", {
+            instance: INSTANCE,
+            worker: WORKER,
+            run: RunId.make("earlier-run"),
+            process: "earlier-process",
+            attempt: AttemptId.make("earlier-run/execute/1"),
+            attempts: 1,
+          });
+          assert.strictEqual(
+            (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
+            1,
+          );
+          yield* (yield* WorkerMachines).sweep;
+          assert.strictEqual(
+            (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
+            0,
+          );
+          assert.lengthOf(api.calls, 0);
+        }).pipe(Effect.scoped, Effect.provide(layer.pipe(Layer.provideMerge(boat.layer))));
+      },
+    );
+
+    it.live(
+      "revokes the auth key and deletes the sandbox after a refused join without reporting the key",
+      () => {
+        const machine = fakeMachine();
+        machine.state.tailscaleJoin = "refused";
         machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
         const boat = fakeProviders();
         const api = fakeTailnet();
         const gateway = fakeGateway(machine, providers);
-        const agent = Agent.make({
-          ...TEST_AGENT,
-          brain: BrainSpec.make({
-            harness: Harness.make(harness),
-            model: ModelId.make(harness === "codex" ? "gpt-5.6-sol" : "claude-sonnet-4-6"),
-            effort: "high",
-          }),
-        });
-        const attempt = CheckoutRequest.make({ ...request, agent });
-        let launched = false;
-        const runtime = stubAttemptRuntime(new StubStorage(), (context) =>
-          Effect.gen(function* () {
-            launched = true;
-            assert.strictEqual(machine.state.credentials.size, 0);
-            for (const call of machine.state.calls) {
-              assert.notInclude(call.line + call.input, TOKEN_PREFIX);
-              assert.notInclude(call.line + call.input, "sk-ant-oat01-test");
-              assert.notInclude(call.line + call.input, "test-client-secret");
-            }
-            assert(Schema.is(RemoteShell)(context.request.host));
-            assert.notInclude(context.request.host.ssh.args, "-J");
-            assert.strictEqual(context.request.environment.HTTPS_PROXY, "");
-            const currentGatewayCredential = yield* context.request.gatewayCredential;
-            assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
-            return yield* completes(context);
-          }),
-        );
         const layer = sshLayer({
           workers: [address],
           instance: INSTANCE,
@@ -364,47 +313,127 @@ describe("Boat tailnet", () => {
           Layer.provide(harnessesLive),
           Layer.provide(machine.layer),
           Layer.provide(mintingProvider().layer),
-          Layer.provide(runtime),
+          Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
           Layer.provide(hostLoginLockLayer),
           Layer.provide(boat.over(api.over(gateway.layer))),
         );
         return Effect.gen(function* () {
-          yield* Effect.gen(function* () {
-            const executor = yield* Executor;
-            const machines = yield* WorkerMachines;
-            yield* executor.preflight(WORKER, [agent.brain], 1);
-            const grant = yield* machines.create(WORKER, MACHINE_RUN, attempt.attemptId, [
-              agent.brain,
-            ]);
-
-            yield* Effect.gen(function* () {
-              yield* (yield* executor.prepare(attempt)).launch(sink);
-            }).pipe(Effect.scoped);
-            yield* machines.release(grant.hold);
-          }).pipe(Effect.scoped, Effect.provide(layer));
-          assert.isTrue(launched);
-          assert.strictEqual(machine.state.credentials.size, 0);
-          assert.strictEqual(boat.boat.sandboxes.size, 0);
-          const join = machine.state.calls.find((call) => call.line.includes("'tailscale' 'up'"));
-          assert(join !== undefined);
-          assert.strictEqual(join.input, "tskey-auth-test");
-          assert.notInclude(join.line, "tskey-auth-test");
-          assert.include(join.line, "--accept-dns=false");
-          assert.include(join.line, "--accept-routes=false");
-          const container = machine.state.calls.find(
-            (call) =>
-              call.line.startsWith("exec 'docker' 'run'") && call.line.includes("--add-host"),
+          const machines = yield* WorkerMachines;
+          const failure = yield* machines
+            .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [TEST_AGENT.brain])
+            .pipe(Effect.flip);
+          assert.include(failure.message, "could not join");
+          const json2 = jsonKey(failure);
+          assert.notInclude(json2, "tskey-auth-test");
+          assert.strictEqual(
+            (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
+            0,
           );
-          assert(container !== undefined);
-          assert.include(container.line, "git.gw.test:100.64.0.2");
-          assert.include(container.line, "llm.gw.test:100.64.0.2");
+          assert.isTrue(api.calls.some((call) => call.method === "DELETE"));
+          assert.isFalse(
+            gateway.calls.some((call) => call.method === "POST" && call.path === "/v1/attachments"),
+          );
           assert.isTrue(
             machine.state.calls.some((call) => call.line.includes("'tailscale' 'logout'")),
           );
-          assert.isTrue(gateway.calls.some((call) => call.method === "DELETE"));
-          assert.strictEqual(api.calls.filter((call) => call.method === "DELETE").length, 2);
-        });
+        }).pipe(Effect.scoped, Effect.provide(layer));
       },
     );
-  }
-});
+
+    for (const harness of ["claude", "codex"] as const) {
+      it.live(
+        `runs ${harness} in a ${provider} container on the gateway subscription, then detaches and logs out`,
+        () => {
+          const machine = fakeMachine();
+          machine.state.docker = "running";
+          machine.state.forwardProxyReachable = false;
+          machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
+          const boat = fakeProviders();
+          const api = fakeTailnet();
+          const gateway = fakeGateway(machine, providers);
+          const agent = Agent.make({
+            ...TEST_AGENT,
+            brain: BrainSpec.make({
+              harness: Harness.make(harness),
+              model: ModelId.make(harness === "codex" ? "gpt-5.6-sol" : "claude-sonnet-4-6"),
+              effort: "high",
+            }),
+          });
+          const attempt = CheckoutRequest.make({ ...request, agent });
+          let launched = false;
+          const runtime = stubAttemptRuntime(new StubStorage(), (context) =>
+            Effect.gen(function* () {
+              launched = true;
+              assert.strictEqual(machine.state.credentials.size, 0);
+              for (const call of machine.state.calls) {
+                assert.notInclude(call.line + call.input, TOKEN_PREFIX);
+                assert.notInclude(call.line + call.input, "sk-ant-oat01-test");
+                assert.notInclude(call.line + call.input, "test-client-secret");
+              }
+              assert(Schema.is(RemoteShell)(context.request.host));
+              assert.notInclude(context.request.host.ssh.args, "-J");
+              assert.strictEqual(context.request.environment.HTTPS_PROXY, "");
+              const currentGatewayCredential = yield* context.request.gatewayCredential;
+              assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
+              return yield* completes(context);
+            }),
+          );
+          const layer = sshLayer({
+            workers: [address],
+            instance: INSTANCE,
+            instanceId: INSTANCE_ID,
+            providerEndpoints: { boat: BOAT_TEST_API },
+            machinePollInterval: "1 millis",
+            machineReadyTimeout: "5 seconds",
+          }).pipe(
+            Layer.provide(harnessesLive),
+            Layer.provide(machine.layer),
+            Layer.provide(mintingProvider().layer),
+            Layer.provide(runtime),
+            Layer.provide(hostLoginLockLayer),
+            Layer.provide(boat.over(api.over(gateway.layer))),
+          );
+          return Effect.gen(function* () {
+            yield* Effect.gen(function* () {
+              const executor = yield* Executor;
+              const machines = yield* WorkerMachines;
+              yield* executor.preflight(WORKER, [agent.brain], 1);
+              const grant = yield* machines.create(WORKER, MACHINE_RUN, attempt.attemptId, [
+                agent.brain,
+              ]);
+
+              yield* Effect.gen(function* () {
+                yield* (yield* executor.prepare(attempt)).launch(sink);
+              }).pipe(Effect.scoped);
+              yield* machines.release(grant.hold);
+            }).pipe(Effect.scoped, Effect.provide(layer));
+            assert.isTrue(launched);
+            assert.strictEqual(machine.state.credentials.size, 0);
+            assert.strictEqual(
+              (provider === "boxd" ? boat.boxd.machines : boat.boat.sandboxes).size,
+              0,
+            );
+            const join = machine.state.calls.find((call) => call.line.includes("'tailscale' 'up'"));
+            assert(join !== undefined);
+            assert.strictEqual(join.input, "tskey-auth-test");
+            assert.notInclude(join.line, "tskey-auth-test");
+            assert.include(join.line, "--accept-dns=false");
+            assert.include(join.line, "--accept-routes=false");
+            const container = machine.state.calls.find(
+              (call) =>
+                call.line.startsWith("exec 'docker' 'run'") && call.line.includes("--add-host"),
+            );
+            assert(container !== undefined);
+            assert.include(container.line, "git.gw.test:100.64.0.2");
+            assert.include(container.line, "llm.gw.test:100.64.0.2");
+            assert.isTrue(
+              machine.state.calls.some((call) => call.line.includes("'tailscale' 'logout'")),
+            );
+            assert.isTrue(gateway.calls.some((call) => call.method === "DELETE"));
+            assert.strictEqual(api.calls.filter((call) => call.method === "DELETE").length, 2);
+          });
+        },
+      );
+    }
+  });
+}

@@ -52,6 +52,7 @@ import {
   KEY,
   hetznerAddress,
   boatAddress,
+  boxdAddress,
   sink,
   runtimeOf,
   pinnedEarlier,
@@ -922,9 +923,10 @@ describe("Provisioned SSH Worker", () => {
     },
   );
 
-  it.live(
-    "creates a Boat sandbox, pins its host key, and refuses a Boat Worker without the identity file's public key",
-    () => {
+  for (const address of [boatAddress, boxdAddress]) {
+    assert(address.machine._tag === "Provisioned");
+    const provider = address.machine.provisioner.provider;
+    it.live(`creates a ${provider} machine and pins its host key`, () => {
       const machine = fakeMachine();
       machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
       const providers = fakeProviders();
@@ -935,47 +937,64 @@ describe("Provisioned SSH Worker", () => {
         const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
           TEST_AGENT.brain,
         ]);
-        const known = machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`);
-        assert.strictEqual(known, `usine-boat-${grant.id} ${providers.boat.hostKey ?? ""}\n`);
+        const known = machine.state.localFiles.get(
+          `${LOCAL_TEMPORARY_DIRECTORY}/${provider}-${grant.id}`,
+        );
+        assert.strictEqual(
+          known,
+          `usine-${provider}-${grant.id} ${provider === "boxd" ? providers.boxd.hostKey : (providers.boat.hostKey ?? "")}\n`,
+        );
         const key = providers.calls.find(({ path }) => path.endsWith("/sshkey"));
-        assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
+        if (provider === "boat")
+          assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
+        else assert.isUndefined(key);
         assert.isTrue(
           machine.state.calls.some(({ command }) =>
             command.args.includes("StrictHostKeyChecking=yes"),
           ),
         );
         yield* machines.release(grant.hold);
-        assert.strictEqual(providers.boat.sandboxes.size, 0);
-        assert.isUndefined(
-          machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`),
+        assert.strictEqual(
+          (provider === "boxd" ? providers.boxd.machines : providers.boat.sandboxes).size,
+          0,
         );
-      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boatAddress)));
-    },
-  );
+        assert.isUndefined(
+          machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/${provider}-${grant.id}`),
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
+    });
 
-  it.live(
-    "refuses a Boat sandbox whose host key the API doesn't report, and deletes it without connecting",
-    () => {
-      const machine = fakeMachine();
-      machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
-      const providers = fakeProviders();
-      providers.boat.hostKey = undefined;
-      return Effect.gen(function* () {
-        const machines = yield* WorkerMachines;
-        const refused = yield* machines
-          .create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain])
-          .pipe(Effect.flip);
-        assert(refused._tag === "MachineUnavailableError");
-        assert.strictEqual(refused.reason, "provider");
-        assert.include(refused.message, "doesn't trust the host key of a first connection");
-        assert.lengthOf(machine.state.calls, 0, "nothing connected to the sandbox");
-        assert.strictEqual(providers.boat.sandboxes.size, 0, "the sandbox was deleted");
-        const currentMachines = yield* machines.machines;
-        assert.lengthOf(currentMachines, 0);
-      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boatAddress)));
-    },
-  );
-
+    it.live(
+      `refuses a ${provider} machine whose API reports no host key and deletes it without connecting`,
+      () => {
+        const machine = fakeMachine();
+        machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
+        const providers = fakeProviders();
+        if (provider === "boxd") providers.boxd.hostKey = "";
+        else providers.boat.hostKey = undefined;
+        return Effect.gen(function* () {
+          const machines = yield* WorkerMachines;
+          const refused = yield* machines
+            .create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain])
+            .pipe(Effect.flip);
+          assert(refused._tag === "MachineUnavailableError");
+          assert.strictEqual(refused.reason, "provider");
+          assert.include(
+            refused.message,
+            provider === "boxd" ? "sshHostKey" : "doesn't trust the host key of a first connection",
+          );
+          assert.lengthOf(machine.state.calls, 0, "nothing connected to the sandbox");
+          assert.strictEqual(
+            (provider === "boxd" ? providers.boxd.machines : providers.boat.sandboxes).size,
+            0,
+            "the sandbox was deleted",
+          );
+          const currentMachines = yield* machines.machines;
+          assert.lengthOf(currentMachines, 0);
+        }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
+      },
+    );
+  }
   it.live("refuses a Boat Worker whose identity file has no public key", () => {
     const machine = fakeMachine();
     const providers = fakeProviders();

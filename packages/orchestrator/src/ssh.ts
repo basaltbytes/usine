@@ -133,16 +133,23 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
           },
         } satisfies SshWorkerMachine;
       case "boat":
+      case "boxd":
         return {
           _tag: "Provisioned",
           provisioner: {
-            provider: "boat",
+            ...(settings.provider === "boxd"
+              ? {
+                  provider: settings.provider,
+                  region: settings.region,
+                  isolated: settings.isolated,
+                  size: settings.size,
+                  snapshot: settings.snapshot,
+                }
+              : { provider: settings.provider, size: settings.size, snapshot: settings.snapshot }),
             token,
-            size: settings.size,
             apiKeys,
             timings: settings.timings,
             reuse: settings.reuse,
-            snapshot: settings.snapshot,
             tailnet: yield* Effect.transposeOption(
               Option.map(settings.tailnet, (tailnet) =>
                 Effect.gen(function* () {

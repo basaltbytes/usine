@@ -101,7 +101,9 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
       const machine =
         provisioner._tag === "hetzner"
           ? `hetzner ${provisioner.serverType} in ${provisioner.location}`
-          : `boat ${provisioner.size}`;
+          : provisioner._tag === "boxd"
+            ? `boxd ${provisioner.size} ${provisioner.region}`
+            : `boat ${provisioner.size}`;
       return `${machine}, one machine per attempt`;
     }
     case "cloudflare":
@@ -376,7 +378,9 @@ export const workerFormCopy = {
   firewall: "Firewall",
   sshKey: "SSH key name",
   sshUser: "SSH user",
-  size: "Sandbox size",
+  size: "Machine size",
+  region: "Region",
+  isolated: "Isolated",
   domain: "Gateway domain",
   gatewayDestination: "Gateway SSH destination",
   adminPort: "Gateway admin port",

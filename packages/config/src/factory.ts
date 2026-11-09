@@ -8,6 +8,9 @@ import {
   ProvisionerTimings,
   ProvisionerReuse,
   BoatSize,
+  BoxdSize,
+  BoxdRegion,
+  BoxdSnapshotName,
   BoatSnapshotName,
   TailnetAddress,
   CloudflareImageName,
@@ -205,6 +208,10 @@ const ProvisionerTimingsFromYaml = ProvisionerTimings.pipe(
   Schema.withDecodingDefaultKey(Effect.succeed({})),
 );
 
+const ProvisionerReuseFromYaml = Schema.OptionFromOptionalKey(
+  ProvisionerReuse.pipe(Schema.encodeKeys({ maxAge: "max_age" })),
+);
+
 /**
  * Settings for Hetzner Cloud machines, with optional reuse across attempts (ADR 0029).
  */
@@ -240,9 +247,7 @@ export class HetznerProvisioner extends Schema.Class<
    */
   timings: ProvisionerTimingsFromYaml,
   /** Omitted by default; both limits are required when reuse is enabled. */
-  reuse: Schema.OptionFromOptionalKey(
-    ProvisionerReuse.pipe(Schema.encodeKeys({ maxAge: "max_age" })),
-  ),
+  reuse: ProvisionerReuseFromYaml,
 }) {}
 
 /** Gateway routing for a long-lived SSH machine already on the tailnet. */
@@ -253,11 +258,11 @@ export class SshTailnet extends Schema.Class<
   gatewayAddress: TailnetAddress,
 }) {}
 
-/** The gateway address and OAuth client variables for a Boat sandbox's tailnet join. */
-export class BoatTailnet extends Schema.Class<
-  BoatTailnet,
-  Brand.Brand<"@usine/config/factory/BoatTailnet">
->("@usine/config/BoatTailnet")({
+/** The gateway address and OAuth client variables for a provisioned machine's tailnet join. */
+export class ProvisionerTailnet extends Schema.Class<
+  ProvisionerTailnet,
+  Brand.Brand<"@usine/config/factory/ProvisionerTailnet">
+>("@usine/config/ProvisionerTailnet")({
   /** The gateway address reachable through the tailnet. */
   gatewayAddress: TailnetAddress,
   /** The orchestrator variable containing the Tailscale OAuth client ID. */
@@ -265,6 +270,16 @@ export class BoatTailnet extends Schema.Class<
   /** The orchestrator variable containing the Tailscale OAuth client secret. */
   clientSecretEnv: EnvironmentVariableName,
 }) {}
+
+const ProvisionerTailnetFromYaml = Schema.OptionFromOptionalKey(
+  ProvisionerTailnet.pipe(
+    Schema.encodeKeys({
+      gatewayAddress: "gateway_address",
+      clientIdEnv: "client_id_env",
+      clientSecretEnv: "client_secret_env",
+    }),
+  ),
+);
 
 /** Settings for Boat machines, optionally from a snapshot and with bounded reuse (ADR 0029). */
 export class BoatProvisioner extends Schema.Class<
@@ -283,15 +298,7 @@ export class BoatProvisioner extends Schema.Class<
    * The gateway address and OAuth variable names for joining the tailnet, or `None` without a
    * gateway.
    */
-  tailnet: Schema.OptionFromOptionalKey(
-    BoatTailnet.pipe(
-      Schema.encodeKeys({
-        gatewayAddress: "gateway_address",
-        clientIdEnv: "client_id_env",
-        clientSecretEnv: "client_secret_env",
-      }),
-    ),
-  ),
+  tailnet: ProvisionerTailnetFromYaml,
   /** Provider key variable names for attempts that use API keys; decoding defaults to none. */
   apiKeys: ProviderApiKeysFromYaml,
   /**
@@ -300,13 +307,35 @@ export class BoatProvisioner extends Schema.Class<
    */
   timings: ProvisionerTimingsFromYaml,
   /** Omitted by default; both limits are required when reuse is enabled. */
-  reuse: Schema.OptionFromOptionalKey(
-    ProvisionerReuse.pipe(Schema.encodeKeys({ maxAge: "max_age" })),
-  ),
+  reuse: ProvisionerReuseFromYaml,
+}) {}
+
+/** @deprecated Use ProvisionerTailnet. */
+export { ProvisionerTailnet as BoatTailnet };
+
+/** Restores each boxd machine from a snapshot with a matching captured size. */
+export class BoxdProvisioner extends Schema.Class<
+  BoxdProvisioner,
+  Brand.Brand<"@usine/config/factory/BoxdProvisioner">
+>("@usine/config/BoxdProvisioner")({
+  provider: Schema.Literal("boxd"),
+  tokenEnv: EnvironmentVariableName,
+  region: BoxdRegion.pipe(Schema.withDecodingDefaultKey(Effect.succeed("fra"))),
+  size: BoxdSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("2x8"))),
+  snapshot: BoxdSnapshotName,
+  isolated: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
+  tailnet: ProvisionerTailnetFromYaml,
+  apiKeys: ProviderApiKeysFromYaml,
+  timings: ProvisionerTimingsFromYaml,
+  reuse: ProvisionerReuseFromYaml,
 }) {}
 
 /** The provider that creates machines for an SSH worker; `provider` selects it. */
-export const WorkerProvisioner = Schema.Union([HetznerProvisioner, BoatProvisioner]);
+export const WorkerProvisioner = Schema.Union([
+  HetznerProvisioner,
+  BoatProvisioner,
+  BoxdProvisioner,
+]);
 export type WorkerProvisioner = typeof WorkerProvisioner.Type;
 
 const WorkerProvisionerFromYaml = Schema.Union([
@@ -320,6 +349,7 @@ const WorkerProvisionerFromYaml = Schema.Union([
     }),
   ),
   BoatProvisioner.pipe(Schema.encodeKeys({ tokenEnv: "token_env", apiKeys: "api_keys" })),
+  BoxdProvisioner.pipe(Schema.encodeKeys({ tokenEnv: "token_env", apiKeys: "api_keys" })),
 ]);
 
 /**
@@ -396,6 +426,14 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
     case "hetzner":
       return Option.isSome(worker.gateway) && Option.isNone(provisioner.network)
         ? `SSH worker "${worker.name}" has a gateway, so its provisioner needs the gateway's private network in network`
+        : undefined;
+    case "boxd":
+      if (Option.isSome(worker.gateway) && Option.isNone(provisioner.tailnet))
+        return `SSH worker "${worker.name}" needs provisioner.tailnet to use a boxd gateway`;
+      if (Option.isSome(provisioner.tailnet) && Option.isNone(worker.gateway))
+        return `SSH worker "${worker.name}" sets provisioner.tailnet without a gateway`;
+      return Option.isNone(worker.identityFile)
+        ? `SSH worker "${worker.name}" has a boxd provisioner and needs identity_file, whose public key must be baked into the snapshot`
         : undefined;
     case "boat":
       if (

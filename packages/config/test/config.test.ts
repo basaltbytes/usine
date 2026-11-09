@@ -439,6 +439,51 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("decodes and round-trips boxd snapshot settings with defaults", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const yaml = `version: 1
+repos: []
+workers:
+  - name: boxd-pool
+    kind: ssh
+    root: /home/boxd/.usine
+    identity_file: ~/.ssh/usine_worker
+    provisioner:
+      provider: boxd
+      token_env: BOXD_API_KEY
+      snapshot: usine-attempt
+`;
+      const parsed = yield* parser.parseUsineYaml(InstancePath.make("usine.yaml"), yaml);
+      const worker = parsed.workers[0];
+      assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
+      const settings = worker.provisioner.value;
+      assert(settings.provider === "boxd");
+      assert.strictEqual(settings.region, "fra");
+      assert.strictEqual(settings.size, "2x8");
+      assert.isTrue(settings.isolated);
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(parsed);
+      const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
+      assert.deepStrictEqual(decoded, parsed);
+      for (const invalid of [
+        yaml + "      size: small\n",
+        yaml + "      region: moon\n",
+        yaml.replace("snapshot: usine-attempt", "snapshot: Bad_Name"),
+        yaml.replace("    identity_file: ~/.ssh/usine_worker\n", ""),
+        yaml.replace("      snapshot: usine-attempt\n", ""),
+        yaml +
+          "    gateway: { domain: gw.test, destination: gateway, admin_token_env: GW_TOKEN }\n",
+        yaml +
+          "      tailnet: { gateway_address: 100.64.0.2, client_id_env: TS_ID, client_secret_env: TS_SECRET }\n",
+      ]) {
+        const result = yield* parser
+          .parseUsineYaml(InstancePath.make("usine.yaml"), invalid)
+          .pipe(Effect.result);
+        assert.isTrue(Result.isFailure(result));
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses a provisioned ssh Worker's Hetzner and Boat settings with their defaults", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

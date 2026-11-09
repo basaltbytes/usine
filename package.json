@@ -23,7 +23,7 @@
     "changeset:publish": "pnpm build && pnpm stage publish -r --tag latest --no-git-checks && node scripts/release/tag.mjs",
     "prerelease:publish": "node scripts/release/next.mjs",
     "prepare": "effect-tsgo patch --typescript",
-    "test:scripts": "node --experimental-strip-types --test tooling/test/*.test.mts scripts/ci/*.test.mjs scripts/docs/*.test.mjs scripts/release/*.test.mjs scripts/effect-diagnostics/*.test.mjs infra/hetzner/gateway/test/*.test.mjs infra/boat/test/*.test.mjs"
+    "test:scripts": "node --experimental-strip-types --test tooling/test/*.test.mts scripts/ci/*.test.mjs scripts/docs/*.test.mjs scripts/release/*.test.mjs scripts/effect-diagnostics/*.test.mjs infra/hetzner/gateway/test/*.test.mjs infra/boat/test/*.test.mjs infra/boxd/test/*.test.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",

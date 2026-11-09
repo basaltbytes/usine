@@ -7,6 +7,7 @@ packages:
 
 # Optional/package-maintenance scripts are unnecessary at runtime.
 allowBuilds:
+  "@bufbuild/buf": true
   "@google/genai": false
   esbuild: false
   msgpackr-extract: false

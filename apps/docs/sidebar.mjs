@@ -28,6 +28,7 @@ export const guideGroups = [
       { slug: "guides/add-a-worker" },
       { slug: "guides/add-an-ssh-worker" },
       { slug: "guides/add-a-boat-worker" },
+      { slug: "guides/add-a-boxd-worker" },
       { slug: "guides/add-a-provisioned-worker" },
       { slug: "guides/cloudflare-sandboxes" },
       { slug: "guides/configure-a-gateway" },

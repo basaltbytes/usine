@@ -1,9 +1,12 @@
-import { Effect, FileSystem, Option, Ref, Semaphore } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Ref, Semaphore } from "effect";
 import { HttpClient } from "effect/http";
 import { homedir } from "node:os";
 import { WorkerCapabilityError } from "../../executor.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { ProvisionedMachinesOptions } from "./machines.ts";
+import { boxdDriverFor } from "./boxd.ts";
+import { BoxdApi } from "./boxd/client.ts";
+import { boxdApiLayer } from "./boxd/grpc-client.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
 import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
 import { type MachineDriver, tagValue } from "./model.ts";
@@ -16,6 +19,8 @@ const expandHome = (file: string): string =>
 export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(function* (
   options: Pick<ProvisionedMachinesOptions, "settings" | "instance">,
 ) {
+  const scope = yield* Effect.scope;
+  const boxd = yield* Effect.serviceOption(BoxdApi);
   const fs = yield* FileSystem.FileSystem;
   const http = yield* HttpClient.HttpClient;
   const { settings, instance } = options;
@@ -64,6 +69,17 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           Option.isSome(entry.gateway),
           settings.providerEndpoints?.hetzner ?? HETZNER_API,
         );
+      case "boxd": {
+        const api = yield* Option.match(boxd, {
+          onSome: Effect.succeed,
+          onNone: () =>
+            Layer.buildWithScope(
+              boxdApiLayer(value.token, value.region, settings.providerEndpoints?.boxd),
+              scope,
+            ).pipe(Effect.map((context) => Context.get(context, BoxdApi))),
+        });
+        return yield* boxdDriverFor(worker, value).pipe(Effect.provideService(BoxdApi, api));
+      }
       case "boat": {
         const publicKey = yield* readPublicKey(entry);
         return yield* boatDriverFor(

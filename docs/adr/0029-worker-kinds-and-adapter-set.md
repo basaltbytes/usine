@@ -104,3 +104,9 @@ The [Boat create API](https://docs.boat.dev/api/reference/sandboxes/create-sandb
 on 2026-11-01, defines `ttlSeconds: null` as disabling auto-stop. The driver already sends
 that explicit setting. Omitting the field applies the one-hour default; trial accounts
 require an auto-stop of at most two hours and cannot use this worker lifetime.
+
+## 2026-11-09: boxd provisioner
+
+boxd is a third driver of the SSH provisioner because its Linux VMs are reached through SSH and fit the existing machine lifecycle interface. Its memory-and-disk snapshots preserve the pulled attempt image, avoiding a download on each restore. The snapshot also fixes the machine size, so the configured size is a preflight assertion instead of a restore override; resizing would discard the captured memory state.
+
+boxd uses gRPC. A client port isolates its transport and decoded responses from the driver. The generated client retains the proxy host key and serving-region metadata that the SDK's public methods discard. Regional endpoints and the region setting keep machines and snapshots in the operator's selected location, including Frankfurt for EU placement. Tailnet joins use the same gateway bootstrap as Boat machines because boxd's own Tailscale integration enrolls its proxies instead of the machines.
