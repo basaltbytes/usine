@@ -74,6 +74,15 @@ jobs:
               printf "%s: " "$tool"
               "$tool" --version
             done'
+      - name: Run pnpm through Corepack offline
+        run: |
+          package_manager=$(jq -r .packageManager package.json)
+          docker run --rm --network none --env PACKAGE_MANAGER="$package_manager" usine-worker:smoke bash -euc '
+            cd "$(mktemp -d)"
+            printf "{\"packageManager\":\"%s\"}\n" "$PACKAGE_MANAGER" > package.json
+            version=$(corepack pnpm --version)
+            echo "corepack pnpm: $version"
+            [ "pnpm@$version" = "$PACKAGE_MANAGER" ]'
       # Rebuilds from the build cache of the Build step.
       - name: Push by digest
         id: push
