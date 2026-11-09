@@ -10,6 +10,7 @@ import {
 
 export const fakeBoxd = () => {
   const machines = new Map<MachineId, BoxdMachine>();
+  const names = new Map<MachineId, string>();
   const creates: Array<BoxdCreate> = [];
   const selectors: Array<ReadonlyArray<string>> = [];
   const timers: Array<{ id: MachineId; kind: string; seconds: number }> = [];
@@ -71,6 +72,8 @@ export const fakeBoxd = () => {
             return yield* failure("createFromSnapshot", state.createFails.value);
           if (state.snapshot.status !== "ready")
             return yield* failure("createFromSnapshot", "FAILED_PRECONDITION");
+          if ([...names.values()].includes(request.name))
+            return yield* failure("createFromSnapshot", "ALREADY_EXISTS");
           creates.push(request);
           const id = MachineId.make(`boxd-${creates.length}`);
           const now = yield* Clock.currentTimeMillis;
@@ -84,6 +87,7 @@ export const fakeBoxd = () => {
             labels: request.labels,
           };
           machines.set(id, machine);
+          names.set(id, request.name);
           return { id, machine: state.createMachine ? Option.some(machine) : Option.none() };
         }),
       ),
@@ -134,7 +138,10 @@ export const fakeBoxd = () => {
         }),
       ),
     destroy: (id) =>
-      call("destroy", () => (machines.delete(id) ? Effect.void : failure("destroy", "NOT_FOUND"))),
+      call("destroy", () => {
+        names.delete(id);
+        return machines.delete(id) ? Effect.void : failure("destroy", "NOT_FOUND");
+      }),
     setAutoHibernateTimeout: timer("hibernate"),
     setAutoSuspendTimeout: timer("suspend"),
   });

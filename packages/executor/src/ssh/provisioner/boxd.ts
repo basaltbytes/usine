@@ -33,6 +33,8 @@ const reasonOf = (code: string): MachineUnavailableReason => {
   }
 };
 
+const terminalStates = new Set(["stopped", "failed", "destroyed"]);
+
 const assignment = (tags: MachineTags) => ({
   "usine.run": tagValue(tags.run),
   "usine.process": tagValue(tags.process),
@@ -118,11 +120,11 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
         ),
     );
     const create = Effect.fn("BoxdDriver.create")(
-      function* (_name: string, tags: MachineTags) {
+      function* (name: string, tags: MachineTags) {
         yield* Effect.annotateCurrentSpan({ worker, attemptId: tags.attempt });
         const result = yield* api.createFromSnapshot({
           snapshot: settings.snapshot,
-          name: `usine-${attemptTag(tags.attempt)}-${tags.attempts}`,
+          name,
           isolated: settings.isolated,
           config: { network: { ssh: true } },
           labels: {
@@ -165,24 +167,21 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
           ),
         ),
     );
+    const connectionError = (message: string) =>
+      ProviderApiError.make({
+        provider: "boxd",
+        operation: "read the machine connection",
+        status: Option.none(),
+        message,
+      });
     const endpointOf = Effect.fn("BoxdDriver.endpointOf")(function* (machine: BoxdMachine) {
       if (machine.status !== "running" || machine.sshPort === 0 || machine.sshDisabled)
-        return yield* BoxdCallError.make({
-          operation: "endpoint",
-          code: "FAILED_PRECONDITION",
-          message: `boxd machine ${machine.id} is ${machine.status} or has SSH disabled`,
-        });
+        return yield* connectionError(
+          `boxd machine ${machine.id} is ${machine.status} or has SSH disabled`,
+        );
       const destination = yield* Schema.decodeEffect(SshDestination)(
         `boxd@${machine.publicIp}`,
-      ).pipe(
-        Effect.mapError(() =>
-          BoxdCallError.make({
-            operation: "endpoint",
-            code: "INTERNAL",
-            message: "boxd returned an invalid SSH address",
-          }),
-        ),
-      );
+      ).pipe(Effect.mapError(() => connectionError("boxd returned an invalid SSH address")));
       const key = yield* proxyKey;
       return {
         destination,
@@ -200,9 +199,7 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
           initial = Option.none();
           if (machine.status === "running" && machine.sshPort > 0)
             return yield* endpointOf(machine);
-          if (
-            ["stopped", "suspended", "hibernated", "failed", "destroyed"].includes(machine.status)
-          )
+          if (terminalStates.has(machine.status))
             return yield* MachineUnavailableError.make({
               worker,
               provider: "boxd",
@@ -219,30 +216,54 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
       },
       (effect) =>
         effect.pipe(
-          Effect.catchTag("BoxdCallError", (failure) =>
-            Effect.fail(
-              failure.code === "NOT_FOUND"
-                ? MachineUnavailableError.make({
-                    worker,
-                    provider: "boxd",
-                    reason: "capacity",
-                    message: "boxd removed the new machine before it was ready",
-                  })
-                : unavailable(failure.code, `boxd couldn't ready the machine: ${failure.message}`),
-            ),
-          ),
+          Effect.catchTags({
+            ProviderApiError: (failure) =>
+              MachineUnavailableError.make({
+                worker,
+                provider: "boxd",
+                reason: "provider",
+                message: failure.message,
+              }),
+            BoxdCallError: (failure) =>
+              Effect.fail(
+                failure.code === "NOT_FOUND"
+                  ? MachineUnavailableError.make({
+                      worker,
+                      provider: "boxd",
+                      reason: "capacity",
+                      message: "boxd removed the new machine before it was ready",
+                    })
+                  : unavailable(
+                      failure.code,
+                      `boxd couldn't ready the machine: ${failure.message}`,
+                    ),
+              ),
+          }),
         ),
     );
     const refreshEndpoint = Effect.fn("BoxdDriver.refreshEndpoint")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
-      return yield* api.vm(id).pipe(
-        Effect.flatMap(endpointOf),
+      const machine = yield* api.vm(id).pipe(
         Effect.asSome,
         Effect.catchIf(
           (failure) => failure.code === "NOT_FOUND",
-          () => Effect.succeed(Option.none<MachineEndpoint>()),
+          () => Effect.succeed(Option.none<BoxdMachine>()),
         ),
         Effect.mapError(apiError("refresh the machine connection")),
+      );
+      if (Option.isNone(machine) || terminalStates.has(machine.value.status)) {
+        yield* Effect.logInfo("boxd machine is gone", {
+          worker,
+          machine: id,
+          status: Option.isSome(machine) ? machine.value.status : "not found",
+        });
+        return Option.none<MachineEndpoint>();
+      }
+      return yield* endpointOf(machine.value).pipe(
+        Effect.asSome,
+        Effect.catchTag("BoxdCallError", (failure) =>
+          apiError("refresh the machine connection")(failure),
+        ),
       );
     });
     const assign = Effect.fn("BoxdDriver.assign")(function* (id: MachineId, tags: MachineTags) {

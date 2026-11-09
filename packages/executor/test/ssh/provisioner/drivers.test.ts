@@ -415,11 +415,11 @@ describe("boxd driver", () => {
       const boxd = fakeBoxd();
       return Effect.gen(function* () {
         const driver = yield* boxdDriverFor(WORKER, boxdSettings());
-        const first = yield* driver.create("ignored", tags);
+        const first = yield* driver.create("pool-aaaaaaaa", tags);
         assert.isTrue(Option.isNone(first.hostKey));
         assert.deepStrictEqual(boxd.state.creates[0], {
           snapshot: "usine-attempt",
-          name: `usine-${attemptTag(ATTEMPT)}-1`,
+          name: "pool-aaaaaaaa",
           isolated: true,
           config: { network: { ssh: true } },
           labels: {
@@ -435,7 +435,7 @@ describe("boxd driver", () => {
           boxd.state.timers.map(({ seconds }) => seconds),
           [0, 0],
         );
-        const second = yield* driver.create("ignored", { ...tags, attempts: 2 });
+        const second = yield* driver.create("pool-bbbbbbbb", { ...tags, attempts: 2 });
         const [endpoint] = yield* Effect.all(
           [driver.endpoint(first.id, Effect.void), driver.endpoint(second.id, Effect.void)],
           { concurrency: 2 },
@@ -461,8 +461,27 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide(boxd.layer));
     },
   );
+  it.effect("preserves unique names across instances and the disabled isolation setting", () => {
+    const boxd = fakeBoxd();
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ isolated: false }));
+      const first = yield* driver.create("pool-aaaaaaaa", { ...tags, instance: "factory" });
+      const second = yield* driver.create("pool-bbbbbbbb", { ...tags, instance: "dev" });
+      assert.notStrictEqual(first.id, second.id);
+      assert.deepStrictEqual(
+        boxd.state.creates.map(({ name, isolated }) => ({ name, isolated })),
+        [
+          { name: "pool-aaaaaaaa", isolated: false },
+          { name: "pool-bbbbbbbb", isolated: false },
+        ],
+      );
+      const duplicate = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
+      assert.strictEqual(duplicate.reason, "provider");
+      assert.include(duplicate.message, "ALREADY_EXISTS");
+    }).pipe(Effect.provide(boxd.layer));
+  });
   it.effect(
-    "polls until running and refreshes a moving proxy port, distinguishing deletion from stopped machines",
+    "polls until running, refreshes proxy ports, and reports terminal machines as gone",
     () => {
       const boxd = fakeBoxd();
       boxd.state.createMachine = false;
@@ -485,19 +504,33 @@ describe("boxd driver", () => {
           .pipe(Effect.flip);
         assert.strictEqual(disabled.reason, "provider");
         assert.include(disabled.message, "SSH disabled");
-        for (const status of ["stopped", "suspended", "hibernated", "failed", "destroyed"]) {
+        for (const status of ["stopped", "failed", "destroyed"]) {
           boxd.state.machines.set(id, { ...machine, status });
           const terminal = yield* driver
             .endpoint(id, Effect.die("must not poll terminal machines"))
             .pipe(Effect.flip);
           assert.strictEqual(terminal.reason, "capacity");
           assert.include(terminal.message, status);
+          const gone = yield* driver.refreshEndpoint(id);
+          assert.isTrue(Option.isNone(gone));
         }
-        boxd.state.machines.set(id, { ...machine, status: "hibernated" });
-        assert.strictEqual(
-          (yield* driver.refreshEndpoint(id).pipe(Effect.flip))._tag,
-          "ProviderApiError",
-        );
+        for (const status of ["suspended", "hibernated", "migrating", "pending"]) {
+          boxd.state.machines.set(id, { ...machine, status });
+          assert.strictEqual(
+            (yield* driver.refreshEndpoint(id).pipe(Effect.flip))._tag,
+            "ProviderApiError",
+          );
+          let polls = 0;
+          const endpoint = yield* driver.endpoint(
+            id,
+            Effect.sync(() => {
+              polls++;
+              boxd.state.machines.set(id, { ...machine, status: "running" });
+            }),
+          );
+          assert.strictEqual(polls, 1, `waits for ${status} machines to resume`);
+          assert.strictEqual(endpoint.destination, "boxd@198.51.100.40");
+        }
         boxd.state.machines.delete(id);
         const gone = yield* driver.refreshEndpoint(id);
         assert.isTrue(Option.isNone(gone));
@@ -515,8 +548,8 @@ describe("boxd driver", () => {
       return Effect.gen(function* () {
         const driver = yield* boxdDriverFor(WORKER, boxdSettings());
         const { id } = yield* driver.create("x", tags);
-        yield* driver.create("x", { ...tags, worker: WorkerName.make("other") });
-        yield* driver.create("x", { ...tags, instance: "another" });
+        yield* driver.create("y", { ...tags, worker: WorkerName.make("other") });
+        yield* driver.create("z", { ...tags, instance: "another" });
         const listed = yield* driver.list(tags.instance, Option.some(WORKER));
         assert.deepStrictEqual(
           listed.map((machine) => machine.id),

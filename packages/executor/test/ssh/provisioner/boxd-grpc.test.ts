@@ -1,4 +1,4 @@
-import { Code, ConnectError } from "@connectrpc/connect";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { assert, it } from "@effect/vitest";
 import { MachineId } from "@usine/core/worker";
@@ -336,3 +336,61 @@ it("maps socket errors that Connect reports as aborted or internal to unavailabl
   remoteCancel.isWireError = true;
   assert.strictEqual(failureCode(remoteCancel), "CANCELED");
 });
+
+it.effect("routes account RPCs to boxd and machine RPCs to the selected region", () =>
+  Effect.gen(function* () {
+    for (const region of ["fra", "nyc"] as const) {
+      const calls: Array<{ method: string; baseUrl: string }> = [];
+      const transport: Parameters<typeof boxdApiLayer>[3] = ({ baseUrl }) =>
+        createRouterTransport((router) => {
+          router.service(BoxdService, {
+            whoami: () => {
+              calls.push({ method: "whoami", baseUrl });
+              return { userId: "member" };
+            },
+            getOrgMachineLimit: () => {
+              calls.push({ method: "getOrgMachineLimit", baseUrl });
+              return { maxVms: 50, vmCount: 0 };
+            },
+            listRegions: () => {
+              calls.push({ method: "listRegions", baseUrl });
+              return { thisRegion: region };
+            },
+          });
+        });
+      yield* Effect.gen(function* () {
+        const api = yield* BoxdApi;
+        yield* api.whoami;
+        yield* api.orgMachineLimit;
+        yield* api.regions;
+      }).pipe(
+        Effect.provide(
+          boxdApiLayer(Redacted.make("key"), region, undefined, transport).pipe(
+            Layer.provide(
+              Layer.succeed(
+                HttpClient.HttpClient,
+                HttpClient.make((request) =>
+                  Effect.gen(function* () {
+                    const now = yield* Clock.currentTimeMillis;
+                    return HttpClientResponse.fromWeb(
+                      request,
+                      new Response(jsonKey({ token: "jwt", expires_at: now / 1000 + 3600 })),
+                    );
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      assert.deepStrictEqual(calls, [
+        { method: "whoami", baseUrl: "https://boxd.sh:9443" },
+        { method: "getOrgMachineLimit", baseUrl: "https://boxd.sh:9443" },
+        {
+          method: "listRegions",
+          baseUrl: region === "fra" ? "https://boxd.sh:9443" : "https://nyc.boxd.sh:9443",
+        },
+      ]);
+    }
+  }).pipe(Effect.scoped),
+);

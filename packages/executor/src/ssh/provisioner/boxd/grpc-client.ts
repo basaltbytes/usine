@@ -54,6 +54,7 @@ export const boxdApiLayer = (
   token: Redacted.Redacted<string>,
   region: BoxdRegion,
   endpoint?: string,
+  transport: typeof createGrpcTransport = createGrpcTransport,
 ) =>
   Layer.effect(
     BoxdApi,
@@ -67,7 +68,7 @@ export const boxdApiLayer = (
           );
           return createClient(
             BoxdService,
-            createGrpcTransport({ baseUrl, sessionManager, defaultTimeoutMs: 30_000 }),
+            transport({ baseUrl, sessionManager, defaultTimeoutMs: 30_000 }),
           );
         });
       const client = yield* clientFor(endpoint ?? endpoints[region]);
