@@ -1,5 +1,80 @@
 # @usine/github
 
+## 0.5.0
+
+### Minor Changes
+
+- e0cedc8: Classify pending CI deadlines as infrastructure failures and report running jobs with elapsed times and previous successful durations when available. Bound diagnostic reads so a stalled request cannot prevent timeout settlement.
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- a1c0d36: Add durable CI waits for developer and fix loops. Agents can end after pushing, freeing their worker slot while usine observes checks on the recorded head. Green applies recorded labels, red starts a budgeted fix loop with failure diagnostics, and silent checks time out into Needs attention. The run page and board link to the waiting PR's checks.
+- 8d28709: Expose operations without arguments as Effect values in engine, GitHub App, and attachment services. Run them with `yield* service.operation`. Backup operations require `FileSystem` and `Path` from the application's platform layer.
+  
+  Use schema-backed errors and schema predicates, preserve typed failures during selective recovery, and compose services in their owning scopes. Sandbox errors expose `sandbox` in TypeScript while preserving the JSON `name` field.
+- 13bdef9: Store optional OAuth client and webhook credentials alongside the App signing key. Add atomic owner-only credential writes and an installation-page lookup that works before the App has an installation.
+- 702692b: Refresh older open pull request payloads once to record comparison bases. Omit attempts without new commits, show checks and review decisions only for whole-PR comparisons, and keep file names readable on phones.
+  
+  Use `scope` for the file-selection query parameter. Return specific 404 errors for unavailable comparisons and 409 errors for stale PR selections. Bound cached file responses to 512 KiB per entry and 64 MiB of serialized payloads, document the conservative 300-file comparison limit, and export file-change models separately from the GitHub service.
+- 81330c9: Show whole pull request and recorded attempt changes on task pages with collapsed file diffs, change counts, and CI and review state. Add a project-scoped files API and commit-based caching, with explicit reporting for missing and truncated GitHub patches.
+  
+  Keep recorded attempt changes available after failed or canceled CI waits, including when a later retry succeeds.
+  
+  Backfill older comparisons only when their producing attempt is identifiable, and let each attempt's completion replace an existing backfilled result.
+  
+  Classify generated files by path to avoid marking hand-written files whose patches mention generated-file markers.
+- 0e34ec1: Add `outcome_labels` to require a GitHub verdict before an agent completion succeeds, with a fresh labels-only read and a visible failure when the verdict is missing. Retry failed verification reads twice; if verification remains unavailable, require operator attention without rerunning the agent.
+
+### Patch Changes
+
+- 7e39460: Retry transient GitHub polling responses, including CI check and log reads, up to twice with jittered backoff and warning logs. Report GitHub request failures in Needs attention after three consecutive failed repository poll cycles, including deferred snapshots and CI observations for repositories removed from configuration, and clear them after a successful cycle. Preserve failure counts and existing alerts while open-issue checks or label requests are rate-limited. Retry warnings include the operation and error tag, with the response status for HTTP failures.
+- c396562: Include failed Actions step names, failure-marker context, and final output in CI fix prompts. Exclude post-job cleanup from failed command output.
+- dbf14bb: Recognise GitHub server errors by their schema instead of an `instanceof` check.
+- 9786f67: An attempt whose CI pull request can't be verified now fails with the reason in its message. A handed-off head that differs from the checkout, a pull request that origin doesn't have or that comes from another repository, and a branch that isn't at the pushed head are agent failures. A GitHub read that still fails is a retryable infrastructure failure.
+  
+  The pull request read during harvesting retries twice, on the same schedule as the GitHub polling reads, and logs the branch's commit on origin against the pull request's head on GitHub.
+  
+  A loop with a CI policy whose agent ends without a handoff now verifies the open pull request of the checkout's branch on origin and uses branches on origin at HEAD for detached checkouts. When only pull request refs match, it uses GitHub's commit-to-pull-request index. An unchanged detached checkout from a branch or tag revision fails as an agent failure instead of waiting on an unrelated pull request.
+  
+  For a detached fixed-commit checkout, indexed pull requests from a fork now fail with `RepositoryMismatch`. When an origin branch matches the detached HEAD but has no open pull request, verification fails with `PullRequestNotFound` even if a matching pull request ref is also on origin. The commit index is queried only when no origin branch matches.
+  
+  A plain success whose GitHub or git verification read fails now records an `InfraFailure` instead of an `AgentFailure`. This includes persistent authorization failures such as HTTP 403, so the attempt can run up to three times. A local branch pushed under a different remote name fails with `BranchNotAtHead`; an explicit handoff verifies the pull request's source branch independently of the local branch name.
+- 9132a5b: Read completed Actions job logs when the run archive is unavailable, preserving failed-step evidence while other matrix jobs are running.
+- f0f018d: Keep polling a repository when GitHub returns a server error for one item's snapshot: log a warning, commit the other items and the poll cursor, and fetch that item again in the next poll. A cycle budget reset now fetches only its item instead of polling the whole repository from scratch.
+- 5796627: Verify explicit CI handoffs against the pushed origin branch when GitHub's pull request head is stale. Keep CI pending until the PR head catches up, and classify unverified handoffs as retryable infrastructure failures.
+- 1d5414f: Route a pull request with merge conflicts and no checks to the configured CI fix loop. The fix task includes conflict resolution instructions and inherits pending completion actions. Unknown mergeability keeps the CI wait pending.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- 765be2e: Request Workflows write permission for write-access attempts so they can push changes under `.github/workflows/`. The GitHub App setup requests the permission, and installation checks report a missing grant. Existing App installations must accept the permission update. Read-access tokens continue to omit Workflows.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [e0cedc8]
+- Updated dependencies [6e60662]
+- Updated dependencies [01467e3]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [e007d09]
+- Updated dependencies [9290433]
+- Updated dependencies [1c981c9]
+- Updated dependencies [82b55aa]
+- Updated dependencies [9786f67]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [d740598]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [5796627]
+- Updated dependencies [4d60236]
+- Updated dependencies [9476883]
+- Updated dependencies [10154eb]
+- Updated dependencies [7c58461]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [0e34ec1]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+
 ## 0.4.0
 
 ### Minor Changes

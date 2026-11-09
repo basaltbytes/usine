@@ -1,5 +1,94 @@
 # @usine/config
 
+## 0.6.0
+
+### Minor Changes
+
+- 6e60662: Brand Schema records and errors so TypeScript callers construct or decode validated values. Compose decoding with Effects and report invalid input through existing operation error channels. Keep formatting helpers pure and treat internal encoding failures as defects. Configuration and HTTP JSON formats remain unchanged.
+- 25728fa: Allow a boolean CEL condition to require approval per run. Save and display the
+  approval decision, require approval when evaluation fails, and validate conditions
+  in the loop editor and configuration API.
+- a1c0d36: Add durable CI waits for developer and fix loops. Agents can end after pushing, freeing their worker slot while usine observes checks on the recorded head. Green applies recorded labels, red starts a budgeted fix loop with failure diagnostics, and silent checks time out into Needs attention. The run page and board link to the waiting PR's checks.
+- dba9075: Support gateway credentials over Tailscale on long-lived SSH workers. Set `tailnet.gateway_address` with a gateway; preflight configures gateway access through passwordless sudo, and attempts use direct internet egress.
+- 4f87593: Add project roles and revisioned role bindings, enforce API permissions, and filter project data by access. Add token permission ceilings and controls for bindings and token scopes. Attribute local API writes and configuration CLI revisions to local admin. Existing members retain instance admin access through a one-time migration.
+  
+  Authorize run actions and cycle-budget resets against the repository’s current project, including after a repository moves. Refresh the configuration revision after writes and stale-revision failures so later writes use the current revision.
+- 77ede43: Read harness credential environment variables and configuration files from descriptors, and manage SSH attempt homes per harness.
+  
+  Gateway credential slots and URL prefixes use `anthropic-messages` and `openai-responses`. Upgrade the gateway first, then the orchestrator, replacing `anthropic` and `openai` in `gateway.llm_providers`. For one release, the gateway accepts the previous URL prefixes as deprecated aliases so running attempts can finish. Preflight normalizes previous provider IDs and requires a gateway with credential reporting. Provisioner API-key names, Cloudflare provider records, and gateway credential environment-variable names stay the same.
+- a7bd195: Add an exact browser origin allowlist with credentialed CORS and security headers on all server responses. Configure additional origins in `auth.origins` and restart; loopback browser origins now require an explicit entry unless they are the canonical server origin. Document public HTTPS deployment with Caddy, Cloudflare Tunnel, and Tailscale Serve.
+- 7c58461: Add opt-in machine reuse for Boat and Hetzner SSH workers with `provisioner.reuse: { attempts: 5, max_age: 2h }`. Reuse requires Docker, successful cleanup, gateway attachment revocation, and preflight before each assignment. Machines retire at the attempt or age limit and when their worker connection is removed.
+  
+  Show machine assignment counts and age on the overview and worker page, and persist daily machine-start counts for statistics.
+- 0e34ec1: Add `outcome_labels` to require a GitHub verdict before an agent completion succeeds, with a fresh labels-only read and a visible failure when the verdict is missing. Retry failed verification reads twice; if verification remains unavailable, require operator attention without rerunning the agent.
+
+### Patch Changes
+
+- 6a1cf79: Run SSH attempt containers with memory-backed `/dev/shm` and `/tmp` storage. Configure their capacities per worker with `container.shm_size_mib` and `container.tmpfs_size_mib`; each defaults to 2048 MiB and is capped at the container memory limit.
+- e007d09: Use explicit finite number schemas for numeric fields and update the operator API schema. Apply Effect's safe rewrites for schema construction, decoding, and layer composition.
+- 9290433: Define harness metadata in one platform-free catalog. Configuration validates registered harness IDs, workers share credential and login requirements, and operator clients receive labels and resume commands through the capabilities API. Harness IDs are branded strings, and Codex pricing reads the descriptor’s bundled rates. Existing launch, authentication, and version policies are unchanged.
+- 12c3921: Check harness capabilities by role, credential route, and placement with one admission policy. Configuration and preflight refusals identify the missing requirement and adapter reason. Validate parent models, efforts, and credentials before accepting configuration imports, reloads, or saved edits. At startup, quarantine agents with refused parent brains and their loops in Needs attention while keeping the server available. Restore them after a corrected reload.
+- 81330c9: Allow PR loop conditions and task templates to read `item.baseRefOid`. The field evaluates to `null` for older stored payloads that omit it.
+- 03d2f48: Add role binding support to the configuration form codec. Edit role bindings in the web UI with a member picker, scope selector, and role selector. Open a binding from Members or add one with the member preselected. Keep the text editor and revision history available for each binding.
+- 8412ddc: Use Effect services for platform operations and deterministic service keys. Report worker JSON encoding failures as defects and preserve synchronous formatting and validation boundaries. Gateway composition supplies Crypto for auth-file names. Check all configured Effect diagnostics directly with the patched compiler.
+- Updated dependencies [6a1cf79]
+- Updated dependencies [e0cedc8]
+- Updated dependencies [6e60662]
+- Updated dependencies [47c0f07]
+- Updated dependencies [df0bd8f]
+- Updated dependencies [b70b5fe]
+- Updated dependencies [09417f7]
+- Updated dependencies [b7ff637]
+- Updated dependencies [10822d3]
+- Updated dependencies [1674238]
+- Updated dependencies [3e822f6]
+- Updated dependencies [92f21ce]
+- Updated dependencies [01467e3]
+- Updated dependencies [8c079aa]
+- Updated dependencies [389f35e]
+- Updated dependencies [a1c0d36]
+- Updated dependencies [8d28709]
+- Updated dependencies [e007d09]
+- Updated dependencies [9290433]
+- Updated dependencies [12c3921]
+- Updated dependencies [548e6b7]
+- Updated dependencies [1c981c9]
+- Updated dependencies [82b55aa]
+- Updated dependencies [9786f67]
+- Updated dependencies [7e5bb5b]
+- Updated dependencies [9d7dfb0]
+- Updated dependencies [35f68ef]
+- Updated dependencies [d740598]
+- Updated dependencies [fc15261]
+- Updated dependencies [3229601]
+- Updated dependencies [bb96f16]
+- Updated dependencies [4f87593]
+- Updated dependencies [77ede43]
+- Updated dependencies [6316707]
+- Updated dependencies [5796627]
+- Updated dependencies [89ae7ee]
+- Updated dependencies [4d60236]
+- Updated dependencies [9476883]
+- Updated dependencies [b6a858e]
+- Updated dependencies [0e34ec1]
+- Updated dependencies [10154eb]
+- Updated dependencies [10154eb]
+- Updated dependencies [7c58461]
+- Updated dependencies [1948b10]
+- Updated dependencies [9cf0b5e]
+- Updated dependencies [9e30c8c]
+- Updated dependencies [ef5aa4d]
+- Updated dependencies [69ba086]
+- Updated dependencies [8412ddc]
+- Updated dependencies [d0900a3]
+- Updated dependencies [81330c9]
+- Updated dependencies [fc18d3f]
+- Updated dependencies [0e34ec1]
+- Updated dependencies [d0900a3]
+  - @usine/core@0.7.0
+  - @usine/expression@0.6.0
+  - @usine/agents@0.7.0
+
 ## 0.5.0
 
 ### Minor Changes
