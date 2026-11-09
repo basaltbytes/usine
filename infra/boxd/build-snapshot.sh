@@ -37,6 +37,8 @@ until ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$m
 done
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys' < "$identity.pub"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" "sh -s -- '$runtime' '$image'" <<'REMOTE'
+# boxd serves SSH through its proxy and exec agent, so sshd configuration in the machine has no effect.
+# Variables sent with SendEnv don't arrive in the machine; see #1101.
 set -eu
 runtime=$1
 image=$2
@@ -59,7 +61,6 @@ rm /tmp/usine-tailscale.sh
 sudo systemctl enable tailscaled
 sudo systemctl stop tailscaled
 sudo rm -f /var/lib/tailscale/tailscaled.state
-# boxd terminates SSH at its proxy and runs commands through its exec agent, without sshd.
 sync
 REMOTE
 boxd snapshots save "$machine" "$name" </dev/null >&2
