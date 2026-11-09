@@ -91,6 +91,8 @@ describe("remote shell commands", () => {
           const remote = RemoteShell.make({
             ...host,
             ssh: { command: ssh, args: [] },
+            // A real SSH login sets PATH; the process owner resolves `node` through it.
+            sshEnvironment: { PATH: yield* Config.String("PATH") },
             stdinEnvironment: { GH_TOKEN: Redacted.make(secret) },
           });
           const input = new Uint8Array([0, 10, 255, 13, 42]);
