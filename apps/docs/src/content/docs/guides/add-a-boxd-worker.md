@@ -45,11 +45,11 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine.
 
-boxd serves SSH through its proxy, so the worker's variables can't reach the machine with `SendEnv`. For workers with a gateway, the machine check reports the variables as not accepted. Workers using API keys without a gateway get no preflight error for the missing variables. Attempts fail in either configuration because the required variables don't arrive.
+boxd serves SSH through its proxy, and the machine runs no sshd. Workers with a gateway fail when the restored machine joins the tailnet: the gateway setup reloads sshd, and the attempt reports that the SSH worker could not configure its tailnet gateway. Workers that use API keys without a gateway pass the keys to the attempt container on standard input, which the proxy carries. No attempt has been verified end to end on a boxd worker with API keys.
 
 `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 
-After the variable transport issue is resolved, start a test run. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
+Start a test run with an API-key worker. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
 
 Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication.
 
