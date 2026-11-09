@@ -19,14 +19,14 @@ machine=usine-snapshot-$(date -u +%Y%m%d%H%M%S)-$$
 created=false
 cleanup() {
   if [ "$created" = true ]; then
-    boxd machine remove "$machine" >/dev/null || echo "Delete temporary machine $machine in boxd" >&2
+    boxd machine remove -y "$machine" >/dev/null || echo "Delete temporary machine $machine in boxd" >&2
   fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # The CLI uses its linked device key for this initial connection and pins the proxy key.
-boxd machine new "$machine" --size "$size" --isolated --auto-hibernate-timeout 0 >&2
+boxd machine new "$machine" --vcpu "${size%%x*}" --isolated --auto-hibernate-timeout 0 >&2
 created=true
 tries=0
 until ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$machine.boxd" true 2>/dev/null; do
