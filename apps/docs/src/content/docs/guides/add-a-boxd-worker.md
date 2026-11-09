@@ -43,11 +43,13 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 ## Check the result
 
-Preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. boxd serves SSH through its proxy, so the worker's variables can't reach the machine with `SendEnv`. Preflight reports the variables as not accepted, and a boxd worker can't run attempts yet.
+Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine.
+
+boxd serves SSH through its proxy, so the worker's variables can't reach the machine with `SendEnv`. For workers with a gateway, the machine check reports the variables as not accepted. Workers using API keys without a gateway get no preflight error for the missing variables. Attempts fail in either configuration because the required variables don't arrive.
 
 `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 
-Start a test run. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
+After the variable transport issue is resolved, start a test run. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
 
 Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication.
 
