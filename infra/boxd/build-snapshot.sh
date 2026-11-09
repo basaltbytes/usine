@@ -1,5 +1,6 @@
 #!/bin/sh
 # Captures the worker key, runtime, attempt image, and empty Tailscale state.
+# The tests in test/ cover the CLI calls with fakes; a real build is the acceptance test.
 set -eu
 usage() { echo "Usage: $0 [--size 1x4|2x8|4x16|8x32] <snapshot-name> <ssh-identity-file>" >&2; exit 2; }
 size=2x8
@@ -19,15 +20,16 @@ machine=usine-snapshot-$(date -u +%Y%m%d%H%M%S)-$$
 created=false
 cleanup() {
   if [ "$created" = true ]; then
-    boxd machine remove -y "$machine" >/dev/null || echo "Delete temporary machine $machine in boxd" >&2
+    boxd machine remove -y "$machine" </dev/null >/dev/null || echo "Delete temporary machine $machine in boxd" >&2
   fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # The CLI uses its linked device key for this initial connection and pins the proxy key.
-boxd machine new "$machine" --vcpu "${size%%x*}" --isolated --auto-hibernate-timeout 0 >&2
+boxd machine new "$machine" --vcpu "${size%%x*}" --isolated --auto-hibernate-timeout 0 --json </dev/null >/dev/null
 created=true
+echo "Created temporary machine $machine" >&2
 tries=0
 until ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$machine.boxd" true 2>/dev/null; do
   tries=$((tries + 1)); [ "$tries" -lt 60 ] || { echo 'SSH readiness timed out' >&2; exit 1; }
@@ -58,10 +60,11 @@ sudo systemctl enable tailscaled
 sudo systemctl stop tailscaled
 sudo rm -f /var/lib/tailscale/tailscaled.state
 printf 'AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY\n' | sudo tee /etc/ssh/sshd_config.d/40-usine.conf >/dev/null
+sudo install -d -m 0755 /run/sshd
 sudo sshd -t
-sudo systemctl reload ssh
+sudo systemctl reload ssh 2>/dev/null || sudo systemctl restart ssh
 sync
 REMOTE
-boxd snapshots save "$machine" "$name" >&2
+boxd snapshots save "$machine" "$name" </dev/null >&2
 # A successful save is ready before the source machine is removed.
 printf '%s\n' "$name"

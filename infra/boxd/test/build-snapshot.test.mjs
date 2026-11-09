@@ -9,19 +9,32 @@ import { test } from "node:test";
 const exec = promisify(execFile);
 const script = new URL("../build-snapshot.sh", import.meta.url).pathname;
 
+// Feeds the script an answer that a forwarded stdin would hand to a boxd prompt.
+const run = (args, env) => {
+  const pending = exec(script, args, { env });
+  pending.child.stdin.end("yes\n");
+  return pending;
+};
+
 // Mirrors the boxd CLI 0.3.3 usage checks the script depends on.
+// Any byte on stdin means the script passed its own stdin through, where a terminal could prompt.
 const fakeBoxd = `#!/bin/sh
 printf 'boxd %s\\n' "$*" >> "$BOXD_CALLS"
+[ ! -t 0 ] || { echo 'error: interactive prompt on a terminal' >&2; exit 1; }
+[ -z "$(cat)" ] || { echo 'error: interactive prompt read stdin' >&2; exit 1; }
 case "$1 $2" in
   'machine new')
     shift 2
+    json=false
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --size) echo "error: unexpected argument '--size' found" >&2; exit 2;;
+        --json) json=true;;
         --vcpu) printf '%s\\n' "$2" >> "$BOXD_VCPU"; shift;;
       esac
       shift
-    done;;
+    done
+    [ "$json" = true ] || { echo 'error: interactive prompt: Connect now? [Y/n]' >&2; exit 1; };;
   'machine remove')
     shift 2
     confirmed=false
@@ -74,19 +87,21 @@ const setUp = async (t) => {
 
 test("snapshot setup sizes the machine by vCPU, bakes the worker key and image, and deletes its source", async (t) => {
   const { identity, env, read } = await setUp(t);
-  const result = await exec(script, ["--size", "2x8", "usine-attempt", identity], { env });
+  const result = await run(["--size", "2x8", "usine-attempt", identity], env);
   assert.equal(result.stdout, "usine-attempt\n");
+  assert.match(result.stderr, /Created temporary machine usine-snapshot-/u);
   assert.doesNotMatch(result.stderr, /Delete temporary machine/u);
   assert.equal(await read("vcpu"), "2\n");
   const calls = await read("calls");
-  assert.match(calls, /boxd machine new .* --vcpu 2 --isolated --auto-hibernate-timeout 0/u);
+  assert.match(calls, /boxd machine new .* --vcpu 2 --isolated --auto-hibernate-timeout 0 --json/u);
   assert.match(calls, /ssh-ed25519 AAAAWorkerKey/u);
   assert.match(calls, /sh -s -- 'docker' 'ghcr.io\/example\/attempt:test'/u);
   assert.match(calls, /boxd snapshots save usine-snapshot-\S+ usine-attempt\n/u);
   assert.match(calls, /boxd machine remove -y usine-snapshot-/u);
   assert.match(await read("removed"), /^usine-snapshot-\S+\n$/u);
   assert.match(calls, /volume create usine-pnpm-store/u);
-  assert.match(calls, /sshd -t/u);
+  assert.match(calls, /sudo install -d -m 0755 \/run\/sshd\nsudo sshd -t\n/u);
+  assert.match(calls, /sudo systemctl reload ssh 2>\/dev\/null \|\| sudo systemctl restart ssh/u);
   assert.match(
     calls,
     /AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN/u,
@@ -95,20 +110,17 @@ test("snapshot setup sizes the machine by vCPU, bakes the worker key and image, 
 
 test("snapshot setup maps the largest size to 8 vCPUs", async (t) => {
   const { identity, env, read } = await setUp(t);
-  const result = await exec(script, ["--size", "8x32", "usine-attempt", identity], { env });
+  const result = await run(["--size", "8x32", "usine-attempt", identity], env);
   assert.equal(result.stdout, "usine-attempt\n");
   assert.equal(await read("vcpu"), "8\n");
 });
 
 test("snapshot setup deletes its source machine when the save fails", async (t) => {
   const { identity, env, read } = await setUp(t);
-  await assert.rejects(
-    exec(script, ["usine-attempt", identity], { env: { ...env, FAIL_SAVE: "1" } }),
-    (error) => {
-      assert.doesNotMatch(error.stderr, /Delete temporary machine/u);
-      return true;
-    },
-  );
+  await assert.rejects(run(["usine-attempt", identity], { ...env, FAIL_SAVE: "1" }), (error) => {
+    assert.doesNotMatch(error.stderr, /Delete temporary machine/u);
+    return true;
+  });
   assert.equal(await read("vcpu"), "2\n");
   assert.match(await read("calls"), /boxd machine remove -y usine-snapshot-.*\n$/u);
   assert.match(await read("removed"), /^usine-snapshot-\S+\n$/u);
