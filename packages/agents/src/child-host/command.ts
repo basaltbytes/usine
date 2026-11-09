@@ -1,7 +1,7 @@
-import { Effect, Stream } from "effect";
+import { Effect, Predicate, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
-import { type ChildHost, type HostInvocation, sshArguments } from "./child-host.ts";
+import { type ChildHost, type HostInvocation, sshArguments, sshInput } from "./child-host.ts";
 
 /**
  * Returns the local process command that runs `invocation` on `host`: the command itself with
@@ -25,8 +25,21 @@ export const hostCommand = (
       const names = Object.keys(invocation.environment);
       if (names.length > 0)
         throw new Error(`Cannot pass ${names.join(", ")} to a remote command on its command line`);
+      let remoteOptions = options;
+      if (host.stdinEnvironment !== undefined) {
+        const stdin = options.stdin;
+        const config =
+          stdin === undefined
+            ? { stream: Stream.empty }
+            : Stream.isStream(stdin) || Predicate.isString(stdin)
+              ? { stream: stdin }
+              : stdin;
+        if (!Stream.isStream(config.stream))
+          throw new Error("A stdin environment requires streamed command input");
+        remoteOptions = { ...options, stdin: { ...config, stream: sshInput(host, config.stream) } };
+      }
       return ChildProcess.make(host.ssh.command, sshArguments(host, invocation), {
-        ...options,
+        ...remoteOptions,
         env: { ...host.sshEnvironment },
         extendEnv: false,
       });
