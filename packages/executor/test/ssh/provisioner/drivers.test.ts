@@ -541,6 +541,32 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide(boxd.layer));
     },
   );
+  it.effect("keeps refresh read and proxy host-key failures as provider errors", () => {
+    const boxd = fakeBoxd();
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+      const { id } = yield* driver.create("pool-aaaaaaaa", tags);
+      for (const code of ["UNAVAILABLE", "DEADLINE_EXCEEDED", "UNAUTHENTICATED"]) {
+        boxd.state.readFails = Option.some(code);
+        const failure = yield* driver.refreshEndpoint(id).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "ProviderApiError");
+        assert.include(failure.message, code);
+        assert.isTrue(boxd.state.machines.has(id));
+      }
+      boxd.state.readFails = Option.none();
+      const hostKey = boxd.state.hostKey;
+      boxd.state.hostKey = "";
+      const failure = yield* driver.refreshEndpoint(id).pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "ProviderApiError");
+      assert.include(failure.message, "sshHostKey: INTERNAL");
+      assert.strictEqual(boxd.state.hostKeyReads, 1);
+      assert.isTrue(boxd.state.machines.has(id));
+      boxd.state.hostKey = hostKey;
+      const recovered = yield* driver.refreshEndpoint(id);
+      assert(Option.isSome(recovered));
+      assert.deepStrictEqual(recovered.value.hostKey, Option.some(hostKey));
+    }).pipe(Effect.provide(boxd.layer));
+  });
   it.effect(
     "lists machines by instance and worker selectors, including creation time and attempt count",
     () => {

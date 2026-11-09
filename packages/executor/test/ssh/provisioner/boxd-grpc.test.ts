@@ -222,11 +222,15 @@ it.effect("times out a stalled token exchange and releases the lock for waiting 
     const started = yield* Deferred.make<void>();
     const http = Layer.succeed(
       HttpClient.HttpClient,
-      HttpClient.make(() =>
+      HttpClient.make((request) =>
         Effect.gen(function* () {
           exchanges++;
-          yield* Deferred.succeed(started, undefined);
-          return yield* Effect.never;
+          if (exchanges === 1) {
+            yield* Deferred.succeed(started, undefined);
+            return yield* Effect.never;
+          }
+          yield* Effect.sleep("5 seconds");
+          return HttpClientResponse.fromWeb(request, new Response(null, { status: 401 }));
         }),
       ),
     );
@@ -238,8 +242,10 @@ it.effect("times out a stalled token exchange and releases the lock for waiting 
       yield* TestClock.adjust("30 seconds");
       assert.strictEqual((yield* Fiber.join(identity)).code, "UNAVAILABLE");
       assert.strictEqual(exchanges, 2, "the waiting call starts another exchange after timeout");
-      yield* TestClock.adjust("30 seconds");
-      assert.strictEqual((yield* Fiber.join(machines)).code, "UNAVAILABLE");
+      yield* TestClock.adjust("5 seconds");
+      const failure = yield* Fiber.join(machines);
+      assert.strictEqual(failure.operation, "authenticate");
+      assert.strictEqual(failure.code, "UNAUTHENTICATED");
     }).pipe(Effect.provide(boxdApiLayer(Redacted.make("key"), "fra").pipe(Layer.provide(http))));
   }).pipe(Effect.scoped),
 );
