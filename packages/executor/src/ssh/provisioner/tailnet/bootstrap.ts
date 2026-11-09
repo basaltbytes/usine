@@ -1,4 +1,3 @@
-import { Harnesses } from "@usine/agents/harness/node";
 import { Effect, Option } from "effect";
 import { HttpClient } from "effect/http";
 import { WorkerCapabilityError } from "../../../executor.ts";
@@ -11,7 +10,6 @@ import { tailscaleClientFor } from "./client.ts";
 export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnetsFor")(function* (
   commands: RemoteCommands,
 ) {
-  const { catalog } = yield* Harnesses;
   const http = yield* HttpClient.HttpClient;
   const clientFor = (address: SshWorkerAddress) =>
     Effect.transposeOption(
@@ -74,7 +72,7 @@ export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnets
           key,
         ),
       );
-      yield* configureTailnetGateway(catalog, commands, "prepare", machine, settings.value, domain);
+      yield* configureTailnetGateway(commands, "prepare", machine, settings.value, domain);
       const response = yield* commands.run("prepare", machine.shell, "curl", [
         "--silent",
         "--show-error",

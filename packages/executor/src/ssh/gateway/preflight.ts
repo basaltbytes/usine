@@ -10,12 +10,20 @@ import { Effect, Option, Redacted, Ref } from "effect";
 import type { CommandResult } from "../../child-command.ts";
 import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts";
 import type { HarnessProbe } from "../../harness-preflight.ts";
-import { type RemoteCommands } from "../../remote/commands.ts";
+import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
 import { forwardProxyUrl, gatewayEnvironment } from "./environment.ts";
 
 /** A placeholder caller token that lets preflight check the sent variables without attaching anything. */
 const PROBE_TOKEN = Redacted.make("usine-preflight");
+
+/** A script that takes name and value pairs and prints each name whose variable doesn't have that value on the machine. */
+const SENT_VARIABLES_SCRIPT = `
+while [ "$#" -gt 1 ]; do
+  test "$(printenv "$1")" = "$2" || echo "$1"
+  shift 2
+done
+`.trim();
 
 /** Matches the Gateway's refusal header for a request without a caller token. */
 const REFUSED_WITHOUT_TOKEN = /^x-usine-gateway-refusal:\s*missing-caller-token\s*$/imu;
@@ -207,7 +215,27 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
       ),
     ),
   };
-  yield* commands.sendingShell(worker, machine.shell, sent, "probe");
+  const received = yield* commands.inspect("preflight", sendingShell(machine.shell, sent), "sh", [
+    "-c",
+    SENT_VARIABLES_SCRIPT,
+    "sh",
+    ...Object.entries(sent).flatMap(([name, value]) => [name, Redacted.value(value)]),
+  ]);
+  if (received.exitCode === SSH_FAILURE)
+    return yield* unreachable(machine.shell.destination, "sh", received);
+  const dropped =
+    received.exitCode === 0
+      ? received.stdout.split("\n").filter((name) => name !== "")
+      : Object.keys(sent);
+  if (dropped.length > 0)
+    return yield* gatewayGap(
+      worker,
+      `SSH worker "${worker}" doesn't receive ${dropped.join(", ")} over standard input. Its SSH commands must run in a POSIX sh with base64.`,
+      new Error(
+        received.stderr.trim() ||
+          `variables not received: ${dropped.join(" ")} (exit code ${String(received.exitCode)})`,
+      ),
+    );
 
   const probed = yield* commands.inspect("preflight", machine.shell, "curl", [
     "-sS",

@@ -136,7 +136,7 @@ The gateway command saves managed configuration in `STATE_DIRECTORY/provider-cre
 
 ## Worker environment
 
-`infra/hetzner/gateway/worker-cloud-init.yaml` sets up the machine. For each attempt, the executor adds the caller token and sends each variable that contains it over the SSH connection, not the command line; the worker's sshd accepts them with `AcceptEnv`. The Claude Code row applies if the gateway has the Anthropic credential, and the Codex row if it has the OpenAI credential; otherwise the harness uses its login on the worker and `HTTPS_PROXY`.
+`infra/hetzner/gateway/worker-cloud-init.yaml` sets up the machine. For each attempt, the executor adds the caller token and sends each variable that contains it on the SSH command's standard input, not the command line. The Claude Code row applies if the gateway has the Anthropic credential, and the Codex row if it has the OpenAI credential; otherwise the harness uses its login on the worker and `HTTPS_PROXY`.
 
 | Tool | Setting |
 | --- | --- |

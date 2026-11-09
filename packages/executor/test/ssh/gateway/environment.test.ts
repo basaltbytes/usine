@@ -11,11 +11,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { Harness } from "@usine/core/agent/brain";
 import { GatewayDomain, type GatewayLlmProtocol } from "@usine/core/worker";
 import { Option, Redacted } from "effect";
-import {
-  gatewaySentVariables,
-  gatewayConfigFiles,
-  gatewayEnvironment,
-} from "../../../src/ssh/gateway/environment.ts";
+import { gatewayConfigFiles, gatewayEnvironment } from "../../../src/ssh/gateway/environment.ts";
 
 const CALLER_TOKEN = "ugw1.sample-claims.sample-signature";
 const DIRECTORIES = {
@@ -107,7 +103,6 @@ describe("An Attempt's environment behind a Gateway", () => {
       CODEX_HOME: "/home/usine/.usine/workers/eu-one/codex",
     });
     assert.deepStrictEqual(sent, { ...SENT_WITHOUT_LLM, USINE_GATEWAY_TOKEN: CALLER_TOKEN });
-    assert.includeMembers(gatewaySentVariables(catalog), Object.keys(sent));
   });
 
   it("isolates each harness's wiring when every descriptor is registered", () => {

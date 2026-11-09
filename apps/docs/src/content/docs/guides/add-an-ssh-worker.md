@@ -108,7 +108,7 @@ Use an always-on Linux VM in OrbStack or Lima for a Mac worker. On Apple Silicon
      gateway_address: 100.64.0.2
    ```
 
-   Set `llm_providers` to the credentials configured on your gateway. Save and inspect preflight. Each preflight reapplies gateway host entries, sshd environment acceptance, and gh's HTTP socket through passwordless sudo, then requires `http://git.<domain>/` to answer `x-usine-gateway-refusal: missing-caller-token` without a token. A sudo, service, or gateway failure prevents the worker from accepting work.
+   Set `llm_providers` to the credentials configured on your gateway. Save and inspect preflight. Each preflight reapplies gateway host entries and gh's HTTP socket through passwordless sudo, then requires `http://git.<domain>/` to answer `x-usine-gateway-refusal: missing-caller-token` without a token. A sudo, service, or gateway failure prevents the worker from accepting work.
 
 Run a test attempt and confirm that GitHub and configured model requests use the gateway while package downloads use direct internet access. Check private-address refusal from inside the attempt container. Removing an attempt leaves the VM joined to the tailnet; the operator manages its identity.
 

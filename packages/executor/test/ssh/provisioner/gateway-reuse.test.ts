@@ -11,19 +11,14 @@ import { fakeProviders } from "./fake-providers.ts";
 import { MACHINE_RUN, ROOT, sink, gatewayRuntimeOf } from "./fixtures.ts";
 
 describe("Provisioned machine reuse behind a gateway", () => {
-  for (const { detachFails, acceptsSentVariables } of [
-    { detachFails: false, acceptsSentVariables: true },
-    { detachFails: true, acceptsSentVariables: true },
-    { detachFails: false, acceptsSentVariables: false },
-  ]) {
+  for (const detachFails of [false, true]) {
     it.live(
       detachFails
         ? "retires the machine when the previous gateway attachment could not be revoked"
-        : `revokes attachments on a reused machine with ${acceptsSentVariables ? "SendEnv" : "stdin"} variables`,
+        : "revokes the previous attachment before the next attempt attaches on the reused machine",
       () => {
         const machine = fakeMachine();
         machine.state.docker = "running";
-        machine.state.acceptsSentVariables = acceptsSentVariables;
         const providers = fakeProviders();
         const gateway = fakeGateway(machine);
         const address: SshWorkerAddress = {

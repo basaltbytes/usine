@@ -38,7 +38,7 @@ done
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys' < "$identity.pub"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" "sh -s -- '$runtime' '$image'" <<'REMOTE'
 # boxd serves SSH through its proxy and exec agent, so sshd configuration in the machine has no effect.
-# Variables sent with SendEnv don't arrive in the machine, so the executor sends them on stdin; see #1101.
+# Variables sent with SendEnv don't arrive in the machine; see #1101.
 set -eu
 runtime=$1
 image=$2

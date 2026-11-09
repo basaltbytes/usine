@@ -365,7 +365,7 @@ Projects use Debian's Chromium through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` (se
 
 A worker needs 8 GB: the lint and knip gates reserve a 6 GiB virtual buffer, which a 4 GB machine refuses, and two attempts at once thrash it ([#270](https://github.com/basaltbytes/usine/issues/270)). cloud-init sets `vm.overcommit_memory=1` and a 2 GB swap file, and installs bubblewrap for Codex's sandbox ([#269](https://github.com/basaltbytes/usine/issues/269)). Create the gateway first. A `cx33` worker takes about four minutes; follow with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. `hcloud server describe worker-one` shows its private address.
 
-The worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, and `USINE_GATEWAY_TOKEN` (`AcceptEnv`), which carry the caller token over SSH, out of command lines. Preflight selects a verified stdin environment block if the server drops these variables. boxd uses this transport because its SSH proxy runs commands without sshd, so `AcceptEnv` does not apply. gh needs both token variables because `GH_TOKEN` serves absolute GitHub pagination links and explicit github.com URLs; Codex uses `USINE_GATEWAY_TOKEN` for the gateway's OpenAI credential.
+The executor sends `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, and `USINE_GATEWAY_TOKEN`, which carry the caller token, as an environment block on each SSH command's standard input, out of command lines; the worker's sshd needs no `AcceptEnv` entry. gh needs both token variables because `GH_TOKEN` serves absolute GitHub pagination links and explicit github.com URLs; Codex uses `USINE_GATEWAY_TOKEN` for the gateway's OpenAI credential.
 
 ## Log in to the harnesses on the worker
 

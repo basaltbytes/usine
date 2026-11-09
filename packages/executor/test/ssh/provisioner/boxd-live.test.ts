@@ -7,7 +7,7 @@ import { Redacted, Clock, Config, Effect, FileSystem, Layer, Option, Schedule } 
 import { FetchHttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
-import { remoteCommandsFor } from "../../../src/remote/commands.ts";
+import { remoteCommandsFor, sendingShell } from "../../../src/remote/commands.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
 import { boxdSettings } from "./support.ts";
@@ -97,13 +97,7 @@ it.live.skipIf(
               const commands = yield* remoteCommandsFor;
               const base = commands.shellFor(ssh, endpoint.destination);
               const value = `boxd-stdin-${now}`;
-              const shell = yield* commands.sendingShell(
-                WorkerName.make("boxd-live"),
-                base,
-                { USINE_BOXD_LIVE_TEST: Redacted.make(value) },
-                "probe",
-              );
-              assert(shell.stdinEnvironment !== undefined);
+              const shell = sendingShell(base, { USINE_BOXD_LIVE_TEST: Redacted.make(value) });
               const received = yield* commands.run("preflight", shell, "printenv", [
                 "USINE_BOXD_LIVE_TEST",
               ]);

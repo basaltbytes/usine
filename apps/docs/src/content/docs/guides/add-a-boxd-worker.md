@@ -45,7 +45,7 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine.
 
-boxd serves SSH through its proxy, and the machine runs no sshd. usine sends gateway tokens and API keys over standard input. Gateway setup configures the host entries and HTTP socket units, and skips sshd configuration when no sshd runs.
+boxd serves SSH through its proxy, and the machine runs no sshd. usine sends gateway tokens and API keys over standard input, which the proxy carries. Gateway setup configures the host entries and the HTTP socket units.
 
 `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 
@@ -55,7 +55,7 @@ Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchan
 
 ## Environment variables
 
-boxd terminates SSH at its proxy and runs commands through its exec agent. It ignores OpenSSH `SendEnv` and `SetEnv`; sshd `AcceptEnv` settings do not apply. usine probes variable delivery and selects the stdin transport for boxd workers. Each command reads a secret environment block before its command input or child protocol starts. Values stay out of command arguments, logs, and credential files. Reused machines and salvage use the same transport. The selected transport is logged at Info once per worker.
+boxd terminates SSH at its proxy and runs commands through its exec agent, which ignores OpenSSH `SendEnv` and `SetEnv`. usine sends secret variables to every SSH worker, boxd included, as an environment block on standard input. Each command reads the block before its command input or child protocol starts. Values stay out of command arguments, logs, and credential files. Gateway preflight checks that placeholder variables arrive this way.
 
 ## SSH recovery
 

@@ -2,4 +2,4 @@
 "@usine/executor": patch
 ---
 
-Support SSH workers whose server drops SendEnv, including boxd. Probe and select a verified stdin environment transport for gateway tokens and provisioner API keys, preserving command input and child protocols. Apply the selected transport to reused machines and salvage, and skip sshd configuration when the machine has no running sshd.
+Send gateway tokens and provisioner API keys to SSH workers as an environment block on each command's standard input instead of OpenSSH `SendEnv`, so they reach boxd workers and stay out of the local SSH client's environment. Gateway preflight fails with a `gateway` capability error naming the variables that don't arrive. Tailnet gateway setup no longer configures sshd `AcceptEnv`.

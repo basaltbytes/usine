@@ -39,6 +39,7 @@ import {
   request,
   TEST_AGENT,
   WORKER,
+  stdinValue,
 } from "../support.ts";
 import { hetznerSettings } from "./support.ts";
 import { fakeGateway, gatewayAddress } from "../gateway/support.ts";
@@ -213,7 +214,8 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         yield* (yield* executor.prepare(codexRequest)).launch(sink);
         assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
-        assert.isString(given.host.sshEnvironment.USINE_GATEWAY_TOKEN);
+        assert.isString(stdinValue(given.host, "USINE_GATEWAY_TOKEN"));
+        assert.notProperty(given.host.sshEnvironment, "USINE_GATEWAY_TOKEN");
         assert.include(
           machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "",
           'base_url = "http://llm.gw.test/openai-responses/v1"',
@@ -357,8 +359,9 @@ describe("Provisioned SSH Worker", () => {
         );
         const pinned = machine.state.localWrites.find(({ path }) => path === knownHosts);
         assert.strictEqual(pinned?.afterCalls, 0, "the key was pinned before the first connection");
-        // Without Docker, the key goes over the SSH connection, never in a command line.
-        assert.strictEqual(given.host.sshEnvironment.ANTHROPIC_API_KEY, KEY);
+        // Without Docker, the key goes over the SSH connection's stdin, never in a command line.
+        assert.strictEqual(stdinValue(given.host, "ANTHROPIC_API_KEY"), KEY);
+        assert.notProperty(given.host.sshEnvironment, "ANTHROPIC_API_KEY");
         assert.isFalse(machine.state.calls.some(({ line }) => line.includes(KEY)));
         assert.isTrue(
           machine.state.calls.every(({ command }) => command.args.includes(destination)),
@@ -877,8 +880,8 @@ describe("Provisioned SSH Worker", () => {
         yield* (yield* executor.prepare(codexRequest)).launch(sink);
         assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
-        assert.strictEqual(given.host.sshEnvironment.OPENAI_API_KEY, OPENAI_KEY);
-        assert.notProperty(given.host.sshEnvironment, "ANTHROPIC_API_KEY");
+        assert.strictEqual(stdinValue(given.host, "OPENAI_API_KEY"), OPENAI_KEY);
+        assert.notProperty(given.host.stdinEnvironment, "ANTHROPIC_API_KEY");
         const config = machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "";
         assert.include(config, 'base_url = "https://api.openai.com/v1"');
         assert.include(config, 'env_key = "OPENAI_API_KEY"');

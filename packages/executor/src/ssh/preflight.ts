@@ -113,7 +113,6 @@ export const sshMachinePreflightFor = (
       const address = machine.address.machine;
       if (address._tag === "Fixed" && Option.isSome(address.tailnet))
         yield* configureTailnetGateway(
-          catalog,
           commands,
           "preflight",
           machine,

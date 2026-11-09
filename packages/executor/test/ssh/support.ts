@@ -2,7 +2,7 @@ import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
-import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
+import { CHILD_KILL_SCRIPT, type ChildHost, RemoteShell } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -116,6 +116,8 @@ interface RemoteCall {
   readonly command: ChildProcess.StandardCommand;
   readonly line: string;
   readonly input: string;
+  /** The variables that the command read from its stdin environment block, by name. */
+  readonly stdinEnvironment: Readonly<Record<string, string>>;
   /** The container that ran the command, if it ran through `docker exec`. */
   readonly container?: string;
 }
@@ -173,9 +175,8 @@ interface FakeMachineState {
   claudeLoggedIn: boolean;
   /** What `codex --version` prints on the machine. */
   codexVersion: string;
-  /** Whether sshd accepts the variables the SSH client sends (`AcceptEnv`). */
-  acceptsSentVariables: boolean;
-  readonly droppedSentVariables: Set<string>;
+  /** Whether the machine's shell decodes the stdin environment block, as with POSIX `sh` and `base64`. */
+  acceptsStdinVariables: boolean;
   /** Whether `git.<domain>` resolves and responds from the machine. */
   gatewayReachable: boolean;
   tailscaleJoin: "ready" | "refused";
@@ -302,13 +303,22 @@ export const remoteWords = (line: string): Array<string> =>
     (word ?? "").replaceAll(`'"'"'`, "'"),
   );
 
-/** Returns the variables an SSH invocation sends to the machine that have a value in its environment. */
-export const sentVariables = (command: ChildProcess.StandardCommand): Array<string> => {
-  const names = command.args.flatMap((arg) =>
-    arg.startsWith("SendEnv=") ? arg.slice("SendEnv=".length).split(" ") : [],
-  );
-  return [...new Set(names)].filter((name) => command.options.env?.[name] !== undefined);
+/** Returns the value of `name` that a child host sends to the machine over stdin. */
+export const stdinValue = (host: ChildHost, name: string): string => {
+  const value = Schema.is(RemoteShell)(host) ? host.stdinEnvironment?.[name] : undefined;
+  if (value === undefined) throw new Error(`The child host doesn't send ${name} over stdin`);
+  return Redacted.value(value);
 };
+
+/** Returns the variables in a stdin environment block: a base64 line of `export NAME='value'`. */
+const stdinExports = (block: string): Record<string, string> =>
+  Object.fromEntries(
+    [
+      ...Buffer.from(block, "base64")
+        .toString("utf8")
+        .matchAll(/export ([A-Za-z_][A-Za-z0-9_]*)='((?:[^']|'"'"')*)'/gu),
+    ].map(([, name = "", value = ""]) => [name, value.replaceAll(`'"'"'`, "'")]),
+  );
 
 /** The remote line that stops the Attempt's children before its checkout is kept or removed. */
 export const KILL_CHILDREN = `exec 'sh' '-c' ${quote(CHILD_KILL_SCRIPT)} 'sh' '${WORKTREE}'`;
@@ -346,8 +356,7 @@ export const fakeMachine = () => {
     salvageCommitted: false,
     claudeLoggedIn: true,
     codexVersion: `codex-cli ${CODEX_CLI_VERSION}`,
-    acceptsSentVariables: true,
-    droppedSentVariables: new Set(),
+    acceptsStdinVariables: true,
     gatewayReachable: true,
     tailscaleJoin: "ready",
     tailnetConfigure: "ready",
@@ -565,7 +574,7 @@ export const fakeMachine = () => {
     command: ChildProcess.StandardCommand,
     line: string,
     input: string,
-    stdinVariables: ReadonlyArray<string>,
+    stdinEnvironment: Readonly<Record<string, string>>,
   ) => {
     const configIndex = command.args.indexOf("-F");
     const config = state.localFiles.get(command.args[configIndex + 1] ?? "") ?? "";
@@ -597,14 +606,10 @@ export const fakeMachine = () => {
       return oneShotHandle("", 1, `auth key refused: ${input}`);
     if (line === "exec 'true'") return oneShotHandle("", 0);
     if (line.includes("printenv")) {
-      const received = [
-        ...stdinVariables,
-        ...(state.acceptsSentVariables
-          ? sentVariables(command).filter((name) => !state.droppedSentVariables.has(name))
-          : []),
-      ];
       const expected = remoteWords(line).slice(4);
-      const dropped = expected.filter((word, index) => index % 2 === 0 && !received.includes(word));
+      const dropped = expected.filter(
+        (word, index) => index % 2 === 0 && stdinEnvironment[word] !== expected[index + 1],
+      );
       return oneShotHandle(dropped.map((name) => `${name}\n`).join(""), 0);
     }
     // Responds to the login host check like curl through the forward proxy: the CONNECT status, then the host's status.
@@ -791,24 +796,21 @@ export const fakeMachine = () => {
       if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
       let line = remoteLine(command);
       let input = yield* standardInput(command);
-      let stdinVariables: ReadonlyArray<string> = [];
+      let stdinEnvironment: Readonly<Record<string, string>> = {};
       if (line.startsWith("set +x; IFS= read -r usine_environment")) {
         const boundary = input.indexOf("\n");
-        const exports = Buffer.from(input.slice(0, boundary), "base64").toString("utf8");
-        stdinVariables = [...exports.matchAll(/export ([A-Za-z_][A-Za-z0-9_]*)=/gu)].map(
-          (match) => match[1] ?? "",
-        );
+        if (state.acceptsStdinVariables) stdinEnvironment = stdinExports(input.slice(0, boundary));
         input = input.slice(boundary + 1);
         line = line.slice(line.indexOf(" && ", line.indexOf('eval "unset usine_environment;')) + 4);
       }
       if (command.args.includes("-N")) {
-        state.calls.push({ command, line, input });
+        state.calls.push({ command, line, input, stdinEnvironment });
         return yield* startForward(command);
       }
       // Runs a `docker exec` line's command as if inside the container.
       if (/^exec '(?:docker|podman)' 'exec' '-i' /u.test(line)) {
         const [, , , container = "", , , inner = ""] = remoteWords(line);
-        state.calls.push({ command, line: inner, input, container });
+        state.calls.push({ command, line: inner, input, stdinEnvironment, container });
         const running = state.containers.get(container)?.running;
         if (running === undefined)
           return oneShotHandle(
@@ -817,7 +819,7 @@ export const fakeMachine = () => {
             `Error response from daemon: No such container: ${container}`,
           );
         return running
-          ? respond(command, inner, input, stdinVariables)
+          ? respond(command, inner, input, stdinEnvironment)
           : oneShotHandle("", 1, "Error response from daemon: container 4f0c2d is not running");
       }
       // Records `docker run` behind the pipe that gives it standard input as the docker command.
@@ -828,9 +830,9 @@ export const fakeMachine = () => {
             .map((word) => quote(word))
             .join(" ")}`
         : line;
-      state.calls.push({ command, line: direct, input });
+      state.calls.push({ command, line: direct, input, stdinEnvironment });
       if (/^exec '(?:docker|podman)' 'pull' /u.test(direct)) yield* state.beforePull;
-      return respond(command, direct, input, stdinVariables);
+      return respond(command, direct, input, stdinEnvironment);
     }),
   );
   const fileSystem = FileSystem.layerNoop({

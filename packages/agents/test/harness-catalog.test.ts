@@ -115,11 +115,6 @@ describe("harness catalog", () => {
       assert.include(dockerfile, `ARG HARNESS_PACKAGES="${inputs.npmPackages.join(" ")}"`);
       assert.match(dockerfile, /^RUN npm install -g .*\$\{HARNESS_PACKAGES\}/mu);
     }
-    const gatewayCloudInit = read("infra/hetzner/gateway/worker-cloud-init.yaml");
-    assert.include(
-      gatewayCloudInit,
-      `AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ${gatewayTokenVariables(catalog).join(" ")}`,
-    );
     const cloudInit = read("infra/hetzner/cloud-init.yaml");
     assert.match(cloudInit, /^\s+npm install -g pnpm@\S+ /mu);
     assert.strictEqual(
