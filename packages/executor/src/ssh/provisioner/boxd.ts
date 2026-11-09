@@ -137,6 +137,12 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
         }).pipe(
           Effect.onError(() =>
             api.destroy(result.id).pipe(
+              Effect.tap(() =>
+                Effect.logInfo("Deleted boxd machine after idle timer setup failed", {
+                  worker,
+                  machine: result.id,
+                }),
+              ),
               Effect.tapError((failure) =>
                 Effect.logWarning("Could not delete boxd machine after idle timer setup failed", {
                   worker,

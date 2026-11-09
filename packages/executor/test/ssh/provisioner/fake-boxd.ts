@@ -120,6 +120,7 @@ export const fakeBoxd = () => {
     sshHostKey: call("sshHostKey", () =>
       Effect.gen(function* () {
         state.hostKeyReads++;
+        yield* Effect.yieldNow;
         if (state.hostKey === "") return yield* failure("sshHostKey", "INTERNAL");
         return state.hostKey;
       }),

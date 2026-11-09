@@ -9,6 +9,16 @@ for (const provider of ["boat", "boxd"] as const) {
     `resolves ${provider} OAuth variables without LLM API keys and reports a missing secret by variable name`,
     () =>
       Effect.gen(function* () {
+        const yamlProvisioner = {
+          provider,
+          token_env: "BOAT_TOKEN",
+          snapshot: "usine-attempt",
+          tailnet: {
+            gateway_address: "100.64.0.2",
+            client_id_env: "TS_CLIENT",
+            client_secret_env: "TS_SECRET",
+          },
+        };
         const config = yield* Schema.decodeEffect(UsineConfig)({
           version: 1,
           repos: [],
@@ -24,16 +34,10 @@ for (const provider of ["boat", "boxd"] as const) {
                 admin_token_env: "GATEWAY_TOKEN",
                 llm_providers: ["anthropic-messages", "openai-responses"],
               },
-              provisioner: {
-                provider,
-                token_env: "BOAT_TOKEN",
-                snapshot: "usine-attempt",
-                tailnet: {
-                  gateway_address: "100.64.0.2",
-                  client_id_env: "TS_CLIENT",
-                  client_secret_env: "TS_SECRET",
-                },
-              },
+              provisioner:
+                provider === "boxd"
+                  ? { ...yamlProvisioner, region: "nyc", isolated: false }
+                  : yamlProvisioner,
             },
           ],
         });
@@ -57,6 +61,11 @@ for (const provider of ["boat", "boxd"] as const) {
             : provisioner.snapshot,
           Option.some("usine-attempt"),
         );
+        if (provisioner.provider === "boxd") {
+          assert.strictEqual(provisioner.region, "nyc");
+          assert.isFalse(provisioner.isolated);
+          assert.strictEqual(Redacted.value(provisioner.token), "boat");
+        }
         assert.isTrue(Option.isNone(provisioner.apiKeys.anthropic));
         assert.isTrue(Option.isNone(provisioner.apiKeys.openai));
         assert(Option.isSome(provisioner.tailnet));

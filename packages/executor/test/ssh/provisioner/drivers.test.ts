@@ -435,18 +435,26 @@ describe("boxd driver", () => {
           boxd.state.timers.map(({ seconds }) => seconds),
           [0, 0],
         );
-        const endpoint = yield* driver.endpoint(first.id, Effect.void);
+        const second = yield* driver.create("ignored", { ...tags, attempts: 2 });
+        const [endpoint] = yield* Effect.all(
+          [driver.endpoint(first.id, Effect.void), driver.endpoint(second.id, Effect.void)],
+          { concurrency: 2 },
+        );
         assert.strictEqual(endpoint.destination, "boxd@198.51.100.40");
         assert.deepStrictEqual(endpoint.port, Option.some(12001));
         assert.deepStrictEqual(endpoint.hostKey, Option.some(boxd.state.hostKey));
         assert.strictEqual(boxd.state.reads, 0, "the create response contains the endpoint");
-        const second = yield* driver.create("ignored", { ...tags, attempts: 2 });
         yield* Effect.all(
           [driver.endpoint(second.id, Effect.void), driver.endpoint(first.id, Effect.void)],
           { concurrency: 2 },
         );
         assert.strictEqual(boxd.state.hostKeyReads, 1);
+        boxd.state.timers.length = 0;
         yield* driver.assign(first.id, { ...tags, attempts: 2 });
+        assert.deepStrictEqual(boxd.state.timers, [
+          { id: first.id, kind: "hibernate", seconds: 0 },
+          { id: first.id, kind: "suspend", seconds: 0 },
+        ]);
         assert.strictEqual(boxd.state.machines.get(first.id)?.labels["usine.attempts"], "2");
         yield* driver.remove(first.id);
         yield* driver.remove(first.id);
@@ -471,6 +479,20 @@ describe("boxd driver", () => {
           (yield* driver.refreshEndpoint(id)).pipe(Option.map((value) => value.port)),
           Option.some(Option.some(24001)),
         );
+        boxd.state.machines.set(id, { ...machine, sshDisabled: true });
+        const disabled = yield* driver
+          .endpoint(id, Effect.die("must not poll disabled SSH"))
+          .pipe(Effect.flip);
+        assert.strictEqual(disabled.reason, "provider");
+        assert.include(disabled.message, "SSH disabled");
+        for (const status of ["stopped", "suspended", "hibernated", "failed", "destroyed"]) {
+          boxd.state.machines.set(id, { ...machine, status });
+          const terminal = yield* driver
+            .endpoint(id, Effect.die("must not poll terminal machines"))
+            .pipe(Effect.flip);
+          assert.strictEqual(terminal.reason, "capacity");
+          assert.include(terminal.message, status);
+        }
         boxd.state.machines.set(id, { ...machine, status: "hibernated" });
         assert.strictEqual(
           (yield* driver.refreshEndpoint(id).pipe(Effect.flip))._tag,
@@ -550,6 +572,8 @@ describe("boxd driver", () => {
         const driver = yield* boxdDriverFor(WORKER, boxdSettings());
         assert.deepStrictEqual((yield* driver.verify(WORKER, 2)).warnings, []);
         boxd.state.maxVms = 2;
+        boxd.state.vmCount = 0;
+        assert.deepStrictEqual((yield* driver.verify(WORKER, 2)).warnings, []);
         boxd.state.vmCount = 1;
         assert.lengthOf((yield* driver.verify(WORKER, 2)).warnings, 1);
         boxd.state.keyRefused = true;
@@ -567,6 +591,8 @@ describe("boxd driver", () => {
         assert.include(mismatch.message, "4 vCPU and 16 GiB");
         assert.include(mismatch.message, "Rebuild the snapshot at 2x8 or change size");
         boxd.state.snapshot.vcpu = 2;
+        const memoryMismatch = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
+        assert.include(memoryMismatch.message, "2 vCPU and 16 GiB");
         boxd.state.snapshot.memoryBytes = 8 * 1024 ** 3;
         boxd.state.snapshot.region = "nyc";
         assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, "is in nyc");

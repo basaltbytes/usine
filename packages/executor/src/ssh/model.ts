@@ -1,3 +1,4 @@
+import type { boxdApiLayer } from "./provisioner/boxd/grpc-client.ts";
 import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
@@ -205,6 +206,8 @@ export interface SshExecutorOptions {
    * directory removed with the executor.
    */
   readonly workerRecordsDirectory?: string;
+  /** Builds the boxd transport. Defaults to the gRPC adapter. */
+  readonly boxdClient?: typeof boxdApiLayer;
   /** The provider API endpoints, which tests replace. Defaults to the providers' own. */
   readonly providerEndpoints?: Partial<Record<MachineProvider, string>>;
   /** The longest wait for a created machine to answer over SSH. Defaults to 10 minutes. */

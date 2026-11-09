@@ -47,6 +47,8 @@ Preflight validates the API key, snapshot readiness, captured size, region, and 
 
 Start a test run. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
 
+Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication.
+
 ## SSH recovery
 
 usine refreshes the machine's SSH endpoint during recovery because its proxy port can change. A deleted machine ends the attempt as an infrastructure failure. A stopped or hibernated machine produces a provider error. Unpushed work on a deleted machine cannot be recovered; retries use the latest pushed salvage.

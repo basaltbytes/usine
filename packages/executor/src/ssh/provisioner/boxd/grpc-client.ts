@@ -37,7 +37,8 @@ const codeName = (code: Code): string =>
     .replace(/[A-Z]/gu, (letter, index) => `${index === 0 ? "" : "_"}${letter}`)
     .toUpperCase();
 
-const failureCode = (failure: ConnectError): string => {
+export const failureCode = (failure: ConnectError): string => {
+  if (!failure.isWireError && failure.code === Code.Canceled) return "UNAVAILABLE";
   const cause = failure.cause;
   return cause instanceof Error &&
     "code" in cause &&
@@ -81,6 +82,10 @@ export const boxdApiLayer = (
           session.value.expires_at > DateTime.toEpochMillis(now) / 1000 + 60
         )
           return session.value.token;
+        yield* Effect.logInfo("Exchanging boxd API key for a session", {
+          region,
+          refreshing: Option.isSome(session),
+        });
         const request = yield* HttpClientRequest.bodyJson(
           HttpClientRequest.post("https://app.boxd.sh/api/v1/auth/token"),
           { api_key: Redacted.value(token) },
@@ -103,8 +108,17 @@ export const boxdApiLayer = (
         session = Option.some(decoded);
         return decoded.token;
       }).pipe(
+        Effect.timeout("30 seconds"),
         exclusive.withPermit,
         Effect.catchTags({
+          TimeoutError: () =>
+            Effect.fail(
+              BoxdCallError.make({
+                operation: "authenticate",
+                code: "UNAVAILABLE",
+                message: "The boxd token exchange timed out",
+              }),
+            ),
           HttpClientError: () =>
             Effect.fail(
               BoxdCallError.make({

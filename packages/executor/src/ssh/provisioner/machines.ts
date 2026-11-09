@@ -85,7 +85,11 @@ export interface ProvisionedMachinesOptions {
   ) => Effect.Effect<void, WorkerCapabilityError>;
   readonly settings: Pick<
     SshExecutorOptions,
-    "knownHostsDirectory" | "providerEndpoints" | "machineReadyTimeout" | "machinePollInterval"
+    | "knownHostsDirectory"
+    | "providerEndpoints"
+    | "boxdClient"
+    | "machineReadyTimeout"
+    | "machinePollInterval"
   >;
 }
 

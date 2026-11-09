@@ -258,6 +258,7 @@ for (const address of [boatAddress, boxdAddress]) {
           workers: [address],
           instance: INSTANCE,
           instanceId: INSTANCE_ID,
+          boxdClient: boat.boxdClient,
           providerEndpoints: { boat: BOAT_TEST_API },
         }).pipe(
           Layer.provide(harnessesLive),
@@ -306,6 +307,7 @@ for (const address of [boatAddress, boxdAddress]) {
           workers: [address],
           instance: INSTANCE,
           instanceId: INSTANCE_ID,
+          boxdClient: boat.boxdClient,
           providerEndpoints: { boat: BOAT_TEST_API },
           machinePollInterval: "1 millis",
           machineReadyTimeout: "5 seconds",
@@ -382,6 +384,7 @@ for (const address of [boatAddress, boxdAddress]) {
             workers: [address],
             instance: INSTANCE,
             instanceId: INSTANCE_ID,
+            boxdClient: boat.boxdClient,
             providerEndpoints: { boat: BOAT_TEST_API },
             machinePollInterval: "1 millis",
             machineReadyTimeout: "5 seconds",

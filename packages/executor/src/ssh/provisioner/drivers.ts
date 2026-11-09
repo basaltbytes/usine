@@ -20,7 +20,6 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
   options: Pick<ProvisionedMachinesOptions, "settings" | "instance">,
 ) {
   const scope = yield* Effect.scope;
-  const boxd = yield* Effect.serviceOption(BoxdApi);
   const fs = yield* FileSystem.FileSystem;
   const http = yield* HttpClient.HttpClient;
   const { settings, instance } = options;
@@ -70,14 +69,15 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           settings.providerEndpoints?.hetzner ?? HETZNER_API,
         );
       case "boxd": {
-        const api = yield* Option.match(boxd, {
-          onSome: Effect.succeed,
-          onNone: () =>
-            Layer.buildWithScope(
-              boxdApiLayer(value.token, value.region, settings.providerEndpoints?.boxd),
-              scope,
-            ).pipe(Effect.map((context) => Context.get(context, BoxdApi))),
-        });
+        const context = yield* Layer.buildWithScope(
+          (settings.boxdClient ?? boxdApiLayer)(
+            value.token,
+            value.region,
+            settings.providerEndpoints?.boxd,
+          ),
+          scope,
+        );
+        const api = Context.get(context, BoxdApi);
         return yield* boxdDriverFor(worker, value).pipe(Effect.provideService(BoxdApi, api));
       }
       case "boat": {
