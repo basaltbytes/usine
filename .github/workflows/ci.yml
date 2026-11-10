@@ -102,11 +102,7 @@ jobs:
       - name: Install server test tools
         if: matrix.leg == 'server'
         timeout-minutes: 3
-        # A stalled mirror request fails after 30 seconds and is retried,
-        # instead of holding the step until its timeout.
         run: |
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
-            > /etc/apt/apt.conf.d/80ci-retries
           apt-get update
           apt-get install -y --no-install-recommends jq lsof
       - name: Run tests

@@ -52,9 +52,6 @@ test("the server container reaps detached processes and installs its required CL
   assert.match(tests.run, /runuser -u pwuser -- env "PATH=\$PATH" pnpm turbo run test/u);
   const setup = job.steps[setupIndex];
   assert.ok(setup["timeout-minutes"] > 0 && setup["timeout-minutes"] <= 3);
-  assert.match(setup.run, /Acquire::Retries "3"/u);
-  assert.match(setup.run, /Acquire::https?::Timeout "30"/u);
-  assert.ok(setup.run.indexOf("apt.conf.d") < setup.run.indexOf("apt-get update"));
   assert.match(setup.run, /apt-get update/u);
   for (const tool of ["jq", "lsof"]) {
     assert.match(setup.run, new RegExp(`apt-get install[^\\n]*\\b${tool}\\b`, "u"));
