@@ -552,20 +552,40 @@ ${egress.join("\n")}
         const failure = yield* parse([`      egress: ${egress}`], llmProviders).pipe(Effect.flip);
         assert.include(failure.message, expected);
       }
-      for (const invalid of [
-        "[]",
-        "[none, registry.npmjs.org]",
-        "[registry.npmjs.org, registry.npmjs.org]",
-        "[Registry.npmjs.org]",
-        "[localhost]",
-        "[300.1.1.1]",
-        "[198.51.100.0/33]",
-        "['https://registry.npmjs.org']",
-        "['registry.npmjs.org:443']",
-      ]) {
-        const result = yield* parse([`      egress: ${invalid}`]).pipe(Effect.result);
-        assert.isTrue(Result.isFailure(result), invalid);
+      const invalid: ReadonlyArray<readonly [string, string]> = [
+        ["", "Expected at least one entry"],
+        ["none", "Expected none as the only entry"],
+        ["registry.npmjs.org, registry.npmjs.org", "Expected an array with unique items"],
+        ["Registry.npmjs.org", "Expected a lowercase host name"],
+        ["localhost", "Expected a lowercase host name"],
+        ["300.1.1.1", "Expected a lowercase host name"],
+        ["198.51.100.0/33", "Expected a lowercase host name"],
+        ["'https://registry.npmjs.org'", "Expected a lowercase host name"],
+        ["'registry.npmjs.org:443'", "Expected a lowercase host name"],
+        ["'*.*.tailscale.com'", "*.*.tailscale.com is an invalid wildcard"],
+        ["'npm*.org'", "npm*.org is an invalid wildcard"],
+        ["10.0.0.0/8", "10.0.0.0/8 overlaps the reserved range 10.0.0.0/8"],
+        ["127.0.0.1", "127.0.0.1 overlaps the reserved range 127.0.0.0/8"],
+        ["100.64.0.2", "100.64.0.2 overlaps the reserved range 100.64.0.0/10"],
+        ["0.0.0.0/0", "0.0.0.0/0 overlaps the reserved range 0.0.0.0/8"],
+        ["172.20.1.1", "172.20.1.1 overlaps the reserved range 172.16.0.0/12"],
+        ["192.168.1.0/24", "192.168.1.0/24 overlaps the reserved range 192.168.0.0/16"],
+        ["169.254.169.254", "169.254.169.254 overlaps the reserved range 169.254.0.0/16"],
+        ["224.0.0.1", "224.0.0.1 overlaps the reserved range 224.0.0.0/4"],
+        ["255.255.255.255", "255.255.255.255 overlaps the reserved range 240.0.0.0/4"],
+        ["198.51.100.7/24", "198.51.100.7/24 has host bits set; did you mean 198.51.100.0/24?"],
+        ["1.2.3.0/7", "1.2.3.0/7 has host bits set; did you mean 0.0.0.0/7?"],
+        ["32.0.0.0/3", "32.0.0.0/3 is wider than /8"],
+      ];
+      for (const [entries, expected] of invalid) {
+        const egress = `['*.tailscale.com'${entries === "" ? "" : `, ${entries}`}]`;
+        const failure = yield* parse([`      egress: ${entries === "" ? "[]" : egress}`]).pipe(
+          Effect.flip,
+        );
+        assert.include(failure.message, expected, entries);
       }
+      const wide = yield* parse(["      egress: ['*.tailscale.com', 32.0.0.0/8, 203.0.113.0/24]"]);
+      assert.deepStrictEqual(egressOf(wide), ["*.tailscale.com", "32.0.0.0/8", "203.0.113.0/24"]);
     }).pipe(Effect.provide(parserLayer)),
   );
 

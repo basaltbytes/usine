@@ -9,9 +9,11 @@ import {
   HetznerResourceName,
   HetznerServerType,
   MachineId,
+  TailnetAddress,
   WorkerName,
 } from "@usine/core/worker";
-import { Clock, Effect, Option, Redacted, Schema } from "effect";
+import { Clock, Effect, Fiber, Option, Redacted, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
 import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
@@ -593,7 +595,7 @@ describe("boxd driver", () => {
     },
   );
   it.live(
-    "restricts a new machine's egress before anything else and reapplies the setting on reuse",
+    "restricts a new machine's egress before anything else, reapplies it on reuse, and leaves an unset setting alone",
     () => {
       const boxd = fakeBoxd();
       const entries = ["*.tailscale.com", "registry.npmjs.org"].map((entry) =>
@@ -625,12 +627,60 @@ describe("boxd driver", () => {
           "hibernate",
           "suspend",
         ]);
-        yield* unrestricted.assign(id, { ...tags, attempts: 3 });
-        assert.deepStrictEqual(boxd.state.egress.at(-1)?.entries, []);
-        assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, []);
+        yield* unrestricted.assign(other.id, { ...tags, attempts: 2 });
+        assert.lengthOf(boxd.state.egress, 2, "an unset egress leaves the machine's list as is");
+        assert.deepStrictEqual(boxd.state.operations.get(other.id), [
+          "create",
+          "hibernate",
+          "suspend",
+          "hibernate",
+          "suspend",
+        ]);
       }).pipe(Effect.provide(boxd.layer));
     },
   );
+  it.effect(
+    "deletes a new machine when its creation is interrupted while egress comes into force",
+    () => {
+      const boxd = fakeBoxd();
+      const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
+        const creating = yield* Effect.forkChild(driver.create("pool-aaaaaaaa", tags));
+        while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
+        yield* TestClock.adjust("500 millis");
+        assert.strictEqual(boxd.state.machines.size, 1, "the machine waits for its allowlist");
+        yield* Fiber.interrupt(creating);
+        assert.strictEqual(boxd.state.machines.size, 0);
+      }).pipe(Effect.provide(boxd.layer));
+    },
+  );
+  it.effect("warns at preflight about address entries behind a gateway", () => {
+    const boxd = fakeBoxd();
+    const egress = Option.some(
+      ["*.tailscale.com", "registry.npmjs.org", "203.0.113.7", "198.51.100.0/24"].map((entry) =>
+        BoxdEgressEntry.make(entry),
+      ),
+    );
+    return Effect.gen(function* () {
+      const direct = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
+      assert.deepStrictEqual((yield* direct.verify(WORKER, 1)).warnings, []);
+      const gateway = yield* boxdDriverFor(
+        WORKER,
+        boxdSettings({
+          egress,
+          tailnet: Option.some({
+            gatewayAddress: TailnetAddress.make("100.64.0.2"),
+            clientId: Redacted.make("test-client"),
+            clientSecret: Redacted.make("test-client-secret"),
+          }),
+        }),
+      );
+      const { warnings } = yield* gateway.verify(WORKER, 1);
+      assert.lengthOf(warnings, 1);
+      assert.include(warnings[0], "admits the addresses 203.0.113.7, 198.51.100.0/24");
+    }).pipe(Effect.provide(boxd.layer));
+  });
   it.effect("deletes a new machine whose egress allowlist boxd refuses or ignores", () => {
     const boxd = fakeBoxd();
     const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
