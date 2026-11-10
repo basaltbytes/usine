@@ -98,7 +98,9 @@ test("the server test tools install from a per-image cache before any apt mirror
   // The apt-get stub mirrors real apt: a transient index fetch failure only warns
   // and exits 0 unless --error-on=any is set, a hard failure (such as a hash or size
   // mismatch during a mirror sync) exits 100 either way, and a missing package
-  // index fails the download.
+  // index fails the download. Downloads land in Dir::Cache::archives (apt's default
+  // archive directory when unset), which must already hold a partial/ directory, and
+  // dpkg fails on an archive path that does not exist, such as an unexpanded glob.
   const install = ({ cacheHit, failedUpdates, packagesIndexed = false, hardFailure = false }) => {
     const scratch = mkdtempSync(join(tmpdir(), "server-tools-"));
     try {
@@ -109,8 +111,10 @@ test("the server test tools install from a per-image cache before any apt mirror
       const lists = join(scratch, "lists");
       const seen = join(scratch, "sources");
       const imageSources = join(scratch, "ubuntu.sources");
+      const defaultArchives = join(scratch, "apt-archives");
       mkdirSync(bin);
       mkdirSync(debs);
+      mkdirSync(join(defaultArchives, "partial"), { recursive: true });
       writeFileSync(state, "0");
       writeFileSync(lists, "missing");
       writeFileSync(
@@ -134,8 +138,10 @@ test("the server test tools install from a per-image cache before any apt mirror
         });
       stub(
         "apt-get",
-        `for arg; do
+        `archives="${defaultArchives}"
+for arg; do
   case "$arg" in
+    Dir::Cache::archives=*) archives="\${arg#*=}" ;;
     Dir::Etc::SourceList=*) echo "list \${arg#*=}" >> "${seen}" ;;
     Dir::Etc::SourceParts=*) cat "\${arg#*=}"/*.sources >> "${seen}" ;;
   esac
@@ -158,10 +164,17 @@ case " $* " in
     fi ;;
   *" --download-only "*)
     if [ "$(cat "${lists}")" != present ]; then echo "E: Unable to locate package jq" >&2; exit 100; fi
-    touch "${debs}/jq.deb" "${debs}/lsof.deb" ;;
+    if [ ! -d "$archives/partial" ]; then echo "E: Archives directory $archives/partial is missing." >&2; exit 100; fi
+    touch "$archives/jq.deb" "$archives/lsof.deb" ;;
 esac`,
       );
-      stub("dpkg", "");
+      stub(
+        "dpkg",
+        `[ "$1" = -i ] && shift
+for deb; do
+  [ -f "$deb" ] || { echo "dpkg: error: cannot access archive '$deb'" >&2; exit 2; }
+done`,
+      );
       stub("sleep", "");
       writeFileSync(
         join(bin, "timeout"),
@@ -181,7 +194,7 @@ esac`,
       });
       const log = existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [];
       const sources = existsSync(seen) ? readFileSync(seen, "utf8") : "";
-      return { status: result.status, log, sources };
+      return { status: result.status, log, sources, debs };
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
@@ -193,7 +206,7 @@ esac`,
     hit.log.every((call) => !call.startsWith("apt-get")),
     hit.log.join("\n"),
   );
-  assert.ok(hit.log.some((call) => call.startsWith("dpkg -i") && call.endsWith("jq.deb")));
+  assert.equal(hit.log.at(-1), `dpkg -i ${join(hit.debs, "jq.deb")}`);
 
   const updates = (log) => log.filter((call) => call.endsWith(" update"));
   const downloads = (log) => log.filter((call) => call.includes(" --download-only "));
@@ -207,7 +220,11 @@ esac`,
       .every((call) => call.includes(" --error-on=any ")),
   );
   assert.ok(flakyMirror.log.some((call) => /--download-only.*\bjq lsof$/u.test(call)));
-  assert.ok(flakyMirror.log.at(-1).startsWith("dpkg -i"));
+  // apt downloads into the cached directory, and dpkg installs what landed there.
+  assert.equal(
+    flakyMirror.log.at(-1),
+    `dpkg -i ${join(flakyMirror.debs, "jq.deb")} ${join(flakyMirror.debs, "lsof.deb")}`,
+  );
   // apt reads only the image's archive stanza, never security.ubuntu.com.
   assert.match(flakyMirror.sources, /^list \/dev\/null$/mu);
   assert.match(flakyMirror.sources, /URIs: http:\/\/archive\.ubuntu\.com\/ubuntu\//u);
