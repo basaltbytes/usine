@@ -7,7 +7,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 | `gateway.sh` | Creates and deletes the network, gateway VM, and firewall with `hcloud`; logs the gateway in to a tailnet; installs `@usine/gateway` from npm or packed tarballs; renders a worker's cloud-init; creates the orchestrator's server in the network and logs it in to the tailnet. |
 | `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, chrony, bastion sshd settings, Tailscale, Node.js, and the `usine-gateway` service. |
 | `gateway-nftables.conf` | The gateway's firewall rules. |
-| `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts and the harness login hosts. `../../boxd/egress.mjs` renders the same list as a boxd worker's `provisioner.egress`. |
+| `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts, the harness login hosts, and boxd's documentation. `../../boxd/egress.mjs` renders the same list as a boxd worker's `provisioner.egress`. |
 | `worker-cloud-init.yaml` | What a worker VM needs behind the gateway; `gateway.sh worker-user-data` sends it after the worker file of `../cloud-init.yaml`. |
 | `worker-nftables.conf` | A worker's firewall rules: the gateway only, and the metadata service for root. |
 
@@ -67,7 +67,7 @@ For a package host with a broad certificate or cross-service routing, a pull-thr
 
 #### Allowlist audit
 
-The table covers all 24 entries in the checked-in `egress-allowlist`. Package-host certificates were inspected on 2026-10-29 through the gateway's CONNECT proxy, with the allowlisted name as SNI. The four harness rows retain the certificate observations from 2026-10-15; [Harness login hosts](#harness-login-hosts) records the routing probes from that date. The auditing gateway refused CONNECT to those hosts on 2026-10-29, so their certificates were not rechecked. Recheck certificates and routing before deployment and after certificate or CDN changes.
+The table covers all 25 entries in the checked-in `egress-allowlist`. Package-host certificates were inspected on 2026-10-29 through the gateway's CONNECT proxy, with the allowlisted name as SNI. The four harness rows retain the certificate observations from 2026-10-15; [Harness login hosts](#harness-login-hosts) records the routing probes from that date. The auditing gateway refused CONNECT to those hosts on 2026-10-29, so their certificates were not rechecked. The `docs.boxd.sh` certificate and routing were checked on 2026-11-10 from a machine with direct internet access. Recheck certificates and routing before deployment and after certificate or CDN changes.
 
 “Broad” means the certificate includes names beyond the listed service, or a wildcard whose scope requires review. The checked-in list retains these entries under the decision above; inclusion does not establish isolation from other services. A service-scoped certificate still needs the routing check.
 
@@ -77,6 +77,7 @@ The table covers all 24 entries in the checked-in `egress-allowlist`. Package-ho
 | `platform.claude.com` | `platform.claude.com` (2026-10-15) | Service only; recheck required. |
 | `chatgpt.com` | Includes `amb-staging.chatgpt.com` and its subdomains (2026-10-15) | Broad: includes staging; recheck required. |
 | `auth.openai.com` | Includes `*.auth.openai.com` (2026-10-15) | Broad wildcard; recheck required. |
+| `docs.boxd.sh` | `docs.boxd.sh` (2026-11-10) | Service only, but served by Vercel, which routes other Vercel sites through it. |
 | `deb.nodesource.com` | `deb.nodesource.com` | Service only. |
 | `registry.npmjs.org` | `npmjs.org`, `*.npmjs.org` | Broad: npm website and subdomains. |
 | `pypi.org` | `pypi.org`, `*.pypi.org`, `www.pypi.org`, `donate.pypi.org` | Broad: includes the donation site and a wildcard. |
@@ -95,6 +96,8 @@ The table covers all 24 entries in the checked-in `egress-allowlist`. Package-ho
 | `nodejs.org` | `nodejs.org`, `doc-kit.nodejs.org`, `*.doc-kit.nodejs.org` | Broad: includes documentation tooling. |
 
 Routing probes on 2026-10-29 kept SNI at the allowlisted host and changed only HTTP/1.1 `Host`, without credentials or redirect following. Both `pypi.org` and `files.pythonhosted.org` returned the Python.org homepage for `Host: www.python.org`; `proxy.golang.org` returned Alphabet Investor Relations for `Host: abc.xyz`. These hosts therefore permit cross-service routing. `registry.npmjs.org` and `nodejs.org` returned Cloudflare `403` responses for `Host: www.cloudflare.com`. Those refusals do not narrow their certificates or establish isolation for other host pairs or HTTP/2.
+
+A routing probe of `docs.boxd.sh` on 2026-11-10, against its Vercel address 76.76.21.123, returned the Next.js website for `Host: nextjs.org` over both HTTP/1.1 and HTTP/2, and a Vercel `403` for `Host: vercel.com`. A tunnel to `docs.boxd.sh` can therefore reach other sites that Vercel hosts, including sites that anyone can deploy. The host is listed under the decision above, so that reviews can read the boxd reference; remove it from a gateway whose attempts don't need boxd's documentation.
 
 ### Paths by client
 
