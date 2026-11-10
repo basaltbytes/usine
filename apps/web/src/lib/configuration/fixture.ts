@@ -380,6 +380,7 @@ export const configurationJson = {
         size: "2x8",
         snapshot: "usine-attempt",
         isolated: true,
+        egress: null,
         anthropicKeyEnv: "ANTHROPIC_API_KEY",
         openaiKeyEnv: null,
       },

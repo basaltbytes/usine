@@ -6,6 +6,7 @@ import {
   BoxdSize,
   BoxdRegion,
   BoxdSnapshotName,
+  BoxdEgressEntry,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
@@ -145,6 +146,8 @@ export class BoxdProvisionerView extends Schema.TaggedClass<
   size: BoxdSize,
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean,
+  /** The egress allowlist each machine gets, or null when egress is unrestricted. */
+  egress: Schema.NullOr(Schema.Array(BoxdEgressEntry)),
   anthropicKeyEnv: Schema.NullOr(Schema.String),
   openaiKeyEnv: Schema.NullOr(Schema.String),
 }) {}
@@ -208,6 +211,7 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
               size: settings.size,
               snapshot: settings.snapshot,
               isolated: settings.isolated,
+              egress: Option.getOrNull(settings.egress),
               anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
               openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
             })

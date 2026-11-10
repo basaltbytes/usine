@@ -36,7 +36,12 @@ for (const provider of ["boat", "boxd"] as const) {
               },
               provisioner:
                 provider === "boxd"
-                  ? { ...yamlProvisioner, region: "nyc", isolated: false }
+                  ? {
+                      ...yamlProvisioner,
+                      region: "nyc",
+                      isolated: false,
+                      egress: ["*.tailscale.com", "registry.npmjs.org"],
+                    }
                   : yamlProvisioner,
             },
           ],
@@ -64,6 +69,8 @@ for (const provider of ["boat", "boxd"] as const) {
         if (provisioner.provider === "boxd") {
           assert.strictEqual(provisioner.region, "nyc");
           assert.isFalse(provisioner.isolated);
+          const egress: ReadonlyArray<string> | null = Option.getOrNull(provisioner.egress);
+          assert.deepStrictEqual(egress, ["*.tailscale.com", "registry.npmjs.org"]);
           assert.strictEqual(Redacted.value(provisioner.token), "boat");
         }
         assert.isTrue(Option.isNone(provisioner.apiKeys.anthropic));

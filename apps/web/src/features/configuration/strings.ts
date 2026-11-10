@@ -383,6 +383,7 @@ export const workerFormCopy = {
   regionHint:
     "A region enabled for your boxd org, as listed by boxd manage regions. fra and nyc are the hosted regions.",
   isolated: "Isolated",
+  egress: "Egress allowlist (comma-separated, empty for unrestricted)",
   domain: "Gateway domain",
   gatewayDestination: "Gateway SSH destination",
   adminPort: "Gateway admin port",

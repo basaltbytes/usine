@@ -855,6 +855,40 @@ it("suggests the hosted boxd regions and saves another region id", async () => {
   });
 });
 
+const boxdEgressSource = (egress: string) =>
+  `name: local\nkind: ssh\nroot: /home/boxd/.usine\nidentity_file: /keys/id_ed25519\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n${egress}`;
+const editBoxdEgress = async (source: string) => {
+  await mount();
+  await editText();
+  await page.getByRole("textbox", { name: "Configuration text" }).fill(source);
+  await button("Edit as form").click();
+  return page.getByRole("textbox", {
+    name: "Egress allowlist (comma-separated, empty for unrestricted)",
+    exact: true,
+  });
+};
+
+it("saves a boxd egress allowlist as a list", async () => {
+  const egress = await editBoxdEgress(boxdEgressSource(""));
+  await egress.fill("registry.npmjs.org, *.tailscale.com");
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
+    value: { provisioner: { egress: ["registry.npmjs.org", "*.tailscale.com"] } },
+  });
+});
+
+it("removes the boxd egress allowlist when the field is cleared", async () => {
+  const egress = await editBoxdEgress(boxdEgressSource("  egress: [registry.npmjs.org]\n"));
+  await expect.element(egress).toHaveValue("registry.npmjs.org");
+  await egress.fill("");
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  const [request] = await commands.configurationEditorRequests();
+  expect(request?.payload).toMatchObject({ value: { provisioner: { provider: "boxd" } } });
+  expect(JSON.stringify(request?.payload)).not.toContain("egress");
+});
+
 it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
   client.setQueryData(
     overviewQuery().queryKey,

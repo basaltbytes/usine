@@ -142,6 +142,7 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
                   provider: settings.provider,
                   region: settings.region,
                   isolated: settings.isolated,
+                  egress: settings.egress,
                   size: settings.size,
                   snapshot: settings.snapshot,
                 }
