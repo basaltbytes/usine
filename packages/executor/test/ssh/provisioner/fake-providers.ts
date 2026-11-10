@@ -1,9 +1,12 @@
 import { assert } from "@effect/vitest";
 import type { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
+import { spawnedBoxdExec } from "./fake-boxd-exec.ts";
+import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
+import type { ChildProcessSpawner } from "effect/process";
 
 /** The base URL of the fake Hetzner Cloud API. */
 export const HETZNER_TEST_API = "https://hetzner.test/v1";
@@ -527,6 +530,16 @@ export const fakeProviders = () => {
       assert.strictEqual(region, boxd.state.region);
       return boxd.layer;
     }) satisfies typeof boxdApiLayer,
+    /**
+     * Returns the `SshExecutorOptions.boxdExec` that runs boxd commands on `machine` and records
+     * the endpoint and credential of each connection in `boxd.connections`.
+     */
+    boxdExecOn:
+      (machine: { readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"] }) =>
+      (endpoint: string, credential: Redacted.Redacted<string>) => {
+        boxd.state.connections.push({ endpoint, credential: Redacted.value(credential) });
+        return Layer.succeed(BoxdExec, spawnedBoxdExec(machine.spawner));
+      },
     layer: Layer.merge(Layer.succeed(HttpClient.HttpClient, clientWith(unexpected)), boxd.layer),
     /** Returns the providers' client that sends other origins to `underlying`'s client. */
     over: <E, R>(underlying: Layer.Layer<HttpClient.HttpClient, E, R>) =>

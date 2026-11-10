@@ -11,234 +11,215 @@ import { machineDriversFor } from "../../../src/ssh/provisioner/drivers.ts";
 import { fakeMachine, WORKER } from "../support.ts";
 import { boxdAddress, hetznerAddress } from "./fixtures.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
-import { boxdSettings, BOXD_KEY_FINGERPRINT, BOXD_PUBLIC_KEY } from "./support.ts";
+import { boxdSettings } from "./support.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { BoxdApi as BoxdService } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
 import { BoxdApi, type BoxdCreate } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
-import { boxdApiLayer, failureCode } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { failureCode } from "../../../src/ssh/provisioner/boxd/status.ts";
 
 /** An endpoint override that skips region discovery; the tests fail before any gRPC call. */
 const UNUSED_ENDPOINT = "http://127.0.0.1:1";
 
-it.effect(
-  "decodes real gRPC responses, shares authentication, retains proxy metadata, and sanitizes refusals",
-  () =>
-    Effect.gen(function* () {
-      const key = "bxd_test_transport_key";
-      let jwt = "test-jwt";
-      const machine = {
-        vmId: "vm-1",
-        publicIp: "198.51.100.40",
-        status: "running",
-        sshPort: 12001,
-        createdAt: 1_700_000_000n,
-        labels: { "usine.worker": "worker" },
-        egressAllow: new Array<string>(),
-      };
-      const selectors: Array<Array<string>> = [];
-      const calls: Array<string> = [];
-      let refused = false;
-      let region = "fra";
-      let hostKey = "ssh-ed25519 AAAAProxyKey";
-      const server = createServer(
-        connectNodeAdapter({
-          routes: (router) =>
-            router.service(BoxdService, {
-              whoami: (_request, context) => {
-                assert.strictEqual(context.requestHeader.get("authorization"), `Bearer ${jwt}`);
-                const timeout = context.timeoutMs();
-                assert.isDefined(timeout);
-                assert.isAtMost(timeout ?? Infinity, 30_000);
-                return { userId: "member", pubkeyFingerprints: [BOXD_KEY_FINGERPRINT] };
-              },
-              getOrgMachineLimit: () => ({ maxVms: 50, vmCount: 2 }),
-              getSnapshot: () => ({
-                snapshot: {
-                  status: "ready",
-                  region,
-                  vcpu: 2,
-                  memoryBytes: 8n * 1024n ** 3n,
-                },
-              }),
-              listRegions: () => ({ thisRegion: region }),
-              createVmFromSnapshot: (request) => {
-                assert.strictEqual(request.config?.network?.ssh, true);
-                assert.strictEqual(request.isolated, true);
-                if (refused) throw new ConnectError(`quota: ${key} ${jwt}`, Code.ResourceExhausted);
-                return { vmId: machine.vmId, machine };
-              },
-              getVm: () => machine,
-              listVms: (request) => {
-                selectors.push(request.labelSelector);
-                return { vms: [machine], sshHostKey: hostKey };
-              },
-              updateVmLabels: () => {
-                calls.push("labels");
-                return {};
-              },
-              destroyVm: () => {
-                calls.push("destroy");
-                return {};
-              },
-              setVmEgressAllow: (request) => {
-                calls.push(`egress ${request.vm} ${request.entries.join(",")}`);
-                machine.egressAllow = request.entries;
-                return { entries: request.entries };
-              },
-              setAutoHibernateTimeout: (request) => {
-                assert.strictEqual(request.timeoutSecs, 0);
-                calls.push("hibernate");
-                return {};
-              },
-              setAutoSuspendTimeout: (request) => {
-                assert.strictEqual(request.timeoutSecs, 0);
-                calls.push("suspend");
-                return {};
+it.effect("decodes real gRPC responses, shares authentication, and sanitizes refusals", () =>
+  Effect.gen(function* () {
+    const key = "bxd_test_transport_key";
+    let jwt = "test-jwt";
+    const machine = {
+      vmId: "vm-1",
+      status: "running",
+      createdAt: 1_700_000_000n,
+      labels: { "usine.worker": "worker" },
+      egressAllow: new Array<string>(),
+    };
+    const selectors: Array<Array<string>> = [];
+    const calls: Array<string> = [];
+    let refused = false;
+    let region = "fra";
+    const server = createServer(
+      connectNodeAdapter({
+        routes: (router) =>
+          router.service(BoxdService, {
+            whoami: (_request, context) => {
+              assert.strictEqual(context.requestHeader.get("authorization"), `Bearer ${jwt}`);
+              const timeout = context.timeoutMs();
+              assert.isDefined(timeout);
+              assert.isAtMost(timeout ?? Infinity, 30_000);
+              return { userId: "member" };
+            },
+            getOrgMachineLimit: () => ({ maxVms: 50, vmCount: 2 }),
+            getSnapshot: () => ({
+              snapshot: {
+                status: "ready",
+                region,
+                vcpu: 2,
+                memoryBytes: 8n * 1024n ** 3n,
               },
             }),
-        }),
-      );
-      yield* Effect.acquireRelease(
-        Effect.callback<void>((resume) => {
-          server.once("error", (cause) => resume(Effect.die(cause)));
-          server.listen(0, "127.0.0.1", () => resume(Effect.void));
-        }),
-        () =>
-          Effect.callback<void>((resume) => {
-            server.close((error) => resume(error === undefined ? Effect.void : Effect.die(error)));
-          }),
-      );
-      const address = server.address();
-      assert(address !== null && !Predicate.isString(address));
-      let exchanges = 0;
-      const http = Layer.succeed(
-        HttpClient.HttpClient,
-        HttpClient.make((request) =>
-          Effect.gen(function* () {
-            exchanges++;
-            jwt = `test-jwt-${exchanges}`;
-            assert.strictEqual(request.url, "https://app.boxd.sh/api/v1/auth/token");
-            assert(request.body._tag === "Uint8Array");
-            assert.strictEqual(
-              new TextDecoder().decode(request.body.body),
-              jsonKey({ api_key: key }),
-            );
-            const now = yield* Clock.currentTimeMillis;
-            return HttpClientResponse.fromWeb(
-              request,
-              new Response(jsonKey({ token: jwt, expires_at: now / 1000 + 3600 }), {
-                headers: { "content-type": "application/json" },
-              }),
-            );
-          }),
-        ),
-      );
-      const layer = boxdApiLayer(
-        Redacted.make(key),
-        BoxdRegion.make("fra"),
-        `http://127.0.0.1:${address.port}`,
-      ).pipe(Layer.provide(http));
-      yield* Effect.gen(function* () {
-        const api = yield* BoxdApi;
-        const [identity, regions, snapshot, limit] = yield* Effect.all(
-          [api.whoami, api.regions, api.snapshot("usine"), api.orgMachineLimit],
-          { concurrency: "unbounded" },
-        );
-        assert.strictEqual(identity.userId, "member");
-        assert.deepStrictEqual(identity.sshKeyFingerprints, [BOXD_KEY_FINGERPRINT]);
-        assert.strictEqual(regions.thisRegion, "fra");
-        assert.strictEqual(snapshot.memoryBytes, 8 * 1024 ** 3);
-        assert.strictEqual(limit.maxVms, 50);
-        const request: BoxdCreate = {
-          snapshot: "usine",
-          name: "worker",
-          isolated: true,
-          labels: {},
-          config: { network: { ssh: true } },
-        };
-        const created = yield* api.createFromSnapshot(request);
-        assert.strictEqual(created.id, "vm-1");
-        const vm = yield* api.vm(created.id);
-        assert.strictEqual(vm.createdAt, 1_700_000_000);
-        yield* api.listVms(["usine.worker=worker"]);
-        const proxyKey = yield* api.sshHostKey;
-        assert.strictEqual(proxyKey, hostKey);
-        yield* api.updateLabels(created.id, { "usine.attempts": "2" });
-        assert.deepStrictEqual(vm.egressAllow, []);
-        const inEffect = yield* api.setEgressAllow(created.id, [
-          "*.tailscale.com",
-          "registry.npmjs.org",
-        ]);
-        assert.deepStrictEqual(inEffect, ["*.tailscale.com", "registry.npmjs.org"]);
-        const restricted = yield* api.vm(created.id);
-        assert.deepStrictEqual(restricted.egressAllow, inEffect);
-        yield* api.setAutoHibernateTimeout(created.id, 0);
-        yield* api.setAutoSuspendTimeout(created.id, 0);
-        yield* api.destroy(MachineId.make("vm-1"));
-        refused = true;
-        const error = yield* api.createFromSnapshot(request).pipe(Effect.flip);
-        assert.strictEqual(error.code, "RESOURCE_EXHAUSTED");
-        assert.notInclude(error.message, key);
-        assert.notInclude(error.message, jwt);
-        for (const malformed of [
-          "",
-          "ssh-ed25519",
-          "ssh-dss AAAA",
-          "ecdsa-sha2-nistp256 AAAA",
-          "ssh-ed25519 AAAA\ninjected ssh-rsa AAAA",
-          "ssh-ed25519 AAAA\rinjected ssh-rsa AAAA",
-        ]) {
-          hostKey = malformed;
-          const missingKey = yield* api.sshHostKey.pipe(Effect.flip);
-          assert.strictEqual(missingKey.code, "INTERNAL");
-        }
-        yield* TestClock.adjust("3541 seconds");
-        yield* api.whoami;
-        assert.strictEqual(exchanges, 2, "refreshes the session before its expiry");
-      }).pipe(Effect.provide(layer));
-      assert.strictEqual(exchanges, 2);
-      assert.deepStrictEqual(selectors[0], ["usine.worker=worker"]);
-      assert.deepStrictEqual(calls, [
-        "labels",
-        "egress vm-1 *.tailscale.com,registry.npmjs.org",
-        "hibernate",
-        "suspend",
-        "destroy",
-      ]);
-      const host = fakeMachine();
-      host.state.localFiles.set("/keys/usine_boxd.pub", BOXD_PUBLIC_KEY);
-      const ambient = fakeBoxd();
-      ambient.state.keyRefused = true;
-      for (const selectedRegion of [BoxdRegion.make("fra"), BoxdRegion.make("nyc")]) {
-        region = selectedRegion;
-        yield* Effect.gen(function* () {
-          const settings = { providerEndpoints: { boxd: `http://127.0.0.1:${address.port}` } };
-          const boxdClient = ((token, region, endpoint) => {
-            assert.strictEqual(region, selectedRegion);
-            assert.strictEqual(Redacted.value(token), key);
-            return boxdApiLayer(token, region, endpoint);
-          }) satisfies typeof boxdApiLayer;
-          const drivers = yield* machineDriversFor({
-            instance: "transport-test",
-            settings: selectedRegion === "nyc" ? { ...settings, boxdClient } : settings,
-          });
-          const driver = yield* drivers.forEntry({
-            address: {
-              ...boxdAddress,
-              machine: {
-                _tag: "Provisioned",
-                provisioner: boxdSettings({ token: Redacted.make(key), region: selectedRegion }),
-              },
+            listRegions: () => ({ thisRegion: region }),
+            createVmFromSnapshot: (request) => {
+              assert.strictEqual(request.config?.network?.ssh, true);
+              assert.strictEqual(request.isolated, true);
+              if (refused) throw new ConnectError(`quota: ${key} ${jwt}`, Code.ResourceExhausted);
+              return { vmId: machine.vmId, machine };
             },
-            gateway: Option.none(),
-            machine: Option.none(),
-          });
-          assert.deepStrictEqual((yield* driver.verify(WORKER, 2)).warnings, []);
-        }).pipe(Effect.provide([http, host.layer, ambient.layer]));
-      }
-      assert.strictEqual(exchanges, 4, "each production factory builds the configured transport");
-    }).pipe(Effect.scoped),
+            getVm: () => machine,
+            listVms: (request) => {
+              selectors.push(request.labelSelector);
+              return { vms: [machine] };
+            },
+            updateVmLabels: () => {
+              calls.push("labels");
+              return {};
+            },
+            destroyVm: () => {
+              calls.push("destroy");
+              return {};
+            },
+            setVmEgressAllow: (request) => {
+              calls.push(`egress ${request.vm} ${request.entries.join(",")}`);
+              machine.egressAllow = request.entries;
+              return { entries: request.entries };
+            },
+            setAutoHibernateTimeout: (request) => {
+              assert.strictEqual(request.timeoutSecs, 0);
+              calls.push("hibernate");
+              return {};
+            },
+            setAutoSuspendTimeout: (request) => {
+              assert.strictEqual(request.timeoutSecs, 0);
+              calls.push("suspend");
+              return {};
+            },
+          }),
+      }),
+    );
+    yield* Effect.acquireRelease(
+      Effect.callback<void>((resume) => {
+        server.once("error", (cause) => resume(Effect.die(cause)));
+        server.listen(0, "127.0.0.1", () => resume(Effect.void));
+      }),
+      () =>
+        Effect.callback<void>((resume) => {
+          server.close((error) => resume(error === undefined ? Effect.void : Effect.die(error)));
+        }),
+    );
+    const address = server.address();
+    assert(address !== null && !Predicate.isString(address));
+    let exchanges = 0;
+    const http = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.gen(function* () {
+          exchanges++;
+          jwt = `test-jwt-${exchanges}`;
+          assert.strictEqual(request.url, "https://app.boxd.sh/api/v1/auth/token");
+          assert(request.body._tag === "Uint8Array");
+          assert.strictEqual(
+            new TextDecoder().decode(request.body.body),
+            jsonKey({ api_key: key }),
+          );
+          const now = yield* Clock.currentTimeMillis;
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(jsonKey({ token: jwt, expires_at: now / 1000 + 3600 }), {
+              headers: { "content-type": "application/json" },
+            }),
+          );
+        }),
+      ),
+    );
+    const layer = boxdApiLayer(
+      Redacted.make(key),
+      BoxdRegion.make("fra"),
+      `http://127.0.0.1:${address.port}`,
+    ).pipe(Layer.provide(http));
+    yield* Effect.gen(function* () {
+      const api = yield* BoxdApi;
+      const [identity, regions, snapshot, limit] = yield* Effect.all(
+        [api.whoami, api.regions, api.snapshot("usine"), api.orgMachineLimit],
+        { concurrency: "unbounded" },
+      );
+      assert.strictEqual(identity.userId, "member");
+      assert.strictEqual(api.endpoint, `http://127.0.0.1:${address.port}`);
+      assert.strictEqual(regions.thisRegion, "fra");
+      assert.strictEqual(snapshot.memoryBytes, 8 * 1024 ** 3);
+      assert.strictEqual(limit.maxVms, 50);
+      const request: BoxdCreate = {
+        snapshot: "usine",
+        name: "worker",
+        isolated: true,
+        labels: {},
+        config: { network: { ssh: true } },
+      };
+      const created = yield* api.createFromSnapshot(request);
+      assert.strictEqual(created.id, "vm-1");
+      const vm = yield* api.vm(created.id);
+      assert.strictEqual(vm.createdAt, 1_700_000_000);
+      yield* api.listVms(["usine.worker=worker"]);
+      yield* api.updateLabels(created.id, { "usine.attempts": "2" });
+      assert.deepStrictEqual(vm.egressAllow, []);
+      const inEffect = yield* api.setEgressAllow(created.id, [
+        "*.tailscale.com",
+        "registry.npmjs.org",
+      ]);
+      assert.deepStrictEqual(inEffect, ["*.tailscale.com", "registry.npmjs.org"]);
+      const restricted = yield* api.vm(created.id);
+      assert.deepStrictEqual(restricted.egressAllow, inEffect);
+      yield* api.setAutoHibernateTimeout(created.id, 0);
+      yield* api.setAutoSuspendTimeout(created.id, 0);
+      yield* api.destroy(MachineId.make("vm-1"));
+      refused = true;
+      const error = yield* api.createFromSnapshot(request).pipe(Effect.flip);
+      assert.strictEqual(error.code, "RESOURCE_EXHAUSTED");
+      assert.notInclude(error.message, key);
+      assert.notInclude(error.message, jwt);
+      yield* TestClock.adjust("3541 seconds");
+      yield* api.whoami;
+      assert.strictEqual(exchanges, 2, "refreshes the session before its expiry");
+    }).pipe(Effect.provide(layer));
+    assert.strictEqual(exchanges, 2);
+    assert.deepStrictEqual(selectors[0], ["usine.worker=worker"]);
+    assert.deepStrictEqual(calls, [
+      "labels",
+      "egress vm-1 *.tailscale.com,registry.npmjs.org",
+      "hibernate",
+      "suspend",
+      "destroy",
+    ]);
+    const host = fakeMachine();
+    const ambient = fakeBoxd();
+    ambient.state.keyRefused = true;
+    for (const selectedRegion of [BoxdRegion.make("fra"), BoxdRegion.make("nyc")]) {
+      region = selectedRegion;
+      yield* Effect.gen(function* () {
+        const settings = { providerEndpoints: { boxd: `http://127.0.0.1:${address.port}` } };
+        const boxdClient = ((token, region, endpoint) => {
+          assert.strictEqual(region, selectedRegion);
+          assert.strictEqual(Redacted.value(token), key);
+          return boxdApiLayer(token, region, endpoint);
+        }) satisfies typeof boxdApiLayer;
+        const drivers = yield* machineDriversFor({
+          instance: "transport-test",
+          settings: selectedRegion === "nyc" ? { ...settings, boxdClient } : settings,
+        });
+        const driver = yield* drivers.forEntry({
+          address: {
+            ...boxdAddress,
+            machine: {
+              _tag: "Provisioned",
+              provisioner: boxdSettings({ token: Redacted.make(key), region: selectedRegion }),
+            },
+          },
+          gateway: Option.none(),
+          machine: Option.none(),
+        });
+        assert.deepStrictEqual((yield* driver.verify(WORKER, 2)).warnings, []);
+      }).pipe(Effect.provide([http, host.layer, ambient.layer]));
+    }
+    assert.strictEqual(exchanges, 4, "each production factory builds the configured transport");
+  }).pipe(Effect.scoped),
 );
 
 it.effect("times out a stalled token exchange and releases the lock for waiting callers", () =>
@@ -293,8 +274,8 @@ for (const [status, code] of [
       const failure = yield* api.whoami.pipe(Effect.flip);
       assert.strictEqual(failure.operation, "authenticate");
       assert.strictEqual(failure.code, code);
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub").pipe(
-        Effect.provide(fakeMachine().layer),
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings()).pipe(
+        Effect.provide(Layer.merge(fakeMachine().layer, fakeBoxd().execLayer)),
       );
       const preflight = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
       assert.include(
@@ -452,6 +433,18 @@ it.effect("routes account RPCs to boxd and machine RPCs to the endpoint ListRegi
         ),
       );
       assert.strictEqual(regions.thisRegion, region, "verify sees the resolved endpoint's region");
+      const served = yield* BoxdApi.pipe(
+        Effect.map((api) => api.endpoint),
+        Effect.provide(
+          boxdApiLayer(
+            Redacted.make("key"),
+            BoxdRegion.make(region),
+            undefined,
+            routedTransport([]),
+          ).pipe(Layer.provide(sessionHttp)),
+        ),
+      );
+      assert.strictEqual(served, endpoint, "Exec calls go to the region's endpoint");
       assert.deepStrictEqual(calls, [
         { method: "listRegions", baseUrl: "https://boxd.sh:9443" },
         { method: "whoami", baseUrl: "https://boxd.sh:9443" },

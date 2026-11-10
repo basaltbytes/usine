@@ -37,7 +37,7 @@ import type { Message } from "@bufbuild/protobuf";
 export const file_api: GenFile =
   /*@__PURE__*/
   fileDesc(
-    "CglhcGkucHJvdG8SC2JveGQuYXBpLnYxIg8KDVdob2FtaVJlcXVlc3QiPgoOV2hvYW1pUmVzcG9uc2USDwoHdXNlcl9pZBgBIAEoCRIbChNwdWJrZXlfZmluZ2VycHJpbnRzGAIgAygJIisKGUdldE9yZ01hY2hpbmVMaW1pdFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJIj8KGkdldE9yZ01hY2hpbmVMaW1pdFJlc3BvbnNlEg8KB21heF92bXMYAyABKA0SEAoIdm1fY291bnQYBCABKA0iLwoSR2V0U25hcHNob3RSZXF1ZXN0EgwKBG5hbWUYASABKAkSCwoDb3JnGAIgASgJImAKDFNuYXBzaG90SW5mbxIMCgRuYW1lGAIgASgJEg4KBnN0YXR1cxgEIAEoCRIMCgR2Y3B1GAkgASgNEhQKDG1lbW9yeV9ieXRlcxgKIAEoBBIOCgZyZWdpb24YESABKAkiQgoTR2V0U25hcHNob3RSZXNwb25zZRIrCghzbmFwc2hvdBgBIAEoCzIZLmJveGQuYXBpLnYxLlNuYXBzaG90SW5mbyIkChJMaXN0UmVnaW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIjgKBlJlZ2lvbhIKCgJpZBgBIAEoCRIUCgxhcGlfZW5kcG9pbnQYBCABKAkSDAoEaG9tZRgIIAEoCCJQChNMaXN0UmVnaW9uc1Jlc3BvbnNlEiQKB3JlZ2lvbnMYASADKAsyEy5ib3hkLmFwaS52MS5SZWdpb24SEwoLdGhpc19yZWdpb24YAyABKAkiKQoNTmV0d29ya0NvbmZpZxIQCgNzc2gYASABKAhIAIgBAUIGCgRfc3NoIjcKCFZtQ29uZmlnEisKB25ldHdvcmsYBSABKAsyGi5ib3hkLmFwaS52MS5OZXR3b3JrQ29uZmlnIvgBChtDcmVhdGVWbUZyb21TbmFwc2hvdFJlcXVlc3QSEAoIc25hcHNob3QYASABKAkSDAoEbmFtZRgCIAEoCRIlCgZjb25maWcYAyABKAsyFS5ib3hkLmFwaS52MS5WbUNvbmZpZxILCgNvcmcYBCABKAkSEAoIaXNvbGF0ZWQYBSABKAgSRAoGbGFiZWxzGAYgAygLMjQuYm94ZC5hcGkudjEuQ3JlYXRlVm1Gcm9tU25hcHNob3RSZXF1ZXN0LkxhYmVsc0VudHJ5Gi0KC0xhYmVsc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiTgoQQ3JlYXRlVm1SZXNwb25zZRINCgV2bV9pZBgBIAEoCRIrCgdtYWNoaW5lGAkgASgLMhouYm94ZC5hcGkudjEuR2V0Vm1SZXNwb25zZSIdCgxHZXRWbVJlcXVlc3QSDQoFdm1faWQYASABKAki+gEKDUdldFZtUmVzcG9uc2USDQoFdm1faWQYASABKAkSEQoJcHVibGljX2lwGAQgASgJEg4KBnN0YXR1cxgFIAEoCRIQCghzc2hfcG9ydBgJIAEoDRISCgpjcmVhdGVkX2F0GBEgASgDEjYKBmxhYmVscxgiIAMoCzImLmJveGQuYXBpLnYxLkdldFZtUmVzcG9uc2UuTGFiZWxzRW50cnkSFAoMc3NoX2Rpc2FibGVkGCkgASgIEhQKDGVncmVzc19hbGxvdxgcIAMoCRotCgtMYWJlbHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIjUKDkxpc3RWbXNSZXF1ZXN0EgsKA29yZxgBIAEoCRIWCg5sYWJlbF9zZWxlY3RvchgDIAMoCSJQCg9MaXN0Vm1zUmVzcG9uc2USJwoDdm1zGAEgAygLMhouYm94ZC5hcGkudjEuR2V0Vm1SZXNwb25zZRIUCgxzc2hfaG9zdF9rZXkYAiABKAkiiQEKFVVwZGF0ZVZtTGFiZWxzUmVxdWVzdBIKCgJ2bRgBIAEoCRI4CgNzZXQYAiADKAsyKy5ib3hkLmFwaS52MS5VcGRhdGVWbUxhYmVsc1JlcXVlc3QuU2V0RW50cnkaKgoIU2V0RW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIYChZVcGRhdGVWbUxhYmVsc1Jlc3BvbnNlIiEKEERlc3Ryb3lWbVJlcXVlc3QSDQoFdm1faWQYASABKAkiEwoRRGVzdHJveVZtUmVzcG9uc2UiRQoeU2V0QXV0b0hpYmVybmF0ZVRpbWVvdXRSZXF1ZXN0Eg0KBXZtX2lkGAEgASgJEhQKDHRpbWVvdXRfc2VjcxgCIAEoDSIhCh9TZXRBdXRvSGliZXJuYXRlVGltZW91dFJlc3BvbnNlIkMKHFNldEF1dG9TdXNwZW5kVGltZW91dFJlcXVlc3QSDQoFdm1faWQYASABKAkSFAoMdGltZW91dF9zZWNzGAIgASgNIh8KHVNldEF1dG9TdXNwZW5kVGltZW91dFJlc3BvbnNlIjYKF1NldFZtRWdyZXNzQWxsb3dSZXF1ZXN0EgoKAnZtGAEgASgJEg8KB2VudHJpZXMYAiADKAkiKwoYU2V0Vm1FZ3Jlc3NBbGxvd1Jlc3BvbnNlEg8KB2VudHJpZXMYASADKAkyrAgKB0JveGRBcGkSQQoGV2hvYW1pEhouYm94ZC5hcGkudjEuV2hvYW1pUmVxdWVzdBobLmJveGQuYXBpLnYxLldob2FtaVJlc3BvbnNlEmUKEkdldE9yZ01hY2hpbmVMaW1pdBImLmJveGQuYXBpLnYxLkdldE9yZ01hY2hpbmVMaW1pdFJlcXVlc3QaJy5ib3hkLmFwaS52MS5HZXRPcmdNYWNoaW5lTGltaXRSZXNwb25zZRJQCgtHZXRTbmFwc2hvdBIfLmJveGQuYXBpLnYxLkdldFNuYXBzaG90UmVxdWVzdBogLmJveGQuYXBpLnYxLkdldFNuYXBzaG90UmVzcG9uc2USUAoLTGlzdFJlZ2lvbnMSHy5ib3hkLmFwaS52MS5MaXN0UmVnaW9uc1JlcXVlc3QaIC5ib3hkLmFwaS52MS5MaXN0UmVnaW9uc1Jlc3BvbnNlEl8KFENyZWF0ZVZtRnJvbVNuYXBzaG90EiguYm94ZC5hcGkudjEuQ3JlYXRlVm1Gcm9tU25hcHNob3RSZXF1ZXN0Gh0uYm94ZC5hcGkudjEuQ3JlYXRlVm1SZXNwb25zZRI+CgVHZXRWbRIZLmJveGQuYXBpLnYxLkdldFZtUmVxdWVzdBoaLmJveGQuYXBpLnYxLkdldFZtUmVzcG9uc2USRAoHTGlzdFZtcxIbLmJveGQuYXBpLnYxLkxpc3RWbXNSZXF1ZXN0GhwuYm94ZC5hcGkudjEuTGlzdFZtc1Jlc3BvbnNlElkKDlVwZGF0ZVZtTGFiZWxzEiIuYm94ZC5hcGkudjEuVXBkYXRlVm1MYWJlbHNSZXF1ZXN0GiMuYm94ZC5hcGkudjEuVXBkYXRlVm1MYWJlbHNSZXNwb25zZRJKCglEZXN0cm95Vm0SHS5ib3hkLmFwaS52MS5EZXN0cm95Vm1SZXF1ZXN0Gh4uYm94ZC5hcGkudjEuRGVzdHJveVZtUmVzcG9uc2USdAoXU2V0QXV0b0hpYmVybmF0ZVRpbWVvdXQSKy5ib3hkLmFwaS52MS5TZXRBdXRvSGliZXJuYXRlVGltZW91dFJlcXVlc3QaLC5ib3hkLmFwaS52MS5TZXRBdXRvSGliZXJuYXRlVGltZW91dFJlc3BvbnNlEm4KFVNldEF1dG9TdXNwZW5kVGltZW91dBIpLmJveGQuYXBpLnYxLlNldEF1dG9TdXNwZW5kVGltZW91dFJlcXVlc3QaKi5ib3hkLmFwaS52MS5TZXRBdXRvU3VzcGVuZFRpbWVvdXRSZXNwb25zZRJfChBTZXRWbUVncmVzc0FsbG93EiQuYm94ZC5hcGkudjEuU2V0Vm1FZ3Jlc3NBbGxvd1JlcXVlc3QaJS5ib3hkLmFwaS52MS5TZXRWbUVncmVzc0FsbG93UmVzcG9uc2ViBnByb3RvMw",
+    "CglhcGkucHJvdG8SC2JveGQuYXBpLnYxIg8KDVdob2FtaVJlcXVlc3QiIQoOV2hvYW1pUmVzcG9uc2USDwoHdXNlcl9pZBgBIAEoCSIrChlHZXRPcmdNYWNoaW5lTGltaXRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSI/ChpHZXRPcmdNYWNoaW5lTGltaXRSZXNwb25zZRIPCgdtYXhfdm1zGAMgASgNEhAKCHZtX2NvdW50GAQgASgNIi8KEkdldFNuYXBzaG90UmVxdWVzdBIMCgRuYW1lGAEgASgJEgsKA29yZxgCIAEoCSJgCgxTbmFwc2hvdEluZm8SDAoEbmFtZRgCIAEoCRIOCgZzdGF0dXMYBCABKAkSDAoEdmNwdRgJIAEoDRIUCgxtZW1vcnlfYnl0ZXMYCiABKAQSDgoGcmVnaW9uGBEgASgJIkIKE0dldFNuYXBzaG90UmVzcG9uc2USKwoIc25hcHNob3QYASABKAsyGS5ib3hkLmFwaS52MS5TbmFwc2hvdEluZm8iJAoSTGlzdFJlZ2lvbnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSI4CgZSZWdpb24SCgoCaWQYASABKAkSFAoMYXBpX2VuZHBvaW50GAQgASgJEgwKBGhvbWUYCCABKAgiUAoTTGlzdFJlZ2lvbnNSZXNwb25zZRIkCgdyZWdpb25zGAEgAygLMhMuYm94ZC5hcGkudjEuUmVnaW9uEhMKC3RoaXNfcmVnaW9uGAMgASgJIikKDU5ldHdvcmtDb25maWcSEAoDc3NoGAEgASgISACIAQFCBgoEX3NzaCI3CghWbUNvbmZpZxIrCgduZXR3b3JrGAUgASgLMhouYm94ZC5hcGkudjEuTmV0d29ya0NvbmZpZyL4AQobQ3JlYXRlVm1Gcm9tU25hcHNob3RSZXF1ZXN0EhAKCHNuYXBzaG90GAEgASgJEgwKBG5hbWUYAiABKAkSJQoGY29uZmlnGAMgASgLMhUuYm94ZC5hcGkudjEuVm1Db25maWcSCwoDb3JnGAQgASgJEhAKCGlzb2xhdGVkGAUgASgIEkQKBmxhYmVscxgGIAMoCzI0LmJveGQuYXBpLnYxLkNyZWF0ZVZtRnJvbVNuYXBzaG90UmVxdWVzdC5MYWJlbHNFbnRyeRotCgtMYWJlbHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIk4KEENyZWF0ZVZtUmVzcG9uc2USDQoFdm1faWQYASABKAkSKwoHbWFjaGluZRgJIAEoCzIaLmJveGQuYXBpLnYxLkdldFZtUmVzcG9uc2UiHQoMR2V0Vm1SZXF1ZXN0Eg0KBXZtX2lkGAEgASgJIr8BCg1HZXRWbVJlc3BvbnNlEg0KBXZtX2lkGAEgASgJEg4KBnN0YXR1cxgFIAEoCRISCgpjcmVhdGVkX2F0GBEgASgDEjYKBmxhYmVscxgiIAMoCzImLmJveGQuYXBpLnYxLkdldFZtUmVzcG9uc2UuTGFiZWxzRW50cnkSFAoMZWdyZXNzX2FsbG93GBwgAygJGi0KC0xhYmVsc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiNQoOTGlzdFZtc1JlcXVlc3QSCwoDb3JnGAEgASgJEhYKDmxhYmVsX3NlbGVjdG9yGAMgAygJIjoKD0xpc3RWbXNSZXNwb25zZRInCgN2bXMYASADKAsyGi5ib3hkLmFwaS52MS5HZXRWbVJlc3BvbnNlIokBChVVcGRhdGVWbUxhYmVsc1JlcXVlc3QSCgoCdm0YASABKAkSOAoDc2V0GAIgAygLMisuYm94ZC5hcGkudjEuVXBkYXRlVm1MYWJlbHNSZXF1ZXN0LlNldEVudHJ5GioKCFNldEVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiGAoWVXBkYXRlVm1MYWJlbHNSZXNwb25zZSIhChBEZXN0cm95Vm1SZXF1ZXN0Eg0KBXZtX2lkGAEgASgJIhMKEURlc3Ryb3lWbVJlc3BvbnNlIkUKHlNldEF1dG9IaWJlcm5hdGVUaW1lb3V0UmVxdWVzdBINCgV2bV9pZBgBIAEoCRIUCgx0aW1lb3V0X3NlY3MYAiABKA0iIQofU2V0QXV0b0hpYmVybmF0ZVRpbWVvdXRSZXNwb25zZSJDChxTZXRBdXRvU3VzcGVuZFRpbWVvdXRSZXF1ZXN0Eg0KBXZtX2lkGAEgASgJEhQKDHRpbWVvdXRfc2VjcxgCIAEoDSIfCh1TZXRBdXRvU3VzcGVuZFRpbWVvdXRSZXNwb25zZSI2ChdTZXRWbUVncmVzc0FsbG93UmVxdWVzdBIKCgJ2bRgBIAEoCRIPCgdlbnRyaWVzGAIgAygJIisKGFNldFZtRWdyZXNzQWxsb3dSZXNwb25zZRIPCgdlbnRyaWVzGAEgAygJIm4KCUV4ZWNDaHVuaxIMCgRkYXRhGAEgASgMEg0KBXN0ZGluGAIgASgIEg8KB2NvbW1hbmQYBCABKAkSDQoFdm1faWQYBSABKAkSEQoJZXhpdF9jb2RlGAYgASgFEhEKCWlzX3N0ZGVychgKIAEoCDLoCAoHQm94ZEFwaRJBCgZXaG9hbWkSGi5ib3hkLmFwaS52MS5XaG9hbWlSZXF1ZXN0GhsuYm94ZC5hcGkudjEuV2hvYW1pUmVzcG9uc2USZQoSR2V0T3JnTWFjaGluZUxpbWl0EiYuYm94ZC5hcGkudjEuR2V0T3JnTWFjaGluZUxpbWl0UmVxdWVzdBonLmJveGQuYXBpLnYxLkdldE9yZ01hY2hpbmVMaW1pdFJlc3BvbnNlElAKC0dldFNuYXBzaG90Eh8uYm94ZC5hcGkudjEuR2V0U25hcHNob3RSZXF1ZXN0GiAuYm94ZC5hcGkudjEuR2V0U25hcHNob3RSZXNwb25zZRJQCgtMaXN0UmVnaW9ucxIfLmJveGQuYXBpLnYxLkxpc3RSZWdpb25zUmVxdWVzdBogLmJveGQuYXBpLnYxLkxpc3RSZWdpb25zUmVzcG9uc2USXwoUQ3JlYXRlVm1Gcm9tU25hcHNob3QSKC5ib3hkLmFwaS52MS5DcmVhdGVWbUZyb21TbmFwc2hvdFJlcXVlc3QaHS5ib3hkLmFwaS52MS5DcmVhdGVWbVJlc3BvbnNlEj4KBUdldFZtEhkuYm94ZC5hcGkudjEuR2V0Vm1SZXF1ZXN0GhouYm94ZC5hcGkudjEuR2V0Vm1SZXNwb25zZRJECgdMaXN0Vm1zEhsuYm94ZC5hcGkudjEuTGlzdFZtc1JlcXVlc3QaHC5ib3hkLmFwaS52MS5MaXN0Vm1zUmVzcG9uc2USWQoOVXBkYXRlVm1MYWJlbHMSIi5ib3hkLmFwaS52MS5VcGRhdGVWbUxhYmVsc1JlcXVlc3QaIy5ib3hkLmFwaS52MS5VcGRhdGVWbUxhYmVsc1Jlc3BvbnNlEkoKCURlc3Ryb3lWbRIdLmJveGQuYXBpLnYxLkRlc3Ryb3lWbVJlcXVlc3QaHi5ib3hkLmFwaS52MS5EZXN0cm95Vm1SZXNwb25zZRJ0ChdTZXRBdXRvSGliZXJuYXRlVGltZW91dBIrLmJveGQuYXBpLnYxLlNldEF1dG9IaWJlcm5hdGVUaW1lb3V0UmVxdWVzdBosLmJveGQuYXBpLnYxLlNldEF1dG9IaWJlcm5hdGVUaW1lb3V0UmVzcG9uc2USbgoVU2V0QXV0b1N1c3BlbmRUaW1lb3V0EikuYm94ZC5hcGkudjEuU2V0QXV0b1N1c3BlbmRUaW1lb3V0UmVxdWVzdBoqLmJveGQuYXBpLnYxLlNldEF1dG9TdXNwZW5kVGltZW91dFJlc3BvbnNlEl8KEFNldFZtRWdyZXNzQWxsb3cSJC5ib3hkLmFwaS52MS5TZXRWbUVncmVzc0FsbG93UmVxdWVzdBolLmJveGQuYXBpLnYxLlNldFZtRWdyZXNzQWxsb3dSZXNwb25zZRI6CgRFeGVjEhYuYm94ZC5hcGkudjEuRXhlY0NodW5rGhYuYm94ZC5hcGkudjEuRXhlY0NodW5rKAEwAWIGcHJvdG8z",
   );
 
 /**
@@ -61,11 +61,6 @@ export type WhoamiResponse = Message<"boxd.api.v1.WhoamiResponse"> & {
    * @generated from field: string user_id = 1;
    */
   userId: string;
-
-  /**
-   * @generated from field: repeated string pubkey_fingerprints = 2;
-   */
-  pubkeyFingerprints: string[];
 };
 
 /**
@@ -387,19 +382,9 @@ export type GetVmResponse = Message<"boxd.api.v1.GetVmResponse"> & {
   vmId: string;
 
   /**
-   * @generated from field: string public_ip = 4;
-   */
-  publicIp: string;
-
-  /**
    * @generated from field: string status = 5;
    */
   status: string;
-
-  /**
-   * @generated from field: uint32 ssh_port = 9;
-   */
-  sshPort: number;
 
   /**
    * @generated from field: int64 created_at = 17;
@@ -410,11 +395,6 @@ export type GetVmResponse = Message<"boxd.api.v1.GetVmResponse"> & {
    * @generated from field: map<string, string> labels = 34;
    */
   labels: { [key: string]: string };
-
-  /**
-   * @generated from field: bool ssh_disabled = 41;
-   */
-  sshDisabled: boolean;
 
   /**
    * @generated from field: repeated string egress_allow = 28;
@@ -461,11 +441,6 @@ export type ListVmsResponse = Message<"boxd.api.v1.ListVmsResponse"> & {
    * @generated from field: repeated boxd.api.v1.GetVmResponse vms = 1;
    */
   vms: GetVmResponse[];
-
-  /**
-   * @generated from field: string ssh_host_key = 2;
-   */
-  sshHostKey: string;
 };
 
 /**
@@ -660,6 +635,51 @@ export const SetVmEgressAllowResponseSchema: GenMessage<SetVmEgressAllowResponse
   messageDesc(file_api, 27);
 
 /**
+ * The first client chunk carries vm_id and command; later client chunks carry stdin bytes with
+ * stdin set. The server sends output chunks, stderr marked by is_stderr, then one chunk with empty
+ * data and exit_code.
+ *
+ * @generated from message boxd.api.v1.ExecChunk
+ */
+export type ExecChunk = Message<"boxd.api.v1.ExecChunk"> & {
+  /**
+   * @generated from field: bytes data = 1;
+   */
+  data: Uint8Array;
+
+  /**
+   * @generated from field: bool stdin = 2;
+   */
+  stdin: boolean;
+
+  /**
+   * @generated from field: string command = 4;
+   */
+  command: string;
+
+  /**
+   * @generated from field: string vm_id = 5;
+   */
+  vmId: string;
+
+  /**
+   * @generated from field: int32 exit_code = 6;
+   */
+  exitCode: number;
+
+  /**
+   * @generated from field: bool is_stderr = 10;
+   */
+  isStderr: boolean;
+};
+
+/**
+ * Describes the message boxd.api.v1.ExecChunk.
+ * Use `create(ExecChunkSchema)` to create a new message.
+ */
+export const ExecChunkSchema: GenMessage<ExecChunk> = /*@__PURE__*/ messageDesc(file_api, 28);
+
+/**
  * @generated from service boxd.api.v1.BoxdApi
  */
 export const BoxdApi: GenService<{
@@ -758,5 +778,13 @@ export const BoxdApi: GenService<{
     methodKind: "unary";
     input: typeof SetVmEgressAllowRequestSchema;
     output: typeof SetVmEgressAllowResponseSchema;
+  };
+  /**
+   * @generated from rpc boxd.api.v1.BoxdApi.Exec
+   */
+  exec: {
+    methodKind: "bidi_streaming";
+    input: typeof ExecChunkSchema;
+    output: typeof ExecChunkSchema;
   };
 }> = /*@__PURE__*/ serviceDesc(file_api, 0);

@@ -9,6 +9,7 @@ import {
   Option,
   Queue,
   Ref,
+  Result,
   Schema,
   Stream,
   SubscriptionRef,
@@ -16,7 +17,8 @@ import {
 import { Base64 } from "effect/encoding";
 import { ChildProcessSpawner } from "effect/process";
 import { childPidFile, type ChildHost, SSH_FAILURE } from "./child-host.ts";
-import { hostCommand, hostOutput } from "./command.ts";
+import { hostOutput, hostSpawn } from "./command.ts";
+import { unreachableCause } from "./exec.ts";
 import { PROCESS_OWNER } from "./supervisor.ts";
 import { outputAcknowledgements } from "./output.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../runtime.ts";
@@ -177,49 +179,46 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
           : "replace";
     const relayReady = yield* Deferred.make<void>();
     const frames = yield* replay();
-    const handle = yield* spawner.spawn(
-      hostCommand(
-        target.host,
-        {
-          ...command,
-          command: "node",
-          args: [
-            "-e",
-            PROCESS_OWNER,
-            mode,
-            pidFile,
-            String(cursor),
-            String(PROCESS_LEASE_MS),
-            command.command,
-            ...command.args,
-          ],
-          environment: {},
-        },
-        {
-          detached: false,
-          forceKillAfter: "5 seconds",
-          stdin: {
-            stream: Stream.concat(
-              Stream.succeed(environment),
-              Stream.merge(
-                frames,
-                Stream.tick("1 second").pipe(
-                  Stream.mapEffect(() =>
-                    Deferred.await(relayReady).pipe(Effect.andThen(output.cursor)),
-                  ),
-                  Stream.map(
-                    (cursor) =>
-                      `{"heartbeat":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,
-                  ),
+    const handle = yield* hostSpawn(
+      target.host,
+      {
+        ...command,
+        command: "node",
+        args: [
+          "-e",
+          PROCESS_OWNER,
+          mode,
+          pidFile,
+          String(cursor),
+          String(PROCESS_LEASE_MS),
+          command.command,
+          ...command.args,
+        ],
+        environment: {},
+      },
+      {
+        detached: false,
+        forceKillAfter: "5 seconds",
+        stdin: {
+          stream: Stream.concat(
+            Stream.succeed(environment),
+            Stream.merge(
+              frames,
+              Stream.tick("1 second").pipe(
+                Stream.mapEffect(() =>
+                  Deferred.await(relayReady).pipe(Effect.andThen(output.cursor)),
                 ),
-                { haltStrategy: "left" },
+                Stream.map(
+                  (cursor) => `{"heartbeat":true,"offset":${cursor.offset},"skip":${cursor.skip}}`,
+                ),
               ),
-            ).pipe(Stream.map((line) => encoder.encode(`${line}\n`))),
-            endOnDone: false,
-          },
+              { haltStrategy: "left" },
+            ),
+          ).pipe(Stream.map((line) => encoder.encode(`${line}\n`))),
+          endOnDone: false,
         },
-      ),
-    );
+      },
+    ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
     return { handle, relayReady, cursor };
   });
   const stream = Effect.fn("ChildHost.stream")(function* ({
@@ -326,26 +325,43 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
       Stream.decodeText(),
       Stream.runForEach((text) => Ref.update(stderr, (tail) => (tail + text).slice(-8192))),
     );
-    const [, , code] = yield* Effect.all([read, diagnostics, handle.exitCode], {
-      concurrency: "unbounded",
-    });
-    return { code, stderrTail: yield* Ref.get(stderr) };
+    // The output keeps the bytes received before an exec shell's transport failed, so it's read
+    // to its end before the exit code.
+    yield* Effect.all([read, diagnostics], { concurrency: "unbounded" });
+    const tail = yield* Ref.get(stderr);
+    // A relay that ended with an exit code, or why the transport lost it.
+    const relay = yield* handle.exitCode.pipe(
+      Effect.map((code) =>
+        target.host._tag === "RemoteShell" && code === SSH_FAILURE
+          ? Result.fail(tail.trim().split("\n").at(-1) ?? "")
+          : Result.succeed(code),
+      ),
+      Effect.catchTag("PlatformError", (error) =>
+        Option.match(unreachableCause(error), {
+          onNone: () => Effect.fail(error),
+          onSome: (unreachable) => Effect.succeed(Result.fail(unreachable.message)),
+        }),
+      ),
+    );
+    return { relay, stderrTail: tail };
   });
   const reattach = Effect.fn("ChildHost.reattach")(function* (
-    code: ChildProcessSpawner.ExitCode,
+    relay: Result.Result<number, string>,
     stderrTail: string,
   ) {
     yield* Effect.annotateCurrentSpan(fields);
-    if (code !== SSH_FAILURE)
+    if (Result.isSuccess(relay))
       return yield* processError(
         target,
         "The child process owner relay stopped without an exit event",
-        { relayExitCode: code, stderrTail },
+        { relayExitCode: relay.success, stderrTail },
       );
     const attempts = yield* Ref.updateAndGet(failures, (value) => value + 1);
     const delaySeconds = Math.min(30, 2 ** Math.min(attempts - 1, 5));
-    yield* Effect.logWarning("SSH connection dropped; reattaching the child process owner", {
+    yield* Effect.logWarning("Connection to the child process owner dropped; reattaching it", {
       ...fields,
+      host: target.host._tag,
+      reason: relay.failure,
       failures: attempts,
       delaySeconds,
       offset: yield* Ref.get(offset),
@@ -355,10 +371,10 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   const monitor = yield* Effect.gen(function* () {
     while (!(yield* Deferred.isDone(exit))) {
       if (yield* lifecycle.isStopping) return yield* Effect.never;
-      const { code, stderrTail } = yield* Effect.scoped(connect().pipe(Effect.flatMap(stream)));
+      const { relay, stderrTail } = yield* Effect.scoped(connect().pipe(Effect.flatMap(stream)));
       if (yield* lifecycle.isStopping) return yield* Effect.never;
       if (yield* Deferred.isDone(exit)) break;
-      yield* reattach(code, stderrTail);
+      yield* reattach(relay, stderrTail);
     }
     yield* Queue.end(stdout);
     const result = yield* Deferred.await(exit);

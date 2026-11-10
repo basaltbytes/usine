@@ -73,7 +73,7 @@ describe("recorded harness transports", () => {
                       if (
                         Array.isArray(message) &&
                         message.includes(
-                          "SSH connection dropped; reattaching the child process owner",
+                          "Connection to the child process owner dropped; reattaching it",
                         )
                       )
                         Deferred.doneUnsafe(reconnecting, Effect.void);

@@ -1,4 +1,4 @@
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
@@ -25,7 +25,7 @@ interface RemoteLeftovers<M extends RemoteMachine> {
 }
 
 export interface RemoteMachine {
-  readonly shell: RemoteShell;
+  readonly shell: RemoteHost;
   /** Follows provider endpoint changes and detects machine loss during a liveness probe. */
   readonly probe?: ProbeConnection;
   /** The Worker directory on the machine, with cached clones under `repos` and checkouts under `attempts`. */
@@ -42,7 +42,7 @@ export interface RemoteAccess {
    * that sends `secrets` through the SSH connection (`sendingShell`). An Attempt container gets
    * `secrets` when it starts instead.
    */
-  readonly shell: RemoteShell;
+  readonly shell: RemoteHost;
   /** The variables with the Attempt's secrets, which never appear in a command line. */
   readonly secrets: Readonly<Record<string, Redacted.Redacted<string>>>;
   /** The machine directories that the Attempt's container mounts read-only, such as its credential directory. */
@@ -117,7 +117,7 @@ export interface RemoteWorker<M extends RemoteMachine> {
     maxConcurrentAttempts: number,
   ) => Effect.Effect<PreflightReport, ExecutorError>;
   /** Returns the probe of a brain's binary and login through `shell`, on `machine` or in a container on it. */
-  readonly harnessProbe: (machine: M, shell: RemoteShell) => HarnessProbe;
+  readonly harnessProbe: (machine: M, shell: RemoteHost) => HarnessProbe;
   /** Returns how new Attempts on `machine` run, as the Worker's last preflight found. */
   readonly isolation: (machine: M) => Effect.Effect<AttemptIsolation, ExecutorError>;
   /**

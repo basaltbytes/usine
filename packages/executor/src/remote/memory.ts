@@ -1,6 +1,6 @@
 import { MemoryKilledProcess } from "@usine/core/attempt";
 import type { ContainerId } from "@usine/core/worker";
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import { Effect, Option, Schema } from "effect";
 import type { RemoteCommands } from "./commands.ts";
 import type { ContainerRuntime } from "./runtime.ts";
@@ -42,7 +42,7 @@ export const killedProcessesFromKernel = (
 export const readKilledProcesses = Effect.fn("RemoteExecutor.readMemoryKilledProcesses")(
   function* (
     commands: RemoteCommands,
-    shell: RemoteShell,
+    shell: RemoteHost,
     runtime: ContainerRuntime,
     name: string,
     container: ContainerId,

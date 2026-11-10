@@ -1,5 +1,5 @@
 import { tailnetOf } from "./model.ts";
-import type { SshCommand } from "@usine/agents/child-host";
+import { ExecShell, type SshCommand } from "@usine/agents/child-host";
 import { safeSegment } from "@usine/core/repository";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
 import { Context, Effect, Equal, Exit, Option, Ref, Scope, SynchronizedRef } from "effect";
@@ -16,7 +16,7 @@ import type {
   SshWorkerAddress,
   SshWorkerGateway,
 } from "./model.ts";
-import type { MachineEndpoint } from "./provisioner/model.ts";
+import { MachineEndpoint, type SshEndpoint } from "./provisioner/model.ts";
 
 /** The Workers of the SSH executor, starting with `SshExecutorOptions.workers`. A reload adds and removes Workers at runtime. */
 export class SshWorkers extends Context.Service<
@@ -104,7 +104,7 @@ export interface PinnedHostKey {
 const provisionedSshCommandFor = (
   base: SshCommand,
   entry: SshWorkerEntry,
-  endpoint: MachineEndpoint,
+  endpoint: SshEndpoint,
   hostKey: PinnedHostKey,
 ): SshCommand => ({
   command: base.command,
@@ -352,7 +352,10 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     return entry.machine.value;
   });
 
-  /** Returns the machine at `endpoint` that a provider created for one Attempt on `entry`'s Worker. */
+  /**
+   * Returns the machine at `endpoint` that a provider created for one Attempt on `entry`'s Worker:
+   * reached with OpenSSH and the host key pinned in `hostKey`, or through its exec transport.
+   */
   const machineAt = (
     entry: SshWorkerEntry,
     id: MachineId,
@@ -361,10 +364,11 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   ): SshMachine => ({
     address: entry.address,
     gateway: entry.gateway,
-    shell: commands.shellFor(
-      provisionedSshCommandFor(base, entry, endpoint, hostKey),
-      endpoint.destination,
-    ),
+    shell: MachineEndpoint.$match(endpoint, {
+      Ssh: (ssh) =>
+        commands.shellFor(provisionedSshCommandFor(base, entry, ssh, hostKey), ssh.destination),
+      Exec: (exec) => ExecShell.make({ transport: exec.transport, destination: exec.machine }),
+    }),
     workerDirectory: workerDirectoryOf(entry.address),
     provisioned: Option.some(id),
   });

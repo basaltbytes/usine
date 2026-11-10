@@ -6,8 +6,9 @@ import { WorkerCapabilityError } from "../../executor.ts";
 import { keyedLockFor } from "../../keyed-lock.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { ProvisionedMachinesOptions } from "./machines.ts";
-import { boxdConnectError, boxdDriverFor } from "./boxd.ts";
+import { boxdConnectError, boxdDriverFor, execCredential } from "./boxd.ts";
 import { BoxdApi } from "./boxd/client.ts";
+import { BoxdExec, boxdExecLayer } from "./boxd/exec.ts";
 import { boxdApiLayer } from "./boxd/grpc-client.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
 import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
@@ -89,16 +90,14 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           ),
         );
         const api = Context.get(context, BoxdApi);
-        return yield* boxdDriverFor(
-          worker,
-          value,
-          Option.match(entry.address.identityFile, {
-            onNone: () => "<identity_file>.pub",
-            onSome: (file) => `${expandHome(file)}.pub`,
-          }),
-        ).pipe(
+        // One connection to the region carries every command of the Worker's machines.
+        const exec = yield* Layer.buildWithScope(
+          (settings.boxdExec ?? boxdExecLayer)(api.endpoint, execCredential(value)),
+          scope,
+        );
+        return yield* boxdDriverFor(worker, value, entry.address.identityFile).pipe(
           Effect.provideService(BoxdApi, api),
-          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(BoxdExec, Context.get(exec, BoxdExec)),
         );
       }
       case "boat": {

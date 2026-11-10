@@ -1,5 +1,5 @@
 import type { HarnessCatalog } from "@usine/agents/harness";
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Match, Option } from "effect";
@@ -44,7 +44,7 @@ const capabilityError = (
 export const sshMachinePreflightFor = (
   catalog: HarnessCatalog,
   commands: RemoteCommands,
-  harnessProbe: (machine: SshMachine, shell: RemoteShell) => HarnessProbe,
+  harnessProbe: (machine: SshMachine, shell: RemoteHost) => HarnessProbe,
   containers: SshContainers,
 ) =>
   Effect.fn("SshExecutor.verifyMachine")(function* (
@@ -150,7 +150,7 @@ export const sshMachinePreflightFor = (
         });
     }
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
-    const probe = (shell: RemoteShell) =>
+    const probe = (shell: RemoteHost) =>
       verifyHarnessReadiness(worker, machine.provisioned, brains, harnessProbe(machine, shell));
     yield* containerCheck._tag === "Container"
       ? Effect.scoped(

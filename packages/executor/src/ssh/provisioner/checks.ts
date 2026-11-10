@@ -4,8 +4,8 @@ import {
   type HarnessCatalog,
   type HarnessCredential,
 } from "@usine/agents/harness";
-import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
-import type { RemoteCommands } from "../../remote/commands.ts";
+import { unreachableHost } from "../../child-command.ts";
+import { machineShellOf, type RemoteCommands } from "../../remote/commands.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { Array as Arr, DateTime, Effect, Option, Duration, Result } from "effect";
@@ -193,7 +193,7 @@ if command -v "$runtime" >/dev/null 2>&1; then
 fi
 `.trim();
 
-/** Waits until the machine answers over SSH and runs `READY_SCRIPT`. */
+/** Waits until the machine answers through its remote shell and runs `READY_SCRIPT`. */
 export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function* (
   commands: RemoteCommands,
   interval: Effect.Effect<void>,
@@ -202,39 +202,38 @@ export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function
   const worker = machine.address.name;
   const host = machine.shell.destination;
   yield* Effect.annotateCurrentSpan({ worker, host });
-  const shell = RemoteShell.make({
-    ssh: {
-      command: machine.shell.ssh.command,
-      args: [...machine.shell.ssh.args, "-o", "ConnectTimeout=10"],
-    },
-    sshEnvironment: machine.shell.sshEnvironment,
-    destination: machine.shell.destination,
-  });
+  const shell = machineShellOf(machine.shell, 10);
   let tries = 0;
   while (true) {
     tries += 1;
-    const result = yield* commands.inspect("prepare", shell, "sh", [
-      "-c",
-      READY_SCRIPT,
-      "sh",
-      machine.address.root,
-    ]);
-    if (result.exitCode === 0) {
-      yield* Effect.logInfo("The new machine answers over SSH", { worker, host, tries });
-      return;
-    }
-    if (result.exitCode !== SSH_FAILURE)
+    const answered = yield* commands
+      .inspect("prepare", shell, "sh", ["-c", READY_SCRIPT, "sh", machine.address.root])
+      .pipe(
+        Effect.map((result) => Result.succeed(result)),
+        Effect.catchIf(unreachableHost, (error) => Effect.succeed(Result.fail(error.message))),
+      );
+    if (Result.isSuccess(answered)) {
+      const result = answered.success;
+      if (result.exitCode === 0) {
+        yield* Effect.logInfo("The new machine answers through its remote shell", {
+          worker,
+          host,
+          tries,
+        });
+        return;
+      }
       return yield* WorkerCapabilityError.make({
         worker,
         capability: "machine",
         message: `The new machine of worker "${worker}" at ${host} can't create the root ${machine.address.root}`,
         cause: new Error(result.stderr.trim() || `exit code ${String(result.exitCode)}`),
       });
-    yield* Effect.logDebug("The new machine doesn't answer over SSH yet", {
+    }
+    yield* Effect.logDebug("The new machine doesn't answer through its remote shell yet", {
       worker,
       host,
       tries,
-      message: result.stderr.trim(),
+      message: answered.failure,
     });
     yield* interval;
   }

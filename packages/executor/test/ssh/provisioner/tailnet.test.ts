@@ -4,7 +4,7 @@ import { MACHINE_RUN } from "./fixtures.ts";
 import { AttemptId } from "@usine/core/attempt";
 import { remoteCommandsFor } from "../../../src/remote/commands.ts";
 import { assert, describe, it } from "@effect/vitest";
-import { RemoteShell } from "@usine/agents/child-host";
+import { ExecShell, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { RunId } from "@usine/core/run";
@@ -51,7 +51,7 @@ import {
   WORKER,
 } from "../support.ts";
 import { BOAT_TEST_API, fakeProviders } from "./fake-providers.ts";
-import { boatSettings, boxdSettings, BOXD_PUBLIC_KEY } from "./support.ts";
+import { boatSettings, boxdSettings } from "./support.ts";
 
 const tailnet: BoatTailnet = {
   gatewayAddress: TailnetAddress.make("100.64.0.2"),
@@ -150,6 +150,7 @@ const sink = {
 
 const boxdAddress: SshWorkerAddress = {
   ...boatAddress,
+  identityFile: Option.none(),
   machine: {
     _tag: "Provisioned",
     provisioner: boxdSettings({
@@ -267,10 +268,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
       `deletes an orphan ${provider} machine after a restart without needing tailnet access`,
       () => {
         const machine = fakeMachine();
-        machine.state.localFiles.set(
-          "/keys/boat.pub",
-          provider === "boxd" ? BOXD_PUBLIC_KEY : "ssh-ed25519 AAAATest",
-        );
+        machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
         machine.state.reachable = false;
         const boat = fakeProviders();
         const api = fakeTailnet();
@@ -280,6 +278,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
           instance: INSTANCE,
           instanceId: INSTANCE_ID,
           boxdClient: boat.boxdClient,
+          boxdExec: boat.boxdExecOn(machine),
           providerEndpoints: { boat: BOAT_TEST_API },
         }).pipe(
           Layer.provide(harnessesLive),
@@ -291,7 +290,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
         );
         return Effect.gen(function* () {
           const driver = yield* provider === "boxd"
-            ? boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub")
+            ? boxdDriverFor(WORKER, boxdSettings())
             : boatDriverFor(WORKER, boatSettings(), "ssh-ed25519 AAAATest", BOAT_TEST_API);
           yield* driver.create("earlier-create", {
             instance: INSTANCE,
@@ -325,10 +324,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
       () => {
         const machine = fakeMachine();
         machine.state.tailscaleJoin = "refused";
-        machine.state.localFiles.set(
-          "/keys/boat.pub",
-          provider === "boxd" ? BOXD_PUBLIC_KEY : "ssh-ed25519 AAAATest",
-        );
+        machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
         const boat = fakeProviders();
         const api = fakeTailnet();
         const gateway = fakeGateway(machine, providers);
@@ -337,6 +333,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
           instance: INSTANCE,
           instanceId: INSTANCE_ID,
           boxdClient: boat.boxdClient,
+          boxdExec: boat.boxdExecOn(machine),
           providerEndpoints: { boat: BOAT_TEST_API },
           machinePollInterval: "1 millis",
           machineReadyTimeout: "5 seconds",
@@ -379,10 +376,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
           const machine = fakeMachine();
           machine.state.docker = "running";
           machine.state.forwardProxyReachable = false;
-          machine.state.localFiles.set(
-            "/keys/boat.pub",
-            provider === "boxd" ? BOXD_PUBLIC_KEY : "ssh-ed25519 AAAATest",
-          );
+          machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
           const boat = fakeProviders();
           const api = fakeTailnet();
           const gateway = fakeGateway(machine, providers);
@@ -405,8 +399,11 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
                 assert.notInclude(call.line + call.input, "sk-ant-oat01-test");
                 assert.notInclude(call.line + call.input, "test-client-secret");
               }
-              assert(Schema.is(RemoteShell)(context.request.host));
-              assert.notInclude(context.request.host.ssh.args, "-J");
+              if (provider === "boxd") assert(Schema.is(ExecShell)(context.request.host));
+              else {
+                assert(Schema.is(RemoteShell)(context.request.host));
+                assert.notInclude(context.request.host.ssh.args, "-J");
+              }
               assert.strictEqual(context.request.environment.HTTPS_PROXY, "");
               const currentGatewayCredential = yield* context.request.gatewayCredential;
               assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
@@ -418,6 +415,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
             instance: INSTANCE,
             instanceId: INSTANCE_ID,
             boxdClient: boat.boxdClient,
+            boxdExec: boat.boxdExecOn(machine),
             providerEndpoints: { boat: BOAT_TEST_API },
             machinePollInterval: "1 millis",
             machineReadyTimeout: "5 seconds",

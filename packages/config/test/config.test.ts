@@ -486,7 +486,6 @@ workers:
   - name: boxd-pool
     kind: ssh
     root: /home/boxd/.usine
-    identity_file: ~/.ssh/usine_worker
     provisioner:
       provider: boxd
       token_env: BOXD_API_KEY
@@ -516,7 +515,6 @@ workers:
         yaml + "      region: FRA\n",
         yaml + '      region: ""\n',
         yaml.replace("snapshot: usine-attempt", "snapshot: Bad_Name"),
-        yaml.replace("    identity_file: ~/.ssh/usine_worker\n", ""),
         yaml.replace("      snapshot: usine-attempt\n", ""),
         yaml +
           "    gateway: { domain: gw.test, destination: gateway, admin_token_env: GW_TOKEN }\n",
@@ -528,15 +526,14 @@ workers:
           .pipe(Effect.result);
         assert.isTrue(Result.isFailure(result));
       }
-      const missingKey = yield* parser
-        .parseUsineYaml(
-          InstancePath.make("usine.yaml"),
-          yaml.replace("    identity_file: ~/.ssh/usine_worker\n", ""),
-        )
-        .pipe(Effect.flip);
-      assert.include(missingKey.message, "needs identity_file");
-      assert.include(missingKey.message, "linked to the boxd account");
-      assert.notInclude(missingKey.message, "snapshot");
+      // Releases before boxd's Exec transport required identity_file; a boxd worker ignores it.
+      const withKey = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        yaml.replace("    root:", "    identity_file: ~/.ssh/usine_worker\n    root:"),
+      );
+      const keyed = withKey.workers[0];
+      assert(keyed?.kind === "ssh");
+      assert.deepStrictEqual(keyed.identityFile, Option.some("~/.ssh/usine_worker"));
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -552,7 +549,6 @@ workers:
   - name: boxd-pool
     kind: ssh
     root: /home/boxd/.usine
-    identity_file: ~/.ssh/usine_worker
     gateway: { domain: gw.test, destination: gateway, admin_token_env: GW_TOKEN, llm_providers: ${llmProviders} }
     provisioner:
       provider: boxd
@@ -648,7 +644,6 @@ workers:
   - name: boxd-direct
     kind: ssh
     root: /home/boxd/.usine
-    identity_file: ~/.ssh/usine_worker
     provisioner:
       provider: boxd
       token_env: BOXD_API_KEY

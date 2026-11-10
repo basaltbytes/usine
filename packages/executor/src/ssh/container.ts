@@ -3,13 +3,13 @@ import { reclaimOnceFor } from "../remote/reclaim.ts";
 import { detectRuntime, verifyPodmanLimits } from "./runtime.ts";
 import { type ContainerRuntime, runtimeOptions } from "../remote/runtime.ts";
 import { tailnetOf } from "./model.ts";
-import { SSH_FAILURE } from "@usine/agents/child-host";
 import { catalog, workerImageInputs } from "@usine/agents/harness";
 import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, ContainerScratchMib, type WorkerName } from "@usine/core/worker";
 import { Duration, Effect, Option, Random, Schema } from "effect";
+import { unreachableHost } from "../child-command.ts";
 import { WorkerCapabilityError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
@@ -134,17 +134,22 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     const worker = machine.address.name;
     const host = machine.shell.destination;
     yield* Effect.annotateCurrentSpan({ worker, host });
-    const read = yield* commands.inspect("preflight", machine.shell, "sh", [
-      "-c",
-      RESOURCES_SCRIPT,
-    ]);
+    const read = yield* commands
+      .inspect("preflight", machine.shell, "sh", ["-c", RESOURCES_SCRIPT])
+      .pipe(
+        Effect.catchIf(unreachableHost, (error) =>
+          containerGap(
+            worker,
+            `Can't reach SSH worker "${worker}" at ${host} to read its CPUs and memory`,
+            error.cause,
+          ),
+        ),
+      );
     const resources = resourcesFromOutput(read.stdout);
     if (read.exitCode === 0 && Option.isSome(resources)) return resources.value;
     return yield* containerGap(
       worker,
-      read.exitCode === SSH_FAILURE
-        ? `Can't reach SSH worker "${worker}" at ${host} to read its CPUs and memory`
-        : `Can't read the CPUs, memory, and task limit of SSH worker "${worker}" to derive the limits of its containers. Set cpus, memory_mib, and pids under the worker's container in usine.yaml.`,
+      `Can't read the CPUs, memory, and task limit of SSH worker "${worker}" to derive the limits of its containers. Set cpus, memory_mib, and pids under the worker's container in usine.yaml.`,
       new Error(read.stderr.trim() || `exit code ${read.exitCode}`),
     );
   });

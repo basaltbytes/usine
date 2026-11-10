@@ -2,7 +2,7 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { HarnessCatalog } from "@usine/agents/harness";
 import { Harnesses } from "@usine/agents/harness/node";
 import { reclaimOnceFor } from "../../remote/reclaim.ts";
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
@@ -52,7 +52,7 @@ interface CurrentAttachment {
 export const writeMachineFiles = (
   commands: RemoteCommands,
   operation: ExecutorOperation,
-  shell: RemoteShell,
+  shell: RemoteHost,
   files: ReadonlyArray<readonly [path: string, contents: string]>,
 ) => commands.run(operation, shell, "sh", ["-c", WRITE_FILES_SCRIPT, "sh", ...files.flat()]);
 

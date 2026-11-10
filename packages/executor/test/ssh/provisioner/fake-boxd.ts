@@ -1,6 +1,5 @@
-import { BOXD_KEY_FINGERPRINT } from "./support.ts";
 import { MachineId } from "@usine/core/worker";
-import { Clock, Effect, Layer, Option } from "effect";
+import { Clock, Effect, Layer, Option, Stream } from "effect";
 import {
   BoxdApi,
   BoxdCallError,
@@ -8,6 +7,10 @@ import {
   type BoxdMachine,
   type BoxdSnapshot,
 } from "../../../src/ssh/provisioner/boxd/client.ts";
+import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
+
+/** The regional API endpoint that the fake reports. */
+export const BOXD_ENDPOINT = "https://fra.boxd.test:9443";
 
 export const fakeBoxd = () => {
   const machines = new Map<MachineId, BoxdMachine>();
@@ -20,14 +23,19 @@ export const fakeBoxd = () => {
   const operations = new Map<MachineId, Array<string>>();
   const record = (id: MachineId, operation: string) =>
     operations.set(id, [...(operations.get(id) ?? []), operation]);
+  /** Every `Exec` call of the fake's `BoxdExec`, in order. */
+  const execs: Array<{ machine: MachineId; command: string }> = [];
+  /** The endpoint and credential of each `BoxdExec` that the executor built. */
+  const connections: Array<{ endpoint: string; credential: string }> = [];
   const state = {
-    sshKeyFingerprints: [BOXD_KEY_FINGERPRINT],
     machines,
     creates,
     selectors,
     timers,
     egress,
     operations,
+    execs,
+    connections,
     snapshot: {
       status: "ready",
       region: "fra",
@@ -38,8 +46,6 @@ export const fakeBoxd = () => {
     region: "fra",
     maxVms: 50,
     vmCount: 0,
-    hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeBoxdProxyHostKey",
-    hostKeyReads: 0,
     reads: 0,
     provisioningReads: 0,
     createMachine: true,
@@ -74,9 +80,8 @@ export const fakeBoxd = () => {
           }),
     );
   const api = BoxdApi.of({
-    whoami: call("whoami", () =>
-      Effect.succeed({ userId: "test-user", sshKeyFingerprints: state.sshKeyFingerprints }),
-    ),
+    endpoint: BOXD_ENDPOINT,
+    whoami: call("whoami", () => Effect.succeed({ userId: "test-user" })),
     orgMachineLimit: call("orgMachineLimit", () =>
       Effect.succeed({ maxVms: state.maxVms, vmCount: state.vmCount }),
     ),
@@ -102,9 +107,6 @@ export const fakeBoxd = () => {
           const now = yield* Clock.currentTimeMillis;
           const machine: BoxdMachine = {
             id,
-            publicIp: "198.51.100.40",
-            sshPort: 12001,
-            sshDisabled: false,
             status: state.provisioningReads > 0 ? "starting" : "running",
             createdAt: Math.floor(now / 1000),
             labels: request.labels,
@@ -146,14 +148,6 @@ export const fakeBoxd = () => {
           );
         }),
       ),
-    sshHostKey: call("sshHostKey", () =>
-      Effect.gen(function* () {
-        state.hostKeyReads++;
-        yield* Effect.yieldNow;
-        if (state.hostKey === "") return yield* failure("sshHostKey", "INTERNAL");
-        return state.hostKey;
-      }),
-    ),
     updateLabels: (id, set) =>
       call("updateLabels", () =>
         Effect.gen(function* () {
@@ -184,5 +178,14 @@ export const fakeBoxd = () => {
     setAutoHibernateTimeout: timer("hibernate"),
     setAutoSuspendTimeout: timer("suspend"),
   });
-  return { state, api, layer: Layer.succeed(BoxdApi, api) };
+  /** Answers every `Exec` call with exit code 0 and no output, and records it in `state.execs`. */
+  const exec = BoxdExec.of({
+    exec: (machine, command) =>
+      Effect.sync(() => {
+        state.execs.push({ machine, command });
+        return { stdout: Stream.empty, stderr: Stream.empty, exitCode: Effect.succeed(0) };
+      }),
+  });
+  const execLayer = Layer.succeed(BoxdExec, exec);
+  return { state, api, execLayer, layer: Layer.merge(Layer.succeed(BoxdApi, api), execLayer) };
 };

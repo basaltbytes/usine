@@ -2,7 +2,7 @@ import { listMachineLeftovers } from "../remote/leftovers.ts";
 import { safeSegment } from "@usine/core/repository";
 import type { AttemptId } from "@usine/core/attempt";
 import { attemptConnectionsFor } from "../attempt-connections.ts";
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import { Harnesses } from "@usine/agents/harness/node";
 import type { Harness } from "@usine/core/agent/brain";
 import type { RepositoryName } from "@usine/core/repository";
@@ -95,7 +95,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
 
     // Probes with no extra environment; the harness login is on the machine or at its Gateway,
     // or a provisioned machine's Attempts get an API key.
-    const harnessProbe = (machine: SshMachine, shell: RemoteShell): HarnessProbe => {
+    const harnessProbe = (machine: SshMachine, shell: RemoteHost): HarnessProbe => {
       const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(harnesses, shell, {});
       const keyed = (harness: Harness) =>
         Option.isSome(provisionedApiKey(catalog, machine, harness));

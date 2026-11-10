@@ -4,7 +4,7 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { describe, expect, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { OperatorLogin } from "@usine/core/operator";
 import { makeExpressionEngine, MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -35,6 +35,7 @@ import {
   ConfigurationEntityKey,
   ConfigurationRevisionNumber,
   ConfigurationStore,
+  validateConfiguration,
 } from "../src/configuration/store.ts";
 import {
   ConfigurationFolder,
@@ -159,6 +160,37 @@ describe("configuration domain without layers", () => {
           }
         }
       }
+    }),
+  );
+
+  it.effect("loads a stored boxd worker that still sets identity_file", () =>
+    Effect.gen(function* () {
+      // A worker entity as releases before boxd's Exec transport stored it.
+      const stored = {
+        name: "boxd-pool",
+        kind: "ssh",
+        root: "/home/boxd/.usine",
+        identity_file: "~/.ssh/usine_worker",
+        provisioner: { provider: "boxd", token_env: "BOXD_API_KEY", snapshot: "usine-attempt" },
+      };
+      const instance = yield* fixture;
+      const entities = configurationEntities(instance).map((entity) =>
+        entity.key.kind === "worker" && entity.key.identifier === "fallback"
+          ? ConfigurationEntity.make({
+              ...entity,
+              key: ConfigurationEntityKey.make({
+                kind: "worker",
+                identifier: ConfigurationEntityId.make("boxd-pool"),
+              }),
+              value: stored,
+            })
+          : entity,
+      );
+      const loaded = yield* validateConfiguration(parser, entities);
+      const worker = loaded.config.workers.find(({ name }) => name === "boxd-pool");
+      assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
+      expect(worker.provisioner.value.provider).toBe("boxd");
+      expect(worker.identityFile).toStrictEqual(Option.some("~/.ssh/usine_worker"));
     }),
   );
 

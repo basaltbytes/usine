@@ -2,6 +2,7 @@ import { BrainSpec } from "@usine/core/agent/brain";
 import { Effect, Option, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
+import { isRemoteHost } from "../../child-host/child-host.ts";
 import { probeBinary, probeFailed, probeOutput } from "../../preflight/command.ts";
 import { claude } from "./descriptor.ts";
 import { HostLoginLock } from "../../runtime.ts";
@@ -22,7 +23,7 @@ const check = Effect.fn("ClaudeRuntime.check")(function* (brain: BrainSpec, targ
     model: brain.model,
     worker: target.worker,
   });
-  if (host._tag === "RemoteShell") yield* probeBinary(claude, target, "node", ["--version"]);
+  if (isRemoteHost(host)) yield* probeBinary(claude, target, "node", ["--version"]);
   yield* probeBinary(claude, target, "claude", ["--version"]);
   if (target.credential !== "host-login") {
     yield* Effect.logInfo("Harness uses an external credential; skipped the host login check", {

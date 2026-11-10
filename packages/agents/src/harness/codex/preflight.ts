@@ -4,6 +4,7 @@ import { Effect, Option } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
 import { checkedPreflight, loginUnavailable, type ProbeTarget } from "../runtime.ts";
+import { isRemoteHost } from "../../child-host/child-host.ts";
 import { probeBinary } from "../../preflight/command.ts";
 import { WorkingDirectory } from "../../runtime.ts";
 import { CodexAppServer, codexConfigArgs } from "./app-server.ts";
@@ -33,7 +34,7 @@ const check = Effect.fn("CodexRuntime.check")(function* (brain: BrainSpec, targe
   });
   const probe = (command: string, args: ReadonlyArray<string>) =>
     probeBinary(codex, target, command, args);
-  if (host._tag === "RemoteShell") yield* probe("node", ["--version"]);
+  if (isRemoteHost(host)) yield* probe("node", ["--version"]);
   const version = yield* probe("codex", [...codexConfigArgs, "--version"]);
   const unsupported = unsupportedCodexVersion(version);
   if (Option.isSome(unsupported)) return yield* unsupported.value;

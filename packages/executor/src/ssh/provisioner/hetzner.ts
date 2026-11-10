@@ -18,6 +18,7 @@ import {
   attemptsFromTag,
   type ListedMachine,
   type MachineDriver,
+  MachineEndpoint,
   type MachineTags,
   ProviderApiError,
   tagValue,
@@ -397,11 +398,11 @@ export const hetznerDriverFor = (
             .pipe(Effect.flatMap(api.decode(OneServer, "read the server")))).server;
           const address = addressOf(server);
           if (server.status === "running" && Option.isSome(address))
-            return {
+            return MachineEndpoint.Ssh({
               destination: SshDestination.make(`${settings.sshUser}@${address.value}`),
               port: Option.none(),
               hostKey: Option.none(),
-            };
+            });
           yield* Effect.logDebug("Waiting for the Hetzner Cloud server to run", {
             worker,
             machine: id,

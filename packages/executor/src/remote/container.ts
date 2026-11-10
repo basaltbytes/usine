@@ -1,5 +1,11 @@
 import { catalog } from "@usine/agents/harness";
-import { CHILD_KILL_SCRIPT, RemoteShell, type ShellContainer } from "@usine/agents/child-host";
+import {
+  CHILD_KILL_SCRIPT,
+  ExecShell,
+  type RemoteHost,
+  RemoteShell,
+  type ShellContainer,
+} from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import { type AttemptId, ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import type { Sink } from "@usine/core/attempt/channel";
@@ -263,7 +269,7 @@ const environmentFile = (
 };
 
 /** Returns the log fields of the container of `spec` on the machine of `shell`. */
-const containerFields = (shell: RemoteShell, spec: ContainerSpec) => ({
+const containerFields = (shell: RemoteHost, spec: ContainerSpec) => ({
   worker: spec.worker,
   host: shell.destination,
   container: spec.name,
@@ -276,18 +282,16 @@ const containerFields = (shell: RemoteShell, spec: ContainerSpec) => ({
 });
 
 /** Returns the shell that runs commands in the container `name` on the machine of `shell`. */
-const containerShell = (
-  shell: RemoteShell,
-  name: string,
-  runtime: ContainerRuntime,
-): RemoteShell => {
+const containerShell = (shell: RemoteHost, name: string, runtime: ContainerRuntime): RemoteHost => {
   const container: ShellContainer = { runtime, name };
-  return RemoteShell.make({
-    ssh: shell.ssh,
-    sshEnvironment: shell.sshEnvironment,
-    destination: shell.destination,
-    container,
-  });
+  return shell._tag === "RemoteShell"
+    ? RemoteShell.make({
+        ssh: shell.ssh,
+        sshEnvironment: shell.sshEnvironment,
+        destination: shell.destination,
+        container,
+      })
+    : ExecShell.make({ transport: shell.transport, destination: shell.destination, container });
 };
 
 /**
@@ -298,7 +302,7 @@ const containerShell = (
 export const containersFor = (commands: RemoteCommands) => {
   const prepareCaches = Effect.fn("RemoteExecutor.prepareSharedCaches")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     image: ContainerImage,
     worker: WorkerName,
     runtime: ContainerRuntime,
@@ -353,7 +357,7 @@ export const containersFor = (commands: RemoteCommands) => {
   });
 
   const remove = Effect.fn("RemoteExecutor.removeContainer")(function* (
-    shell: RemoteShell,
+    shell: RemoteHost,
     name: string,
     runtime: ContainerRuntime,
   ) {
@@ -378,7 +382,7 @@ export const containersFor = (commands: RemoteCommands) => {
    */
   const start = Effect.fn("RemoteExecutor.startContainer")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     spec: ContainerSpec,
   ) {
     const fields = containerFields(shell, spec);
@@ -521,7 +525,7 @@ export const containersFor = (commands: RemoteCommands) => {
    */
   const stopChildren = Effect.fn("RemoteExecutor.stopContainerChildren")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     name: string,
     worktree: string,
     runtime: ContainerRuntime,
@@ -551,7 +555,7 @@ export const containersFor = (commands: RemoteCommands) => {
    */
   const ensureRunning = Effect.fn("RemoteExecutor.ensureContainerRunning")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     spec: ContainerSpec,
   ) {
     const fields = containerFields(shell, spec);
@@ -586,7 +590,7 @@ export const containersFor = (commands: RemoteCommands) => {
    */
   const outOfMemoryKills = Effect.fn("RemoteExecutor.containerOutOfMemoryKills")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     spec: ContainerSpec,
   ) {
     const fields = containerFields(shell, spec);
@@ -632,7 +636,7 @@ export const containersFor = (commands: RemoteCommands) => {
 
   /** Tracks kills across container restarts and records them before removal. */
   const trackMemory = Effect.fn("RemoteExecutor.trackContainerMemory")(function* (
-    shell: RemoteShell,
+    shell: RemoteHost,
     spec: ContainerSpec,
   ) {
     const fields = containerFields(shell, spec);
@@ -700,7 +704,7 @@ export const containersFor = (commands: RemoteCommands) => {
    * whose process label is not in `kept`. Returns the names removed.
    */
   const sweep = Effect.fn("RemoteExecutor.sweepContainers")(function* (
-    shell: RemoteShell,
+    shell: RemoteHost,
     instance: string,
     instanceId: InstanceId,
     worker: WorkerName,
@@ -744,7 +748,7 @@ export const containersFor = (commands: RemoteCommands) => {
   /** Records that the checkout of `marker` is mounted in a container, before any container starts. */
   const mark = Effect.fn("RemoteExecutor.markContainerCheckout")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     marker: string,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, marker });
@@ -754,7 +758,7 @@ export const containersFor = (commands: RemoteCommands) => {
   /** Returns whether a container has had the checkout of `marker` mounted. */
   const marked = Effect.fn("RemoteExecutor.isContainerCheckout")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     marker: string,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, marker });

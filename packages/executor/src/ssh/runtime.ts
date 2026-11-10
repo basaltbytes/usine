@@ -1,4 +1,4 @@
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import type { WorkerName, ContainerLimits } from "@usine/core/worker";
 import { Effect, Option, Schema } from "effect";
 import { WorkerCapabilityError } from "../executor.ts";
@@ -170,7 +170,7 @@ awk -v q="$quota" -v p="$period" -v cpus="$1" 'BEGIN { exit !(q != "max" && p > 
 /** Reads the limits from the same cgroup used by exec and OOM accounting. */
 export const verifyPodmanLimits = Effect.fn("SshExecutor.verifyPodmanLimits")(function* (
   commands: RemoteCommands,
-  shell: RemoteShell,
+  shell: RemoteHost,
   worker: WorkerName,
   limits: ContainerLimits,
 ) {
