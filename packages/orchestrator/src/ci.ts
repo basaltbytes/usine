@@ -21,7 +21,13 @@ import { ciFixDedupKey, Submission, RunEngine, EnginePersistenceError } from "@u
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
-import { GitHubChecks, type IncompleteWorkflowRun, type PendingCheck } from "@usine/github/checks";
+import {
+  GitHubChecks,
+  HeadWorkflowRunState,
+  type IncompleteWorkflowRun,
+  type PendingCheck,
+  type RunningWorkflowRun,
+} from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { ChangedPullRequest, GitHubPolling } from "@usine/github/polling";
@@ -62,6 +68,13 @@ const incompleteRunDetails = (runs: ReadonlyArray<IncompleteWorkflowRun>) =>
   runs
     .map(({ workflow, id, conclusion, url }) => `${workflow} (run ${id}, ${conclusion}): ${url}`)
     .join("; ");
+
+const runningRunDetails = (runs: ReadonlyArray<RunningWorkflowRun>) =>
+  runs
+    .map(({ workflow, id, status, url }) => `${workflow} (run ${id}, ${status}): ${url}`)
+    .join("; ");
+
+const noWorkflowRuns = HeadWorkflowRunState.make({ incomplete: [], running: [] });
 
 /** Settles persisted CI waits during polling and webhook hints, without worker reservations. */
 export class CiMonitor extends Context.Service<
@@ -180,19 +193,40 @@ export class CiMonitor extends Context.Service<
           });
           return;
         }
-        const incomplete =
+        const { incomplete, running } =
           observed.state === "conflict"
-            ? []
-            : yield* checks.incompleteRuns(wait.repository, head).pipe(
+            ? noWorkflowRuns
+            : yield* checks.workflowRuns(wait.repository, head).pipe(
                 Effect.catchIf(
                   (error) => error._tag !== "GitHubRateLimitError",
                   (error) =>
                     Effect.logWarning(
                       "Workflow runs on the head are unreadable; the check rollup decides alone",
                       { runId, head, errorTag: error._tag },
-                    ).pipe(Effect.as([])),
+                    ).pipe(Effect.as(noWorkflowRuns)),
                 ),
               );
+        if (running.length > 0) {
+          const details = runningRunDetails(running);
+          if (timedOut) {
+            yield* Effect.logWarning(
+              "CI wait timed out while workflow runs had not concluded; operator attention is required",
+              { runId, head, state: observed.state, runs: running.map(({ id }) => id) },
+            );
+            return yield* engine.settleCi(
+              runId,
+              head,
+              CiTimedOut.make({
+                message: `CI did not settle within ${handoff.timeoutSeconds} seconds. These workflow runs on head ${head} had not concluded: ${details}. Check https://github.com/${wait.repository}/pull/${pullRequest}/checks`,
+              }),
+            );
+          }
+          yield* Effect.logInfo(
+            "Workflow runs on the head have not concluded; CI is still pending",
+            { runId, head, state: observed.state, runs: running.map(({ id }) => id) },
+          );
+          return;
+        }
         const evidence =
           observed.state === "failure"
             ? yield* checks.failures(wait.repository, head).pipe(Effect.asSome)

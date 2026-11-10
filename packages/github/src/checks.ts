@@ -51,6 +51,26 @@ export class IncompleteWorkflowRun extends Schema.Class<
   url: Schema.NonEmptyString,
 }) {}
 
+/** The latest run of a workflow on a head that has not concluded yet. */
+export class RunningWorkflowRun extends Schema.Class<
+  RunningWorkflowRun,
+  Brand.Brand<"@usine/github/checks/RunningWorkflowRun">
+>("RunningWorkflowRun")({
+  id: Schema.Int.check(Schema.isGreaterThan(0)),
+  workflow: Schema.NonEmptyString,
+  status: Schema.NonEmptyString,
+  url: Schema.NonEmptyString,
+}) {}
+
+/** The latest workflow runs on a head that either ran only in part or have not concluded. */
+export class HeadWorkflowRunState extends Schema.Class<
+  HeadWorkflowRunState,
+  Brand.Brand<"@usine/github/checks/HeadWorkflowRunState">
+>("HeadWorkflowRunState")({
+  incomplete: Schema.Array(IncompleteWorkflowRun),
+  running: Schema.Array(RunningWorkflowRun),
+}) {}
+
 const Head = Schema.Struct({
   repository: Schema.NullOr(
     Schema.Struct({
@@ -136,10 +156,6 @@ const HeadWorkflowRuns = Schema.Struct({
     }),
   ),
 });
-const RunJobs = Schema.Struct({
-  total_count: Schema.Int,
-  jobs: Schema.Array(Schema.Struct({ conclusion: Schema.NullOr(Schema.String) })),
-});
 
 /** Reads aggregate CI and failure diagnostics without starting an agent. */
 export class GitHubChecks extends Context.Service<
@@ -158,13 +174,15 @@ export class GitHubChecks extends Context.Service<
       head: CommitSha,
     ) => Effect.Effect<ReadonlyArray<PendingCheck>, GitHubAppError>;
     /**
-     * Returns the latest workflow runs on `head` that concluded `failure` or `cancelled` although
-     * none of their jobs failed, such as a run whose jobs GitHub Actions never created.
+     * Reads the latest run of each workflow and event on `head`. `incomplete` holds runs that
+     * concluded `failure` or `cancelled` although none of their jobs failed, such as a run whose
+     * jobs GitHub Actions never created. `running` holds runs that have not concluded yet, which
+     * can outlast their last created job while the check rollup already reads green.
      */
-    readonly incompleteRuns: (
+    readonly workflowRuns: (
       repository: RepositoryName,
       head: CommitSha,
-    ) => Effect.Effect<ReadonlyArray<IncompleteWorkflowRun>, GitHubAppError>;
+    ) => Effect.Effect<HeadWorkflowRunState, GitHubAppError>;
   }
 >()("@usine/github/checks/GitHubChecks") {
   static readonly layer = Layer.effect(
@@ -250,7 +268,28 @@ export class GitHubChecks extends Context.Service<
         });
         return output;
       });
-      const checkRuns = Effect.fn("GitHubChecks.checkRuns")(function* <C>(
+      const paginate = Effect.fn("GitHubChecks.paginate")(function* <
+        P extends { readonly total_count: number },
+        A,
+      >(
+        path: string,
+        schema: Schema.Codec<P, unknown, never, unknown>,
+        items: (page: P) => ReadonlyArray<A>,
+      ) {
+        yield* Effect.annotateCurrentSpan({ path });
+        const all: Array<A> = [];
+        const separator = path.includes("?") ? "&" : "?";
+        for (let page = 1; page <= 10; page++) {
+          const response = yield* get(`${path}${separator}per_page=100&page=${page}`);
+          const body = yield* HttpClientResponse.schemaBodyJson(schema)(response).pipe(
+            Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+          );
+          all.push(...items(body));
+          if (page * 100 >= body.total_count) break;
+        }
+        return all;
+      });
+      const checkRuns = <C>(
         prefix: string,
         head: CommitSha,
         schema: Schema.Codec<
@@ -259,21 +298,18 @@ export class GitHubChecks extends Context.Service<
           never,
           unknown
         >,
-      ) {
-        yield* Effect.annotateCurrentSpan({ prefix, head });
-        const runs: Array<C> = [];
-        for (let page = 1; page <= 10; page++) {
-          const response = yield* get(
-            `${prefix}/commits/${head}/check-runs?per_page=100&filter=latest&page=${page}`,
-          );
-          const checks = yield* HttpClientResponse.schemaBodyJson(schema)(response).pipe(
-            Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-          );
-          runs.push(...checks.check_runs);
-          if (page * 100 >= checks.total_count) break;
-        }
-        return runs;
-      });
+      ) =>
+        paginate(
+          `${prefix}/commits/${head}/check-runs?filter=latest`,
+          schema,
+          ({ check_runs }) => check_runs,
+        );
+      const runJobs = (prefix: string, run: number) =>
+        paginate(
+          `${prefix}/actions/runs/${run}/jobs?filter=latest`,
+          CompletedJobs,
+          ({ jobs }) => jobs,
+        );
       const previousSuccessfulJobs = Effect.fn("GitHubChecks.previousSuccessfulJobs")(function* (
         prefix: string,
         run: string,
@@ -292,46 +328,11 @@ export class GitHubChecks extends Context.Service<
         const previous = yield* HttpClientResponse.schemaBodyJson(WorkflowRuns)(response).pipe(
           Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
         );
-        const jobs: Array<(typeof CompletedJobs.Type)["jobs"][number]> = [];
         const previousRun = previous.workflow_runs[0];
-        if (previousRun !== undefined) {
-          for (let page = 1; page <= 10; page++) {
-            const response = yield* get(
-              `${prefix}/actions/runs/${previousRun.id}/jobs?per_page=100&filter=latest&page=${page}`,
-            );
-            const completed = yield* HttpClientResponse.schemaBodyJson(CompletedJobs)(
-              response,
-            ).pipe(Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)));
-            jobs.push(...completed.jobs);
-            if (page * 100 >= completed.total_count) break;
-          }
-        }
-        return jobs;
-      });
-      const hasFailedJob = Effect.fn("GitHubChecks.hasFailedJob")(function* (
-        prefix: string,
-        run: number,
-      ) {
-        yield* Effect.annotateCurrentSpan({ actionsRunId: run });
-        for (let page = 1; page <= 10; page++) {
-          const response = yield* get(
-            `${prefix}/actions/runs/${run}/jobs?per_page=100&filter=latest&page=${page}`,
-          );
-          const jobs = yield* HttpClientResponse.schemaBodyJson(RunJobs)(response).pipe(
-            Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-          );
-          if (
-            jobs.jobs.some(
-              ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
-            )
-          )
-            return true;
-          if (page * 100 >= jobs.total_count) break;
-        }
-        return false;
+        return previousRun === undefined ? [] : yield* runJobs(prefix, previousRun.id);
       });
       return {
-        incompleteRuns: Effect.fn("GitHubChecks.incompleteRuns")(function* (
+        workflowRuns: Effect.fn("GitHubChecks.workflowRuns")(function* (
           repository: RepositoryName,
           head: CommitSha,
         ) {
@@ -339,34 +340,44 @@ export class GitHubChecks extends Context.Service<
           const { owner, name } = splitRepositoryName(repository);
           const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
           const latest = new Map<string, (typeof HeadWorkflowRuns.Type)["workflow_runs"][number]>();
-          for (let page = 1; page <= 10; page++) {
-            const response = yield* get(
-              `${prefix}/actions/runs?head_sha=${head}&per_page=100&page=${page}`,
-            );
-            const runs = yield* HttpClientResponse.schemaBodyJson(HeadWorkflowRuns)(response).pipe(
-              Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-            );
-            for (const run of runs.workflow_runs) {
-              const key = `${run.workflow_id}:${run.event}`;
-              const previous = latest.get(key);
-              if (previous === undefined || previous.run_number < run.run_number)
-                latest.set(key, run);
-            }
-            if (page * 100 >= runs.total_count) break;
+          for (const run of yield* paginate(
+            `${prefix}/actions/runs?head_sha=${head}`,
+            HeadWorkflowRuns,
+            ({ workflow_runs }) => workflow_runs,
+          )) {
+            const key = `${run.workflow_id}:${run.event}`;
+            const previous = latest.get(key);
+            if (previous === undefined || previous.run_number < run.run_number)
+              latest.set(key, run);
           }
+          const workflow = (run: (typeof HeadWorkflowRuns.Type)["workflow_runs"][number]) =>
+            run.name === null || run.name === "" ? `workflow ${run.workflow_id}` : run.name;
           const incomplete: Array<IncompleteWorkflowRun> = [];
+          const running: Array<RunningWorkflowRun> = [];
           for (const run of latest.values()) {
+            if (run.status !== "completed") {
+              running.push(
+                RunningWorkflowRun.make({
+                  id: run.id,
+                  workflow: workflow(run),
+                  status: run.status === null || run.status === "" ? "unknown" : run.status,
+                  url: run.html_url,
+                }),
+              );
+              continue;
+            }
+            if (run.conclusion !== "failure" && run.conclusion !== "cancelled") continue;
+            const jobs = yield* runJobs(prefix, run.id);
             if (
-              run.status !== "completed" ||
-              (run.conclusion !== "failure" && run.conclusion !== "cancelled")
+              jobs.some(
+                ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
+              )
             )
               continue;
-            if (yield* hasFailedJob(prefix, run.id)) continue;
             incomplete.push(
               IncompleteWorkflowRun.make({
                 id: run.id,
-                workflow:
-                  run.name === null || run.name === "" ? `workflow ${run.workflow_id}` : run.name,
+                workflow: workflow(run),
                 conclusion: run.conclusion,
                 url: run.html_url,
               }),
@@ -377,8 +388,9 @@ export class GitHubChecks extends Context.Service<
             head,
             workflows: latest.size,
             incomplete: incomplete.map(({ id }) => id),
+            running: running.map(({ id }) => id),
           });
-          return incomplete;
+          return HeadWorkflowRunState.make({ incomplete, running });
         }),
         pendingDetails: Effect.fn("GitHubChecks.pendingDetails")(function* (
           repository: RepositoryName,
