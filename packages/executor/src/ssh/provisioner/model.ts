@@ -89,11 +89,14 @@ export interface MachineDriver {
     worker: WorkerName,
     maxConcurrentAttempts: number,
   ) => Effect.Effect<DriverReport, WorkerCapabilityError>;
-  /** Creates a machine named `name` with `tags` once the provider accepts it. */
+  /**
+   * Creates a machine named `name` with `tags` once the provider accepts it. Fails with a
+   * `WorkerCapabilityError` when the provider refuses the request itself, which a retry repeats.
+   */
   readonly create: (
     name: string,
     tags: MachineTags,
-  ) => Effect.Effect<CreatedMachine, MachineUnavailableError>;
+  ) => Effect.Effect<CreatedMachine, MachineUnavailableError | WorkerCapabilityError>;
   /** Updates the attempt identity before a reused machine starts work. */
   readonly assign: (id: MachineId, tags: MachineTags) => Effect.Effect<void, ProviderApiError>;
   /** Waits until the machine runs and has an SSH address. Polls every `interval`. */
