@@ -195,6 +195,21 @@ describe("Desk", () => {
     assert.include(visible, "hz-worker-1 1 of 1 slot in use Preflight failed 6h ago");
   });
 
+  it("says a paused Worker takes no new attempts", () => {
+    const worker = (paused: boolean) =>
+      WorkerView.make({
+        name: WorkerName.make("local"),
+        paused,
+        slots: WorkerSlotsView.make({ capacity: 2, leased: 1 }),
+        preflight: null,
+      });
+    assert.include(
+      text(render(<WorkersLine workers={[worker(true)]} now={now} />)),
+      "local 1 of 2 slots in use Paused: takes no new attempts No preflight yet",
+    );
+    assert.notInclude(text(render(<WorkersLine workers={[worker(false)]} now={now} />)), "Paused");
+  });
+
   it("shows a Worker that runs attempts without containers as degraded, not failed", () => {
     const degraded = WorkerView.make({
       name: WorkerName.make("hz-worker-2"),
