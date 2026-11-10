@@ -60,6 +60,7 @@ async function fixture(t, outcomes) {
   const builds = [];
   const publishes = [];
   const delays = [];
+  const warnings = [];
   const manifests = () =>
     Promise.all(packages.map(async ({ file }) => JSON.parse(await readFile(file, "utf8"))));
   const command = async (args) => {
@@ -92,8 +93,9 @@ async function fixture(t, outcomes) {
       if (unrevealed.length > 0 && --lag === 0) reveal();
     },
     registry,
+    warn: (warning) => warnings.push(warning),
   };
-  return { input, services, builds, publishes, delays, visible };
+  return { input, services, builds, publishes, delays, visible, warnings };
 }
 
 for (const [label, failure] of [
@@ -182,10 +184,10 @@ test("waits for a successful upload to become public without republishing", asyn
   });
 });
 
-test("fails without republishing when a successful upload stays private for ten minutes", async (t) => {
+test("warns without failing or republishing when a successful upload stays private for ten minutes", async (t) => {
   const f = await fixture(t, [neverPublic]);
   const logged = events(t);
-  await assert.rejects(publishNext(f.input, f.services), /not public after 10 minutes/);
+  await publishNext(f.input, f.services);
   assert.equal(f.publishes.length, 1);
   assert.deepEqual(f.delays.slice(0, 6), [10_000, 15_000, 20_000, 25_000, 30_000, 30_000]);
   assert.equal(
@@ -193,15 +195,48 @@ test("fails without republishing when a successful upload stays private for ten 
     600_000,
   );
   assert.ok(!logged.some(({ event }) => event === "next_publish_retry"));
+  const pending = [
+    "@usine-test/core@1.0.1-next.312.g1a2b3c4.1.1",
+    "@usine-test/app@2.3.5-next.312.g1a2b3c4.1.1",
+  ];
   assert.deepEqual(logged.at(-1), {
-    event: "next_publish_exhausted",
+    event: "next_publish_slow",
     attempt: 1,
     suffix: "next.312.g1a2b3c4.1.1",
-    reason: "versions_not_public",
     waitedMs: 600_000,
-    packages: [
-      "@usine-test/core@1.0.1-next.312.g1a2b3c4.1.1",
-      "@usine-test/app@2.3.5-next.312.g1a2b3c4.1.1",
-    ],
+    packages: pending,
   });
+  assert.equal(f.warnings.length, 1);
+  const [warning] = f.warnings;
+  assert.equal(warning.title, "Snapshot versions not public yet");
+  assert.equal(
+    warning.message,
+    `npm accepted every snapshot, but 2 of 2 versions are not public after 10 minutes: ${pending.join(", ")}`,
+  );
+  for (const name of pending) assert.ok(warning.summary.includes(`- \`${name}\``));
+});
+
+test("names only the versions that are still private", async (t) => {
+  const f = await fixture(t, [neverPublic]);
+  events(t);
+  const [core] = f.input.packages;
+  f.visible.set("/@usine-test/core/1.0.1-next.312.g1a2b3c4.1.1", {
+    name: core.manifest.name,
+    version: "1.0.1-next.312.g1a2b3c4.1.1",
+  });
+  await publishNext(f.input, f.services);
+  assert.deepEqual(
+    f.warnings.map(({ message }) => message),
+    [
+      "npm accepted every snapshot, but 1 of 2 versions are not public after 10 minutes: @usine-test/app@2.3.5-next.312.g1a2b3c4.1.1",
+    ],
+  );
+  assert.ok(!f.warnings[0].summary.includes("@usine-test/core"));
+});
+
+test("a successful snapshot that becomes public raises no warning", async (t) => {
+  const f = await fixture(t, [lagging]);
+  events(t);
+  await publishNext(f.input, f.services);
+  assert.deepEqual(f.warnings, []);
 });
