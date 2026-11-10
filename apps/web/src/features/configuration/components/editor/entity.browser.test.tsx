@@ -831,6 +831,30 @@ it.each([
   });
 });
 
+it("suggests the hosted boxd regions and saves another region id", async () => {
+  await mount();
+  await editText();
+  await page
+    .getByRole("textbox", { name: "Configuration text" })
+    .fill(
+      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nidentity_file: /keys/id_ed25519\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
+    );
+  await button("Edit as form").click();
+  const region = page.getByRole("combobox", { name: "Region", exact: true });
+  await expect.element(region).toBeVisible();
+  const list = document.getElementById(region.element().getAttribute("list") ?? "");
+  expect([...(list?.querySelectorAll("option") ?? [])].map((option) => option.value)).toEqual([
+    "fra",
+    "nyc",
+  ]);
+  await region.fill("eu-own-1");
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
+    value: { provisioner: { provider: "boxd", region: "eu-own-1" } },
+  });
+});
+
 it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
   client.setQueryData(
     overviewQuery().queryKey,

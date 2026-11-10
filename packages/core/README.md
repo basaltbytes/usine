@@ -142,4 +142,4 @@ Run `pnpm --filter @usine/core check` after building dependencies to check TypeS
 
 `OutcomeLabels` (`/loop`) defines the labels that can prove a loop completed its task. An empty list disables verification; otherwise, any one listed label satisfies the requirement.
 
-SSH machine providers include Hetzner Cloud, Boat, and boxd. The worker schemas define boxd snapshot names, regions, and captured sizes.
+SSH machine providers include Hetzner Cloud, Boat, and boxd. The worker schemas define boxd snapshot names, region ids, and captured sizes.

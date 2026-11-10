@@ -1,10 +1,12 @@
-import { Context, Effect, FileSystem, Layer, Option, Ref, Semaphore } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Ref } from "effect";
 import { HttpClient } from "effect/http";
 import { homedir } from "node:os";
+import type { WorkerName } from "@usine/core/worker";
 import { WorkerCapabilityError } from "../../executor.ts";
+import { keyedLockFor } from "../../keyed-lock.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { ProvisionedMachinesOptions } from "./machines.ts";
-import { boxdDriverFor } from "./boxd.ts";
+import { boxdConnectError, boxdDriverFor } from "./boxd.ts";
 import { BoxdApi } from "./boxd/client.ts";
 import { boxdApiLayer } from "./boxd/grpc-client.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
@@ -76,6 +78,15 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
             settings.providerEndpoints?.boxd,
           ),
           scope,
+        ).pipe(
+          Effect.mapError((failure) => boxdConnectError(worker, failure)),
+          Effect.tapError((error) =>
+            Effect.logWarning("Could not connect to the boxd region", {
+              worker,
+              region: value.region,
+              message: error.message,
+            }),
+          ),
         );
         const api = Context.get(context, BoxdApi);
         return yield* boxdDriverFor(worker, value).pipe(Effect.provideService(BoxdApi, api));
@@ -92,17 +103,23 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
     }
   });
   const drivers = new WeakMap<SshWorkerEntry, MachineDriver>();
-  const exclusive = yield* Semaphore.make(1);
+  // A boxd build calls the provider, so only builds for the same Worker wait for each other.
+  const building = yield* keyedLockFor<WorkerName>();
   const forEntry = Effect.fn("SshExecutor.driverForConnection")(function* (entry: SshWorkerEntry) {
-    yield* Effect.annotateCurrentSpan({ worker: entry.address.name });
-    const existing = drivers.get(entry);
-    if (existing !== undefined) return existing;
-    const driver = yield* buildDriver(entry).pipe(
-      Effect.provideService(HttpClient.HttpClient, http),
-    );
-    drivers.set(entry, driver);
-    return driver;
-  }, exclusive.withPermit);
+    const worker = entry.address.name;
+    yield* Effect.annotateCurrentSpan({ worker });
+    const cached = drivers.get(entry);
+    if (cached !== undefined) return cached;
+    return yield* Effect.gen(function* () {
+      const existing = drivers.get(entry);
+      if (existing !== undefined) return existing;
+      const driver = yield* buildDriver(entry).pipe(
+        Effect.provideService(HttpClient.HttpClient, http),
+      );
+      drivers.set(entry, driver);
+      return driver;
+    }).pipe(building.withLock(worker));
+  });
 
   const warned = yield* Ref.make(false);
   const warnUnowned = Effect.fn("SshExecutor.warnUnownedMachines")(function* (

@@ -13,6 +13,7 @@ import {
   BoxdMachine,
   BoxdRegions,
   BoxdSnapshot,
+  BoxdUnknownRegion,
   type BoxdCreate,
 } from "./client.ts";
 
@@ -21,11 +22,14 @@ class RpcRejection extends Schema.TaggedError<RpcRejection, { readonly brand: un
   { cause: Schema.Defect() },
 ) {}
 
+/** The account endpoint, which also lists every region with its API endpoint. */
 const BOXD_API = "https://boxd.sh:9443";
-const endpoints = { fra: BOXD_API, nyc: "https://nyc.boxd.sh:9443" } satisfies Record<
-  BoxdRegion,
-  string
->;
+const RegionList = Schema.Struct({
+  regions: Schema.Array(Schema.Struct({ id: Schema.String, apiEndpoint: Schema.String })),
+});
+/** Returns `endpoint` as a URL, adding `https://` when boxd lists only the host and port. */
+const endpointUrl = (endpoint: string): string =>
+  /^[a-z][a-z0-9+.-]*:\/\//iu.test(endpoint) ? endpoint : `https://${endpoint}`;
 const Session = Schema.Struct({ token: Schema.String, expires_at: Schema.Finite });
 const machineValue = (value: GetVmResponse) => ({
   ...value,
@@ -49,7 +53,14 @@ export const failureCode = (failure: ConnectError): string => {
     : codeName(failure.code);
 };
 
-/** Generated gRPC calls retain proxy host keys and serving-region metadata omitted by the SDK. */
+/**
+ * Generated gRPC calls retain proxy host keys and serving-region metadata omitted by the SDK.
+ *
+ * Building the layer exchanges the API key for a session and calls `ListRegions` on the account
+ * endpoint to find the API endpoint of `region`. It fails with `BoxdUnknownRegion` when boxd lists
+ * no such region. When `endpoint` is set, it serves both account and regional calls and the
+ * layer skips the lookup.
+ */
 export const boxdApiLayer = (
   token: Redacted.Redacted<string>,
   region: BoxdRegion,
@@ -71,9 +82,7 @@ export const boxdApiLayer = (
             transport({ baseUrl, sessionManager, defaultTimeoutMs: 30_000 }),
           );
         });
-      const client = yield* clientFor(endpoint ?? endpoints[region]);
-      const account =
-        endpoint === undefined && region !== "fra" ? yield* clientFor(BOXD_API) : client;
+      const account = yield* clientFor(endpoint ?? BOXD_API);
       let session: Option.Option<typeof Session.Type> = Option.none();
       const exclusive = yield* Semaphore.make(1);
       const bearer = Effect.gen(function* () {
@@ -180,6 +189,30 @@ export const boxdApiLayer = (
               }),
             ),
           );
+      const regional = Effect.gen(function* () {
+        const listed = yield* call("listRegions", (opts) => account.listRegions({}, opts)).pipe(
+          Effect.flatMap(decode(RegionList, "listRegions")),
+        );
+        const match = listed.regions.find(({ id }) => id === region);
+        if (match === undefined) {
+          const available = listed.regions.map(({ id }) => id);
+          yield* Effect.logWarning("boxd lists no region with the configured id", {
+            region,
+            available,
+          });
+          return yield* BoxdUnknownRegion.make({ region, available });
+        }
+        if (match.apiEndpoint.length === 0)
+          return yield* BoxdCallError.make({
+            operation: "listRegions",
+            code: "INTERNAL",
+            message: `boxd lists region ${region} without an API endpoint`,
+          });
+        const url = endpointUrl(match.apiEndpoint);
+        yield* Effect.logInfo("Resolved the boxd regional endpoint", { region, endpoint: url });
+        return url === BOXD_API ? account : yield* clientFor(url);
+      }).pipe(Effect.withSpan("BoxdApi.resolveRegion", { attributes: { region } }));
+      const client = endpoint === undefined ? yield* regional : account;
       const list = (selector: ReadonlyArray<string>) =>
         call("listVms", (opts) => client.listVms({ labelSelector: [...selector] }, opts));
       return BoxdApi.of({

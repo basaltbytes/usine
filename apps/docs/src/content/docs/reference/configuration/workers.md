@@ -192,7 +192,7 @@ These fields also belong to `provisioner` when `provider` is `boxd`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `region` | `fra` or `nyc` | `fra` | Machine and snapshot region: Frankfurt or New York. |
+| `region` | region id | `fra` | Machine and snapshot region: the lowercase id of a region that boxd enables for your org, as listed by `boxd manage regions`. `fra` (Frankfurt) and `nyc` (New York) are the hosted regions. Preflight fails if boxd lists no region with this id for the org, including a region that isn't enabled, and names the ids it lists. |
 | `size` | `1x4`, `2x8`, `4x16`, or `8x32` | `2x8` | Required captured snapshot size, in vCPU × GiB. Preflight checks it; creation restores the captured size. |
 | `snapshot` | lowercase name, 1–63 characters | required | Ready snapshot containing the worker public key and attempt image. |
 | `isolated` | boolean | `true` | Excludes the in-machine boxd CLI, integrations, agent logins, and default private network. A snapshot's isolation is inherited even when this is false. |
@@ -211,7 +211,7 @@ provisioner:
   api_keys: { anthropic: USINE_ANTHROPIC_API_KEY }
 ```
 
-boxd requires `identity_file`, whose public key is baked into the snapshot's `/home/boxd/.ssh/authorized_keys`. The driver authenticates through the regional gRPC API and pins its SSH proxy key per machine. Auto-hibernate and auto-suspend are disabled on creation and reuse. A gateway requires `tailnet`; tailnet settings are refused without a gateway. Snapshots retain the attempt image, so rebuild after an upgrade changes the image. See [Add a boxd worker](/guides/add-a-boxd-worker/).
+boxd requires `identity_file`, whose public key is baked into the snapshot's `/home/boxd/.ssh/authorized_keys`. The driver reaches three endpoints: it exchanges the API key for a session over HTTPS at `app.boxd.sh`, lists regions and reads account details over gRPC at `boxd.sh:9443`, and sends machine and snapshot calls to the API endpoint that `ListRegions` lists for the region. Allow egress to all three. If boxd doesn't answer while the driver connects to the region, the attempt waits and tries again. The driver pins its SSH proxy key per machine. Auto-hibernate and auto-suspend are disabled on creation and reuse. A gateway requires `tailnet`; tailnet settings are refused without a gateway. Snapshots retain the attempt image, so rebuild after an upgrade changes the image. See [Add a boxd worker](/guides/add-a-boxd-worker/).
 
 ## Cloudflare connection
 

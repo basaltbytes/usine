@@ -7,7 +7,7 @@ Add an SSH worker that restores a boxd machine for each attempt.
 
 ## Prerequisites
 
-Instance admin access, a boxd account with a payment method and available machine slots, the boxd CLI, and an SSH key pair. The snapshot and machines must be in the same region. `fra` is Frankfurt; `nyc` is New York.
+Instance admin access, a boxd account with a payment method and available machine slots, the boxd CLI, and an SSH key pair. The snapshot and machines must be in the same region. A region is the id of a region that boxd enables for your org. `boxd manage regions` lists the org's regions and whether each is enabled, and `boxd manage regions --json` prints them as JSON. `fra` (Frankfurt) and `nyc` (New York) are the hosted regions, and a boxd deployment in your own cloud account has its own id. Your org's home region is always enabled; to use another region, ask boxd to enable it with `boxd manage regions request <id>`.
 
 Use a gateway for subscription credentials. Without a gateway, configure API keys for the rostered harnesses.
 
@@ -35,7 +35,7 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
    The script creates a temporary Ubuntu machine at the requested size, writes the worker key, prepares Docker, pulls the release's attempt image, installs Tailscale, and saves the snapshot. It deletes the temporary machine and prints the snapshot name. Set `USINE_CONTAINER_RUNTIME=podman` to install Podman instead. Set `ATTEMPT_IMAGE` to bake a custom attempt image.
 
-4. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, identity file `~/.ssh/usine_worker`, and the desired concurrency. Select provisioner `boxd`, token variable `BOXD_API_KEY`, region `fra`, size `2x8`, and snapshot `usine-attempt`. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
+4. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, identity file `~/.ssh/usine_worker`, and the desired concurrency. Select provisioner `boxd`, token variable `BOXD_API_KEY`, region `fra` or the id of the snapshot's region, size `2x8`, and snapshot `usine-attempt`. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
 
 5. For subscription credentials, select gateway `usine-gateway` and enable the provisioner's tailnet settings. Enter the gateway's Tailscale address and OAuth client variable names. The client needs `auth_keys` write access for `tag:usine-attempt`. The [Boat gateway guide](/guides/connect-boat-to-a-gateway/) describes the shared tailnet policy and gateway setup. Each machine joins with an ephemeral single-use key and leaves during cleanup. Package downloads use the machine's direct internet connection.
 
@@ -43,7 +43,7 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 ## Check the result
 
-Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine.
+Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists.
 
 boxd serves SSH through its proxy, and the machine runs no sshd. usine sends gateway tokens and API keys over standard input, which the proxy carries. Gateway setup configures the host entries and the HTTP socket units.
 

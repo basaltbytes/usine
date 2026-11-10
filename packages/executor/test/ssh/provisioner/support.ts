@@ -1,10 +1,11 @@
 import {
-  ProvisionerTimings,
+  BoxdRegion,
   BoxdSnapshotName,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
   HetznerServerType,
+  ProvisionerTimings,
   SshUser,
 } from "@usine/core/worker";
 import { Option, Redacted } from "effect";
@@ -51,7 +52,7 @@ export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProv
   ...boatSettings(),
   provider: "boxd",
   token: Redacted.make("bxd_test_key"),
-  region: "fra",
+  region: BoxdRegion.make("fra"),
   size: "2x8",
   snapshot: BoxdSnapshotName.make("usine-attempt"),
   isolated: true,
