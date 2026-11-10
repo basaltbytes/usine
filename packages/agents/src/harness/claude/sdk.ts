@@ -30,7 +30,7 @@ export interface ClaudeUserMessage {
   readonly parent_tool_use_id: null;
 }
 
-/** The Claude SDK launch options used by the child backend, including worker credentials, settings sources, permissions, and process spawning. */
+/** The Claude SDK launch options used by the child backend, including worker credentials, settings sources, flag settings, permissions, and process spawning. */
 export type ClaudeQueryOptions = Pick<
   Options,
   | "allowDangerouslySkipPermissions"
@@ -44,6 +44,7 @@ export type ClaudeQueryOptions = Pick<
   | "resume"
   | "sessionId"
   | "settingSources"
+  | "settings"
   | "spawnClaudeCodeProcess"
   | "thinking"
   | "hooks"

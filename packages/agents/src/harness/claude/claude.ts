@@ -125,6 +125,8 @@ const optionsFor = (request: ChildRequest, sessionId: string): ClaudeQueryOption
     // The worktree is untrusted, so its project and local settings (hooks, env) are not loaded into
     // a child that has the App credential; only the Worker user's settings apply.
     settingSources: ["user"],
+    // Flag settings take precedence over the Worker user's settings file.
+    settings: { attribution: { commit: "", pr: "" } },
   };
   return effort === "off"
     ? { ...shared, thinking: { type: "disabled" } }

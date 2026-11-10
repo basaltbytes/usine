@@ -35,6 +35,7 @@
           "permissionMode": "bypassPermissions",
           "persistSession": true,
           "settingSources": ["user"],
+          "settings": { "attribution": { "commit": "", "pr": "" } },
           "effort": "low",
           "thinking": { "type": "adaptive" },
           "hooks": {
@@ -348,6 +349,7 @@
           "persistSession": true,
           "resume": "0be9d86a-d8a7-4a97-becf-01dcd1ffd821",
           "settingSources": ["user"],
+          "settings": { "attribution": { "commit": "", "pr": "" } },
           "effort": "low",
           "thinking": { "type": "adaptive" },
           "hooks": {
