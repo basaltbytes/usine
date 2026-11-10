@@ -149,4 +149,4 @@ Configuration records use nominal Schema brands. `configurationEntities`, `forma
 
 Run `pnpm --filter @usine/config check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
 
-SSH workers accept `provisioner.provider: boxd`, a required snapshot, a captured-size assertion (default `2x8`), region (default `fra`), isolation (default enabled), and optional gateway tailnet settings.
+SSH workers accept `provisioner.provider: boxd`, a required snapshot, a captured-size assertion (default `2x8`), a region id (default `fra`), isolation (default enabled), and optional gateway tailnet settings.
