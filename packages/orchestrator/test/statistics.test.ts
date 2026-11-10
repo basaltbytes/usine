@@ -108,6 +108,8 @@ interface AttemptPlan {
   readonly endedAt?: string;
   readonly start?: AttemptStart;
   readonly memoryKills?: number;
+  /** The agent selected for the attempt, if not the run's. */
+  readonly agent?: Agent;
 }
 
 const attempts = (runId: string, agent: Agent, plans: ReadonlyArray<AttemptPlan>) =>
@@ -118,9 +120,9 @@ const attempts = (runId: string, agent: Agent, plans: ReadonlyArray<AttemptPlan>
       stepName: StepName.make("run"),
       worker: WorkerName.make(plan.worker),
       number: AttemptNumber.make(index + 1),
-      brain: agent.brain,
+      brain: (plan.agent ?? agent).brain,
       task: AttemptTask.make("Work on it."),
-      agent: agent.name,
+      agent: (plan.agent ?? agent).name,
       operatorIntervened: false,
       outOfMemory:
         plan.memoryKills === undefined
@@ -743,6 +745,104 @@ describe("Model statistics", () => {
             ["gpt-5", 1, 1, 5 * HOUR],
           ],
         ],
+      ],
+    );
+  });
+
+  it("attributes each attempt to its own agent after an edit and retry picks another", () => {
+    const fallback = agentOf("fallback", gpt);
+    const retried = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        mergedTask(44, at("24T12:00"), [
+          summary({
+            id: "retried",
+            item: 44,
+            loop: startDev,
+            // The run's agent after the amendment.
+            agent: fallback,
+            state: RunState.Succeeded.make(),
+            openedAt: "24T08:00",
+            closedAt: "24T10:00",
+            attempts: [
+              {
+                worker: "w1",
+                startedAt: "24T08:00",
+                outcome: failed("Tests fail"),
+                endedAt: "24T09:00",
+                agent: developer,
+              },
+              { worker: "w1", startedAt: "24T09:00", outcome: succeeded, endedAt: "24T10:00" },
+            ],
+          }),
+        ]),
+      ],
+    });
+    assert.deepStrictEqual(
+      retried.agents.map(({ agent, tasks, opened, models }) => [
+        agent,
+        tasks,
+        opened,
+        models.map(({ harness, model, tasks, mixed }) => [harness, model, tasks, mixed]),
+      ]),
+      [
+        ["developer", 1, 1, [["claude", "claude-opus", 1, 0]]],
+        ["fallback", 1, 0, [["codex", "gpt-5", 1, 0]]],
+      ],
+    );
+  });
+
+  it("orders agents by tasks opened, then by tasks, and models by tasks", () => {
+    const auditor = agentOf("auditor", gpt);
+    const triage = agentOf("triage", opus);
+    const ordered = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        mergedTask(50, at("24T12:00"), [
+          ran("ordered-gpt", 50, startDev, developerOnGpt, "24", 8),
+          ran("ordered-gpt-review", 51, reviewPr, reviewer, "24", 9),
+          ran("ordered-gpt-audit", 51, reviewPr, auditor, "24", 10),
+        ]),
+        mergedTask(52, at("23T12:00"), [
+          ran("ordered-gpt-again", 52, startDev, developerOnGpt, "23", 8),
+          ran("ordered-gpt-again-review", 53, reviewPr, reviewer, "23", 9),
+        ]),
+        mergedTask(54, at("22T12:00"), [
+          ran("ordered-opus", 54, startDev, developer, "22", 8),
+          ran("ordered-opus-review", 55, reviewPr, reviewer, "22", 9),
+        ]),
+        mergedTask(56, at("21T12:00"), [
+          ran("ordered-triage", 56, startDev, triage, "21", 8),
+          ran("ordered-triage-review", 57, reviewPr, reviewer, "21", 9),
+        ]),
+      ],
+    });
+    assert.deepStrictEqual(
+      ordered.agents.map(({ agent, opened, tasks, models }) => [
+        agent,
+        opened,
+        tasks,
+        models.map(({ model, tasks }) => [model, tasks]),
+      ]),
+      [
+        // The developer has fewer tasks than the reviewer, but opened more.
+        [
+          "developer",
+          3,
+          3,
+          [
+            ["gpt-5", 2],
+            ["claude-opus", 1],
+          ],
+        ],
+        ["triage", 1, 1, [["claude-opus", 1]]],
+        // The reviewer has more tasks than the auditor, whose name sorts first.
+        ["reviewer", 0, 4, [["gpt-5", 4]]],
+        ["auditor", 0, 1, [["gpt-5", 1]]],
       ],
     );
   });

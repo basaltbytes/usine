@@ -196,7 +196,7 @@ export class AgentModelsView extends Schema.Class<
   AgentModelsView,
   Brand.Brand<"@usine/orchestrator/operator/statistics/view/AgentModelsView">
 >("@usine/orchestrator/AgentModelsView")({
-  /** The effective agent name of the runs. */
+  /** The agent selected for the attempts. */
   agent: AgentName,
   /** The tasks where this agent ran an attempt. */
   tasks: PositiveCount,
@@ -254,7 +254,10 @@ export class StatisticsView extends Schema.Class<
   untimed: Schema.NullOr(UntimedTasksView),
   /** The tasks with a Run that has an Attempt but no token report, left out of `tokens`. */
   unmetered: Count,
-  /** The agents that ran an attempt on the tasks, by `opened`, highest first, then by name. */
+  /**
+   * The agents that ran an attempt on the tasks, by `opened`, then by `tasks`, highest first, then
+   * by name.
+   */
   agents: Schema.Array(AgentModelsView).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 

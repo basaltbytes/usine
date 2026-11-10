@@ -30,11 +30,6 @@ export interface OutcomeTask {
 /** Whether no Loop succeeded twice on one of the task's Items: one review round. */
 export const firstTimeRight = ({ rounds }: OutcomeTask): boolean => rounds <= 1;
 
-interface AgentAttempt {
-  readonly agent: AgentName;
-  readonly attempt: AttemptSummary;
-}
-
 /** One task as an Agent saw it: the brain of its first Attempt and whether it changed. */
 interface AttributedTask {
   readonly agent: AgentName;
@@ -47,30 +42,26 @@ interface AttributedTask {
   readonly start: number;
 }
 
-const brainKey = ({ attempt: { brain } }: AgentAttempt): string =>
-  jsonKey([brain.harness, brain.model]);
+const brainKey = ({ brain }: AttemptSummary): string => jsonKey([brain.harness, brain.model]);
 
-const byStart = (left: AgentAttempt, right: AgentAttempt): number =>
-  epoch(left.attempt.startedAt) - epoch(right.attempt.startedAt) ||
-  left.attempt.id.localeCompare(right.attempt.id);
+const byStart = (left: AttemptSummary, right: AttemptSummary): number =>
+  epoch(left.startedAt) - epoch(right.startedAt) || left.id.localeCompare(right.id);
 
 /** Returns one entry per Agent that ran an Attempt on `task`. */
 const attribute = (task: OutcomeTask): ReadonlyArray<AttributedTask> => {
-  const attempts = task.runs
-    .flatMap(({ agent, attempts }) => attempts.map((attempt) => ({ agent: agent.name, attempt })))
-    .sort(byStart);
+  const attempts = task.runs.flatMap(({ attempts }) => attempts).sort(byStart);
   const [first] = attempts;
   if (first === undefined) return [];
   return Object.values(EffectArray.groupBy(attempts, ({ agent }) => agent)).map((members) => {
     const [own] = members;
     return {
       agent: own.agent,
-      harness: own.attempt.brain.harness,
-      model: own.attempt.brain.model,
+      harness: own.brain.harness,
+      model: own.brain.model,
       mixed: members.some((member) => brainKey(member) !== brainKey(own)),
       opened: own.agent === first.agent,
       task,
-      start: epoch(first.attempt.startedAt),
+      start: epoch(first.startedAt),
     };
   });
 };
