@@ -35,25 +35,12 @@ RUN set -eu; \
     rm -rf /var/lib/apt/lists/*
 
 # The boxd CLI, signed out, so that an attempt can read `boxd <command> --help`.
-# boxd serves only its latest binary, at a URL without a version, and its
-# installer always installs that one; this step downloads it the way the
-# installer does, and fails when boxd has replaced the pinned version. The
-# checksums are those of https://boxd.sh/downloads/cli/latest-linux-<arch>.json.
+# The checksums are those of https://boxd.sh/downloads/cli/latest-linux-<arch>.json.
+# install-boxd.sh installs nothing and warns when boxd serves another binary.
 ARG BOXD_VERSION=0.3.3
 ARG BOXD_SHA256_AMD64=38371394b448850f32a2b6b297fe5141c5d8e2afd40037e8d4c93a0a00b0d35f
 ARG BOXD_SHA256_ARM64=86479f787620fd970c10453cdeb15f871b7ce818e559925e3d6ebfc3c2052b13
-RUN set -eu; \
-    arch=$(dpkg --print-architecture); \
-    case "$arch" in \
-      amd64) sum=${BOXD_SHA256_AMD64} ;; \
-      arm64) sum=${BOXD_SHA256_ARM64} ;; \
-      *) echo "boxd has no Linux binary for $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL -o /usr/local/bin/boxd "https://boxd.sh/downloads/cli/boxd-linux-$arch"; \
-    echo "$sum  /usr/local/bin/boxd" | sha256sum -c - \
-      || { echo "boxd no longer serves ${BOXD_VERSION}: update BOXD_VERSION and the checksums" >&2; exit 1; }; \
-    chmod 0755 /usr/local/bin/boxd; \
-    [ "$(BOXD_TELEMETRY=0 boxd --version)" = "boxd ${BOXD_VERSION}" ]
+RUN --mount=type=bind,source=install-boxd.sh,target=/tmp/install-boxd.sh sh /tmp/install-boxd.sh
 
 RUN npm install -g "pnpm@${PNPM_VERSION}" ${HARNESS_PACKAGES} \
  && npm cache clean --force

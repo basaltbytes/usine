@@ -11,7 +11,7 @@ An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. The
 
 ## Attempt containers
 
-The attempt image includes `lsof`, `ss` (from `iproute2`), `ps` (from `procps`), and `curl` for process, port, and HTTP checks. It also includes the boxd CLI at the version of `BOXD_VERSION` in `../worker-image/Dockerfile`, signed out, so that a review can check boxd commands and flags against `boxd <command> --help`; the build fails when boxd no longer serves that version, and updating it means updating the version and both checksums.
+The attempt image includes `lsof`, `ss` (from `iproute2`), `ps` (from `procps`), and `curl` for process, port, and HTTP checks. It also includes the boxd CLI at the version of `BOXD_VERSION` in `../worker-image/Dockerfile`, signed out, so that a review can check boxd commands and flags against `boxd <command> --help`. When boxd no longer serves that version, the image builds without the CLI, the build log warns with the pinned and the served version, and the Worker image workflow's smoke test prints `boxd: not installed (pin outdated)`; to add the CLI back, update the version and both checksums.
 
 New workers use rootless Podman. The root-owned `/etc/usine/container-runtime` selects `podman` or `docker`; set `USINE_CONTAINER_RUNTIME=docker` when running `create-worker.sh`, `snapshot.sh`, or `gateway/gateway.sh worker-user-data` to build a Docker worker. On existing machines without the file, the executor selects Podman when installed, then Docker. A selected runtime that fails its checks fails preflight.
 
