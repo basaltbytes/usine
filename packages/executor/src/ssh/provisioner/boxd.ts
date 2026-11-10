@@ -1,5 +1,6 @@
 import { MachineId, SshDestination, SshPort, type WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Option, Schema, Semaphore } from "effect";
+import { DateTime, Effect, FileSystem, Option, Schema, Semaphore } from "effect";
+import { Base64 } from "effect/encoding";
 import {
   MachineUnavailableError,
   WorkerCapabilityError,
@@ -88,9 +89,14 @@ export const boxdConnectError = (
     : boxdPreflightError(worker, failure);
 
 /** A driver retains the create response only until endpoint discovery consumes it. */
-export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
+export const boxdDriverFor = (
+  worker: WorkerName,
+  settings: BoxdProvisioner,
+  publicKeyFile: string,
+) =>
   Effect.gen(function* () {
     const api = yield* BoxdApi;
+    const fs = yield* FileSystem.FileSystem;
     const created = new Map<MachineId, BoxdMachine>();
     let hostKey: Option.Option<string> = Option.none();
     const hostKeyLock = yield* Semaphore.make(1);
@@ -119,7 +125,7 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
     const verify = Effect.fn("BoxdDriver.verify")(
       function* (_worker: WorkerName, maxConcurrentAttempts: number) {
         yield* Effect.annotateCurrentSpan({ worker, region: settings.region });
-        yield* api.whoami;
+        const identity = yield* api.whoami;
         const snapshot = yield* api.snapshot(settings.snapshot);
         if (snapshot.status !== "ready")
           return yield* capability(
@@ -139,6 +145,35 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
           return yield* capability(
             `boxd endpoint serves ${thisRegion}; use the endpoint for provisioner.region ${settings.region}.`,
           );
+        const pubkey = yield* fs.readFileString(publicKeyFile).pipe(
+          Effect.mapBoth({
+            onSuccess: (text) => text.trim(),
+            onFailure: () =>
+              capability(
+                `boxd worker "${worker}" needs a readable public key at ${publicKeyFile}. Create the .pub file next to identity_file.`,
+              ),
+          }),
+        );
+        const encoded = /^\S+[ \t]+([A-Za-z0-9+/]+={0,2})(?:[ \t]+[^\r\n]*)?$/u.exec(pubkey)?.[1];
+        if (encoded === undefined)
+          return yield* capability(
+            `boxd worker "${worker}" has an invalid SSH public key at ${publicKeyFile}.`,
+          );
+        const bytes = yield* Effect.fromResult(Base64.decode(encoded)).pipe(
+          Effect.mapError(() =>
+            capability(
+              `boxd worker "${worker}" has an invalid SSH public key at ${publicKeyFile}.`,
+            ),
+          ),
+        );
+        const digest = yield* Effect.promise(() =>
+          crypto.subtle.digest("SHA-256", new Uint8Array(bytes)),
+        );
+        const fingerprint = `SHA256:${Base64.encode(new Uint8Array(digest)).replace(/=+$/u, "")}`;
+        if (!identity.sshKeyFingerprints.includes(fingerprint))
+          return yield* capability(
+            `boxd worker "${worker}" SSH public key ${fingerprint} at ${publicKeyFile} is not linked to the boxd account of the API key. Link the key from a signed-in session; API keys cannot link SSH keys. See https://docs.usine.dev/guides/add-a-boxd-worker/#link-the-worker-key.`,
+          );
         const limit = yield* api.orgMachineLimit;
         const warnings =
           limit.maxVms - limit.vmCount < maxConcurrentAttempts
@@ -148,6 +183,7 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
             : [];
         yield* Effect.logInfo("boxd provisioner verified", {
           worker,
+          fingerprint,
           region: settings.region,
           warnings,
         });

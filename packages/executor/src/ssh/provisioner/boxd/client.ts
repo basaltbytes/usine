@@ -40,7 +40,10 @@ export type BoxdSnapshot = typeof BoxdSnapshot.Type;
 
 export const BoxdRegions = Schema.Struct({ thisRegion: Schema.String });
 export const BoxdLimit = Schema.Struct({ maxVms: Schema.Int, vmCount: Schema.Int });
-export const BoxdIdentity = Schema.Struct({ userId: Schema.NonEmptyString });
+export const BoxdIdentity = Schema.Struct({
+  userId: Schema.NonEmptyString,
+  sshKeyFingerprints: Schema.Array(Schema.String),
+});
 export const BoxdCreated = Schema.Struct({
   id: MachineId,
   machine: Schema.OptionFromOptionalKey(BoxdMachine),

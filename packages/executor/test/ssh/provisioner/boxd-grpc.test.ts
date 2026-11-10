@@ -11,7 +11,7 @@ import { machineDriversFor } from "../../../src/ssh/provisioner/drivers.ts";
 import { fakeMachine, WORKER } from "../support.ts";
 import { boxdAddress, hetznerAddress } from "./fixtures.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
-import { boxdSettings } from "./support.ts";
+import { boxdSettings, BOXD_KEY_FINGERPRINT, BOXD_PUBLIC_KEY } from "./support.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { BoxdApi as BoxdService } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
 import { BoxdApi, type BoxdCreate } from "../../../src/ssh/provisioner/boxd/client.ts";
@@ -49,7 +49,7 @@ it.effect(
                 const timeout = context.timeoutMs();
                 assert.isDefined(timeout);
                 assert.isAtMost(timeout ?? Infinity, 30_000);
-                return { userId: "member" };
+                return { userId: "member", pubkeyFingerprints: [BOXD_KEY_FINGERPRINT] };
               },
               getOrgMachineLimit: () => ({ maxVms: 50, vmCount: 2 }),
               getSnapshot: () => ({
@@ -140,6 +140,7 @@ it.effect(
           { concurrency: "unbounded" },
         );
         assert.strictEqual(identity.userId, "member");
+        assert.deepStrictEqual(identity.sshKeyFingerprints, [BOXD_KEY_FINGERPRINT]);
         assert.strictEqual(regions.thisRegion, "fra");
         assert.strictEqual(snapshot.memoryBytes, 8 * 1024 ** 3);
         assert.strictEqual(limit.maxVms, 50);
@@ -186,6 +187,7 @@ it.effect(
       assert.deepStrictEqual(selectors[0], ["usine.worker=worker"]);
       assert.deepStrictEqual(calls, ["labels", "hibernate", "suspend", "destroy"]);
       const host = fakeMachine();
+      host.state.localFiles.set("/keys/usine_boxd.pub", BOXD_PUBLIC_KEY);
       const ambient = fakeBoxd();
       ambient.state.keyRefused = true;
       for (const selectedRegion of [BoxdRegion.make("fra"), BoxdRegion.make("nyc")]) {
@@ -271,7 +273,9 @@ for (const [status, code] of [
       const failure = yield* api.whoami.pipe(Effect.flip);
       assert.strictEqual(failure.operation, "authenticate");
       assert.strictEqual(failure.code, code);
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub").pipe(
+        Effect.provide(fakeMachine().layer),
+      );
       const preflight = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
       assert.include(
         preflight.message,

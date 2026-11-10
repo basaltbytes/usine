@@ -490,6 +490,15 @@ workers:
           .pipe(Effect.result);
         assert.isTrue(Result.isFailure(result));
       }
+      const missingKey = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          yaml.replace("    identity_file: ~/.ssh/usine_worker\n", ""),
+        )
+        .pipe(Effect.flip);
+      assert.include(missingKey.message, "needs identity_file");
+      assert.include(missingKey.message, "linked to the boxd account");
+      assert.notInclude(missingKey.message, "snapshot");
     }).pipe(Effect.provide(parserLayer)),
   );
 

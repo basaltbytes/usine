@@ -58,3 +58,10 @@ export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProv
   isolated: true,
   ...overrides,
 });
+
+export const BOXD_PUBLIC_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f usine-test";
+export const BOXD_KEY_FINGERPRINT = "SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA";
+export const BOXD_ROTATED_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/ usine-test";
+export const BOXD_ROTATED_FINGERPRINT = "SHA256:LVC7PY6ur9Dk+WVIYQsgEU2uvTXAor8XoYLl+ZmNyRo";
