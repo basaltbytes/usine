@@ -828,16 +828,34 @@ describe("SSH Worker behind a Gateway", () => {
           [],
         );
 
-        machine.state.acceptsStdinVariables = false;
+        const notReceived =
+          'SSH worker "eu-one" doesn\'t receive GIT_CONFIG_VALUE_0, GH_ENTERPRISE_TOKEN, GH_TOKEN, ANTHROPIC_AUTH_TOKEN over standard input. Its SSH commands must run in a POSIX sh with base64.';
+        machine.state.stdinVariables = "dropped";
         const dropped = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(dropped._tag === "WorkerCapabilityError", dropped._tag);
         assert.strictEqual(dropped.capability, "gateway");
+        assert.strictEqual(dropped.message, notReceived);
+
+        machine.state.stdinVariables = "no-base64";
+        const noBase64 = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert(noBase64._tag === "WorkerCapabilityError", noBase64._tag);
+        assert.strictEqual(noBase64.capability, "gateway");
+        assert.strictEqual(noBase64.message, notReceived);
+        assert.instanceOf(noBase64.cause, Error);
+        assert.strictEqual(noBase64.cause.message, "sh: 1: base64: not found");
+
+        machine.state.stdinVariables = "disconnects";
+        const disconnected = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert(disconnected._tag === "ExecutorOperationError", disconnected._tag);
+        assert.strictEqual(disconnected.operation, "preflight");
+        assert.strictEqual(disconnected.message, "Can't reach usine@203.0.113.7 to run sh");
+        assert.instanceOf(disconnected.cause, Error);
         assert.strictEqual(
-          dropped.message,
-          'SSH worker "eu-one" doesn\'t receive GIT_CONFIG_VALUE_0, GH_ENTERPRISE_TOKEN, GH_TOKEN, ANTHROPIC_AUTH_TOKEN over standard input. Its SSH commands must run in a POSIX sh with base64.',
+          disconnected.cause.message,
+          "Connection to 203.0.113.7 closed by remote host.",
         );
 
-        machine.state.acceptsStdinVariables = true;
+        machine.state.stdinVariables = "received";
         machine.state.gatewayReachable = false;
         const unreachable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(unreachable._tag === "WorkerCapabilityError");

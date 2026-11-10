@@ -175,8 +175,13 @@ interface FakeMachineState {
   claudeLoggedIn: boolean;
   /** What `codex --version` prints on the machine. */
   codexVersion: string;
-  /** Whether the machine's shell decodes the stdin environment block, as with POSIX `sh` and `base64`. */
-  acceptsStdinVariables: boolean;
+  /**
+   * How a command that starts with the stdin environment block runs: `received` decodes the block,
+   * as POSIX `sh` with `base64` does; `dropped` runs the command without the variables; `no-base64`
+   * exits 127 before the command, as `sh` without `base64` does; and `disconnects` loses the SSH
+   * connection, so `ssh` exits 255.
+   */
+  stdinVariables: "received" | "dropped" | "no-base64" | "disconnects";
   /** Whether `git.<domain>` resolves and responds from the machine. */
   gatewayReachable: boolean;
   tailscaleJoin: "ready" | "refused";
@@ -356,7 +361,7 @@ export const fakeMachine = () => {
     salvageCommitted: false,
     claudeLoggedIn: true,
     codexVersion: `codex-cli ${CODEX_CLI_VERSION}`,
-    acceptsStdinVariables: true,
+    stdinVariables: "received",
     gatewayReachable: true,
     tailscaleJoin: "ready",
     tailnetConfigure: "ready",
@@ -799,9 +804,18 @@ export const fakeMachine = () => {
       let stdinEnvironment: Readonly<Record<string, string>> = {};
       if (line.startsWith("set +x; IFS= read -r usine_environment")) {
         const boundary = input.indexOf("\n");
-        if (state.acceptsStdinVariables) stdinEnvironment = stdinExports(input.slice(0, boundary));
+        if (state.stdinVariables === "received")
+          stdinEnvironment = stdinExports(input.slice(0, boundary));
         input = input.slice(boundary + 1);
         line = line.slice(line.indexOf(" && ", line.indexOf('eval "unset usine_environment;')) + 4);
+        if (state.stdinVariables === "no-base64") {
+          state.calls.push({ command, line, input, stdinEnvironment });
+          return oneShotHandle("", 127, "sh: 1: base64: not found\n");
+        }
+        if (state.stdinVariables === "disconnects") {
+          state.calls.push({ command, line, input, stdinEnvironment });
+          return oneShotHandle("", 255, "Connection to 203.0.113.7 closed by remote host.\n");
+        }
       }
       if (command.args.includes("-N")) {
         state.calls.push({ command, line, input, stdinEnvironment });
