@@ -40,6 +40,11 @@ it.each([
     [outcome("gpt-5", 10, 5), outcome("opus", 6, 3)],
     "gpt-5 and opus passed the first review equally often: 50% of 10 tasks and 50% of 6 tasks",
   ],
+  [
+    "a tie on the printed percent",
+    [outcome("gpt-5", 7, 5), outcome("opus", 17, 12)],
+    "opus and gpt-5 passed the first review equally often: 71% of 17 tasks and 71% of 7 tasks",
+  ],
 ] as const)("compares %s", (_, models, expected) => {
   expect(comparisonLine(models)).toBe(expected);
 });

@@ -701,6 +701,52 @@ describe("Model statistics", () => {
     );
   });
 
+  it("counts only successful runs as review rounds", () => {
+    const unsuccessful = (id: string, state: RunState.RunState, outcome: AttemptOutcome) =>
+      summary({
+        id,
+        item: 31,
+        loop: reviewPr,
+        agent: reviewer,
+        state,
+        openedAt: "21T09:00",
+        closedAt: "21T09:30",
+        attempts: [{ worker: "w1", startedAt: "21T09:00", outcome, endedAt: "21T09:30" }],
+      });
+    const withUnsuccessful = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        // A failed review and a canceled one before the review that succeeds.
+        mergedTask(30, at("21T12:00"), [
+          firstTry,
+          unsuccessful("failed-review", RunState.Failed.make(), failed("No login")),
+          unsuccessful("canceled-review", operatorCanceled, AttemptCanceled.make()),
+          ran("first-try-review", 31, reviewPr, reviewer, "21", 9),
+        ]),
+      ],
+    });
+    const rounds = (statistics: typeof view) => [
+      statistics.firstTimeRight,
+      statistics.agents.map(({ agent, models }) => [
+        agent,
+        models.map(({ model, firstTimeRight, medianRounds }) => [
+          model,
+          firstTimeRight,
+          medianRounds,
+        ]),
+      ]),
+    ];
+    assert.deepStrictEqual(rounds(withUnsuccessful), [
+      1,
+      [
+        ["developer", [["claude-opus", 1, 1]]],
+        ["reviewer", [["gpt-5", 1, 1]]],
+      ],
+    ]);
+  });
+
   it("orders attempts by their start, not by run, and does not split tasks by reasoning effort", () => {
     const developerOnLowEffort = agentOf("developer", BrainSpec.make({ ...opus, effort: "low" }));
     const ordered = taskStatisticsView({

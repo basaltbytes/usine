@@ -7,10 +7,9 @@ const COMPARISON_MINIMUM_TASKS = 5;
 const count = (value: number, one: string, many: string): string =>
   `${value.toLocaleString("en")} ${value === 1 ? one : many}`;
 
-const percent = (part: number, whole: number): string => `${Math.round((part / whole) * 100)}%`;
-
-const firstReviewShare = ({ firstTimeRight, tasks }: ModelOutcomeView): number =>
-  firstTimeRight / tasks;
+/** Returns the whole percent of tasks that passed the first review, as the comparison prints it. */
+const firstReviewPercent = ({ firstTimeRight, tasks }: ModelOutcomeView): number =>
+  Math.round((firstTimeRight / tasks) * 100);
 
 export const firstReviewTitle = "Tasks that passed the first review, per model";
 
@@ -38,7 +37,7 @@ export const comparisonLine = (models: ReadonlyArray<ModelOutcomeView>): string 
     .filter(({ tasks }) => tasks >= COMPARISON_MINIMUM_TASKS)
     .sort(
       (left, right) =>
-        firstReviewShare(right) - firstReviewShare(left) ||
+        firstReviewPercent(right) - firstReviewPercent(left) ||
         left.medianRounds - right.medianRounds ||
         right.tasks - left.tasks,
     );
@@ -46,8 +45,8 @@ export const comparisonLine = (models: ReadonlyArray<ModelOutcomeView>): string 
   if (first === undefined || second === undefined)
     return `Too few tasks to compare: each model needs at least ${COMPARISON_MINIMUM_TASKS} merged tasks`;
   const share = (outcome: ModelOutcomeView) =>
-    `${percent(outcome.firstTimeRight, outcome.tasks)} of ${count(outcome.tasks, "task", "tasks")}`;
-  if (firstReviewShare(first) === firstReviewShare(second))
+    `${firstReviewPercent(outcome)}% of ${count(outcome.tasks, "task", "tasks")}`;
+  if (firstReviewPercent(first) === firstReviewPercent(second))
     return `${first.model} and ${second.model} passed the first review equally often: ${share(first)} and ${share(second)}`;
   return `${first.model} passed the first review most often: ${share(first)}, against ${share(second)} for ${second.model}`;
 };
