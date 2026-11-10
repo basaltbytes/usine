@@ -44736,10 +44736,7 @@
           },
           "region": {
             "type": "string",
-            "enum": [
-              "fra",
-              "nyc"
-            ]
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
           },
           "size": {
             "type": "string",

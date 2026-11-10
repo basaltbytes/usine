@@ -6,7 +6,7 @@ import {
   type MachineUnavailableReason,
 } from "../../executor.ts";
 import type { BoxdProvisioner } from "../model.ts";
-import { BoxdApi, BoxdCallError, type BoxdMachine } from "./boxd/client.ts";
+import { BoxdApi, BoxdCallError, type BoxdMachine, type BoxdUnknownRegion } from "./boxd/client.ts";
 import {
   attemptTag,
   attemptsFromTag,
@@ -41,6 +41,25 @@ const assignment = (tags: MachineTags) => ({
   "usine.attempt": attemptTag(tags.attempt),
   "usine.attempts": String(tags.attempts),
 });
+
+/** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
+export const boxdPreflightError = (
+  worker: WorkerName,
+  failure: BoxdCallError | BoxdUnknownRegion,
+): WorkerCapabilityError => {
+  const message =
+    failure._tag === "BoxdUnknownRegion"
+      ? `boxd has no region "${failure.region}". Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ") || "none"}.`
+      : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
+        ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
+        : `boxd preflight ${failure.operation} failed: ${failure.code}: ${failure.message}. Check the API endpoint and snapshot; build it with boxd snapshots save.`;
+  return WorkerCapabilityError.make({
+    worker,
+    capability: "provider",
+    message,
+    cause: new Error(message),
+  });
+};
 
 /** A driver retains the create response only until endpoint discovery consumes it. */
 export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
@@ -111,11 +130,7 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
       (effect) =>
         effect.pipe(
           Effect.catchTag("BoxdCallError", (failure) =>
-            capability(
-              failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
-                ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
-                : `boxd preflight ${failure.operation} failed: ${failure.code}: ${failure.message}. Check the API endpoint and snapshot; build it with boxd snapshots save.`,
-            ),
+            Effect.fail(boxdPreflightError(worker, failure)),
           ),
         ),
     );

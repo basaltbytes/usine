@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { WorkerCapabilityError } from "../../executor.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { ProvisionedMachinesOptions } from "./machines.ts";
-import { boxdDriverFor } from "./boxd.ts";
+import { boxdDriverFor, boxdPreflightError } from "./boxd.ts";
 import { BoxdApi } from "./boxd/client.ts";
 import { boxdApiLayer } from "./boxd/grpc-client.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
@@ -76,6 +76,15 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
             settings.providerEndpoints?.boxd,
           ),
           scope,
+        ).pipe(
+          Effect.mapError((failure) => boxdPreflightError(worker, failure)),
+          Effect.tapError((error) =>
+            Effect.logWarning("Could not connect to the boxd region", {
+              worker,
+              region: value.region,
+              message: error.message,
+            }),
+          ),
         );
         const api = Context.get(context, BoxdApi);
         return yield* boxdDriverFor(worker, value).pipe(Effect.provideService(BoxdApi, api));

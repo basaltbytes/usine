@@ -462,12 +462,21 @@ workers:
       assert.strictEqual(settings.region, "fra");
       assert.strictEqual(settings.size, "2x8");
       assert.isTrue(settings.isolated);
+      const custom = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        yaml + "      region: eu-own-1\n",
+      );
+      const customWorker = custom.workers[0];
+      assert(customWorker?.kind === "ssh" && Option.isSome(customWorker.provisioner));
+      assert(customWorker.provisioner.value.provider === "boxd");
+      assert.strictEqual(customWorker.provisioner.value.region, "eu-own-1");
       const encoded = yield* Schema.encodeEffect(UsineConfig)(parsed);
       const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
       assert.deepStrictEqual(decoded, parsed);
       for (const invalid of [
         yaml + "      size: small\n",
-        yaml + "      region: moon\n",
+        yaml + "      region: FRA\n",
+        yaml + '      region: ""\n',
         yaml.replace("snapshot: usine-attempt", "snapshot: Bad_Name"),
         yaml.replace("    identity_file: ~/.ssh/usine_worker\n", ""),
         yaml.replace("      snapshot: usine-attempt\n", ""),

@@ -1,4 +1,4 @@
-import { MachineId } from "@usine/core/worker";
+import { BoxdRegion, MachineId } from "@usine/core/worker";
 import { type Brand, Context, Effect, Schema } from "effect";
 
 export class BoxdCallError extends Schema.TaggedError<
@@ -8,6 +8,15 @@ export class BoxdCallError extends Schema.TaggedError<
   operation: Schema.String,
   code: Schema.String,
   message: Schema.String,
+}) {}
+
+/** The error when boxd lists no region with the configured id; `available` lists the ids it has. */
+export class BoxdUnknownRegion extends Schema.TaggedError<
+  BoxdUnknownRegion,
+  Brand.Brand<"@usine/executor/boxd/BoxdUnknownRegion">
+>()("BoxdUnknownRegion", {
+  region: BoxdRegion,
+  available: Schema.Array(Schema.String),
 }) {}
 
 export const BoxdMachine = Schema.Struct({

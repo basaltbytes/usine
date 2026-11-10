@@ -334,8 +334,15 @@ export type BoatSnapshotName = typeof BoatSnapshotName.Type;
 export const BoxdSize = Schema.Literals(["1x4", "2x8", "4x16", "8x32"]);
 export type BoxdSize = typeof BoxdSize.Type;
 
-/** The region containing a boxd machine and its snapshot. */
-export const BoxdRegion = Schema.Literals(["fra", "nyc"]);
+/**
+ * The id of the boxd region containing a machine and its snapshot, such as `fra` or `nyc`.
+ * boxd lists its regions, so any lowercase id is accepted here and checked at preflight.
+ */
+export const BoxdRegion = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9][a-z0-9_-]{0,62}$/u, {
+    message: "Expected a lowercase boxd region id, such as fra",
+  }),
+).pipe(Schema.brand("BoxdRegion"));
 export type BoxdRegion = typeof BoxdRegion.Type;
 
 /** A lowercase boxd snapshot name of at most 63 characters. */
