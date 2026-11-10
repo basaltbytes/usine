@@ -32,8 +32,8 @@ it.each([
   ],
   [
     "two ranked models",
-    [outcome("gpt-5", 9, 3), outcome("opus", 6, 4), outcome("haiku", 2, 2)],
-    "opus passed the first review most often: 67% of 6 tasks, against 33% of 9 tasks for gpt-5",
+    [outcome("gpt-5", 9, 5), outcome("opus", 6, 4), outcome("haiku", 2, 2)],
+    "opus passed the first review most often: 67% of 6 tasks, against 56% of 9 tasks for gpt-5",
   ],
   [
     "a tie",
