@@ -59,7 +59,7 @@ The default worker image tag and install packages come from the harness descript
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `image` | image reference | release's worker image | Container image with Git, gh, Node.js, and the child harnesses. |
+| `image` | image reference | release's worker image | Container image with Git, gh, Node.js, and the child harnesses. The release's image also has the boxd CLI, signed out and with telemetry off, for `boxd <command> --help`. |
 | `cpus` | number > 0 | host CPUs ÷ slots | CPU limit per attempt. |
 | `memory_mib` | integer ≥ 256 | (host MiB − 1024) ÷ slots | Memory limit per attempt. |
 | `pids` | integer ≥ 64 | (host process capacity − 1024) ÷ slots | Process limit per attempt. |

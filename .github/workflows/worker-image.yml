@@ -72,10 +72,12 @@ jobs:
         run: |
           docker run --rm usine-worker:smoke bash -euc '
             uname -m
-            for tool in node pnpm gh claude codex chromium; do
+            for tool in node pnpm gh claude codex chromium boxd; do
               printf "%s: " "$tool"
               "$tool" --version
-            done'
+            done
+            boxd manage regions --help > /dev/null
+            [ ! -e ~/.config/boxd/telemetry ]'
       - name: Run pnpm through Corepack offline
         run: |
           package_manager=$(jq -r .packageManager package.json)
