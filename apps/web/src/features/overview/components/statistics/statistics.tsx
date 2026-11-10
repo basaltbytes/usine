@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import type { StatisticsView, StatisticsWindow } from "@usine/orchestrator/operator";
+import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { ModelComparison } from "~/components/statistics/models/comparison";
 import { ErrorAlert } from "~/components/error-alert";
 import { DeskSection, EmptyLine } from "~/components/overview/section";
 import { Skeleton } from "~/components/ui/skeleton";
-import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
+import { WindowToggle } from "~/components/statistics/window-toggle";
 import { Details } from "~/features/overview/components/statistics/details";
 import { FirstTimeRight } from "~/features/overview/components/statistics/first-time-right";
 import {
@@ -17,19 +19,15 @@ import { TasksDoneLegend } from "~/features/overview/components/statistics/tasks
 import { statisticsQuery } from "~/lib/statistics/queries";
 import {
   aboutLabel,
+  developerLine,
   noTasksLine,
   unmeteredLine,
   unpricedLine,
   untimedLine,
   windowNote,
 } from "~/features/overview/strings";
-import { tokensLabel, usdLabel, spanLabel, windowLabels } from "~/lib/strings";
+import { tokensLabel, usdLabel, spanLabel } from "~/lib/strings";
 import { cn } from "~/lib/utils";
-
-const WINDOWS: ReadonlyArray<StatisticsWindow> = ["7d", "30d", "all"];
-
-const isWindow = (value: string | undefined): value is StatisticsWindow =>
-  WINDOWS.some((window) => window === value);
 
 type FigureProps = { readonly value: string; readonly unit: string };
 
@@ -100,6 +98,29 @@ const TokensPerTask = ({ statistics }: TokensPerTaskProps) => {
   );
 };
 
+type ModelsPerTaskProps = { readonly statistics: StatisticsView };
+
+/** The models of the agent that ran the first attempt on the most tasks: the developer agent. */
+const ModelsPerTask = ({ statistics }: ModelsPerTaskProps) => {
+  const [developer] = statistics.agents;
+  if (developer === undefined || developer.opened === 0) return null;
+  return (
+    <TaskBlock title="Models" className="lg:col-span-2">
+      <p className="text-sm text-muted-foreground">
+        <Link
+          to="/configuration/agents/$agent"
+          params={{ agent: developer.agent }}
+          className="text-primary hover:underline"
+        >
+          {developer.agent}
+        </Link>
+        {developerLine(developer.opened, statistics.tasks.length)}
+      </p>
+      <ModelComparison models={developer.models} />
+    </TaskBlock>
+  );
+};
+
 type StatisticsBodyProps = { readonly statistics: StatisticsView };
 
 const StatisticsBody = ({ statistics }: StatisticsBodyProps) => {
@@ -141,6 +162,7 @@ const StatisticsBody = ({ statistics }: StatisticsBodyProps) => {
           <FirstTimeRight statistics={statistics} />
         </TaskBlock>
         <TokensPerTask statistics={statistics} />
+        <ModelsPerTask statistics={statistics} />
       </div>
       {gaps.length > 0 && <p className="text-xs text-muted-foreground">{gaps.join("; ")}</p>}
     </div>
@@ -171,24 +193,7 @@ export const Statistics = () => {
       id="desk-statistics"
       title="Statistics"
       note={statistics === undefined ? undefined : windowNote(statistics.from, statistics.bucket)}
-      actions={
-        <ToggleGroup
-          aria-label="Statistics window"
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={[selected]}
-          onValueChange={([value]) => {
-            if (isWindow(value)) setSelected(value);
-          }}
-        >
-          {WINDOWS.map((option) => (
-            <ToggleGroupItem key={option} value={option}>
-              {windowLabels[option]}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      }
+      actions={<WindowToggle value={selected} onChange={setSelected} />}
     >
       <div className="flex flex-col gap-6 pt-2">
         {statistics === undefined ? (

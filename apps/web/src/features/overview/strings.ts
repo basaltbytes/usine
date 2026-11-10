@@ -111,6 +111,10 @@ export const countLabel = (count: number, one: string, many: string): string =>
 export const perTaskLabel = (count: number, tasks: number): string =>
   tasks === 0 ? "0" : (count / tasks).toLocaleString("en", { maximumFractionDigits: 1 });
 
+/** Returns the end of a line after an agent name, such as `: first attempt on 40 of 45 tasks`. */
+export const developerLine = (opened: number, tasks: number): string =>
+  `: first attempt on ${opened.toLocaleString("en")} of ${countLabel(tasks, "task", "tasks")}`;
+
 export const noTasksLine = (window: StatisticsWindow): string =>
   `No tasks done ${windowPhrase(window)}`;
 

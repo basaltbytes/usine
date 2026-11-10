@@ -16,7 +16,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "~/components/ui/chart";
-import { ChartTable } from "~/features/overview/components/statistics/chart-table";
+import { ChartTable } from "~/components/statistics/chart-table";
 import {
   attemptCountLabel,
   countLabel,
