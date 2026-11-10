@@ -32,20 +32,73 @@ import { assert, describe, it } from "@effect/vitest";
 
 import { Attached } from "../src/admin/api.ts";
 import { silentTunnel } from "./tunnel.ts";
-import { ADMIN_TOKEN_VALUE, freeGatewayPorts } from "./fixtures.ts";
+import { ADMIN_TOKEN_VALUE } from "./fixtures.ts";
 
 const MAIN = fileURLToPath(new URL("../src/node/main.ts", import.meta.url));
 
-/** Starts `usine-gateway` on free ports and waits until its admin API listens or it exits. */
-const start = (env: Readonly<Record<string, string>>) =>
+/** The log message each listener writes with its bound address once it accepts connections. */
+const LISTENING = {
+  proxy: "The gateway proxy is listening",
+  egress: "The egress proxy is listening",
+  admin: "The gateway admin API is listening",
+} as const;
+
+const decodeLogLine = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({ message: Schema.Array(Schema.Unknown), level: Schema.String }),
+  ),
+);
+const decodeBound = Schema.decodeUnknownOption(
+  Schema.Tuple([Schema.String, Schema.Struct({ port: Schema.Int })]),
+);
+
+interface GatewayPorts {
+  readonly proxy: number;
+  readonly egress: number;
+  readonly admin: number;
+}
+
+/** Returns the port of each listener whose bound address `output` logs, or `none` until all three do. */
+const boundPorts = (output: string) => {
+  const logged = new Map(
+    output.split("\n").flatMap((line) =>
+      decodeLogLine(line).pipe(
+        Option.flatMap(({ message }) => decodeBound(message)),
+        Option.match({ onNone: () => [], onSome: ([text, { port }]) => [[text, port] as const] }),
+      ),
+    ),
+  );
+  return Option.all({
+    proxy: Option.fromNullishOr(logged.get(LISTENING.proxy)),
+    egress: Option.fromNullishOr(logged.get(LISTENING.egress)),
+    admin: Option.fromNullishOr(logged.get(LISTENING.admin)),
+  });
+};
+
+/** Returns the lines of `output` other than INFO log lines, such as a listen error and its stack. */
+const failureLines = (output: string) =>
+  output
+    .split("\n")
+    .filter((line) =>
+      Option.match(decodeLogLine(line), {
+        onNone: () => line.trim() !== "",
+        onSome: ({ level }) => level !== "INFO",
+      }),
+    )
+    .join("\n");
+
+/**
+ * Starts `usine-gateway` with every listener on port zero and returns the ports it logs once all
+ * three listen. Fails with the gateway's errors, prefixed with `name`, if it exits first.
+ */
+const start = (name: string, env: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {
-    const ports = yield* freeGatewayPorts;
     const gateway = spawn(process.execPath, ["--experimental-strip-types", MAIN], {
       env: {
         ...env,
-        USINE_GATEWAY_PROXY_PORT: String(ports.proxy),
-        USINE_GATEWAY_EGRESS_PORT: String(ports.egress),
-        USINE_GATEWAY_ADMIN_PORT: String(ports.admin),
+        USINE_GATEWAY_PROXY_PORT: "0",
+        USINE_GATEWAY_EGRESS_PORT: "0",
+        USINE_GATEWAY_ADMIN_PORT: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -58,22 +111,29 @@ const start = (env: Readonly<Record<string, string>>) =>
       gateway.once("exit", (code) => resolve(code));
       return Deferred.await(completion);
     })();
-    const listening = yield* (() => {
-      const completion = Deferred.makeUnsafe<boolean>();
-      const resolve = (value: boolean) => {
+    const ports = yield* (() => {
+      const completion = Deferred.makeUnsafe<Option.Option<GatewayPorts>>();
+      const resolve = (value: Option.Option<GatewayPorts>) => {
         Deferred.doneUnsafe(completion, Effect.succeed(value));
       };
       const read = (chunk: Buffer) => {
         output += chunk.toString();
-        if (output.includes("The gateway admin API is listening")) resolve(true);
+        const bound = boundPorts(output);
+        if (Option.isSome(bound)) resolve(bound);
       };
       gateway.stdout.on("data", read);
       gateway.stderr.on("data", read);
       // Unlike `exit`, `close` waits for the output streams to end.
-      gateway.once("close", () => resolve(false));
+      gateway.once("close", () => resolve(Option.none()));
       return Deferred.await(completion);
     })();
-    return { gateway, exited, listening, ports, output: () => output };
+    if (Option.isNone(ports)) {
+      const code = yield* exited;
+      return assert.fail(
+        `The ${name} usine-gateway exited with code ${code} before it listened:\n${failureLines(output)}`,
+      );
+    }
+    return { gateway, exited, ports: ports.value, output: () => output };
   });
 
 const stop = (started: Effect.Success<ReturnType<typeof start>>) =>
@@ -134,13 +194,7 @@ describe("the usine-gateway command", () => {
             USINE_GATEWAY_CALLER_KEY: "caller-key-for-the-command-0123456789",
             USINE_GATEWAY_EGRESS_ALLOWLIST: allowlist,
           };
-          let started = yield* start(environment);
-          // Another test file can bind a probed port before the command does.
-          for (let retry = 0; retry < 3; retry++) {
-            if (started.listening || !started.output().includes("EADDRINUSE")) break;
-            started = yield* start(environment);
-          }
-          assert.isTrue(started.listening, `usine-gateway exited first:\n${started.output()}`);
+          const started = yield* start("first", environment);
           const sockets: Array<Socket> = [];
           try {
             const actual1 = yield* partialRequest(started.ports.proxy);
@@ -205,9 +259,8 @@ describe("the usine-gateway command", () => {
             "registry.npmjs.org\n",
           ),
         );
-        let started = yield* start(environment);
+        let started = yield* start("first", environment);
         try {
-          assert.isTrue(started.listening, started.output());
           const json1 = jsonKey({
             worker: "worker",
             repository: "acme/demo",
@@ -279,8 +332,7 @@ describe("the usine-gateway command", () => {
           );
           started.gateway.kill("SIGKILL");
           yield* started.exited;
-          started = yield* start(environment);
-          assert.isTrue(started.listening, started.output());
+          started = yield* start("killed and restarted", environment);
           const afterRestart = yield* call();
           assert.strictEqual(afterRestart.status, 200);
           assert.strictEqual(afterRestart.body, "upstream accepted");
@@ -308,8 +360,7 @@ describe("the usine-gateway command", () => {
           yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
             fileSystem.remove(join(directory, "attachments.enc")),
           );
-          started = yield* start(environment);
-          assert.isTrue(started.listening, started.output());
+          started = yield* start("restarted without attachments.enc", environment);
           assert.strictEqual((yield* call()).status, 403);
           const renewedResponse = yield* adminRequest(`/${attached.attachment.id}`, "PUT", payload);
           const actual5 = yield* Effect.promise(() => renewedResponse.json());
@@ -318,8 +369,7 @@ describe("the usine-gateway command", () => {
           assert.strictEqual((yield* call()).status, 200);
           yield* adminRequest(`/${attached.attachment.id}`, "DELETE");
           yield* stop(started);
-          started = yield* start(environment);
-          assert.isTrue(started.listening, started.output());
+          started = yield* start("restarted after the detach", environment);
           assert.strictEqual((yield* call()).status, 403);
           yield* stop(started);
         } finally {
