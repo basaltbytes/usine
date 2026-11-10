@@ -60,7 +60,7 @@
     "@usine/gateway": "workspace:*"
   },
   "devDependencies": {
-    "@bufbuild/buf": "1.71.0",
+    "@bufbuild/buf": "1.75.0",
     "@bufbuild/protoc-gen-es": "2.17.0",
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
@@ -69,7 +69,7 @@
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "ws": "8.22.0"
+    "ws": "8.22.1"
   },
   "peerDependencies": {
     "effect": "catalog:"
