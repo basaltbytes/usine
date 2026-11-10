@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { unpublishedPackages } from "./registry.mjs";
@@ -9,7 +9,10 @@ const visibilityBudgetMs = 600_000;
 
 const log = (event, fields) => console.log(JSON.stringify({ event, ...fields }));
 
-export async function publishNext({ run, sha, runAttempt, packages }, { command, wait, registry }) {
+export async function publishNext(
+  { run, sha, runAttempt, packages },
+  { command, wait, registry, warn },
+) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const suffix = `next.${run}.g${sha.slice(0, 7)}.${runAttempt}.${attempt}`;
     const versions = packages.map(({ file, manifest }) => {
@@ -31,7 +34,7 @@ export async function publishNext({ run, sha, runAttempt, packages }, { command,
       "--provenance",
     ]);
     if (result.code === 0) {
-      await waitUntilPublic(versions, { attempt, suffix }, { wait, registry });
+      await waitUntilPublic(versions, { attempt, suffix }, { wait, registry, warn });
       return;
     }
     let reason;
@@ -54,7 +57,10 @@ export async function publishNext({ run, sha, runAttempt, packages }, { command,
   }
 }
 
-async function waitUntilPublic(versions, { attempt, suffix }, { wait, registry }) {
+// Runs only after `pnpm publish` succeeded, so a timeout means npm accepted every version but
+// does not serve some of them yet. Republishing would collide with the accepted versions, so the
+// job ends with a warning that names them instead of failing.
+async function waitUntilPublic(versions, { attempt, suffix }, { wait, registry, warn }) {
   let waitedMs = 0;
   for (let check = 1; ; check++) {
     const pending = await unpublishedPackages(versions, registry);
@@ -64,21 +70,34 @@ async function waitUntilPublic(versions, { attempt, suffix }, { wait, registry }
     }
     log("next_publish_not_public", { attempt, check, waitedMs, packages: pending });
     if (waitedMs >= visibilityBudgetMs) {
-      log("next_publish_exhausted", {
-        attempt,
-        suffix,
-        reason: "versions_not_public",
-        waitedMs,
-        packages: pending,
+      log("next_publish_slow", { attempt, suffix, waitedMs, packages: pending });
+      const minutes = visibilityBudgetMs / 60_000;
+      warn({
+        title: "Snapshot versions not public yet",
+        message: `npm accepted every snapshot, but ${pending.length} of ${versions.length} versions are not public after ${minutes} minutes: ${pending.join(", ")}`,
+        summary: [
+          "### Snapshot versions not public yet",
+          "",
+          `npm accepted every snapshot publish, but after ${minutes} minutes the registry does not serve these versions yet:`,
+          "",
+          ...pending.map((name) => `- \`${name}\``),
+          "",
+          "They become installable once npm serves them. The job does not republish them.",
+          "",
+        ].join("\n"),
       });
-      throw new Error(
-        `Snapshot versions are not public after ${visibilityBudgetMs / 60_000} minutes; inspect the logged versions on npm`,
-      );
+      return;
     }
     const delayMs = Math.min(5_000 + check * 5_000, 30_000, visibilityBudgetMs - waitedMs);
     await wait(delayMs);
     waitedMs += delayMs;
   }
+}
+
+// Reports through GitHub Actions: a warning annotation on the run and a section in the step summary.
+function warn({ title, message, summary }) {
+  process.stdout.write(`::warning title=${title}::${message}\n`);
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 }
 
 function command(args) {
@@ -124,6 +143,7 @@ if (import.meta.main) {
       command,
       wait: setTimeout,
       registry: "https://registry.npmjs.org/",
+      warn,
     },
   );
 }
