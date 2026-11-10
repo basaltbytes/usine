@@ -306,6 +306,11 @@ export class WorkerConfigurationView extends Schema.Class<
   kind: WorkerKind,
   /** The configured maximum simultaneous attempts on this worker. */
   maxConcurrentAttempts: Schema.Int,
+  /** Whether `usine.yaml` pauses the worker, so it takes no new attempts. */
+  paused: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
   /** An SSH Worker's connection and root, or null for the other kinds. */
   destination: Schema.NullOr(SshDestination),
   /** The SSH port, or null to use the client default or for a non-SSH worker. */
@@ -711,6 +716,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         preflightRunning: checking.has(worker.name),
         kind: worker.kind,
         maxConcurrentAttempts: worker.maxConcurrentAttempts,
+        paused: worker.paused,
         ...workerConnection(worker),
         slots:
           slot === undefined

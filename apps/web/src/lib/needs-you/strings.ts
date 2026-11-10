@@ -8,6 +8,7 @@ import type {
 import { DateTime, Match, Option } from "effect";
 import { poolLabel } from "~/lib/strings";
 import { failureMessage, failureReason } from "~/lib/runs/strings";
+import { workerPausedDetail } from "~/lib/workers/strings";
 
 export interface NeedCopy {
   readonly title: string;
@@ -103,6 +104,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
+    WorkerPausedNeed: ({ worker }) => ({
+      title: `${worker}: paused`,
+      detail: workerPausedDetail,
+      repository: null,
+      runId: null,
+    }),
     WorkerPreflightNeed: ({ worker, message }) => ({
       title: `${worker}: preflight failed`,
       detail: `${message} This worker takes no new attempts while preflight retries automatically.`,
@@ -162,6 +169,7 @@ export const needKindLabel = {
   CycleBudgetNeed: "Cycle budget exhausted",
   WorkerPreflightNeed: "Worker preflight failed",
   WorkerQuotaNeed: "Cloud quota reached",
+  WorkerPausedNeed: "Worker paused",
   UnconfiguredWorkerNeed: "Unconfigured worker",
   UnresponsiveWorkerNeed: "Unresponsive worker",
   RunFailureNeed: "Run failed",

@@ -8,7 +8,8 @@ import { OpeningRow, rowLinkClass } from "~/features/configuration/components/se
 import { SlotCells } from "~/features/configuration/components/workers/slots";
 import { workerKindLabel, workerPlace } from "~/features/configuration/strings";
 import { useNow } from "~/hooks/use-now";
-import { creationFailureTitle, nextCreationLine } from "~/lib/workers/strings";
+import { StateMark } from "~/components/status-badge";
+import { creationFailureTitle, nextCreationLine, workerPausedLine } from "~/lib/workers/strings";
 
 type WorkerRowProps = { readonly worker: WorkerConfigurationView };
 
@@ -45,6 +46,12 @@ export const WorkerRow = ({ worker }: WorkerRowProps) => {
         )}
       </TableCell>
       <FillCell className="whitespace-normal">
+        {worker.paused && (
+          <p className="text-xs text-muted-foreground">
+            <StateMark state="paused" className="mr-1.5 align-middle" />
+            {workerPausedLine}
+          </p>
+        )}
         <PreflightState worker={worker} />
         <PreflightAction worker={worker} />
         {worker.provisioning?.blocked === true && (

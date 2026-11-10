@@ -123,6 +123,44 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("defaults a Worker to unpaused and encodes paused only when set", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const config = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        [
+          "version: 1",
+          "repos: []",
+          "workers:",
+          "  - name: local",
+          "    kind: local",
+          "  - name: trial",
+          "    kind: exe.dev",
+          "    paused: true",
+        ].join("\n"),
+      );
+      expect(config.workers.map(({ name, paused }) => ({ name, paused }))).toEqual([
+        { name: "local", paused: false },
+        { name: "trial", paused: true },
+      ]);
+
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(config);
+      expect(encoded.workers).toEqual([
+        { name: "local", kind: "local", max_concurrent_attempts: 1 },
+        { name: "trial", kind: "exe.dev", max_concurrent_attempts: 1, paused: true },
+      ]);
+
+      const notBoolean = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          "version: 1\nrepos: []\nworkers:\n  - name: local\n    kind: local\n    paused: yes\n",
+        )
+        .pipe(Effect.flip);
+      expect(notBoolean.stage).toBe("schema");
+      expect(notBoolean.message).toContain("paused");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses the tracing block, defaults service_name, and rejects other URLs", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

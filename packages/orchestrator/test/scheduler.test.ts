@@ -368,6 +368,12 @@ const localWorkers = (workers: ReadonlyArray<readonly [string, number]>) =>
     )
     .join("");
 
+const pausedWorker = (name: string, max: number) => `  - name: ${name}
+    kind: local
+    max_concurrent_attempts: ${max}
+    paused: true
+`;
+
 const sshWorker = (name: string, max: number, destination = `usine@${name}`) => `  - name: ${name}
     kind: ssh
     max_concurrent_attempts: ${max}
@@ -552,6 +558,57 @@ const logged = (lines: ReadonlyArray<ReadonlyArray<unknown>>, message: string) =
 
 const local = WorkerName.make("local");
 const spare = WorkerName.make("spare");
+
+describe("Worker scheduler with a paused Worker", () => {
+  it.live("leases its slot only to a Run that reattaches an Attempt there", () =>
+    withWorkers(pausedWorker("local", 1) + localWorkers([["spare", 1]]), () =>
+      Effect.gen(function* () {
+        const scheduler = yield* startScheduler([]);
+        const agent = yield* developer;
+        const first = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
+        assert.strictEqual(first.worker, spare);
+        const reattached = yield* scheduler.reserve(
+          runOf(2),
+          submission(agent, 2),
+          Option.some(local),
+        );
+        assert.strictEqual(reattached.worker, local);
+        const waiting = yield* Effect.forkChild(
+          scheduler.reserve(runOf(3), submission(agent, 3), Option.none()),
+        );
+        yield* assertWaiting(waiting, "spare is full and local is paused");
+        yield* reattached.release;
+        yield* assertWaiting(waiting, "local has a free slot but is paused");
+        yield* first.release;
+
+        assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.live("warns when a Run waits and every Worker is paused", () =>
+    withWorkers(pausedWorker("local", 1), () =>
+      Effect.gen(function* () {
+        const lines: Array<ReadonlyArray<unknown>> = [];
+        const scheduler = yield* startScheduler([]);
+        const agent = yield* developer;
+        const waiting = yield* Effect.forkChild(
+          scheduler
+            .reserve(runOf(1), submission(agent, 1), Option.none())
+            .pipe(Effect.withLogger(logsIn(lines))),
+        );
+        yield* assertWaiting(waiting, "the only Worker is paused");
+        const warnings = logged(
+          lines,
+          "Run waits for a worker slot, and no Worker takes new Attempts: each one is paused in usine.yaml or unavailable; it waits until a reload resumes a Worker or a preflight passes",
+        );
+        assert.lengthOf(warnings, 1);
+        assert.deepInclude(warnings[0], { paused: [local] });
+        yield* Fiber.interrupt(waiting);
+      }).pipe(Effect.scoped),
+    ),
+  );
+});
 
 describe("Worker scheduler reservations that name a Worker", () => {
   it.live("lease from that Worker only, without holding up the Runs behind them", () =>
@@ -996,6 +1053,68 @@ describe("Worker scheduler slots occupied by Attempts that already run", () => {
 });
 
 describe("Worker scheduler on reload", () => {
+  it.live(
+    "a reload that pauses a Worker sends new Runs elsewhere without a preflight, and one that resumes it admits a waiting Run",
+    () =>
+      withWorkers(
+        localWorkers([
+          ["local", 1],
+          ["spare", 1],
+        ]),
+        (root) =>
+          Effect.gen(function* () {
+            const instances = yield* CurrentInstance;
+            const lines: Array<ReadonlyArray<unknown>> = [];
+            const preflighted: Array<string> = [];
+            const scheduler = yield* startScheduler(preflighted);
+            const agent = yield* developer;
+            const first = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
+            assert.strictEqual(first.worker, local);
+            const checks = preflighted.length;
+
+            yield* writeInstanceFiles(root, [
+              ["usine.yaml", usineYaml(pausedWorker("local", 1) + localWorkers([["spare", 1]]))],
+            ]);
+            const paused = yield* instances.reload.pipe(Effect.withLogger(logsIn(lines)));
+            assert.deepStrictEqual(paused.workers.changed, [local]);
+            assert.strictEqual(preflighted.length, checks, "pausing runs no preflight");
+            assert.deepStrictEqual(
+              logged(
+                lines,
+                "Worker paused by a reload; it takes no new Attempt, and its running Attempts finish",
+              ),
+              [{ worker: local, running: 1 }],
+            );
+            yield* first.release;
+            const second = yield* scheduler.reserve(runOf(2), submission(agent, 2), Option.none());
+            assert.strictEqual(second.worker, spare);
+            const waiting = yield* Effect.forkChild(
+              scheduler.reserve(runOf(3), submission(agent, 3), Option.none()),
+            );
+            yield* assertWaiting(waiting, "spare is full and local is paused");
+
+            yield* writeInstanceFiles(root, [
+              [
+                "usine.yaml",
+                usineYaml(
+                  localWorkers([
+                    ["local", 1],
+                    ["spare", 1],
+                  ]),
+                ),
+              ],
+            ]);
+            yield* instances.reload.pipe(Effect.withLogger(logsIn(lines)));
+            assert.strictEqual((yield* leaseOf(waiting)).worker, local);
+            assert.strictEqual(preflighted.length, checks, "resuming runs no preflight");
+            assert.deepStrictEqual(
+              logged(lines, "Worker resumed by a reload; it takes new Attempts now"),
+              [{ worker: local, slots: 1, running: 0 }],
+            );
+          }).pipe(Effect.scoped),
+      ),
+  );
+
   it.live("a reload that raises max_concurrent_attempts admits a waiting Run at once", () =>
     withWorkers(localWorkers([["local", 1]]), (root) =>
       Effect.gen(function* () {

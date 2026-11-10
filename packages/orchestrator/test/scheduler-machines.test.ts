@@ -609,7 +609,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
             1,
             "the run with a machine does not wait for quota",
           );
-          const needs = (yield* refresh(overview, [], [POOL])).needsYou;
+          const needs = (yield* refresh(overview, [], [{ name: POOL, paused: false }])).needsYou;
           assert.lengthOf(needs, 1);
           assert.strictEqual(needs[0]?._tag, "WorkerQuotaNeed");
           const nextProvisioning = yield* status.provisioning;
@@ -670,7 +670,10 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const nextProvisioning = yield* status.provisioning;
         assert.strictEqual(quotaWaits(nextProvisioning).size, 0);
 
-        assert.lengthOf((yield* refresh(overview, [], [POOL])).needsYou, 0);
+        assert.lengthOf(
+          (yield* refresh(overview, [], [{ name: POOL, paused: false }])).needsYou,
+          0,
+        );
         assert.strictEqual(fake.calls.filter((call) => call.startsWith("create")).length, 4);
         yield* lease.release;
         yield* readyLease.release;

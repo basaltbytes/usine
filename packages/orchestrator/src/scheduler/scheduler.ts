@@ -89,6 +89,11 @@ interface WorkerSlots {
   readonly capacity: number;
   /** The number of Attempts with a lease on the Worker. */
   readonly leased: number;
+  /**
+   * Whether `usine.yaml` pauses the Worker, so that only a Run that reattaches an Attempt there
+   * takes its free slots.
+   */
+  readonly paused: boolean;
 }
 
 /**
@@ -101,21 +106,24 @@ const slotPoolOf = (workers: ReadonlyArray<ConfigWorker>, previous: SlotPool): S
   const declared = new Set(workers.map(({ name }) => name));
   return new Map([
     ...workers.map(
-      ({ name, maxConcurrentAttempts }) =>
+      ({ name, maxConcurrentAttempts, paused }) =>
         [
           name,
-          { capacity: maxConcurrentAttempts, leased: previous.get(name)?.leased ?? 0 },
+          { capacity: maxConcurrentAttempts, leased: previous.get(name)?.leased ?? 0, paused },
         ] as const,
     ),
     ...[...previous]
       .filter(([name, { leased }]) => !declared.has(name) && leased > 0)
-      .map(([name, { leased }]) => [name, { capacity: 0, leased }] as const),
+      .map(([name, { leased }]) => [name, { capacity: 0, leased, paused: false }] as const),
   ]);
 };
 
-/** Returns the Workers that take new Attempts: those `usine.yaml` declares with slots. */
+/**
+ * Returns the Workers that take new Attempts: those `usine.yaml` declares with slots and doesn't
+ * pause.
+ */
 const openWorkers = (pool: SlotPool): ReadonlyArray<WorkerName> =>
-  [...pool].filter(([, { capacity }]) => capacity > 0).map(([worker]) => worker);
+  [...pool].filter(([, { capacity, paused }]) => capacity > 0 && !paused).map(([worker]) => worker);
 
 /** Returns the Runs of `queued`, which is in lease order, with the Runs ahead of each. */
 const queuedRuns = (
@@ -138,20 +146,22 @@ const isFree = (pool: SlotPool, worker: WorkerName): boolean => {
 };
 
 /**
- * Returns the Worker with a free slot for `reservation`: its specified Worker, or else the first
- * free one that isn't `paused` from creating machines.
+ * Returns the Worker with a free slot for `reservation`: its specified Worker, even if paused, or
+ * else the first free one that `usine.yaml` doesn't pause and that isn't held back from creating
+ * machines by `provisioning`.
  */
 const workerFor = (
   pool: SlotPool,
-  paused: ReadonlyMap<WorkerName, WorkerPause>,
+  provisioning: ReadonlyMap<WorkerName, WorkerPause>,
   reservation: Reservation,
 ): Option.Option<WorkerName> =>
   Option.match(reservation.worker, {
     onNone: () =>
       Option.fromNullishOr(
-        [...pool.keys()].find(
-          (worker) => isFree(pool, worker) && paused.get(worker)?.blocked !== true,
-        ),
+        [...pool].find(
+          ([worker, { paused }]) =>
+            !paused && isFree(pool, worker) && provisioning.get(worker)?.blocked !== true,
+        )?.[0],
       ),
     onSome: (worker) => (isFree(pool, worker) ? Option.some(worker) : Option.none()),
   });
@@ -443,11 +453,28 @@ export const stepExecutorLayer = (
             running: running(worker.name),
           }),
         );
+        yield* Effect.forEach(change.paused, (worker) =>
+          worker.paused
+            ? Effect.logInfo(
+                "Worker paused by a reload; it takes no new Attempt, and its running Attempts finish",
+                { worker: worker.name, running: running(worker.name) },
+              )
+            : Effect.logInfo("Worker resumed by a reload; it takes new Attempts now", {
+                worker: worker.name,
+                slots: worker.maxConcurrentAttempts,
+                running: running(worker.name),
+              }),
+        );
         yield* Effect.forEach(change.added, (worker) =>
-          Effect.logInfo("Worker added by a reload; it takes Attempts now", {
-            worker: worker.name,
-            slots: worker.maxConcurrentAttempts,
-          }),
+          worker.paused
+            ? Effect.logInfo(
+                "Worker added paused by a reload; it takes no Attempt until a reload resumes it",
+                { worker: worker.name, slots: worker.maxConcurrentAttempts },
+              )
+            : Effect.logInfo("Worker added by a reload; it takes Attempts now", {
+                worker: worker.name,
+                slots: worker.maxConcurrentAttempts,
+              }),
         );
         yield* Effect.forEach(change.removed, ({ name }) =>
           running(name) === 0
@@ -551,6 +578,15 @@ export const stepExecutorLayer = (
         ...agents.map(({ agent }) => agent.brain),
       ]);
       yield* preflight.exclusive.withPermit(preflight.start(workers, startupRoster));
+      yield* Effect.forEach(
+        workers.filter(({ paused }) => paused),
+        (worker) =>
+          Effect.logInfo(
+            "Worker paused in usine.yaml; it takes no new Attempt until a reload resumes it",
+            { worker: worker.name, slots: worker.maxConcurrentAttempts },
+          ),
+        { discard: true },
+      );
 
       const releaseSlot = (worker: WorkerName) =>
         TxRef.modify(pool, (current) => releasedFrom(current, worker)).pipe(
@@ -746,17 +782,23 @@ export const stepExecutorLayer = (
           yield* bus.publish([
             { audience: { _tag: "Loop", loop: run.loop }, target: { kind: "run", id: run.runId } },
           ]);
+          const open = openWorkers(current);
           const fields = {
             ...run,
             ...positionFields(reservation.position),
             queued: queue.length,
-            ahead: aheadCount(
-              queue.slice(0, queue.indexOf(reservation)),
-              reservation,
-              openWorkers(current),
-            ),
+            ahead: aheadCount(queue.slice(0, queue.indexOf(reservation)), reservation, open),
           };
-          if (Option.isNone(worker)) yield* Effect.logInfo("Run waits for a worker slot", fields);
+          if (Option.isNone(worker) && open.length > 0)
+            yield* Effect.logInfo("Run waits for a worker slot", fields);
+          else if (Option.isNone(worker))
+            yield* Effect.logWarning(
+              "Run waits for a worker slot, and no Worker takes new Attempts: each one is paused in usine.yaml or unavailable; it waits until a reload resumes a Worker or a preflight passes",
+              {
+                ...fields,
+                paused: [...current].filter(([, { paused }]) => paused).map(([name]) => name),
+              },
+            );
           else if ((current.get(worker.value)?.capacity ?? 0) > 0)
             yield* Effect.logInfo(
               "Run waits for a slot on the Worker its reattached Attempt runs on",

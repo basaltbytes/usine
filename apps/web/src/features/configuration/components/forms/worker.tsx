@@ -71,11 +71,15 @@ export const WorkerFields = (fields: FormFieldsProps) => {
           fields.onChange(
             next.kind === fields.value.kind
               ? next
-              : {
-                  name: next.name ?? "",
-                  kind: next.kind ?? "local",
-                  max_concurrent_attempts: next.max_concurrent_attempts ?? 1,
-                },
+              : withField(
+                  {
+                    name: next.name ?? "",
+                    kind: next.kind ?? "local",
+                    max_concurrent_attempts: next.max_concurrent_attempts ?? 1,
+                  },
+                  "paused",
+                  next.paused,
+                ),
           )
         }
         definitions={[
@@ -93,6 +97,15 @@ export const WorkerFields = (fields: FormFieldsProps) => {
           },
         ]}
       />
+      <Label>
+        <Checkbox
+          checked={fields.value.paused === true}
+          onCheckedChange={(checked) =>
+            fields.onChange(withField(fields.value, "paused", checked ? true : undefined))
+          }
+        />
+        {copy.paused}
+      </Label>
       {fields.value.kind === "ssh" && (
         <>
           <Label className="flex flex-col items-start gap-2">

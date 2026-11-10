@@ -69,6 +69,7 @@ workers:
     max_concurrent_attempts: 2
   - name: eu-1
     kind: ssh
+    paused: true
     destination: usine@eu-1
     root: /srv/usine
     identity_file: ~/.ssh/usine_worker
@@ -386,6 +387,7 @@ describe("Configuration view", () => {
       assert(onLocal !== undefined && onSsh !== undefined, "both Workers are declared");
       assert.strictEqual(onLocal.kind, "local");
       assert.strictEqual(onLocal.maxConcurrentAttempts, 2);
+      assert.isFalse(onLocal.paused);
       assert.deepStrictEqual(onLocal.slots, { capacity: 2, leased: 1 });
       assert.isNull(onLocal.destination);
       assert.deepStrictEqual(onLocal.prerequisites, {
@@ -405,6 +407,7 @@ describe("Configuration view", () => {
       assert.strictEqual(failed.message, "Claude Code is not logged in on Worker local");
 
       assert.strictEqual(onSsh.kind, "ssh");
+      assert.isTrue(onSsh.paused);
       assert.strictEqual(onSsh.destination, "usine@eu-1");
       assert.strictEqual(onSsh.root, "/srv/usine");
       assert.strictEqual(onSsh.identityFile, "~/.ssh/usine_worker");
