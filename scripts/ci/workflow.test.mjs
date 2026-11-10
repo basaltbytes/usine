@@ -95,9 +95,11 @@ test("the server test tools install from a per-image cache before any apt mirror
   assert.equal(limits.length, 2);
   assert.ok(3 * limits.reduce((a, b) => a + b, 0) + 2 * sleep < setup["timeout-minutes"] * 60 - 30);
 
-  // The apt-get stub mirrors real apt: a failed index fetch only warns and exits 0
-  // unless --error-on=any is set, and a missing package index fails the download.
-  const install = ({ cacheHit, failedUpdates, packagesIndexed = false }) => {
+  // The apt-get stub mirrors real apt: a transient index fetch failure only warns
+  // and exits 0 unless --error-on=any is set, a hard failure (such as a hash or size
+  // mismatch during a mirror sync) exits 100 either way, and a missing package
+  // index fails the download.
+  const install = ({ cacheHit, failedUpdates, packagesIndexed = false, hardFailure = false }) => {
     const scratch = mkdtempSync(join(tmpdir(), "server-tools-"));
     try {
       const bin = join(scratch, "bin");
@@ -143,9 +145,14 @@ case " $* " in
     failed=$(cat "${state}")
     if [ "$failed" -lt ${failedUpdates} ]; then
       echo $((failed + 1)) > "${state}"
-      echo "W: Some index files failed to download." >&2
-      case " $* " in *" --error-on=any "*) exit 100 ;; esac
       echo ${packagesIndexed ? "present" : "missing"} > "${lists}"
+      ${
+        hardFailure
+          ? `echo "E: Failed to fetch noble-updates/main Packages  File has unexpected size. Mirror sync in progress?" >&2
+      exit 100`
+          : `echo "W: Some index files failed to download." >&2
+      case " $* " in *" --error-on=any "*) exit 100 ;; esac`
+      }
     else
       echo present > "${lists}"
     fi ;;
@@ -189,6 +196,7 @@ esac`,
   assert.ok(hit.log.some((call) => call.startsWith("dpkg -i") && call.endsWith("jq.deb")));
 
   const updates = (log) => log.filter((call) => call.endsWith(" update"));
+  const downloads = (log) => log.filter((call) => call.includes(" --download-only "));
 
   const flakyMirror = install({ cacheHit: false, failedUpdates: 2 });
   assert.equal(flakyMirror.status, 0, flakyMirror.log.join("\n"));
@@ -212,10 +220,29 @@ esac`,
   assert.ok(!updates(partialMirror.log).at(-1).includes("--error-on=any"));
   assert.ok(partialMirror.log.at(-1).startsWith("dpkg -i"));
 
+  // A pocket mid-sync makes apt-get update exit 100 even without --error-on=any, yet
+  // the indexes it fetched still serve jq and lsof, so the last attempt downloads anyway.
+  const syncingMirror = install({
+    cacheHit: false,
+    failedUpdates: 3,
+    packagesIndexed: true,
+    hardFailure: true,
+  });
+  assert.equal(syncingMirror.status, 0, syncingMirror.log.join("\n"));
+  assert.equal(updates(syncingMirror.log).length, 3);
+  assert.equal(downloads(syncingMirror.log).length, 1);
+  assert.ok(syncingMirror.log.at(-1).startsWith("dpkg -i"));
+
   const downMirror = install({ cacheHit: false, failedUpdates: 3 });
   assert.notEqual(downMirror.status, 0);
   assert.equal(updates(downMirror.log).length, 3);
   assert.ok(downMirror.log.every((call) => !call.startsWith("dpkg")));
+
+  const brokenMirror = install({ cacheHit: false, failedUpdates: 3, hardFailure: true });
+  assert.notEqual(brokenMirror.status, 0);
+  assert.equal(updates(brokenMirror.log).length, 3);
+  assert.equal(downloads(brokenMirror.log).length, 1);
+  assert.ok(brokenMirror.log.every((call) => !call.startsWith("dpkg")));
 });
 
 test("browser test tasks receive the container's Playwright browser registry", () => {

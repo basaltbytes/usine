@@ -99,6 +99,10 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
+      # A cache saved by a pull request run is scoped to that pull request, so the
+      # first main run on a new image tag misses and downloads from the mirror
+      # with the bounded retries below. Running this workflow on main with
+      # workflow_dispatch seeds the main cache.
       - name: Restore server test tools
         if: matrix.leg == 'server'
         id: server-tools
@@ -128,12 +132,14 @@ jobs:
               timeout -k 5 "$limit" apt-get $APT_OPTIONS -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts="$sources" "$@"
             }
             # apt-get update exits 0 when an index fails to download, so earlier
-            # attempts use --error-on=any to retry. The last attempt accepts partial
-            # indexes and lets the download decide whether jq and lsof resolve.
+            # attempts use --error-on=any to retry. It exits 100 on a hard error such
+            # as "Mirror sync in progress?" even when the other indexes were fetched,
+            # so the last attempt ignores its status and lets the download decide
+            # whether jq and lsof resolve.
             for attempt in 1 2 3; do
               strict=--error-on=any
               [ "$attempt" -lt 3 ] || strict=
-              if apt_get 60 $strict update &&
+              if { apt_get 60 $strict update || [ "$attempt" -eq 3 ]; } &&
                 apt_get 30 install -y --download-only --no-install-recommends -o Dir::Cache::archives="$DEBS" jq lsof; then
                 break
               fi
