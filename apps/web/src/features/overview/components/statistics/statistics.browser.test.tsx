@@ -14,7 +14,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
-import { statisticsQuery } from "~/features/overview/queries";
+import { statisticsQuery } from "~/lib/statistics/queries";
 import { routeTree } from "~/route-tree.gen";
 import {
   deskFixture,

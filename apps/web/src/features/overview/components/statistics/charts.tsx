@@ -1,3 +1,4 @@
+import { spanLabel } from "~/lib/strings";
 import type {
   AttemptCountView,
   NeedsAttentionPeriodView,
@@ -21,7 +22,6 @@ import {
   countLabel,
   percentLabel,
   periodLabel,
-  spanLabel,
   utcDayLabel,
 } from "~/features/overview/strings";
 

@@ -16,8 +16,8 @@ import {
 } from "~/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
 import { StatisticsBlock } from "~/features/overview/components/statistics/charts";
-import { outcomeTotal, percentLabel, spanLabel, windowPhrase } from "~/features/overview/strings";
-import { brainLine, tokensLabel, usdLabel } from "~/lib/strings";
+import { outcomeTotal, percentLabel } from "~/features/overview/strings";
+import { brainLine, tokensLabel, usdLabel, spanLabel, windowPhrase } from "~/lib/strings";
 
 type Dimension = "loop" | "agent" | "model";
 

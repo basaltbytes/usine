@@ -1,7 +1,8 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { expect, it, vi } from "vitest";
 import { connectChanges } from "~/lib/changes";
-import { runStatisticsQuery, statisticsQuery } from "./queries";
+import { statisticsQuery } from "~/lib/statistics/queries";
+import { runStatisticsQuery } from "./queries";
 
 class Source extends EventTarget {
   onopen: ((event: Event) => void) | null = null;

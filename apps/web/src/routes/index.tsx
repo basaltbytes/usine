@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Desk } from "~/features/overview/overview.page";
-import { statisticsQuery } from "~/features/overview/queries";
+import { statisticsQuery } from "~/lib/statistics/queries";
 import { deskQuery } from "~/lib/desk/queries";
 import { RouteError, RoutePending } from "~/components/route-status";
 

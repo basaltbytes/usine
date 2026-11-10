@@ -14,18 +14,16 @@ import {
 } from "~/features/overview/components/statistics/share-bar";
 import { TasksDoneChart } from "~/features/overview/components/statistics/tasks-done/chart";
 import { TasksDoneLegend } from "~/features/overview/components/statistics/tasks-done/legend";
-import { statisticsQuery } from "~/features/overview/queries";
+import { statisticsQuery } from "~/lib/statistics/queries";
 import {
   aboutLabel,
   noTasksLine,
-  spanLabel,
   unmeteredLine,
   unpricedLine,
   untimedLine,
-  windowLabels,
   windowNote,
 } from "~/features/overview/strings";
-import { tokensLabel, usdLabel } from "~/lib/strings";
+import { tokensLabel, usdLabel, spanLabel, windowLabels } from "~/lib/strings";
 import { cn } from "~/lib/utils";
 
 const WINDOWS: ReadonlyArray<StatisticsWindow> = ["7d", "30d", "all"];

@@ -1,6 +1,6 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import type { BillingPool } from "@usine/core/agent/session";
-import type { LoopView } from "@usine/orchestrator/operator";
+import type { LoopView, StatisticsWindow } from "@usine/orchestrator/operator";
 
 export const brainLine = (brain: Pick<BrainSpec, "harness" | "model" | "effort">): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
@@ -70,6 +70,30 @@ export const durationLabel = (milliseconds: number): string => {
     ? `${Math.floor(minutes / 60)} h`
     : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 };
+
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+
+/**
+ * Returns a duration as `durationLabel` does, with `under 1s` below a second and days and hours
+ * from two days up: `3 d 4 h`.
+ */
+export const spanLabel = (milliseconds: number): string => {
+  if (milliseconds < 1000) return "under 1s";
+  if (milliseconds < 2 * DAY) return durationLabel(milliseconds);
+  const hours = Math.round(milliseconds / HOUR);
+  return hours % 24 === 0 ? `${hours / 24} d` : `${Math.floor(hours / 24)} d ${hours % 24} h`;
+};
+
+export const windowLabels = {
+  "7d": "7 days",
+  "30d": "30 days",
+  all: "All",
+} as const satisfies Record<StatisticsWindow, string>;
+
+/** Returns the end of an empty-state fragment, such as `in the last 7 days`, or `yet` for all. */
+export const windowPhrase = (window: StatisticsWindow): string =>
+  window === "all" ? "yet" : `in the last ${windowLabels[window]}`;
 
 /** Returns a token count in compact notation: `950`, `27.3K`, or `1.2M`. */
 export const tokensLabel = (tokens: number): string =>

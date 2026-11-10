@@ -13,8 +13,7 @@ import type {
   StatisticsWindow,
   UntimedTasksView,
 } from "@usine/orchestrator/operator";
-import { agoLabel, clockLabel, elapsedLabel } from "~/lib/strings";
-import { durationLabel } from "~/lib/strings";
+import { agoLabel, clockLabel, elapsedLabel, spanLabel, windowPhrase } from "~/lib/strings";
 
 export const warningLine = (warning: ConnectivityWarningView): string =>
   Match.valueTags(warning, {
@@ -66,19 +65,7 @@ export const deskCounts = (desk: DeskView): string | undefined => {
 };
 
 const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-export const windowLabels = {
-  "7d": "7 days",
-  "30d": "30 days",
-  all: "All",
-} as const satisfies Record<StatisticsWindow, string>;
-
-/** Returns the end of an empty-state fragment, such as `in the last 7 days`, or `yet` for all. */
-export const windowPhrase = (window: StatisticsWindow): string =>
-  window === "all" ? "yet" : `in the last ${windowLabels[window]}`;
 
 /** Returns a UTC day such as `2026-10-22` as `22 Oct`. */
 export const utcDayLabel = (day: string): string => {
@@ -97,17 +84,6 @@ export const periodLabel = (start: string, bucket: StatisticsBucket): string =>
 /** Returns the window's start, for example `From 19 Oct, by UTC day`. */
 export const windowNote = (from: string, bucket: StatisticsBucket): string =>
   `From ${utcDayLabel(from.slice(0, 10))}, by UTC ${bucket}`;
-
-/**
- * Returns a duration as `durationLabel` does, with `under 1s` below a second and days and hours
- * from two days up: `3 d 4 h`.
- */
-export const spanLabel = (milliseconds: number): string => {
-  if (milliseconds < 1000) return "under 1s";
-  if (milliseconds < 2 * DAY) return durationLabel(milliseconds);
-  const hours = Math.round(milliseconds / HOUR);
-  return hours % 24 === 0 ? `${hours / 24} d` : `${Math.floor(hours / 24)} d ${hours % 24} h`;
-};
 
 /**
  * Returns a duration rounded for speech: to the minute under 10 minutes, to 5 minutes under an

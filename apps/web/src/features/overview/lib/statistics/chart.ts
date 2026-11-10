@@ -1,5 +1,5 @@
+import { spanLabel } from "~/lib/strings";
 import { type ChartConfig } from "~/components/ui/chart";
-import { spanLabel } from "~/features/overview/strings";
 
 export const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;

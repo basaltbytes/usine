@@ -1,3 +1,4 @@
+import { spanLabel } from "~/lib/strings";
 import { useProjectLinks } from "~/hooks/use-project-links";
 import { useNavigate } from "@tanstack/react-router";
 import type { StatisticsView, TaskDoneView } from "@usine/orchestrator/operator";
@@ -11,7 +12,7 @@ import {
   ladderLabel,
   tooltipClass,
 } from "~/features/overview/lib/statistics/chart";
-import { instantDayLabel, spanLabel } from "~/features/overview/strings";
+import { instantDayLabel } from "~/features/overview/strings";
 
 /** Returns a tick every day for a week or less, else every 7 days, from the window's start. */
 const dayTicks = (from: number, to: number): ReadonlyArray<number> => {

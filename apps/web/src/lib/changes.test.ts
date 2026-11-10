@@ -18,7 +18,8 @@ import {
   upgradeQuery,
   workersQuery,
 } from "~/features/configuration/queries";
-import { statisticsQuery, runStatisticsQuery } from "~/features/overview/queries";
+import { runStatisticsQuery } from "~/features/overview/queries";
+import { statisticsQuery } from "~/lib/statistics/queries";
 import { laneItemsQuery, loadedLaneItemsQuery, projectQuery } from "~/features/projects/queries";
 import { runGitHubChangesQuery } from "~/features/runs/queries";
 import { projectTasksQuery, taskRunsQuery } from "~/features/tasks/queries";
