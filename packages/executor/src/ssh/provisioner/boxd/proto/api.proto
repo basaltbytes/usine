@@ -26,7 +26,7 @@ syntax = "proto3";
 package boxd.api.v1;
 
 message WhoamiRequest {}
-message WhoamiResponse { string user_id = 1; }
+message WhoamiResponse { string user_id = 1; repeated string pubkey_fingerprints = 2; }
 message GetOrgMachineLimitRequest { string org_id = 1; }
 message GetOrgMachineLimitResponse { uint32 max_vms = 3; uint32 vm_count = 4; }
 message GetSnapshotRequest { string name = 1; string org = 2; }

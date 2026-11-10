@@ -113,6 +113,10 @@ boxd uses gRPC. A client port isolates its transport and decoded responses from 
 
 boxd regions are discovered, not enumerated: the region setting is a region id that `ListRegions` resolves to its API endpoint. A fixed list of hosted regions would prevent a usine worker from running on a boxd deployment in the operator's own cloud account and region.
 
+## 2026-11-10: boxd account-linked SSH keys (#1121)
+
+The boxd SSH proxy terminates SSH and authenticates keys linked to the account, so it does not read the machine's `authorized_keys`. Baking a worker public key into a snapshot cannot authorize the worker. boxd fences API keys from account changes, including `LinkSshKey`, so linking requires an operator's signed-in session. The operator script uses device id `usine:<worker name>` to replace the previous key after rotation. Preflight reads the public key next to `identity_file` and checks its SHA-256 fingerprint against `Whoami`'s linked fingerprints using the worker's API key. Snapshot preparation uses the boxd CLI's linked device key and saves only the runtime, attempt image, and Tailscale setup.
+
 ## 2026-11-10: boxd egress allowlist
 
 A boxd machine restored from a snapshot starts with unrestricted egress. `provisioner.egress` gives each machine an allowlist that boxd enforces itself, admitting HTTP and HTTPS by host name and other traffic by address. The driver applies it with `SetVmEgressAllow` after the restore instead of through the machine spec that `CreateVmFromSnapshot` accepts. A spec can't be combined with the request's `labels` and `isolated` fields, so it would change the create request that the 2026-11-09 spike verified. The driver then waits one second, the time boxd states the list takes to come into force, before it connects to the machine. Only the snapshot's own resumed processes run without the list, and no attempt process starts before the list applies. If boxd refuses the list or reports it empty, the driver deletes the machine instead of running an attempt with unrestricted egress.

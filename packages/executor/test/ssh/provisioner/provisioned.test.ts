@@ -29,6 +29,12 @@ import { TestClock } from "effect/testing";
 import { Deferred, Effect, Fiber, Option, Redacted, Schema, Layer, DateTime } from "effect";
 import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
+import {
+  BOXD_PUBLIC_KEY,
+  BOXD_KEY_FINGERPRINT,
+  BOXD_ROTATED_KEY,
+  BOXD_ROTATED_FINGERPRINT,
+} from "./support.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
@@ -931,7 +937,10 @@ describe("Provisioned SSH Worker", () => {
     const provider = address.machine.provisioner.provider;
     it.live(`creates a ${provider} machine and pins its host key`, () => {
       const machine = fakeMachine();
-      machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
+      machine.state.localFiles.set(
+        `/keys/usine_${provider}.pub`,
+        provider === "boxd" ? `${BOXD_PUBLIC_KEY}\n` : "ssh-ed25519 AAAAOperatorKey usine\n",
+      );
       const providers = fakeProviders();
       return Effect.gen(function* () {
         const executor = yield* Executor;
@@ -950,7 +959,6 @@ describe("Provisioned SSH Worker", () => {
         const key = providers.calls.find(({ path }) => path.endsWith("/sshkey"));
         if (provider === "boat")
           assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
-        else assert.isUndefined(key);
         assert.isTrue(
           machine.state.calls.some(({ command }) =>
             command.args.includes("StrictHostKeyChecking=yes"),
@@ -971,7 +979,10 @@ describe("Provisioned SSH Worker", () => {
       `refuses a ${provider} machine whose API reports no host key and deletes it without connecting`,
       () => {
         const machine = fakeMachine();
-        machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
+        machine.state.localFiles.set(
+          `/keys/usine_${provider}.pub`,
+          provider === "boxd" ? `${BOXD_PUBLIC_KEY}\n` : "ssh-ed25519 AAAAOperatorKey usine\n",
+        );
         const providers = fakeProviders();
         if (provider === "boxd") providers.boxd.hostKey = "";
         else providers.boat.hostKey = undefined;
@@ -998,6 +1009,60 @@ describe("Provisioned SSH Worker", () => {
       },
     );
   }
+  it.live("boxd preflight checks the current public key against the account fingerprints", () => {
+    const machine = fakeMachine();
+    const providers = fakeProviders();
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      machine.state.localFiles.set("/keys/usine_boxd.pub", `${BOXD_PUBLIC_KEY}\n`);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      machine.state.localFiles.set("/keys/usine_boxd.pub", `${BOXD_ROTATED_KEY}\n`);
+      const unlinked = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
+      assert(unlinked._tag === "WorkerCapabilityError");
+      assert.strictEqual(unlinked.capability, "provider");
+      assert.include(unlinked.message, "/keys/usine_boxd.pub");
+      assert.include(unlinked.message, BOXD_ROTATED_FINGERPRINT);
+      assert.include(unlinked.message, "signed-in session");
+      assert.include(
+        unlinked.message,
+        "https://docs.usine.dev/guides/add-a-boxd-worker/#link-the-worker-key",
+      );
+      providers.boxd.sshKeyFingerprints.push(BOXD_ROTATED_FINGERPRINT);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      const verified = logs.lines.filter((line) => line.includes("boxd provisioner verified"));
+      assert.lengthOf(verified, 2);
+      assert.include(verified[0] ?? "", BOXD_KEY_FINGERPRINT);
+      assert.include(verified[1] ?? "", BOXD_ROTATED_FINGERPRINT);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        runtimeOf(machine, providers, boxdAddress).pipe(Layer.provideMerge(logs.layer)),
+      ),
+    );
+  });
+
+  for (const key of [undefined, "", "invalid-key", "ssh-ed25519 !!!"]) {
+    it.live(
+      `boxd preflight reports a provider error for ${key === undefined ? "a missing public key" : `public key "${key}"`}`,
+      () => {
+        const machine = fakeMachine();
+        const providers = fakeProviders();
+        if (key !== undefined) machine.state.localFiles.set("/keys/usine_boxd.pub", key);
+        return Effect.gen(function* () {
+          const executor = yield* Executor;
+          const refused = yield* executor
+            .preflight(WORKER, [TEST_AGENT.brain], 1)
+            .pipe(Effect.flip);
+          assert(refused._tag === "WorkerCapabilityError");
+          assert.strictEqual(refused.capability, "provider");
+          assert.include(refused.message, "/keys/usine_boxd.pub");
+          assert.strictEqual(providers.boxd.machines.size, 0);
+        }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
+      },
+    );
+  }
+
   it.live("refuses a Boat Worker whose identity file has no public key", () => {
     const machine = fakeMachine();
     const providers = fakeProviders();

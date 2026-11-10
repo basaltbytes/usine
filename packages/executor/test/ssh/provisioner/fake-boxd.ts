@@ -1,3 +1,4 @@
+import { BOXD_KEY_FINGERPRINT } from "./support.ts";
 import { MachineId } from "@usine/core/worker";
 import { Clock, Effect, Layer, Option } from "effect";
 import {
@@ -20,6 +21,7 @@ export const fakeBoxd = () => {
   const record = (id: MachineId, operation: string) =>
     operations.set(id, [...(operations.get(id) ?? []), operation]);
   const state = {
+    sshKeyFingerprints: [BOXD_KEY_FINGERPRINT],
     machines,
     creates,
     selectors,
@@ -70,7 +72,9 @@ export const fakeBoxd = () => {
           }),
     );
   const api = BoxdApi.of({
-    whoami: call("whoami", () => Effect.succeed({ userId: "test-user" })),
+    whoami: call("whoami", () =>
+      Effect.succeed({ userId: "test-user", sshKeyFingerprints: state.sshKeyFingerprints }),
+    ),
     orgMachineLimit: call("orgMachineLimit", () =>
       Effect.succeed({ maxVms: state.maxVms, vmCount: state.vmCount }),
     ),

@@ -217,7 +217,12 @@ export const boxdApiLayer = (
         call("listVms", (opts) => client.listVms({ labelSelector: [...selector] }, opts));
       return BoxdApi.of({
         whoami: call("whoami", (opts) => account.whoami({}, opts)).pipe(
-          Effect.flatMap(decode(BoxdIdentity, "whoami")),
+          Effect.flatMap((value) =>
+            decode(
+              BoxdIdentity,
+              "whoami",
+            )({ userId: value.userId, sshKeyFingerprints: value.pubkeyFingerprints }),
+          ),
         ),
         orgMachineLimit: call("orgMachineLimit", (opts) =>
           account.getOrgMachineLimit({}, opts),
