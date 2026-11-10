@@ -197,10 +197,20 @@ it.live(
       const directory = yield* directoryFixture;
       expect(run(directory, ["log"]).status).toBe(0);
       const before = storedConfiguration(directory);
+      const editor = join(directory, "parent-editor.mjs");
+      yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.writeFileString(
+          editor,
+          `import { readFileSync, writeFileSync } from "node:fs";
+const file = process.argv[2];
+writeFileSync(file, readFileSync(file, "utf8").replace("effort: high", "effort: high\\nparent_model: unknown/x"));
+`,
+        ),
+      );
       const rejected = run(
         directory,
         ["edit", "agent", "developer"],
-        `sed -i 's|effort: high|effort: high\\nparent_model: unknown/x|'`,
+        `${process.execPath} ${editor}`,
       );
       expect(rejected.status).not.toBe(0);
       expect(rejected.stdout + rejected.stderr).toContain("cannot run as coordinator");
