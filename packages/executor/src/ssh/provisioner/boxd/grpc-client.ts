@@ -1,4 +1,4 @@
-import { Code, ConnectError, createClient, type CallOptions } from "@connectrpc/connect";
+import { ConnectError, createClient, type CallOptions } from "@connectrpc/connect";
 import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
 import { type MachineId, type BoxdRegion } from "@usine/core/worker";
 import { DateTime, Effect, Layer, Option, Redacted, Schema, Semaphore } from "effect";
@@ -16,6 +16,7 @@ import {
   BoxdUnknownRegion,
   type BoxdCreate,
 } from "./client.ts";
+import { failureCode } from "./status.ts";
 
 class RpcRejection extends Schema.TaggedError<RpcRejection, { readonly brand: unique symbol }>()(
   "RpcRejection",
@@ -36,23 +37,6 @@ const machineValue = (value: GetVmResponse) => ({
   id: value.vmId,
   createdAt: Number(value.createdAt),
 });
-const codeName = (code: Code): string =>
-  (Code[code] ?? "Unknown")
-    .replace(/[A-Z]/gu, (letter, index) => `${index === 0 ? "" : "_"}${letter}`)
-    .toUpperCase();
-
-export const failureCode = (failure: ConnectError): string => {
-  if (!failure.isWireError && failure.code === Code.Canceled) return "UNAVAILABLE";
-  const cause = failure.cause;
-  return cause instanceof Error &&
-    "code" in cause &&
-    ["ECONNRESET", "ECONNABORTED", "EPIPE", "ENETUNREACH", "EHOSTUNREACH"].includes(
-      String(cause.code),
-    )
-    ? "UNAVAILABLE"
-    : codeName(failure.code);
-};
-
 /**
  * Generated gRPC calls retain proxy host keys and serving-region metadata omitted by the SDK.
  *

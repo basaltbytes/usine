@@ -75,6 +75,17 @@ message SetAutoSuspendTimeoutRequest { string vm_id = 1; uint32 timeout_secs = 2
 message SetAutoSuspendTimeoutResponse {}
 message SetVmEgressAllowRequest { string vm = 1; repeated string entries = 2; }
 message SetVmEgressAllowResponse { repeated string entries = 1; }
+// The first client chunk carries vm_id and command; later client chunks carry stdin bytes with
+// stdin set. The server sends output chunks, stderr marked by is_stderr, then one chunk with empty
+// data and exit_code.
+message ExecChunk {
+  bytes data = 1;
+  bool stdin = 2;
+  string command = 4;
+  string vm_id = 5;
+  int32 exit_code = 6;
+  bool is_stderr = 10;
+}
 
 service BoxdApi {
   rpc Whoami(WhoamiRequest) returns (WhoamiResponse);
@@ -89,4 +100,5 @@ service BoxdApi {
   rpc SetAutoHibernateTimeout(SetAutoHibernateTimeoutRequest) returns (SetAutoHibernateTimeoutResponse);
   rpc SetAutoSuspendTimeout(SetAutoSuspendTimeoutRequest) returns (SetAutoSuspendTimeoutResponse);
   rpc SetVmEgressAllow(SetVmEgressAllowRequest) returns (SetVmEgressAllowResponse);
+  rpc Exec(stream ExecChunk) returns (stream ExecChunk);
 }

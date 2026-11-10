@@ -16,7 +16,8 @@ import { jsonKey } from "@usine/core/json-key";
 import { BoxdApi as BoxdService } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
 import { BoxdApi, type BoxdCreate } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
-import { boxdApiLayer, failureCode } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { failureCode } from "../../../src/ssh/provisioner/boxd/status.ts";
 
 /** An endpoint override that skips region discovery; the tests fail before any gRPC call. */
 const UNUSED_ENDPOINT = "http://127.0.0.1:1";
