@@ -31,6 +31,8 @@ fi
 : "${USINE_BIN:=usine}"
 : "${USINE_REPOS:=}"
 : "${USINE_APP:=}"
+: "${USINE_GATE_WORKFLOW:=CI}"
+: "${USINE_GATE_JOB:=ci}"
 
 # usine_api METHOD PATH [BODY]
 usine_api() {

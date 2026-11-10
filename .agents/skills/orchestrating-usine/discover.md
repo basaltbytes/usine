@@ -10,6 +10,8 @@ USINE_DIR=        # instance folder on that host
 USINE_BIN=        # absolute path of the usine executable on that host
 USINE_REPOS=      # space-separated owner/name of the managed repositories
 USINE_APP=        # GitHub login of the instance's App, as `app/<slug>`, for `gh pr list --author`
+USINE_GATE_WORKFLOW=CI  # optional: the workflow whose gate job every PR must run
+USINE_GATE_JOB=ci       # optional: that gate job's name
 ```
 
 Work down this list and stop at the first hit for each variable.
