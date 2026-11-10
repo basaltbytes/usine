@@ -1,6 +1,6 @@
 # usine
 
-usine runs loops against many repositories from one headless orchestrator. A loop is a file in git that defines a trigger and the agent run it starts, with any coding-agent harness. The spec is `CONTEXT.md`. The ADRs in `docs/adr/` record why past decisions were made, indexed by the wayfinder map [#1](https://github.com/basaltbytes/usine/issues/1).
+usine runs loops against many repositories from one headless orchestrator. A loop defines a trigger and the agent run it starts, with any coding-agent harness. Configuration is stored in the instance database; files are an import and export format. The spec is `CONTEXT.md`. The ADRs in `docs/adr/` record why past decisions were made, indexed by the wayfinder map [#1](https://github.com/basaltbytes/usine/issues/1).
 
 Before you name a concept, read the glossary in `CONTEXT.md`.
 

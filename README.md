@@ -12,6 +12,7 @@
 <p align="center">Run coding agents on your GitHub issues and pull requests, on your own machines.</p>
 
 <p align="center">
+  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-orange">
   <a href="https://www.npmjs.com/package/@usine/server"><img alt="npm" src="https://img.shields.io/npm/v/@usine/server?label=npm"></a>
   <a href="https://github.com/basaltbytes/usine/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/basaltbytes/usine/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="./LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
@@ -24,6 +25,9 @@
   </a>
 </p>
 
+> [!WARNING]
+> usine is alpha software. The configuration format, the CLI, and the `@usine/*` package APIs can change in any release. Back up the instance folder and read the release notes before you upgrade.
+
 usine is a self-hosted orchestrator for coding agents. It watches the GitHub repositories you register. When an issue or pull request matches a loop you wrote, usine starts Claude Code, Codex, or Pi in a checkout on one of your workers. The agent does the task and usually ends by opening or updating a pull request.
 
 You decide which work starts on its own and which waits for your approval. A web UI shows every run, its transcript, and the runs that need a decision from you.
@@ -32,17 +36,19 @@ This repository is developed with usine. The screenshots on this page come from 
 
 ## Quick start
 
-You need macOS or Linux, Node.js 22.22 or later, and a GitHub account that can create a GitHub App.
+You need macOS or Linux, Node.js 22.22 or later, Git, and a GitHub account that can create a GitHub App.
 
 ```sh
-npm create usine@latest my-factory
-cd my-factory
-npm run usine -- up
+npm install --global @usine/server
+mkdir my-factory && cd my-factory
+usine up
 ```
 
 `usine up` prints a sign-in link and opens setup in your browser. In setup, you create the GitHub App, install it on your repositories, and connect a Claude or ChatGPT login.
 
 The [quickstart](https://docs.usine.dev/get-started/quickstart/) covers the full path, including the agent CLIs to install, up to a first pull request opened by an agent on a scratch repository.
+
+To pin the server version in the instance folder instead of installing it globally, run `npm create usine@latest my-factory`.
 
 ## Loops
 
@@ -135,7 +141,7 @@ usine is a pnpm monorepo. The engine is published as separate packages under the
 | [`@usine/gateway`](./packages/gateway)           | Credential proxy for GitHub and model providers, with an egress allowlist |
 | [`@usine/cloudflare`](./packages/cloudflare)     | The Cloudflare Worker that runs each attempt in a sandbox                |
 
-Packages are 0.x, and their APIs change between minor versions. An instance pins an exact server version and moves it with `usine upgrade`.
+Packages are 0.x, and their APIs change between minor versions.
 
 ## Development
 

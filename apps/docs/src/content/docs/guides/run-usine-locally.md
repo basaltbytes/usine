@@ -46,6 +46,18 @@ While the instance runs, `usine status` from its folder reports its PID, version
 
 To close the terminal while the instance runs, [start it detached](/guides/keep-the-orchestrator-running/). For an always-on machine, [host usine on a Linux server](/guides/host-usine-on-linux/).
 
+## Pin the version in the instance folder
+
+To keep the server version with the instance instead of installing it globally, create the folder with `create-usine`:
+
+```sh
+npm create usine@latest my-factory
+cd my-factory
+npm run usine -- up
+```
+
+The command writes a `package.json` that pins an exact `@usine/server` version and installs it in the folder. Run the CLI through the package manager, such as `npm run usine -- status`. `usine upgrade` moves the pin; see [Upgrade an instance](/guides/upgrade-an-instance/).
+
 ## Event-loop delay
 
 While `usine up` runs, the server logs `Event-loop delay` once per minute with `p99Millis`, `maxMillis`, and `intervalSeconds`. The monitor samples every 10 ms and resets after each report. Check `maxMillis` for isolated stalls and `p99Millis` for sustained delay. Standalone SQLite reads and run-reader snapshots run on a read-only worker connection so transcript appends and HTTP health responses can continue during long overview, board, and run-list queries. Each snapshot reads related records from one committed database state. Write transactions use the main connection to preserve atomic reads and writes.
