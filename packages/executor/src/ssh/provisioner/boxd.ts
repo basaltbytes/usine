@@ -41,6 +41,9 @@ const reasonOf = (code: string): MachineUnavailableReason => {
 
 const terminalStates = new Set(["stopped", "failed", "destroyed"]);
 
+/** How long boxd takes to enforce an egress allowlist after `SetVmEgressAllow` returns. */
+const EGRESS_IN_FORCE = "1 second";
+
 /** The `BoxdCallError` operation of a failure to apply `provisioner.egress`. */
 const EGRESS_OPERATION = "setEgressAllow";
 
@@ -214,6 +217,8 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
             yield* restrictEgress(result.id, settings.egress.value);
           yield* api.setAutoHibernateTimeout(result.id, 0);
           yield* api.setAutoSuspendTimeout(result.id, 0);
+          // The timer calls count toward the time boxd takes to enforce the allowlist.
+          if (Option.isSome(settings.egress)) yield* Effect.sleep(EGRESS_IN_FORCE);
         }).pipe(
           Effect.onError(() =>
             api.destroy(result.id).pipe(

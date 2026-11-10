@@ -11,7 +11,7 @@ import {
   MachineId,
   WorkerName,
 } from "@usine/core/worker";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { Clock, Effect, Option, Redacted, Schema } from "effect";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
 import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
@@ -592,7 +592,7 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide(boxd.layer));
     },
   );
-  it.effect(
+  it.live(
     "restricts a new machine's egress before anything else and reapplies the setting on reuse",
     () => {
       const boxd = fakeBoxd();
@@ -601,7 +601,10 @@ describe("boxd driver", () => {
       );
       return Effect.gen(function* () {
         const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress: Option.some(entries) }));
+        const started = yield* Clock.currentTimeMillis;
         const { id } = yield* driver.create("pool-aaaaaaaa", tags);
+        const returned = yield* Clock.currentTimeMillis;
+        assert.isAtLeast(returned - started, 1000, "waits until boxd enforces the allowlist");
         assert.deepStrictEqual(boxd.state.operations.get(id), [
           "create",
           "egress",
