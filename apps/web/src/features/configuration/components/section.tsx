@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { Page, PageHeading } from "~/components/page";
 import { StatusBadge } from "~/components/status-badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
@@ -86,15 +86,20 @@ type DetailSectionProps = {
   readonly children: ReactNode;
 };
 
-export const DetailSection = ({ title, aside, children }: DetailSectionProps) => (
-  <section className="flex min-w-0 flex-col gap-3">
-    <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h2 className="text-md font-semibold">{title}</h2>
-      {aside !== undefined && <p className="text-xs text-muted-foreground">{aside}</p>}
-    </header>
-    {children}
-  </section>
-);
+export const DetailSection = ({ title, aside, children }: DetailSectionProps) => {
+  const id = useId();
+  return (
+    <section aria-labelledby={id} className="flex min-w-0 flex-col gap-3">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 id={id} className="text-md font-semibold">
+          {title}
+        </h2>
+        {aside !== undefined && <p className="text-xs text-muted-foreground">{aside}</p>}
+      </header>
+      {children}
+    </section>
+  );
+};
 
 type FactsProps = { readonly children: ReactNode };
 

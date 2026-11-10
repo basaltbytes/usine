@@ -1,6 +1,6 @@
 import { MachineStarts } from "@usine/executor";
 import { AgentName } from "@usine/core/agent";
-import { BrainSpec } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { BillingPool, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -158,6 +158,55 @@ export class UntimedTasksView extends Schema.Class<
 }) {}
 
 /**
+ * The merged tasks whose first Attempt by one Agent ran with one harness and model. A task is
+ * mixed if a later Attempt by the Agent on the task ran with another harness or model; it still
+ * counts for the first. Reasoning effort doesn't split the tasks.
+ */
+export class ModelOutcomeView extends Schema.Class<
+  ModelOutcomeView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/ModelOutcomeView">
+>("@usine/orchestrator/ModelOutcomeView")({
+  /** The harness of the agent's first attempt on each task. */
+  harness: Harness,
+  /** The model of the agent's first attempt on each task. */
+  model: ModelId,
+  /** The number of merged tasks attributed to this harness and model. */
+  tasks: PositiveCount,
+  /** The tasks where the agent also ran with another harness or model. */
+  mixed: Count,
+  /** The tasks with no loop that succeeded twice on one of their items: one review round. */
+  firstTimeRight: Count,
+  /**
+   * The median of each task's rounds: the most successful runs of one loop on one of the task's
+   * items.
+   */
+  medianRounds: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The median time from each task's first attempt, by any agent, to its merge. */
+  medianMillis: Milliseconds,
+  /** The tasks with token reports for every run that has an attempt. */
+  metered: Count,
+  /** The median tokens per metered task, all loops summed, or null without one. */
+  medianTokens: Schema.NullOr(TokenCount),
+  /** The median price per priced task, all loops summed, or null without one. */
+  cost: Schema.NullOr(TaskCostView),
+}) {}
+
+/** The models that one Agent ran with on the tasks done, by the Agent's first Attempt per task. */
+export class AgentModelsView extends Schema.Class<
+  AgentModelsView,
+  Brand.Brand<"@usine/orchestrator/operator/statistics/view/AgentModelsView">
+>("@usine/orchestrator/AgentModelsView")({
+  /** The agent selected for the attempts. */
+  agent: AgentName,
+  /** The tasks where this agent ran an attempt. */
+  tasks: PositiveCount,
+  /** The tasks whose first attempt this agent ran, such as a developer's first implementation. */
+  opened: Count,
+  /** By task count, highest first, then by harness and model. */
+  models: Schema.Array(ModelOutcomeView),
+}) {}
+
+/**
  * The tasks done in `window`: a task is done when its pull request merges, and counts if it has a
  * Run. Runs that a newer Event or an Item change canceled before an Attempt are left out.
  */
@@ -205,6 +254,11 @@ export class StatisticsView extends Schema.Class<
   untimed: Schema.NullOr(UntimedTasksView),
   /** The tasks with a Run that has an Attempt but no token report, left out of `tokens`. */
   unmetered: Count,
+  /**
+   * The agents that ran an attempt on the tasks, by `opened`, then by `tasks`, highest first, then
+   * by name.
+   */
+  agents: Schema.Array(AgentModelsView).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** The median of at least one duration. */

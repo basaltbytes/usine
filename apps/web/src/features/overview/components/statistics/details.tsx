@@ -1,3 +1,4 @@
+import { spanLabel, windowPhrase } from "~/lib/strings";
 import {
   Table,
   TableBody,
@@ -37,8 +38,6 @@ import {
   oneAttemptShare,
   outcomeTotal,
   percentLabel,
-  spanLabel,
-  windowPhrase,
 } from "~/features/overview/strings";
 import { cn } from "~/lib/utils";
 

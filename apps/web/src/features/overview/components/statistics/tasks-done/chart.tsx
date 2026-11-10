@@ -1,8 +1,9 @@
+import { spanLabel } from "~/lib/strings";
 import type { StatisticsView } from "@usine/orchestrator/operator";
-import { ChartTable } from "~/features/overview/components/statistics/chart-table";
+import { ChartTable } from "~/components/statistics/chart-table";
 import { TaskScatter } from "~/features/overview/components/statistics/tasks-done/scatter";
 import { WeeklyTasks } from "~/features/overview/components/statistics/tasks-done/weekly";
-import { instantDayLabel, spanLabel } from "~/features/overview/strings";
+import { instantDayLabel } from "~/features/overview/strings";
 
 type TasksDoneChartProps = { readonly statistics: StatisticsView };
 

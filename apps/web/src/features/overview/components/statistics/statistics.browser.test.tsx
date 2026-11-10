@@ -14,7 +14,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
-import { statisticsQuery } from "~/features/overview/queries";
+import { statisticsQuery } from "~/lib/statistics/queries";
 import { routeTree } from "~/route-tree.gen";
 import {
   deskFixture,
@@ -162,6 +162,21 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
       ),
     )
     .toBeVisible();
+  await expect
+    .element(statistics.getByText("developer: first attempt on 12 of 12 tasks", { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(
+      statistics.getByText(
+        "gpt-5.6-sol passed the first review most often: 71% of 7 tasks, against 40% of 5 tasks for claude-opus-5-5",
+      ),
+    )
+    .toBeVisible();
+  await expect
+    .element(
+      statistics.getByRole("table", { name: "Tasks that passed the first review, per model" }),
+    )
+    .toBeInTheDocument();
   expect(statistics.getByText(/p90|9 in 10/u).elements()).toHaveLength(0);
   expect((await commands.statisticsRequests()).runs).toEqual([]);
 

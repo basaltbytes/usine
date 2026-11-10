@@ -54,6 +54,7 @@ import {
   WorkerSlotsView,
   WorkerView,
   LocalWorkerAccess,
+  AgentModelsView,
   AgentStatisticsView,
   AttemptCountView,
   BrainStatisticsView,
@@ -62,6 +63,7 @@ import {
   LoopRunTimeView,
   LoopShareView,
   LoopStatisticsView,
+  ModelOutcomeView,
   NeedsAttentionPeriodView,
   NeedsAttentionView,
   OutcomeCountsView,
@@ -579,6 +581,65 @@ export const statisticsFixture = (now: number, window: "7d" | "30d") => {
     untimed:
       window === "7d" ? null : UntimedTasksView.make({ tasks: 3, before: utcDay(from + 12 * DAY) }),
     unmetered: 0,
+    agents:
+      window === "7d"
+        ? []
+        : [
+            AgentModelsView.make({
+              agent: AgentName.make("developer"),
+              tasks: 12,
+              opened: 12,
+              models: [
+                ModelOutcomeView.make({
+                  harness: Harness.make("codex"),
+                  model: ModelId.make("gpt-5.6-sol"),
+                  tasks: 7,
+                  mixed: 0,
+                  firstTimeRight: 5,
+                  medianRounds: 1,
+                  medianMillis: 3 * HOUR,
+                  metered: 7,
+                  medianTokens: TokenCount.make(540_000),
+                  cost: TaskCostView.make({
+                    tasks: 7,
+                    medianUsd: UsdAmount.make(2.4),
+                    estimate: true,
+                  }),
+                }),
+                ModelOutcomeView.make({
+                  harness: Harness.make("claude"),
+                  model: ModelId.make("claude-opus-5-5"),
+                  tasks: 5,
+                  mixed: 1,
+                  firstTimeRight: 2,
+                  medianRounds: 2,
+                  medianMillis: 5 * HOUR,
+                  metered: 4,
+                  medianTokens: TokenCount.make(910_000),
+                  cost: null,
+                }),
+              ],
+            }),
+            AgentModelsView.make({
+              agent: AgentName.make("reviewer"),
+              tasks: 12,
+              opened: 0,
+              models: [
+                ModelOutcomeView.make({
+                  harness: Harness.make("claude"),
+                  model: ModelId.make("claude-opus-4-1"),
+                  tasks: 12,
+                  mixed: 0,
+                  firstTimeRight: 7,
+                  medianRounds: 1,
+                  medianMillis: 4 * HOUR,
+                  metered: 12,
+                  medianTokens: TokenCount.make(180_000),
+                  cost: null,
+                }),
+              ],
+            }),
+          ],
   });
 };
 

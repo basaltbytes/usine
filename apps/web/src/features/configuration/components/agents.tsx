@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { agentCopy, plural } from "~/features/configuration/strings";
+import { AgentModels } from "~/features/configuration/components/agent-models";
 import { FileError } from "~/features/configuration/components/file-error";
 import {
   ConfigurationPage,
@@ -217,6 +218,7 @@ export const AgentDetail = ({ name, configuration }: AgentDetailProps) => {
           <DetailSection title="Persona" aside="Sent to the agent with every task">
             <Markdown className="max-w-[72ch] text-md">{agent.persona}</Markdown>
           </DetailSection>
+          <AgentModels agent={agent} />
         </DetailColumns>
       </ConfigurationPage>
     );

@@ -1,3 +1,4 @@
+import { spanLabel } from "~/lib/strings";
 import type {
   AttemptCountView,
   NeedsAttentionPeriodView,
@@ -15,13 +16,12 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "~/components/ui/chart";
-import { ChartTable } from "~/features/overview/components/statistics/chart-table";
+import { ChartTable } from "~/components/statistics/chart-table";
 import {
   attemptCountLabel,
   countLabel,
   percentLabel,
   periodLabel,
-  spanLabel,
   utcDayLabel,
 } from "~/features/overview/strings";
 

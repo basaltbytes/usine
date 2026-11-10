@@ -41254,6 +41254,12 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_orchestrator_AgentModelsViewEncoded"
+            }
           }
         },
         "required": [
@@ -41273,7 +41279,140 @@
           "time",
           "tokens",
           "untimed",
-          "unmetered"
+          "unmetered",
+          "agents"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_AgentModelsViewEncoded": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "opened": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/_usine_orchestrator_ModelOutcomeViewEncoded"
+            }
+          }
+        },
+        "required": [
+          "agent",
+          "tasks",
+          "opened",
+          "models"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_ModelOutcomeViewEncoded": {
+        "type": "object",
+        "properties": {
+          "harness": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "model": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "mixed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "firstTimeRight": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "medianRounds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "medianMillis": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "metered": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "medianTokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/_usine_orchestrator_TaskCostViewEncoded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "harness",
+          "model",
+          "tasks",
+          "mixed",
+          "firstTimeRight",
+          "medianRounds",
+          "medianMillis",
+          "metered",
+          "medianTokens",
+          "cost"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_TaskCostViewEncoded": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "medianUsd": {
+            "type": "number",
+            "minimum": 0
+          },
+          "estimate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tasks",
+          "medianUsd",
+          "estimate"
         ],
         "additionalProperties": false
       },
@@ -41331,29 +41470,6 @@
           "medianTokens",
           "loops",
           "cost"
-        ],
-        "additionalProperties": false
-      },
-      "_usine_orchestrator_TaskCostViewEncoded": {
-        "type": "object",
-        "properties": {
-          "tasks": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "medianUsd": {
-            "type": "number",
-            "minimum": 0
-          },
-          "estimate": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "tasks",
-          "medianUsd",
-          "estimate"
         ],
         "additionalProperties": false
       },

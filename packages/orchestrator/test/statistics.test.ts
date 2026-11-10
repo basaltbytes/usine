@@ -108,6 +108,8 @@ interface AttemptPlan {
   readonly endedAt?: string;
   readonly start?: AttemptStart;
   readonly memoryKills?: number;
+  /** The agent selected for the attempt, if not the run's. */
+  readonly agent?: Agent;
 }
 
 const attempts = (runId: string, agent: Agent, plans: ReadonlyArray<AttemptPlan>) =>
@@ -118,9 +120,9 @@ const attempts = (runId: string, agent: Agent, plans: ReadonlyArray<AttemptPlan>
       stepName: StepName.make("run"),
       worker: WorkerName.make(plan.worker),
       number: AttemptNumber.make(index + 1),
-      brain: agent.brain,
+      brain: (plan.agent ?? agent).brain,
       task: AttemptTask.make("Work on it."),
-      agent: agent.name,
+      agent: (plan.agent ?? agent).name,
       operatorIntervened: false,
       outOfMemory:
         plan.memoryKills === undefined
@@ -591,6 +593,303 @@ describe("Task statistics", () => {
     assert.deepStrictEqual(
       [empty.medianMillis, empty.time, empty.tokens, empty.untimed],
       [null, null, null, null],
+    );
+  });
+});
+
+describe("Model statistics", () => {
+  const ran = (
+    id: string,
+    item: number,
+    loop: LoopName,
+    agent: Agent,
+    day: string,
+    hour: number,
+  ): RunSummary => {
+    const start = `${day}T${String(hour).padStart(2, "0")}`;
+    const end = `${day}T${String(hour + 1).padStart(2, "0")}`;
+    return summary({
+      id,
+      item,
+      loop,
+      agent,
+      state: RunState.Succeeded.make(),
+      openedAt: `${start}:00`,
+      closedAt: `${end}:00`,
+      attempts: [
+        { worker: "w1", startedAt: `${start}:00`, outcome: succeeded, endedAt: `${end}:00` },
+      ],
+    });
+  };
+  const developerOnGpt = agentOf("developer", gpt);
+  const firstTry = ran("first-try", 30, startDev, developer, "21", 8);
+  const view = taskStatisticsView({
+    window: "7d",
+    now,
+    usage: new Map([
+      [firstTry.run.id, usageOf([session("first-try/1", "claudePlan", 10_000, 1)])],
+      [
+        RunId.make("first-try-review"),
+        usageOf([session("first-try-review/1", "apiKeys", 5_000, 0.5, gpt)]),
+      ],
+    ]),
+    tasks: [
+      mergedTask(30, at("21T12:00"), [
+        firstTry,
+        ran("first-try-review", 31, reviewPr, reviewer, "21", 9),
+      ]),
+      // A second review round, after a fix that the developer ran on another model.
+      mergedTask(32, at("22T18:00"), [
+        ran("two-rounds", 32, startDev, developer, "22", 8),
+        ran("two-rounds-review", 33, reviewPr, reviewer, "22", 9),
+        ran("two-rounds-fix", 33, actOnFindings, developerOnGpt, "22", 10),
+        ran("two-rounds-second-review", 33, reviewPr, reviewer, "22", 11),
+      ]),
+      mergedTask(34, at("23T10:00"), [
+        ran("on-gpt", 34, startDev, developerOnGpt, "23", 8),
+        ran("on-gpt-review", 35, reviewPr, reviewer, "23", 9),
+      ]),
+      // Merged before the window.
+      mergedTask(36, at("10T10:00"), [ran("early", 36, startDev, developerOnGpt, "10", 8)]),
+    ],
+  });
+
+  it("attributes each task to the model of the agent's first attempt on it, and marks it mixed", () => {
+    assert.deepStrictEqual(
+      view.agents.map(({ agent, tasks, opened, models }) => [
+        agent,
+        tasks,
+        opened,
+        models.map(({ harness, model, tasks, mixed }) => [harness, model, tasks, mixed]),
+      ]),
+      [
+        [
+          "developer",
+          3,
+          3,
+          [
+            ["claude", "claude-opus", 2, 1],
+            ["codex", "gpt-5", 1, 0],
+          ],
+        ],
+        ["reviewer", 3, 0, [["codex", "gpt-5", 3, 0]]],
+      ],
+    );
+  });
+
+  it("measures review rounds, time to merge, and usage per merged task, all loops summed", () => {
+    const [opusTasks, gptTasks] = view.agents[0]?.models ?? [];
+    assert.deepStrictEqual(
+      [opusTasks, gptTasks].map((outcome) => [
+        outcome?.firstTimeRight,
+        outcome?.medianRounds,
+        outcome?.medianMillis,
+        outcome?.metered,
+        outcome?.medianTokens,
+        outcome?.cost === null ? null : { ...outcome?.cost },
+      ]),
+      [
+        // From the first attempt to the merge: 4 hours and 10 hours.
+        [1, 1.5, 7 * HOUR, 1, 15_000, { tasks: 1, medianUsd: UsdAmount.make(1.5), estimate: true }],
+        [1, 1, 2 * HOUR, 0, null, null],
+      ],
+    );
+    // From each task's first attempt, by any agent, not from the reviewer's: 4, 10, and 2 hours.
+    assert.deepStrictEqual(
+      view.agents[1]?.models.map(({ model, medianMillis }) => [model, medianMillis]),
+      [["gpt-5", 4 * HOUR]],
+    );
+  });
+
+  it("counts only successful runs as review rounds", () => {
+    const unsuccessful = (id: string, state: RunState.RunState, outcome: AttemptOutcome) =>
+      summary({
+        id,
+        item: 31,
+        loop: reviewPr,
+        agent: reviewer,
+        state,
+        openedAt: "21T09:00",
+        closedAt: "21T09:30",
+        attempts: [{ worker: "w1", startedAt: "21T09:00", outcome, endedAt: "21T09:30" }],
+      });
+    const withUnsuccessful = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        // A failed review and a canceled one before the review that succeeds.
+        mergedTask(30, at("21T12:00"), [
+          firstTry,
+          unsuccessful("failed-review", RunState.Failed.make(), failed("No login")),
+          unsuccessful("canceled-review", operatorCanceled, AttemptCanceled.make()),
+          ran("first-try-review", 31, reviewPr, reviewer, "21", 9),
+        ]),
+      ],
+    });
+    const rounds = (statistics: typeof view) => [
+      statistics.firstTimeRight,
+      statistics.agents.map(({ agent, models }) => [
+        agent,
+        models.map(({ model, firstTimeRight, medianRounds }) => [
+          model,
+          firstTimeRight,
+          medianRounds,
+        ]),
+      ]),
+    ];
+    assert.deepStrictEqual(rounds(withUnsuccessful), [
+      1,
+      [
+        ["developer", [["claude-opus", 1, 1]]],
+        ["reviewer", [["gpt-5", 1, 1]]],
+      ],
+    ]);
+  });
+
+  it("orders attempts by their start, not by run, and does not split tasks by reasoning effort", () => {
+    const developerOnLowEffort = agentOf("developer", BrainSpec.make({ ...opus, effort: "low" }));
+    const ordered = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        // The first run opened first, but its attempt started after the second run's attempt.
+        mergedTask(40, at("24T14:00"), [
+          summary({
+            id: "queued-first",
+            item: 40,
+            loop: startDev,
+            agent: developer,
+            state: RunState.Succeeded.make(),
+            openedAt: "24T08:00",
+            closedAt: "24T12:00",
+            attempts: [
+              { worker: "w1", startedAt: "24T11:00", outcome: succeeded, endedAt: "24T12:00" },
+            ],
+          }),
+          ran("started-first", 41, actOnFindings, developerOnGpt, "24", 9),
+        ]),
+        // The same model at another reasoning effort.
+        mergedTask(42, at("23T20:00"), [
+          ran("high-effort", 42, startDev, developer, "23", 8),
+          ran("low-effort", 43, actOnFindings, developerOnLowEffort, "23", 10),
+        ]),
+      ],
+    });
+    assert.deepStrictEqual(
+      ordered.agents.map(({ agent, models }) => [
+        agent,
+        models.map(({ model, tasks, mixed, medianMillis }) => [model, tasks, mixed, medianMillis]),
+      ]),
+      [
+        [
+          "developer",
+          [
+            // 09:00 to 14:00, from the attempt that started first.
+            ["claude-opus", 1, 0, 12 * HOUR],
+            ["gpt-5", 1, 1, 5 * HOUR],
+          ],
+        ],
+      ],
+    );
+  });
+
+  it("attributes each attempt to its own agent after an edit and retry picks another", () => {
+    const fallback = agentOf("fallback", gpt);
+    const retried = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        mergedTask(44, at("24T12:00"), [
+          summary({
+            id: "retried",
+            item: 44,
+            loop: startDev,
+            // The run's agent after the amendment.
+            agent: fallback,
+            state: RunState.Succeeded.make(),
+            openedAt: "24T08:00",
+            closedAt: "24T10:00",
+            attempts: [
+              {
+                worker: "w1",
+                startedAt: "24T08:00",
+                outcome: failed("Tests fail"),
+                endedAt: "24T09:00",
+                agent: developer,
+              },
+              { worker: "w1", startedAt: "24T09:00", outcome: succeeded, endedAt: "24T10:00" },
+            ],
+          }),
+        ]),
+      ],
+    });
+    assert.deepStrictEqual(
+      retried.agents.map(({ agent, tasks, opened, models }) => [
+        agent,
+        tasks,
+        opened,
+        models.map(({ harness, model, tasks, mixed }) => [harness, model, tasks, mixed]),
+      ]),
+      [
+        ["developer", 1, 1, [["claude", "claude-opus", 1, 0]]],
+        ["fallback", 1, 0, [["codex", "gpt-5", 1, 0]]],
+      ],
+    );
+  });
+
+  it("orders agents by tasks opened, then by tasks, and models by tasks", () => {
+    const auditor = agentOf("auditor", gpt);
+    const triage = agentOf("triage", opus);
+    const ordered = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        mergedTask(50, at("24T12:00"), [
+          ran("ordered-gpt", 50, startDev, developerOnGpt, "24", 8),
+          ran("ordered-gpt-review", 51, reviewPr, reviewer, "24", 9),
+          ran("ordered-gpt-audit", 51, reviewPr, auditor, "24", 10),
+        ]),
+        mergedTask(52, at("23T12:00"), [
+          ran("ordered-gpt-again", 52, startDev, developerOnGpt, "23", 8),
+          ran("ordered-gpt-again-review", 53, reviewPr, reviewer, "23", 9),
+        ]),
+        mergedTask(54, at("22T12:00"), [
+          ran("ordered-opus", 54, startDev, developer, "22", 8),
+          ran("ordered-opus-review", 55, reviewPr, reviewer, "22", 9),
+        ]),
+        mergedTask(56, at("21T12:00"), [
+          ran("ordered-triage", 56, startDev, triage, "21", 8),
+          ran("ordered-triage-review", 57, reviewPr, reviewer, "21", 9),
+        ]),
+      ],
+    });
+    assert.deepStrictEqual(
+      ordered.agents.map(({ agent, opened, tasks, models }) => [
+        agent,
+        opened,
+        tasks,
+        models.map(({ model, tasks }) => [model, tasks]),
+      ]),
+      [
+        // The developer has fewer tasks than the reviewer, but opened more.
+        [
+          "developer",
+          3,
+          3,
+          [
+            ["gpt-5", 2],
+            ["claude-opus", 1],
+          ],
+        ],
+        ["triage", 1, 1, [["claude-opus", 1]]],
+        // The reviewer has more tasks than the auditor, whose name sorts first.
+        ["reviewer", 0, 4, [["gpt-5", 4]]],
+        ["auditor", 0, 1, [["gpt-5", 1]]],
+      ],
     );
   });
 });

@@ -1,3 +1,4 @@
+import { spanLabel } from "~/lib/strings";
 import type { StatisticsView } from "@usine/orchestrator/operator";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip } from "~/components/ui/chart";
@@ -8,7 +9,7 @@ import {
   ladderLabel,
   tooltipClass,
 } from "~/features/overview/lib/statistics/chart";
-import { periodLabel, spanLabel, utcDayLabel } from "~/features/overview/strings";
+import { periodLabel, utcDayLabel } from "~/features/overview/strings";
 
 type WeeklyTasksProps = { readonly statistics: StatisticsView };
 

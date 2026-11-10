@@ -6,8 +6,10 @@ import type {
   ConfigurationView,
   ContainerView,
   PreflightCheckView,
+  StatisticsWindow,
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
+import { windowPhrase } from "~/lib/strings";
 
 export const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -227,7 +229,14 @@ export const agentCopy = {
   add: "Choose New to add an agent.",
   parentOverride: "Set on this agent",
   parentModelUnset: "Not set on this agent or in settings",
+  models: "Models",
+  modelsNote: "Merged tasks, by the model of the first attempt with this agent",
+  modelsError: "Could not load the model statistics",
 };
+
+/** Returns text such as `No merged task with an attempt by this agent in the last 30 days`. */
+export const noModelTasksLine = (window: StatisticsWindow): string =>
+  `No merged task with an attempt by this agent ${windowPhrase(window)}`;
 
 export const addLoop = "Choose New to add a loop. New loops start paused.";
 

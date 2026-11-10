@@ -16,6 +16,8 @@ import { configurationQuery } from "~/lib/configuration/queries";
 import { dayTimeLabel } from "~/lib/strings";
 import { routeTree } from "~/route-tree.gen";
 import { configurationFixture } from "~/lib/configuration/fixture";
+import { statisticsFixture } from "~/lib/desk/fixture";
+import { statisticsQuery } from "~/lib/statistics/queries";
 import { workersQuery } from "./queries";
 import "~/index.css";
 
@@ -160,4 +162,53 @@ it("keeps a provisioned worker's Machines table within the main column beside th
     "For",
   ]);
   fitsWithoutScrolling(machines);
+});
+
+it("compares the models of an agent by merged task and marks the configured model", async () => {
+  queryClient.setQueryData(statisticsQuery("30d").queryKey, statisticsFixture(Date.now(), "30d"));
+  await mount("/configuration/agents/developer", 1280);
+  const models = page.getByRole("region", { name: "Models" });
+  await expect
+    .element(
+      models.getByText(
+        "gpt-5.6-sol passed the first review most often: 71% of 7 tasks, against 40% of 5 tasks for claude-opus-5-5",
+      ),
+    )
+    .toBeVisible();
+  await expect.element(models.getByText("Configured", { exact: true })).toBeVisible();
+  expect(
+    models
+      .getByRole("listitem")
+      .filter({ hasText: "Configured" })
+      .elements()
+      .map(({ textContent }) => textContent.startsWith("gpt-5.6-sol")),
+  ).toEqual([true]);
+  await expect
+    .element(models.getByText("5 tasks merged, 1 mixed with another model", { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(
+      models.getByText(
+        "Median per task: 910K tokens from 4 tasks, and 5 h from first attempt to merge",
+        { exact: true },
+      ),
+    )
+    .toBeVisible();
+  // The reviewer's model is not one of the developer's.
+  expect(models.getByText("claude-opus-4-1").elements()).toEqual([]);
+  fitsWithoutScrolling(models.element());
+});
+
+it("shows each agent its own models", async () => {
+  queryClient.setQueryData(statisticsQuery("30d").queryKey, statisticsFixture(Date.now(), "30d"));
+  await mount("/configuration/agents/reviewer", 1280);
+  const models = page.getByRole("region", { name: "Models" });
+  await expect.element(models.getByText("12 tasks merged", { exact: true })).toBeVisible();
+  expect(
+    models
+      .getByRole("listitem")
+      .elements()
+      .map(({ textContent }) => textContent.startsWith("claude-opus-4-1")),
+  ).toEqual([true]);
+  expect(models.getByText("gpt-5.6-sol").elements()).toEqual([]);
 });
