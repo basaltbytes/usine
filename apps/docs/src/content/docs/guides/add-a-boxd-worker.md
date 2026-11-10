@@ -7,7 +7,7 @@ Add an SSH worker that restores a boxd machine for each attempt.
 
 ## Prerequisites
 
-Instance admin access, a boxd account with a payment method and available machine slots, the boxd CLI, and an SSH key pair. The snapshot and machines must be in the same region. A region is a region id that `boxd regions` lists: `fra` (Frankfurt) and `nyc` (New York) are the hosted regions, and a boxd deployment in your own cloud account has its own id.
+Instance admin access, a boxd account with a payment method and available machine slots, the boxd CLI, and an SSH key pair. The snapshot and machines must be in the same region. A region is the id of a region that boxd enables for your org. `boxd manage regions` lists the org's regions and whether each is enabled, and `boxd manage regions --json` prints them as JSON. `fra` (Frankfurt) and `nyc` (New York) are the hosted regions, and a boxd deployment in your own cloud account has its own id. Your org's home region is always enabled; to use another region, ask boxd to enable it with `boxd manage regions request <id>`.
 
 Use a gateway for subscription credentials. Without a gateway, configure API keys for the rostered harnesses.
 
@@ -43,7 +43,7 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 ## Check the result
 
-Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id, preflight fails and names the ids that boxd lists.
+Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists.
 
 boxd serves SSH through its proxy, and the machine runs no sshd. usine sends gateway tokens and API keys over standard input, which the proxy carries. Gateway setup configures the host entries and the HTTP socket units.
 

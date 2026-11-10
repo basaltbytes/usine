@@ -192,7 +192,7 @@ These fields also belong to `provisioner` when `provider` is `boxd`.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `region` | region id | `fra` | Machine and snapshot region: a lowercase region id from `boxd regions`. `fra` (Frankfurt) and `nyc` (New York) are the hosted regions. Preflight fails if boxd lists no region with this id and names the ids it lists. |
+| `region` | region id | `fra` | Machine and snapshot region: the lowercase id of a region that boxd enables for your org, as listed by `boxd manage regions`. `fra` (Frankfurt) and `nyc` (New York) are the hosted regions. Preflight fails if boxd lists no region with this id for the org, including a region that isn't enabled, and names the ids it lists. |
 | `size` | `1x4`, `2x8`, `4x16`, or `8x32` | `2x8` | Required captured snapshot size, in vCPU × GiB. Preflight checks it; creation restores the captured size. |
 | `snapshot` | lowercase name, 1–63 characters | required | Ready snapshot containing the worker public key and attempt image. |
 | `isolated` | boolean | `true` | Excludes the in-machine boxd CLI, integrations, agent logins, and default private network. A snapshot's isolation is inherited even when this is false. |

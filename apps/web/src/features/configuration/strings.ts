@@ -380,7 +380,8 @@ export const workerFormCopy = {
   sshUser: "SSH user",
   size: "Machine size",
   region: "Region",
-  regionHint: "A region id from boxd regions. fra and nyc are the hosted regions.",
+  regionHint:
+    "A region enabled for your boxd org, as listed by boxd manage regions. fra and nyc are the hosted regions.",
   isolated: "Isolated",
   domain: "Gateway domain",
   gatewayDestination: "Gateway SSH destination",

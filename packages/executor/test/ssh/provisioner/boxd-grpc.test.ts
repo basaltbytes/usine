@@ -574,3 +574,36 @@ it.effect("builds another Worker's driver while a boxd region lookup is pending"
     yield* Fiber.interrupt(boxd);
   }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
 );
+
+it.effect("builds a boxd Worker's driver once for concurrent callers", () =>
+  Effect.gen(function* () {
+    const boxd = fakeBoxd();
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    let builds = 0;
+    const drivers = yield* machineDriversFor({
+      instance: "regions-test",
+      settings: {
+        boxdClient: () => {
+          builds += 1;
+          return Layer.effect(
+            BoxdApi,
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as(boxd.api),
+            ),
+          );
+        },
+      },
+    });
+    const entry = { address: boxdAddress, gateway: Option.none(), machine: Option.none() };
+    const first = yield* drivers.forEntry(entry).pipe(Effect.forkChild);
+    yield* Deferred.await(started);
+    const second = yield* drivers.forEntry(entry).pipe(Effect.forkChild);
+    yield* Effect.yieldNow;
+    yield* Deferred.succeed(release, undefined);
+    const [one, two] = yield* Fiber.joinAll([first, second]);
+    assert.strictEqual(builds, 1);
+    assert.strictEqual(one, two);
+  }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
+);
