@@ -1688,6 +1688,8 @@ export {
   TaskCostView,
   TaskTokensView,
   UntimedTasksView,
+  ModelOutcomeView,
+  AgentModelsView,
   StatisticsView,
   DurationSummaryView,
   OutcomeCountsView,

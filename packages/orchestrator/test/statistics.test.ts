@@ -595,6 +595,106 @@ describe("Task statistics", () => {
   });
 });
 
+describe("Model statistics", () => {
+  const ran = (
+    id: string,
+    item: number,
+    loop: LoopName,
+    agent: Agent,
+    day: string,
+    hour: number,
+  ): RunSummary => {
+    const start = `${day}T${String(hour).padStart(2, "0")}`;
+    const end = `${day}T${String(hour + 1).padStart(2, "0")}`;
+    return summary({
+      id,
+      item,
+      loop,
+      agent,
+      state: RunState.Succeeded.make(),
+      openedAt: `${start}:00`,
+      closedAt: `${end}:00`,
+      attempts: [
+        { worker: "w1", startedAt: `${start}:00`, outcome: succeeded, endedAt: `${end}:00` },
+      ],
+    });
+  };
+  const developerOnGpt = agentOf("developer", gpt);
+  const firstTry = ran("first-try", 30, startDev, developer, "21", 8);
+  const view = taskStatisticsView({
+    window: "7d",
+    now,
+    usage: new Map([
+      [firstTry.run.id, usageOf([session("first-try/1", "claudePlan", 10_000, 1)])],
+      [
+        RunId.make("first-try-review"),
+        usageOf([session("first-try-review/1", "apiKeys", 5_000, 0.5, gpt)]),
+      ],
+    ]),
+    tasks: [
+      mergedTask(30, at("21T12:00"), [
+        firstTry,
+        ran("first-try-review", 31, reviewPr, reviewer, "21", 9),
+      ]),
+      // A second review round, after a fix that the developer ran on another model.
+      mergedTask(32, at("22T18:00"), [
+        ran("two-rounds", 32, startDev, developer, "22", 8),
+        ran("two-rounds-review", 33, reviewPr, reviewer, "22", 9),
+        ran("two-rounds-fix", 33, actOnFindings, developerOnGpt, "22", 10),
+        ran("two-rounds-second-review", 33, reviewPr, reviewer, "22", 11),
+      ]),
+      mergedTask(34, at("23T10:00"), [
+        ran("on-gpt", 34, startDev, developerOnGpt, "23", 8),
+        ran("on-gpt-review", 35, reviewPr, reviewer, "23", 9),
+      ]),
+      // Merged before the window.
+      mergedTask(36, at("10T10:00"), [ran("early", 36, startDev, developerOnGpt, "10", 8)]),
+    ],
+  });
+
+  it("attributes each task to the model of the agent's first attempt on it, and marks it mixed", () => {
+    assert.deepStrictEqual(
+      view.agents.map(({ agent, tasks, opened, models }) => [
+        agent,
+        tasks,
+        opened,
+        models.map(({ harness, model, tasks, mixed }) => [harness, model, tasks, mixed]),
+      ]),
+      [
+        [
+          "developer",
+          3,
+          3,
+          [
+            ["claude", "claude-opus", 2, 1],
+            ["codex", "gpt-5", 1, 0],
+          ],
+        ],
+        ["reviewer", 3, 0, [["codex", "gpt-5", 3, 0]]],
+      ],
+    );
+  });
+
+  it("measures review rounds, time to merge, and usage per merged task, all loops summed", () => {
+    const [opusTasks, gptTasks] = view.agents[0]?.models ?? [];
+    assert.deepStrictEqual(
+      [opusTasks, gptTasks].map((outcome) => [
+        outcome?.firstTimeRight,
+        outcome?.medianRounds,
+        outcome?.medianMillis,
+        outcome?.metered,
+        outcome?.medianTokens,
+        outcome?.cost === null ? null : { ...outcome?.cost },
+      ]),
+      [
+        // From the first attempt to the merge: 4 hours and 10 hours.
+        [1, 1.5, 7 * HOUR, 1, 15_000, { tasks: 1, medianUsd: UsdAmount.make(1.5), estimate: true }],
+        [1, 1, 2 * HOUR, 0, null, null],
+      ],
+    );
+  });
+});
+
 describe("Run statistics", () => {
   it("excludes handed-off runs and attempts from failure, cancellation, and attention counts", () => {
     const source = summary({

@@ -9,6 +9,7 @@ import * as RunState from "@usine/core/run/state";
 import type { RunSummary } from "@usine/engine/run-reader";
 import { Array as EffectArray, DateTime, Option } from "effect";
 import type { RunUsageView } from "../usage.ts";
+import { agentModelsView, firstTimeRight, type OutcomeTask, type TaskUsage } from "./models.ts";
 import { attemptMillis, operatorRetry } from "./runs.ts";
 import {
   LoopRunTimeView,
@@ -75,23 +76,16 @@ type TaskTiming =
   | { readonly _tag: "Unrecorded"; readonly lastStart: number }
   | { readonly _tag: "Empty" };
 
-interface TaskTokens {
-  readonly total: number;
+interface TaskTokens extends TaskUsage {
   readonly loops: ReadonlyMap<LoopName, number>;
-  /** The summed price, or `None` if a session has no price. */
-  readonly usd: Option.Option<number>;
-  readonly estimate: boolean;
 }
 
-interface MeasuredTask {
+interface MeasuredTask extends OutcomeTask {
   readonly view: TaskDoneView;
   readonly start: number;
-  readonly mergedAt: number;
-  readonly firstTimeRight: boolean;
   readonly outOfMemory: ReadonlyArray<OutOfMemoryKills>;
   readonly operatorActions: number;
   readonly timing: TaskTiming;
-  /** The task's tokens, or `None` if a Run with an Attempt reported none. */
   readonly tokens: Option.Option<TaskTokens>;
   /** The task's Loops by their first Run's opening. */
   readonly loops: ReadonlyArray<LoopName>;
@@ -109,16 +103,19 @@ const loopsByFirstRun = (runs: ReadonlyArray<RunSummary>): ReadonlyArray<LoopNam
 };
 
 /**
- * Whether no Loop succeeded twice on one of the task's Items. A second successful Run of a Loop is
- * a second round (ADR 0022), including a loop that rebases a pull request.
+ * Returns the most successful Runs of one Loop on one of the task's Items. A second successful Run
+ * of a Loop is a second round (ADR 0022), including a loop that rebases a pull request.
  */
-const firstTimeRight = (runs: ReadonlyArray<RunSummary>): boolean =>
-  Object.values(
-    EffectArray.groupBy(
-      runs.filter(({ run }) => run.state._tag === "Succeeded"),
-      ({ itemKey, run }) => jsonKey([itemKey, run.loop]),
-    ),
-  ).every((members) => members.length === 1);
+const rounds = (runs: ReadonlyArray<RunSummary>): number =>
+  Math.max(
+    0,
+    ...Object.values(
+      EffectArray.groupBy(
+        runs.filter(({ run }) => run.state._tag === "Succeeded"),
+        ({ itemKey, run }) => jsonKey([itemKey, run.loop]),
+      ),
+    ).map((members) => members.length),
+  );
 
 /** Counts the approvals, operator retries, and failures marked resolved on `runs`. */
 const runActions = (runs: ReadonlyArray<RunSummary>): number =>
@@ -260,7 +257,8 @@ const measure = (
     }),
     start,
     mergedAt,
-    firstTimeRight: firstTimeRight(runs),
+    runs,
+    rounds: rounds(runs),
     outOfMemory: runs.flatMap(({ attempts }) =>
       attempts.flatMap(({ outOfMemory }) => Option.toArray(outOfMemory)),
     ),
@@ -400,11 +398,11 @@ export const taskStatisticsView = ({
         start: utcDay(start),
         tasks: members.length,
         medianMillis: durations(members),
-        firstTimeRight: members.filter(({ firstTimeRight }) => firstTimeRight).length,
+        firstTimeRight: members.filter(firstTimeRight).length,
         operatorActions: sum(members.map(({ operatorActions }) => operatorActions)),
       });
     }),
-    firstTimeRight: tasks.filter(({ firstTimeRight }) => firstTimeRight).length,
+    firstTimeRight: tasks.filter(firstTimeRight).length,
     memoryKills: sum(memory.map(({ kills }) => kills)),
     memoryKillAttempts: memory.length,
     repeatedMemoryKillAttempts: memory.filter(({ kills }) => kills > 1).length,
@@ -418,5 +416,6 @@ export const taskStatisticsView = ({
         })
       : null,
     unmetered: tasks.length - metered.length,
+    agents: agentModelsView(tasks),
   });
 };
