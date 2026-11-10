@@ -796,3 +796,71 @@ for (const status of [403, 429, 503]) {
     );
   });
 }
+
+const workflowRun = (
+  id: number,
+  fields: { name: string; workflow: number; number: number; conclusion: string | null },
+) => ({
+  id,
+  name: fields.name,
+  workflow_id: fields.workflow,
+  event: "pull_request",
+  run_number: fields.number,
+  status: fields.conclusion === null ? "in_progress" : "completed",
+  conclusion: fields.conclusion,
+  html_url: `https://github.com/${repository}/actions/runs/${id}`,
+});
+
+it.effect("reports the latest failed workflow runs on a head whose jobs never failed", () => {
+  const requested: Array<string> = [];
+  return Effect.gen(function* () {
+    const runs = yield* (yield* GitHubChecks).incompleteRuns(repository, head);
+    assert.deepStrictEqual(
+      runs.map(({ id, workflow, conclusion }) => ({ id, workflow, conclusion })),
+      [
+        { id: 42672750451, workflow: "CI", conclusion: "failure" },
+        { id: 42672750206, workflow: "Worker image", conclusion: "cancelled" },
+      ],
+    );
+    assert.strictEqual(runs[0]?.url, `https://github.com/${repository}/actions/runs/42672750451`);
+    assert.include(requested[0] ?? "", `/actions/runs?head_sha=${head}&per_page=100&page=1`);
+    assert.notInclude(requested.join("\n"), "/runs/30/jobs");
+    assert.notInclude(requested.join("\n"), "/runs/40/jobs");
+  }).pipe(
+    Effect.provide(
+      withClient((url) => {
+        requested.push(url);
+        if (url.includes("/actions/runs?"))
+          return json({
+            total_count: 5,
+            workflow_runs: [
+              workflowRun(42672750451, {
+                name: "CI",
+                workflow: 1,
+                number: 9,
+                conclusion: "failure",
+              }),
+              workflowRun(30, { name: "CI", workflow: 1, number: 8, conclusion: "cancelled" }),
+              workflowRun(42672750206, {
+                name: "Worker image",
+                workflow: 2,
+                number: 4,
+                conclusion: "cancelled",
+              }),
+              workflowRun(40, { name: "Docs", workflow: 3, number: 2, conclusion: "success" }),
+              workflowRun(50, { name: "Lint", workflow: 4, number: 7, conclusion: "failure" }),
+            ],
+          });
+        if (url.includes("/runs/50/jobs"))
+          return json({
+            total_count: 2,
+            jobs: [{ conclusion: "success" }, { conclusion: "failure" }],
+          });
+        return json({
+          total_count: 2,
+          jobs: [{ conclusion: "success" }, { conclusion: "skipped" }],
+        });
+      }),
+    ),
+  );
+});

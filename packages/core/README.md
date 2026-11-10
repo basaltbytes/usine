@@ -124,7 +124,7 @@ A verification that fails returns no pull request and sets `Harvest.unverifiedHa
 
 `HandedOff` is a closed, neutral run state with the failed head, reason, fix loop, and fix run ID. `CiHandedOff` settles a CI wait into this state and ends its attempt as `AttemptHandedOff`.
 
-`CiTimedOut` settles a CI wait that remains pending at its deadline as an `InfraFailure`. `CiFailed` records an `AgentFailure` when failed CI cannot start a fix.
+`CiTimedOut` settles a CI wait that remains pending at its deadline as an `InfraFailure`. `CiIncomplete` settles a CI wait whose workflow run failed or was canceled with no failed job as an `InfraFailure` for the operator. `CiFailed` records an `AgentFailure` when failed CI cannot start a fix.
 
 Attempt timing and provider-retry helpers accept the metadata they use, so polling summaries can omit prompts and comments.
 

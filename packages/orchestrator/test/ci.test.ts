@@ -39,6 +39,7 @@ import {
   CheckFailureEvidence,
   CheckSnapshot,
   GitHubChecks,
+  IncompleteWorkflowRun,
   PendingCheck,
 } from "@usine/github/checks";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
@@ -198,7 +199,12 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const pendingFailure = yield* Ref.make(Option.none<GitHubApiError>());
   const pendingStarted = yield* Deferred.make<void>();
   const pendingStalled = yield* Ref.make(false);
+  const incompleteRuns = yield* Ref.make<
+    Effect.Effect<ReadonlyArray<IncompleteWorkflowRun>, GitHubApiError>
+  >(Effect.succeed([]));
+  const failedJobs = yield* Ref.make<ReadonlyArray<string>>(["ci"]);
   const checks = Layer.succeed(GitHubChecks)({
+    incompleteRuns: () => Effect.flatten(Ref.get(incompleteRuns)),
     pendingDetails: () =>
       Effect.gen(function* () {
         yield* Deferred.succeed(pendingStarted, undefined);
@@ -233,8 +239,13 @@ const scenario = Effect.fn("test.ciScenario")(function* (
         Effect.flatMap(({ state }) =>
           state === "conflict"
             ? Effect.die("A merge conflict has no failed check logs")
-            : Effect.succeed(
-                CheckFailureEvidence.make({ jobs: ["ci"], excerpt: "TypeError: failing CI log" }),
+            : Ref.get(failedJobs).pipe(
+                Effect.map((jobs) =>
+                  CheckFailureEvidence.make({
+                    jobs,
+                    excerpt: jobs.length === 0 ? "" : "TypeError: failing CI log",
+                  }),
+                ),
               ),
         ),
       ),
@@ -333,6 +344,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     pendingFailure,
     pendingStarted,
     pendingStalled,
+    incompleteRuns,
+    failedJobs,
     mergeable,
     tasks,
     verifiedSubmissions,
@@ -532,6 +545,95 @@ it.live("green CI observed after the deadline applies the recorded labels once",
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
 
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+const partialRun = IncompleteWorkflowRun.make({
+  id: 42672750451,
+  workflow: "CI",
+  conclusion: "failure",
+  url: `https://github.com/${repository}/actions/runs/42672750451`,
+});
+
+it.live.each(["success", "failure"] as const)(
+  "a partially created workflow run under a %s rollup needs the operator and starts no fix",
+  (state) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(setup.incompleteRuns, Effect.succeed([partialRun]));
+          yield* Ref.set(setup.failedJobs, []);
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state }));
+
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+          const failed = yield* engine.inspect(runId);
+          assert.strictEqual(failed.run.state._tag, "Failed");
+          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(outcome.failure._tag, "InfraFailure");
+          assert.include(outcome.failure.message, "CI (run 42672750451, failure)");
+          assert.include(outcome.failure.message, partialRun.url);
+          assert.include(outcome.failure.message, "Rerun these workflow runs");
+          const mutations = yield* Ref.get(setup.mutations);
+          assert.deepStrictEqual(mutations, []);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+          assert.strictEqual(runNeedsAttention(runView(failed, new Set(), new Map()), false), true);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a failed job routes CI to the fix loop even beside a partially created run", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(setup.incompleteRuns, Effect.succeed([partialRun]));
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        const source = yield* (yield* RunEngine).inspect(runId);
+        assert(source.run.state._tag === "HandedOff");
+        assert.include(source.run.state.reason, "CI failed: ci.");
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("unreadable workflow runs leave green CI to the check rollup", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.incompleteRuns,
+          Effect.fail(
+            GitHubApiError.make({
+              operation: "read-ci-checks",
+              status: Option.some(403),
+              message: "Resource not accessible by integration",
+            }),
+          ),
+        );
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+
+        const result = yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        assert.deepStrictEqual(result.failures, []);
+        assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "Succeeded");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),

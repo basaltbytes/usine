@@ -40,6 +40,17 @@ export class PendingCheck extends Schema.Class<
   ),
 }) {}
 
+/** The latest run of a workflow on a head that failed or was canceled although none of its jobs failed. */
+export class IncompleteWorkflowRun extends Schema.Class<
+  IncompleteWorkflowRun,
+  Brand.Brand<"@usine/github/checks/IncompleteWorkflowRun">
+>("IncompleteWorkflowRun")({
+  id: Schema.Int.check(Schema.isGreaterThan(0)),
+  workflow: Schema.NonEmptyString,
+  conclusion: Schema.Literals(["failure", "cancelled"]),
+  url: Schema.NonEmptyString,
+}) {}
+
 const Head = Schema.Struct({
   repository: Schema.NullOr(
     Schema.Struct({
@@ -110,6 +121,26 @@ const CompletedJobs = Schema.Struct({
   ),
 });
 
+const HeadWorkflowRuns = Schema.Struct({
+  total_count: Schema.Int,
+  workflow_runs: Schema.Array(
+    Schema.Struct({
+      id: Schema.Int.check(Schema.isGreaterThan(0)),
+      name: Schema.NullOr(Schema.String),
+      workflow_id: Schema.Int,
+      event: Schema.String,
+      run_number: Schema.Int,
+      status: Schema.NullOr(Schema.String),
+      conclusion: Schema.NullOr(Schema.String),
+      html_url: Schema.NonEmptyString,
+    }),
+  ),
+});
+const RunJobs = Schema.Struct({
+  total_count: Schema.Int,
+  jobs: Schema.Array(Schema.Struct({ conclusion: Schema.NullOr(Schema.String) })),
+});
+
 /** Reads aggregate CI and failure diagnostics without starting an agent. */
 export class GitHubChecks extends Context.Service<
   GitHubChecks,
@@ -126,6 +157,14 @@ export class GitHubChecks extends Context.Service<
       repository: RepositoryName,
       head: CommitSha,
     ) => Effect.Effect<ReadonlyArray<PendingCheck>, GitHubAppError>;
+    /**
+     * Returns the latest workflow runs on `head` that concluded `failure` or `cancelled` although
+     * none of their jobs failed, such as a run whose jobs GitHub Actions never created.
+     */
+    readonly incompleteRuns: (
+      repository: RepositoryName,
+      head: CommitSha,
+    ) => Effect.Effect<ReadonlyArray<IncompleteWorkflowRun>, GitHubAppError>;
   }
 >()("@usine/github/checks/GitHubChecks") {
   static readonly layer = Layer.effect(
@@ -269,7 +308,78 @@ export class GitHubChecks extends Context.Service<
         }
         return jobs;
       });
+      const hasFailedJob = Effect.fn("GitHubChecks.hasFailedJob")(function* (
+        prefix: string,
+        run: number,
+      ) {
+        yield* Effect.annotateCurrentSpan({ actionsRunId: run });
+        for (let page = 1; page <= 10; page++) {
+          const response = yield* get(
+            `${prefix}/actions/runs/${run}/jobs?per_page=100&filter=latest&page=${page}`,
+          );
+          const jobs = yield* HttpClientResponse.schemaBodyJson(RunJobs)(response).pipe(
+            Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+          );
+          if (
+            jobs.jobs.some(
+              ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
+            )
+          )
+            return true;
+          if (page * 100 >= jobs.total_count) break;
+        }
+        return false;
+      });
       return {
+        incompleteRuns: Effect.fn("GitHubChecks.incompleteRuns")(function* (
+          repository: RepositoryName,
+          head: CommitSha,
+        ) {
+          yield* Effect.annotateCurrentSpan({ repository, head });
+          const { owner, name } = splitRepositoryName(repository);
+          const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+          const latest = new Map<string, (typeof HeadWorkflowRuns.Type)["workflow_runs"][number]>();
+          for (let page = 1; page <= 10; page++) {
+            const response = yield* get(
+              `${prefix}/actions/runs?head_sha=${head}&per_page=100&page=${page}`,
+            );
+            const runs = yield* HttpClientResponse.schemaBodyJson(HeadWorkflowRuns)(response).pipe(
+              Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+            );
+            for (const run of runs.workflow_runs) {
+              const key = `${run.workflow_id}:${run.event}`;
+              const previous = latest.get(key);
+              if (previous === undefined || previous.run_number < run.run_number)
+                latest.set(key, run);
+            }
+            if (page * 100 >= runs.total_count) break;
+          }
+          const incomplete: Array<IncompleteWorkflowRun> = [];
+          for (const run of latest.values()) {
+            if (
+              run.status !== "completed" ||
+              (run.conclusion !== "failure" && run.conclusion !== "cancelled")
+            )
+              continue;
+            if (yield* hasFailedJob(prefix, run.id)) continue;
+            incomplete.push(
+              IncompleteWorkflowRun.make({
+                id: run.id,
+                workflow:
+                  run.name === null || run.name === "" ? `workflow ${run.workflow_id}` : run.name,
+                conclusion: run.conclusion,
+                url: run.html_url,
+              }),
+            );
+          }
+          yield* Effect.logInfo("Read workflow runs on the head", {
+            repository,
+            head,
+            workflows: latest.size,
+            incomplete: incomplete.map(({ id }) => id),
+          });
+          return incomplete;
+        }),
         pendingDetails: Effect.fn("GitHubChecks.pendingDetails")(function* (
           repository: RepositoryName,
           head: CommitSha,

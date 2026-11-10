@@ -245,7 +245,7 @@ Operator audit fields accept `OperatorActor`: a GitHub login or the reserved `lo
 
 An admitted CI fix closes its source run as `HandedOff` with the fix run ID and failure reason. The source attempt also ends neutrally. A same-loop fix for the recorded failed head can pass cycle-budget admission while the source awaits CI, since its attempt has ended. Refused fixes and exhausted budgets leave the source failed.
 
-`CiTimedOut` settles a pending CI deadline as an `InfraFailure`, preserving the session end time and pushed result. The failed run requires operator attention; settlement does not restart the agent.
+`CiTimedOut` settles a pending CI deadline, and `CiIncomplete` a partially run workflow, as an `InfraFailure`, preserving the session end time and pushed result. The failed run requires operator attention; settlement does not restart the agent.
 
 Polling run summaries omit task prompts, step results, attempt prompts, harvested comments, and agent personas from SQL selections. They extract only the pull request URL from a step result. Run and task detail use full snapshots. Board reads select current runs with SQL windows and aggregate historical counts, timing, loop states, and PR links; token attribution reads only run and attempt identities and terminal status. Recent closed-run lists apply their limits in SQL.
 
