@@ -49,7 +49,7 @@ const transientMessage = (worker: WorkerName, failure: BoxdCallError): string =>
   `boxd didn't answer ${failure.operation} for worker "${worker}": ${failure.code}: ${failure.message}. Check that this host reaches app.boxd.sh, boxd.sh:9443, and the API endpoint of the region, or wait for the boxd rate limit to reset.`;
 
 /** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
-export const boxdPreflightError = (
+const boxdPreflightError = (
   worker: WorkerName,
   failure: BoxdCallError | BoxdUnknownRegion,
 ): WorkerCapabilityError => {
