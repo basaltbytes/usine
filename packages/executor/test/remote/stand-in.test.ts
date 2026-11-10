@@ -192,7 +192,10 @@ const runThrough = (
   subject: Subject,
   destination: string,
   line: string,
-  options: { readonly stdin?: Uint8Array; readonly sshOptions?: ReadonlyArray<string> } = {},
+  options: {
+    readonly stdin?: Uint8Array | Stream.Stream<Uint8Array>;
+    readonly sshOptions?: ReadonlyArray<string>;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -202,7 +205,12 @@ const runThrough = (
         subject.ssh.command,
         [...subject.ssh.args, ...(options.sshOptions ?? []), destination, "--", line],
         {
-          stdin: Stream.make(options.stdin ?? new Uint8Array()),
+          stdin:
+            options.stdin === undefined
+              ? Stream.empty
+              : options.stdin instanceof Uint8Array
+                ? Stream.make(options.stdin)
+                : options.stdin,
           env: { PATH: path, ...subject.environment },
           extendEnv: false,
         },
@@ -271,6 +279,15 @@ for (const { name, setup } of subjects) {
         assert.isTrue(Buffer.from(input).equals(result.stdout));
         assert.strictEqual(result.stderr.toString(), "done\n");
         assert.strictEqual(result.exitCode, 0);
+      }));
+
+    test("exits when the command exits, though its stdin stays open", (subject) =>
+      Effect.gen(function* () {
+        const result = yield* runThrough(subject, subject.reachable, "head -c 3; exit 4", {
+          stdin: Stream.concat(Stream.make(new TextEncoder().encode("abcdef")), Stream.never),
+        });
+        assert.strictEqual(result.stdout.toString(), "abc");
+        assert.strictEqual(result.exitCode, 4);
       }));
 
     test("accepts and ignores the -o options that usine adds", (subject) =>

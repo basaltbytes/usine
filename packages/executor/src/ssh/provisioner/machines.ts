@@ -304,19 +304,20 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     };
     if (Option.isSome(created)) yield* pinHostKey(worker, id, pinned, created.value);
     const endpoint = yield* driver.endpoint(id, interval);
-    if (endpoint._tag === "Ssh" && Option.isSome(endpoint.hostKey))
-      yield* pinHostKey(worker, id, pinned, endpoint.hostKey.value);
-    else if (
-      endpoint._tag === "Ssh" &&
-      Option.isNone(created) &&
-      !(yield* fs.exists(pinned.file).pipe(Effect.orElseSucceed(() => false)))
-    )
-      return yield* MachineUnavailableError.make({
-        worker,
-        provider: driver.provider,
-        reason: "provider",
-        message: `usine has no SSH host key for ${driver.provider} machine ${id} of worker "${worker}": the provider reported none, and ${pinned.file} doesn't exist. usine doesn't trust the host key of a first connection.`,
-      });
+    if (endpoint._tag === "Ssh") {
+      if (Option.isSome(endpoint.hostKey))
+        yield* pinHostKey(worker, id, pinned, endpoint.hostKey.value);
+      else if (
+        Option.isNone(created) &&
+        !(yield* fs.exists(pinned.file).pipe(Effect.orElseSucceed(() => false)))
+      )
+        return yield* MachineUnavailableError.make({
+          worker,
+          provider: driver.provider,
+          reason: "provider",
+          message: `usine has no SSH host key for ${driver.provider} machine ${id} of worker "${worker}": the provider reported none, and ${pinned.file} doesn't exist. usine doesn't trust the host key of a first connection.`,
+        });
+    }
     const connect = (endpoint: MachineEndpoint) => options.machineAt(entry, id, endpoint, pinned);
     return yield* connectionFor(id, endpoint, driver, pinned, connect);
   });
