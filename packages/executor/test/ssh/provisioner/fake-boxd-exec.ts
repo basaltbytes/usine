@@ -1,10 +1,8 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
-import { Effect, Predicate, Queue, Stream } from "effect";
-// The fake runs commands with callbacks inside a gRPC handler, as boxd's agent runs them.
-// @effect-diagnostics-next-line nodeBuiltinImport:off
-import { spawn } from "node:child_process";
+import { Effect, Predicate, Stream } from "effect";
 import { createServer, type Http2Session } from "node:http2";
+import { runLocally as runCommand } from "../../remote/local-command.ts";
 import {
   BoxdApi as BoxdService,
   type ExecChunk,
@@ -39,43 +37,16 @@ const outputChunks = (data: Uint8Array, isStderr: boolean): Array<ExecReply> =>
     isStderr,
   }));
 
-/**
- * Runs the command line with the local `sh -c` in its own process group, as boxd's agent does, and
- * ends the group with `TERM` when the call is cancelled.
- */
+/** Runs the call's command line with the local `sh -c`, as boxd's agent runs it. */
 export const runLocally: ExecHandler = (call, stdin) =>
-  Stream.callback<ExecReply>((queue) =>
-    Effect.gen(function* () {
-      const child = spawn("sh", ["-c", call.command], { detached: true, stdio: "pipe" });
-      const stop = () => {
-        if (child.pid !== undefined && child.exitCode === null) process.kill(-child.pid, "SIGTERM");
-      };
-      call.signal.addEventListener("abort", stop);
-      yield* Effect.addFinalizer(() => Effect.sync(stop));
-      child.stdout.on("data", (data: Buffer) => {
-        for (const chunk of outputChunks(data, false)) Queue.offerUnsafe(queue, chunk);
-      });
-      child.stderr.on("data", (data: Buffer) => {
-        for (const chunk of outputChunks(data, true)) Queue.offerUnsafe(queue, chunk);
-      });
-      child.on("close", (code, signal) => {
-        Queue.offerUnsafe(queue, {
-          exitCode: code ?? 128 + (signal === "SIGKILL" ? 9 : 15),
-        });
-        Queue.endUnsafe(queue);
-      });
-      child.stdin.on("error", () => {});
-      yield* stdin.pipe(
-        Stream.runForEach((bytes) =>
-          Effect.callback<void>((resume) => {
-            if (child.stdin.write(bytes)) resume(Effect.void);
-            else child.stdin.once("drain", () => resume(Effect.void));
-          }),
-        ),
-        Effect.andThen(Effect.sync(() => child.stdin.end())),
-        Effect.forkScoped,
-      );
-    }),
+  runCommand(call.command, stdin, call.signal).pipe(
+    Stream.flatMap((event) =>
+      Stream.fromIterable(
+        event._tag === "Exited"
+          ? [{ exitCode: event.exitCode }]
+          : outputChunks(event.bytes, event.channel === "stderr"),
+      ),
+    ),
   );
 
 /**

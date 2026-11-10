@@ -8,11 +8,26 @@ export class LocalProcess extends Schema.TaggedClass<
   Brand.Brand<"@usine/agents/child-host/child-host/LocalProcess">
 >("@usine/agents/LocalProcess")("LocalProcess", {}) {}
 
-/** The local SSH executable and the options before the destination. */
+/**
+ * The local SSH executable and the options before the destination. The executable is OpenSSH's
+ * `ssh`, or a stand-in program that reaches the machine another way and follows the same contract:
+ *
+ * - Arguments: `args`, then any `-o <option>` pairs that usine adds, such as
+ *   `-o ConnectTimeout=10`, then the destination, `--`, and one command line for the machine's
+ *   POSIX shell. A stand-in accepts and ignores every `-o` option. usine adds other OpenSSH options,
+ *   such as `-F`, `-J`, and `-p`, only to an `ssh` that it runs.
+ * - Standard streams: the program writes its stdin to the command's stdin until stdin ends, which
+ *   closes the command's stdin. It writes the command's stdout and stderr to its own, byte for
+ *   byte, each in order.
+ * - Exit code: the command's exit code, or 255 when the program can't reach the machine, or loses
+ *   the command before it exits. A command that exits 255 itself looks like a transport failure.
+ * - Environment: `RemoteShell.sshEnvironment`. A stand-in reads its endpoint and credential there,
+ *   and never from its arguments, which process listings show.
+ */
 export const SshCommand = Schema.Struct({
   /** The SSH executable on the launching machine, resolved through its PATH or an explicit path. */
   command: Schema.NonEmptyString,
-  /** SSH options before the destination, each passed as a separate argument. */
+  /** SSH options, or a stand-in's own arguments, before the destination, each a separate argument. */
   args: Schema.Array(Schema.String),
 });
 export type SshCommand = typeof SshCommand.Type;
@@ -50,7 +65,10 @@ export class RemoteShell extends Schema.TaggedClass<
       ),
     ),
   ),
-  /** The SSH destination, passed as one argument. */
+  /**
+   * The destination, passed as one argument: an SSH destination, or the name that a stand-in uses
+   * for the machine.
+   */
   destination: Schema.NonEmptyString,
   /**
    * The container that runs each command, with the working directory, variables, and PID file

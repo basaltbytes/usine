@@ -1,9 +1,8 @@
 /**
  * The sandbox shell: a stand-in for `ssh` that runs one command in a Cloudflare sandbox through
- * the Worker's exec stream. It takes an SSH client's arguments, `[options] <sandbox> -- <command>`,
- * relays stdin, stdout, and stderr, and exits with the command's exit code, or 255 if it can't
- * reach the sandbox or follow the command. The executor uses it as a `RemoteShell`'s SSH command,
- * so children and git commands run in a sandbox as they run over SSH.
+ * the Worker's exec stream, under the `SshCommand` contract of `@usine/agents/child-host`. The
+ * executor uses it as a `RemoteShell`'s SSH command, so children and git commands run in a sandbox
+ * as they run over SSH. The destination is the sandbox name.
  *
  * If the stream drops after the command started, it attaches to the command's output from the
  * bytes it already wrote, a few times, so a short network failure doesn't lose an exit code. The
@@ -19,13 +18,15 @@ import {
   encodeClientMessage,
   ExecStart,
   execPath,
+  type OutputChannel,
   type ProcessId,
   SandboxName,
   StdinEnd,
 } from "@usine/cloudflare/stream";
-import { Effect, Exit, Option, Schema } from "effect";
+import { Data, Deferred, Effect, Option, Queue, Schema, Stream } from "effect";
 
-import { SHELL_ENVIRONMENT, SHELL_FAILURE } from "./environment.ts";
+import { runStandIn, StandInFailure, type StandInStreams } from "../../remote/stand-in.ts";
+import { SHELL_ENVIRONMENT } from "./environment.ts";
 
 const Settings = Schema.Struct({
   [SHELL_ENVIRONMENT.workerUrl]: Schema.URLFromString,
@@ -33,19 +34,24 @@ const Settings = Schema.Struct({
   [SHELL_ENVIRONMENT.accessClientSecret]: Schema.NonEmptyString,
 });
 
-/** The delays before each attach to a command whose stream dropped, in milliseconds. */
-const REATTACH_DELAYS = [500, 1_000, 2_000, 4_000, 8_000] as const;
-/** The time a stream has to open, in milliseconds. */
-const OPEN_TIMEOUT = 30_000;
+/** The delays before each attach to a command whose stream dropped. */
+const REATTACH_DELAYS = ["500 millis", "1 second", "2 seconds", "4 seconds", "8 seconds"] as const;
+/** The time a stream has to open. */
+const OPEN_TIMEOUT = "30 seconds";
 
-type Outcome =
-  | { readonly _tag: "Exited"; readonly exitCode: number }
-  | { readonly _tag: "Failed"; readonly message: string }
-  | {
-      readonly _tag: "Dropped";
-      readonly process: Option.Option<ProcessId>;
-      readonly reason: string;
-    };
+type Outcome = Data.TaggedEnum<{
+  Exited: { readonly exitCode: number };
+  Failed: { readonly message: string };
+  Dropped: { readonly process: Option.Option<ProcessId>; readonly reason: string };
+}>;
+const Outcome = Data.taggedEnum<Outcome>();
+
+/** What one exec or attach stream reports, in order. */
+type StreamEvent = Data.TaggedEnum<{
+  Output: { readonly channel: OutputChannel; readonly bytes: Uint8Array };
+  Ended: { readonly outcome: Outcome };
+}>;
+const StreamEvent = Data.taggedEnum<StreamEvent>();
 
 interface WebSocketInit {
   readonly headers: Readonly<Record<string, string>>;
@@ -56,130 +62,126 @@ const openSocket = (url: URL, init: WebSocketInit): WebSocket =>
   // argument from Node.js 22; lib.dom's declaration lists only subprotocols there.
   new WebSocket(url, init as never);
 
-const finish = (code: number, message?: string) => {
-  if (message !== undefined) process.stderr.write(`usine sandbox shell: ${message}\n`);
-  process.stdout.write("", () => process.stderr.write("", () => process.exit(code)));
-};
-
-const separator = process.argv.indexOf("--");
-const destination = Schema.decodeUnknownOption(SandboxName)(process.argv[separator - 1]);
-const command = process.argv[separator + 1];
-const settings = Schema.decodeUnknownOption(Settings)(process.env);
-
-if (separator < 0 || Option.isNone(destination) || command === undefined || command === "")
-  finish(SHELL_FAILURE, "expected [options] <sandbox> -- <command>");
-else if (Option.isNone(settings))
-  finish(SHELL_FAILURE, `set ${Object.values(SHELL_ENVIRONMENT).join(", ")} in the environment`);
-else {
-  const { [SHELL_ENVIRONMENT.workerUrl]: worker } = settings.value;
-  const init = {
-    headers: {
-      [ACCESS_CLIENT_ID_HEADER]: settings.value[SHELL_ENVIRONMENT.accessClientId],
-      [ACCESS_CLIENT_SECRET_HEADER]: settings.value[SHELL_ENVIRONMENT.accessClientSecret],
-    },
-  };
-  const written = { stdout: 0, stderr: 0 };
-  let stdinOpen = true;
-  /**
-   * Where stdin goes: buffered until the exec stream opens, then to it. Once that stream ends,
-   * stdin is dropped, as a dropped SSH connection drops it.
-   */
-  let stdinTarget:
-    | { readonly _tag: "Buffering"; readonly chunks: Array<Uint8Array<ArrayBuffer>> }
-    | { readonly _tag: "Streaming"; readonly socket: WebSocket }
-    | { readonly _tag: "Dropped" } = { _tag: "Buffering", chunks: [] };
-
-  process.stdin.on("data", (chunk: Uint8Array) => {
-    const bytes = new Uint8Array(chunk);
-    if (stdinTarget._tag === "Buffering") stdinTarget.chunks.push(bytes);
-    if (stdinTarget._tag === "Streaming") stdinTarget.socket.send(bytes);
-  });
-  process.stdin.on("end", () => {
-    stdinOpen = false;
-    if (stdinTarget._tag === "Streaming")
-      stdinTarget.socket.send(encodeClientMessage(StdinEnd.make()));
-  });
-
-  /** Opens one exec or attach stream and resolves when it ends. */
-  const stream = (url: URL, start: Option.Option<string>) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        let onTimeout = () => {};
-        const timer = yield* Effect.sleep(OPEN_TIMEOUT).pipe(
-          Effect.andThen(Effect.sync(() => onTimeout())),
-          Effect.forkScoped,
-        );
-        return yield* Effect.callback<Outcome>((resume) => {
-          const resolve = (outcome: Outcome) => resume(Effect.succeed(outcome));
-          const socket = openSocket(new URL(url.href.replace(/^http/u, "ws")), init);
-          socket.binaryType = "arraybuffer";
-          let process_: Option.Option<ProcessId> = Option.none();
-          let settled = false;
-          const settle = (outcome: Outcome) => {
-            if (settled) return;
-            settled = true;
-            timer.interruptUnsafe();
-            if (start._tag === "Some") stdinTarget = { _tag: "Dropped" };
-            resolve(outcome);
-            socket.close();
-          };
-          onTimeout = () =>
-            settle({
-              _tag: "Dropped",
-              process: process_,
-              reason: "the stream didn't open in time",
-            });
-          socket.addEventListener("open", () => {
-            timer.interruptUnsafe();
-            Option.match(start, {
-              onNone: () => undefined,
-              onSome: (line) => {
-                socket.send(encodeClientMessage(ExecStart.make({ command: line })));
-                if (stdinTarget._tag === "Buffering")
-                  for (const chunk of stdinTarget.chunks) socket.send(chunk);
-                stdinTarget = { _tag: "Streaming", socket };
-                if (!stdinOpen) socket.send(encodeClientMessage(StdinEnd.make()));
-              },
-            });
-          });
-          socket.addEventListener("message", (event) => {
-            if (event.data instanceof ArrayBuffer) {
-              Option.map(decodeOutputFrame(new Uint8Array(event.data)), ({ channel, bytes }) => {
-                written[channel] += bytes.length;
-                (channel === "stdout" ? process.stdout : process.stderr).write(bytes);
-              });
+/**
+ * Returns the events of one exec or attach stream at `url`, ending with `Ended`. For an exec
+ * stream, `start` is the command line, and `stdin` goes to the command once the stream opens, then
+ * `StdinEnd`. Ending the returned stream closes the socket and stops reading stdin.
+ */
+const streamEvents = (
+  url: URL,
+  init: WebSocketInit,
+  start: Option.Option<{ readonly line: string; readonly stdin: Stream.Stream<Uint8Array> }>,
+) =>
+  Stream.callback<StreamEvent>((queue) =>
+    Effect.gen(function* () {
+      const socket = yield* Effect.acquireRelease(
+        Effect.sync(() => openSocket(new URL(url.href.replace(/^http/u, "ws")), init)),
+        (socket) => Effect.sync(() => socket.close()),
+      );
+      socket.binaryType = "arraybuffer";
+      const end = (outcome: Outcome) => {
+        Queue.offerUnsafe(queue, StreamEvent.Ended({ outcome }));
+        Queue.endUnsafe(queue);
+      };
+      let process_: Option.Option<ProcessId> = Option.none();
+      const opened = yield* Deferred.make<void>();
+      socket.addEventListener("open", () => Deferred.doneUnsafe(opened, Effect.void));
+      socket.addEventListener("message", (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          Option.map(decodeOutputFrame(new Uint8Array(event.data)), ({ channel, bytes }) =>
+            Queue.offerUnsafe(queue, StreamEvent.Output({ channel, bytes })),
+          );
+          return;
+        }
+        Option.map(decodeServerMessage(String(event.data)), (message) => {
+          switch (message._tag) {
+            case "Started":
+              process_ = Option.some(message.process);
               return;
-            }
-            Option.map(decodeServerMessage(String(event.data)), (message) => {
-              switch (message._tag) {
-                case "Started":
-                  process_ = Option.some(message.process);
-                  return;
-                case "Exited":
-                  return settle({ _tag: "Exited", exitCode: message.exitCode });
-                case "StreamFailed":
-                  return settle({ _tag: "Failed", message: message.message });
-              }
-            });
-          });
-          socket.addEventListener("close", (event) =>
-            settle({
-              _tag: "Dropped",
-              process: process_,
-              reason: `the stream closed with code ${String(event.code)}`,
-            }),
-          );
-          socket.addEventListener("error", () =>
-            settle({ _tag: "Dropped", process: process_, reason: "the stream failed" }),
-          );
-          return Effect.sync(() => socket.close());
+            case "Exited":
+              return end(Outcome.Exited({ exitCode: message.exitCode }));
+            case "StreamFailed":
+              return end(Outcome.Failed({ message: message.message }));
+          }
         });
-      }),
-    );
+      });
+      socket.addEventListener("close", (event) =>
+        end(
+          Outcome.Dropped({
+            process: process_,
+            reason: `the stream closed with code ${String(event.code)}`,
+          }),
+        ),
+      );
+      socket.addEventListener("error", () =>
+        end(Outcome.Dropped({ process: process_, reason: "the stream failed" })),
+      );
+      const open = yield* Deferred.await(opened).pipe(Effect.timeoutOption(OPEN_TIMEOUT));
+      if (Option.isNone(open))
+        return end(
+          Outcome.Dropped({ process: process_, reason: "the stream didn't open in time" }),
+        );
+      if (Option.isNone(start)) return;
+      socket.send(encodeClientMessage(ExecStart.make({ command: start.value.line })));
+      yield* start.value.stdin.pipe(
+        Stream.runForEach((chunk) => Effect.sync(() => socket.send(new Uint8Array(chunk)))),
+        Effect.andThen(Effect.sync(() => socket.send(encodeClientMessage(StdinEnd.make())))),
+        Effect.forkScoped,
+      );
+    }),
+  );
 
-  const main = Effect.gen(function* () {
-    const name = destination.value;
-    let outcome = yield* stream(new URL(execPath(name), worker), Option.some(command));
+/** Relays one stream's output to the shell's own, and returns how it ended. */
+const follow = (
+  events: Stream.Stream<StreamEvent>,
+  streams: StandInStreams,
+  written: Record<OutputChannel, number>,
+) =>
+  events.pipe(
+    Stream.runFoldEffect(
+      (): Outcome => Outcome.Dropped({ process: Option.none(), reason: "the stream ended" }),
+      (outcome, event) =>
+        StreamEvent.$match(event, {
+          Output: ({ channel, bytes }) => {
+            written[channel] += bytes.length;
+            return streams[channel](bytes).pipe(Effect.as(outcome));
+          },
+          Ended: (ended) => Effect.succeed(ended.outcome),
+        }),
+    ),
+  );
+
+runStandIn("usine sandbox shell", ({ destination, line }, streams) =>
+  Effect.gen(function* () {
+    const name = yield* Schema.decodeEffect(SandboxName)(destination).pipe(
+      Effect.mapError(() =>
+        StandInFailure.make({ message: `invalid sandbox name ${destination}` }),
+      ),
+    );
+    const settings = yield* Schema.decodeUnknownEffect(Settings)(process.env).pipe(
+      Effect.mapError(() =>
+        StandInFailure.make({
+          message: `set ${Object.values(SHELL_ENVIRONMENT).join(", ")} in the environment`,
+        }),
+      ),
+    );
+    const worker = settings[SHELL_ENVIRONMENT.workerUrl];
+    const init = {
+      headers: {
+        [ACCESS_CLIENT_ID_HEADER]: settings[SHELL_ENVIRONMENT.accessClientId],
+        [ACCESS_CLIENT_SECRET_HEADER]: settings[SHELL_ENVIRONMENT.accessClientSecret],
+      },
+    };
+    const written = { stdout: 0, stderr: 0 };
+    let outcome = yield* follow(
+      streamEvents(
+        new URL(execPath(name), worker),
+        init,
+        Option.some({ line, stdin: streams.stdin }),
+      ),
+      streams,
+      written,
+    );
     for (const delay of REATTACH_DELAYS) {
       if (outcome._tag !== "Dropped" || Option.isNone(outcome.process)) break;
       const process = outcome.process.value;
@@ -187,21 +189,15 @@ else {
       const url = new URL(attachPath(name, process), worker);
       url.searchParams.set("stdout", String(written.stdout));
       url.searchParams.set("stderr", String(written.stderr));
-      const attached = yield* stream(url, Option.none());
+      const attached = yield* follow(streamEvents(url, init, Option.none()), streams, written);
       outcome =
         attached._tag === "Dropped" ? { ...attached, process: Option.some(process) } : attached;
     }
-    switch (outcome._tag) {
-      case "Exited":
-        return finish(outcome.exitCode);
-      case "Failed":
-        return finish(SHELL_FAILURE, outcome.message);
-      case "Dropped":
-        return finish(SHELL_FAILURE, `lost sandbox ${name}: ${outcome.reason}`);
-    }
-  });
-  Effect.runFork(main).addObserver((exit) => {
-    // WebSocket constructor errors can contain Access credentials.
-    if (Exit.isFailure(exit)) finish(SHELL_FAILURE, "command stream failed unexpectedly");
-  });
-}
+    return yield* Outcome.$match(outcome, {
+      Exited: ({ exitCode }) => Effect.succeed(exitCode),
+      Failed: ({ message }) => Effect.fail(StandInFailure.make({ message })),
+      Dropped: ({ reason }) =>
+        Effect.fail(StandInFailure.make({ message: `lost sandbox ${name}: ${reason}` })),
+    });
+  }),
+);
