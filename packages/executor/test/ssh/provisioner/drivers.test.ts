@@ -700,6 +700,42 @@ describe("boxd driver", () => {
       assert.lengthOf(boxd.state.timers, 0);
     }).pipe(Effect.provide(boxd.layer));
   });
+  it.effect("refuses to reuse a machine whose egress allowlist boxd ignores or refuses", () => {
+    const boxd = fakeBoxd();
+    const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
+      const creating = yield* Effect.forkChild(driver.create("pool-aaaaaaaa", tags));
+      while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
+      yield* TestClock.adjust("1 second");
+      const { id } = yield* Fiber.join(creating);
+      const created = ["create", "egress", "hibernate", "suspend"];
+      assert.deepStrictEqual(boxd.state.operations.get(id), created);
+
+      boxd.state.egressIgnored = true;
+      const ignored = yield* driver.assign(id, { ...tags, attempts: 2 }).pipe(Effect.flip);
+      assert.strictEqual(ignored._tag, "ProviderApiError");
+      assert.include(ignored.message, "unrestricted egress");
+      assert.include(ignored.message, id);
+      assert.deepStrictEqual(
+        boxd.state.operations.get(id),
+        [...created, "egress"],
+        "no idle timer call follows the ignored allowlist",
+      );
+
+      boxd.state.egressIgnored = false;
+      boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
+      const refused = yield* driver.assign(id, { ...tags, attempts: 3 }).pipe(Effect.flip);
+      assert.strictEqual(refused._tag, "ProviderApiError");
+      assert.include(refused.message, "INVALID_ARGUMENT");
+      assert.deepStrictEqual(
+        boxd.state.operations.get(id),
+        [...created, "egress"],
+        "no idle timer call follows the refused allowlist",
+      );
+      assert.lengthOf(boxd.state.timers, 2);
+    }).pipe(Effect.provide(boxd.layer));
+  });
   it.effect("deletes a new machine when disabling its idle timers fails", () => {
     const boxd = fakeBoxd();
     boxd.state.timerFails = Option.some("UNAVAILABLE");
