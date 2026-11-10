@@ -27,6 +27,8 @@ export const BoxdMachine = Schema.Struct({
   sshDisabled: Schema.Boolean,
   createdAt: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000 })),
   labels: Schema.Record(Schema.String, Schema.String),
+  /** The machine's egress allowlist; empty when its egress is unrestricted. */
+  egressAllow: Schema.Array(Schema.String),
 });
 export type BoxdMachine = typeof BoxdMachine.Type;
 
@@ -75,6 +77,14 @@ export class BoxdApi extends Context.Service<
       set: Record<string, string>,
     ) => Effect.Effect<void, BoxdCallError>;
     readonly destroy: (id: MachineId) => Effect.Effect<void, BoxdCallError>;
+    /**
+     * Replaces the machine's egress allowlist; an empty list makes egress unrestricted. Returns
+     * the list in effect.
+     */
+    readonly setEgressAllow: (
+      id: MachineId,
+      entries: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyArray<string>, BoxdCallError>;
     readonly setAutoHibernateTimeout: (
       id: MachineId,
       seconds: number,

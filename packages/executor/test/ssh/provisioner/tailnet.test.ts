@@ -10,6 +10,7 @@ import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { RunId } from "@usine/core/run";
 import {
   BoatSnapshotName,
+  BoxdEgressEntry,
   GatewayDomain,
   SshIdentityFile,
   SshDestination,
@@ -241,10 +242,27 @@ describe("Provisioner tailnet credentials", () => {
   );
 });
 
-for (const address of [boatAddress, boxdAddress]) {
+const boxdEgressAddress: SshWorkerAddress = {
+  ...boxdAddress,
+  machine: {
+    _tag: "Provisioned",
+    provisioner: boxdSettings({
+      tailnet: Option.some(tailnet),
+      apiKeys: { anthropic: Option.none(), openai: Option.none() },
+      egress: Option.some(
+        ["*.tailscale.com", "registry.npmjs.org"].map((entry) => BoxdEgressEntry.make(entry)),
+      ),
+    }),
+  },
+};
+
+for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
   assert(address.machine._tag === "Provisioned");
   const provider = address.machine.provisioner.provider;
-  describe(`${provider} tailnet`, () => {
+  const restricted =
+    address.machine.provisioner.provider === "boxd" &&
+    Option.isSome(address.machine.provisioner.egress);
+  describe(`${provider}${restricted ? " with an egress allowlist" : ""} tailnet`, () => {
     it.live(
       `deletes an orphan ${provider} machine after a restart without needing tailnet access`,
       () => {
@@ -325,6 +343,7 @@ for (const address of [boatAddress, boxdAddress]) {
             .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [TEST_AGENT.brain])
             .pipe(Effect.flip);
           assert.include(failure.message, "could not join");
+          assert.strictEqual(failure.message.includes("provisioner.egress"), restricted);
           const json2 = jsonKey(failure);
           assert.notInclude(json2, "tskey-auth-test");
           assert.strictEqual(

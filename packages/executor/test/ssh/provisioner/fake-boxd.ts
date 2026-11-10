@@ -14,11 +14,18 @@ export const fakeBoxd = () => {
   const creates: Array<BoxdCreate> = [];
   const selectors: Array<ReadonlyArray<string>> = [];
   const timers: Array<{ id: MachineId; kind: string; seconds: number }> = [];
+  /** Every `SetVmEgressAllow` call, in order, with the operations before it on the same machine. */
+  const egress: Array<{ id: MachineId; entries: ReadonlyArray<string>; after: Array<string> }> = [];
+  const operations = new Map<MachineId, Array<string>>();
+  const record = (id: MachineId, operation: string) =>
+    operations.set(id, [...(operations.get(id) ?? []), operation]);
   const state = {
     machines,
     creates,
     selectors,
     timers,
+    egress,
+    operations,
     snapshot: {
       status: "ready",
       region: "fra",
@@ -39,6 +46,9 @@ export const fakeBoxd = () => {
     createFails: Option.none<string>(),
     readFails: Option.none<string>(),
     timerFails: Option.none<string>(),
+    egressFails: Option.none<string>(),
+    /** Whether boxd answers `SetVmEgressAllow` with an empty list, leaving egress unrestricted. */
+    egressIgnored: false,
   };
   const failure = (operation: string, code: string) =>
     BoxdCallError.make({ operation, code, message: `boxd ${operation}: ${code}` });
@@ -56,6 +66,7 @@ export const fakeBoxd = () => {
         ? failure(kind, state.timerFails.value)
         : Effect.sync(() => {
             timers.push({ id, kind, seconds });
+            record(id, kind);
           }),
     );
   const api = BoxdApi.of({
@@ -85,9 +96,11 @@ export const fakeBoxd = () => {
             status: state.provisioningReads > 0 ? "starting" : "running",
             createdAt: Math.floor(now / 1000),
             labels: request.labels,
+            egressAllow: [],
           };
           machines.set(id, machine);
           names.set(id, request.name);
+          record(id, "create");
           return { id, machine: state.createMachine ? Option.some(machine) : Option.none() };
         }),
       ),
@@ -142,6 +155,20 @@ export const fakeBoxd = () => {
         names.delete(id);
         return machines.delete(id) ? Effect.void : failure("destroy", "NOT_FOUND");
       }),
+    setEgressAllow: (id, entries) =>
+      call("setEgressAllow", () =>
+        Effect.gen(function* () {
+          if (Option.isSome(state.egressFails))
+            return yield* failure("setEgressAllow", state.egressFails.value);
+          const machine = machines.get(id);
+          if (machine === undefined) return yield* failure("setEgressAllow", "NOT_FOUND");
+          egress.push({ id, entries, after: [...(operations.get(id) ?? [])] });
+          record(id, "egress");
+          const inEffect = state.egressIgnored ? [] : [...entries];
+          machines.set(id, { ...machine, egressAllow: inEffect });
+          return inEffect;
+        }),
+      ),
     setAutoHibernateTimeout: timer("hibernate"),
     setAutoSuspendTimeout: timer("suspend"),
   });

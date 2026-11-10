@@ -3,6 +3,7 @@ import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import {
   BoatSnapshotName,
+  BoxdEgressEntry,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
@@ -591,6 +592,61 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide(boxd.layer));
     },
   );
+  it.effect(
+    "restricts a new machine's egress before anything else and reapplies the setting on reuse",
+    () => {
+      const boxd = fakeBoxd();
+      const entries = ["*.tailscale.com", "registry.npmjs.org"].map((entry) =>
+        BoxdEgressEntry.make(entry),
+      );
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress: Option.some(entries) }));
+        const { id } = yield* driver.create("pool-aaaaaaaa", tags);
+        assert.deepStrictEqual(boxd.state.operations.get(id), [
+          "create",
+          "egress",
+          "hibernate",
+          "suspend",
+        ]);
+        assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, entries);
+        yield* driver.assign(id, { ...tags, attempts: 2 });
+        assert.deepStrictEqual(
+          boxd.state.egress.map((call) => call.entries),
+          [entries, entries],
+        );
+
+        const unrestricted = yield* boxdDriverFor(WORKER, boxdSettings());
+        const other = yield* unrestricted.create("pool-bbbbbbbb", tags);
+        assert.deepStrictEqual(boxd.state.operations.get(other.id), [
+          "create",
+          "hibernate",
+          "suspend",
+        ]);
+        yield* unrestricted.assign(id, { ...tags, attempts: 3 });
+        assert.deepStrictEqual(boxd.state.egress.at(-1)?.entries, []);
+        assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, []);
+      }).pipe(Effect.provide(boxd.layer));
+    },
+  );
+  it.effect("deletes a new machine whose egress allowlist boxd refuses or ignores", () => {
+    const boxd = fakeBoxd();
+    const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
+      boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
+      const refused = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
+      assert.strictEqual(refused.reason, "refused");
+      assert.include(refused.message, "didn't apply provisioner.egress");
+      assert.strictEqual(boxd.state.machines.size, 0);
+      boxd.state.egressFails = Option.none();
+      boxd.state.egressIgnored = true;
+      const ignored = yield* driver.create("pool-bbbbbbbb", tags).pipe(Effect.flip);
+      assert.strictEqual(ignored.reason, "provider");
+      assert.include(ignored.message, "unrestricted egress");
+      assert.strictEqual(boxd.state.machines.size, 0);
+      assert.lengthOf(boxd.state.timers, 0);
+    }).pipe(Effect.provide(boxd.layer));
+  });
   it.effect("deletes a new machine when disabling its idle timers fails", () => {
     const boxd = fakeBoxd();
     boxd.state.timerFails = Option.some("UNAVAILABLE");

@@ -1,4 +1,10 @@
-import { MachineId, SshDestination, SshPort, type WorkerName } from "@usine/core/worker";
+import {
+  type BoxdEgressAllowlist,
+  MachineId,
+  SshDestination,
+  SshPort,
+  type WorkerName,
+} from "@usine/core/worker";
 import { DateTime, Effect, Option, Schema, Semaphore } from "effect";
 import {
   MachineUnavailableError,
@@ -34,6 +40,9 @@ const reasonOf = (code: string): MachineUnavailableReason => {
 };
 
 const terminalStates = new Set(["stopped", "failed", "destroyed"]);
+
+/** The `BoxdCallError` operation of a failure to apply `provisioner.egress`. */
+const EGRESS_OPERATION = "setEgressAllow";
 
 const assignment = (tags: MachineTags) => ({
   "usine.run": tagValue(tags.run),
@@ -149,6 +158,10 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
         yield* Effect.logInfo("boxd provisioner verified", {
           worker,
           region: settings.region,
+          egress: Option.match(settings.egress, {
+            onNone: () => "unrestricted",
+            onSome: (entries) => `${entries.length} entries`,
+          }),
           warnings,
         });
         return { warnings };
@@ -160,6 +173,28 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
           ),
         ),
     );
+    /**
+     * Replaces the egress allowlist of machine `id` with `entries` and fails when boxd leaves a
+     * restricted machine unrestricted, so no attempt runs on it.
+     */
+    const restrictEgress = Effect.fn("BoxdDriver.restrictEgress")(function* (
+      id: MachineId,
+      entries: BoxdEgressAllowlist,
+    ) {
+      yield* Effect.annotateCurrentSpan({ worker, machine: id });
+      const inEffect = yield* api.setEgressAllow(id, entries);
+      if (inEffect.length === 0)
+        return yield* BoxdCallError.make({
+          operation: EGRESS_OPERATION,
+          code: "FAILED_PRECONDITION",
+          message: `boxd reported unrestricted egress after usine set ${entries.length} entries`,
+        });
+      yield* Effect.logInfo("Restricted boxd machine egress", {
+        worker,
+        machine: id,
+        entries: inEffect.length,
+      });
+    });
     const create = Effect.fn("BoxdDriver.create")(
       function* (name: string, tags: MachineTags) {
         yield* Effect.annotateCurrentSpan({ worker, attemptId: tags.attempt });
@@ -175,19 +210,21 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
           },
         });
         yield* Effect.gen(function* () {
+          if (Option.isSome(settings.egress))
+            yield* restrictEgress(result.id, settings.egress.value);
           yield* api.setAutoHibernateTimeout(result.id, 0);
           yield* api.setAutoSuspendTimeout(result.id, 0);
         }).pipe(
           Effect.onError(() =>
             api.destroy(result.id).pipe(
               Effect.tap(() =>
-                Effect.logInfo("Deleted boxd machine after idle timer setup failed", {
+                Effect.logInfo("Deleted boxd machine after its setup failed", {
                   worker,
                   machine: result.id,
                 }),
               ),
               Effect.tapError((failure) =>
-                Effect.logWarning("Could not delete boxd machine after idle timer setup failed", {
+                Effect.logWarning("Could not delete boxd machine after its setup failed", {
                   worker,
                   machine: result.id,
                   code: failure.code,
@@ -204,7 +241,12 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
       (effect) =>
         effect.pipe(
           Effect.mapError((failure) =>
-            unavailable(failure.code, `boxd didn't create the machine: ${failure.message}`),
+            unavailable(
+              failure.code,
+              failure.operation === EGRESS_OPERATION
+                ? `boxd didn't apply provisioner.egress to the new machine, which usine deleted: ${failure.message}`
+                : `boxd didn't create the machine: ${failure.message}`,
+            ),
           ),
         ),
     );
@@ -311,6 +353,18 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
       yield* Effect.annotateCurrentSpan({ worker, machine: id, attemptId: tags.attempt });
       yield* Effect.gen(function* () {
         yield* api.updateLabels(id, assignment(tags));
+        yield* Option.match(settings.egress, {
+          onNone: () =>
+            api.setEgressAllow(id, []).pipe(
+              Effect.tap(() =>
+                Effect.logInfo("Cleared boxd machine egress allowlist for reuse", {
+                  worker,
+                  machine: id,
+                }),
+              ),
+            ),
+          onSome: (entries) => restrictEgress(id, entries),
+        });
         yield* api.setAutoHibernateTimeout(id, 0);
         yield* api.setAutoSuspendTimeout(id, 0);
       }).pipe(Effect.mapError(apiError("assign the machine")));

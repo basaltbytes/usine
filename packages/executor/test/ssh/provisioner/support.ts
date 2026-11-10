@@ -56,5 +56,6 @@ export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProv
   size: "2x8",
   snapshot: BoxdSnapshotName.make("usine-attempt"),
   isolated: true,
+  egress: Option.none(),
   ...overrides,
 });

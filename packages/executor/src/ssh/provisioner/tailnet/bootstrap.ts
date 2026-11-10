@@ -6,6 +6,12 @@ import { provisionerTailnetOf, type SshMachine, type SshWorkerAddress } from "..
 import { configureTailnetGateway } from "../../gateway/tailnet.ts";
 import { tailscaleClientFor } from "./client.ts";
 
+/** Whether the worker's machines get a boxd egress allowlist. */
+const restrictsEgress = (address: SshWorkerAddress): boolean =>
+  address.machine._tag === "Provisioned" &&
+  address.machine.provisioner.provider === "boxd" &&
+  Option.isSome(address.machine.provisioner.egress);
+
 /** Configures provisioned machines before checkout and removes their ephemeral nodes at cleanup. */
 export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnetsFor")(function* (
   commands: RemoteCommands,
@@ -48,6 +54,9 @@ export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnets
     const settings = provisionerTailnetOf(machine.address);
     if (Option.isNone(settings) || Option.isNone(machine.gateway)) return;
     const worker = machine.address.name;
+    const egressHint = restrictsEgress(machine.address)
+      ? " provisioner.egress restricts the machine's egress, so also check that boxd admits Tailscale's servers through *.tailscale.com."
+      : "";
     const domain = machine.gateway.value.settings.domain;
     yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
     const client = yield* tailscaleClientFor(worker, settings.value).pipe(
@@ -90,7 +99,7 @@ export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnets
         return yield* WorkerCapabilityError.make({
           worker,
           capability: "gateway",
-          message: `Provisioned worker "${worker}" cannot reach the gateway over the tailnet`,
+          message: `Provisioned worker "${worker}" cannot reach the gateway over the tailnet.${egressHint}`,
           cause: new Error("missing gateway response"),
         });
       yield* Effect.logInfo("Joined the machine to the tailnet and configured gateway access", {
@@ -103,7 +112,7 @@ export const provisionerTailnetsFor = Effect.fn("SshExecutor.provisionerTailnets
           WorkerCapabilityError.make({
             worker,
             capability: "gateway",
-            message: `Provisioned worker "${worker}" could not join the tailnet or configure the gateway. Check the snapshot's Tailscale service and tailnet policy.`,
+            message: `Provisioned worker "${worker}" could not join the tailnet or configure the gateway. Check the snapshot's Tailscale service and tailnet policy.${egressHint}`,
             cause: new Error("tailnet bootstrap failed"),
           }),
         ),
