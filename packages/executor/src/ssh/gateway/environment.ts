@@ -1,5 +1,5 @@
 import type { Harness } from "@usine/core/agent/brain";
-import { type HarnessCatalog, gatewayTokenVariables } from "@usine/agents/harness";
+import type { HarnessCatalog } from "@usine/agents/harness";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayDomain, GatewayLlmProtocol } from "@usine/core/worker";
 import { type CallerToken, GATEWAY_TOKEN_HEADER } from "@usine/gateway/admin";
@@ -16,14 +16,6 @@ export const GH_GATEWAY_SOCKET_DIRECTORY = "/run/usine-gateway";
 const GH_GATEWAY_SOCKET = `${GH_GATEWAY_SOCKET_DIRECTORY}/http.sock`;
 
 const FORWARD_PROXY_PORT = 3128;
-
-/** Caller-token variables that the worker's sshd must accept. */
-export const gatewaySentVariables = (catalog: HarnessCatalog) => [
-  "GIT_CONFIG_VALUE_0",
-  "GH_ENTERPRISE_TOKEN",
-  "GH_TOKEN",
-  ...gatewayTokenVariables(catalog),
-];
 
 /** Returns the Gateway's forward proxy URL from a Worker; children receive it as `HTTPS_PROXY`. */
 export const forwardProxyUrl = (domain: GatewayDomain): string =>

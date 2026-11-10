@@ -1,25 +1,18 @@
-import type { HarnessCatalog } from "@usine/agents/harness";
 import type { GatewayDomain } from "@usine/core/worker";
 import { Effect } from "effect";
 import { WorkerCapabilityError } from "../../executor.ts";
 import type { RemoteCommands } from "../../remote/commands.ts";
 import type { SshMachine, SshTailnet } from "../model.ts";
-import { gatewaySentVariables } from "./environment.ts";
 
 const CONFIGURE = String.raw`
 set -eu
 address=$1
 domain=$2
-variables=$3
 work=$(mktemp)
 trap 'rm -f "$work"' EXIT
 grep -v '# usine-tailnet$' /etc/hosts > "$work" || true
 printf '%s git.%s llm.%s # usine-tailnet\n' "$address" "$domain" "$domain" >> "$work"
 cat "$work" > /etc/hosts
-mkdir -p /etc/ssh/sshd_config.d
-printf 'AcceptEnv %s\n' "$variables" > /etc/ssh/sshd_config.d/40-usine-gateway.conf
-sshd -t
-systemctl reload ssh
 cat > /etc/systemd/system/usine-gateway-http.socket <<UNIT
 [Socket]
 ListenStream=/run/usine-gateway/http.sock
@@ -50,7 +43,6 @@ fi
 `.trim();
 
 export const configureTailnetGateway = Effect.fn("SshExecutor.configureTailnetGateway")(function* (
-  catalog: HarnessCatalog,
   commands: RemoteCommands,
   operation: "preflight" | "prepare",
   machine: SshMachine,
@@ -74,14 +66,13 @@ export const configureTailnetGateway = Effect.fn("SshExecutor.configureTailnetGa
       "sh",
       tailnet.gatewayAddress,
       domain,
-      gatewaySentVariables(catalog).join(" "),
     ])
     .pipe(
       Effect.mapError((cause) =>
         WorkerCapabilityError.make({
           worker,
           capability: "gateway",
-          message: `SSH worker "${worker}" could not configure its tailnet gateway. Check passwordless sudo, sshd, and systemd on the worker.`,
+          message: `SSH worker "${worker}" could not configure its tailnet gateway. Check passwordless sudo and systemd on the worker.`,
           cause,
         }),
       ),

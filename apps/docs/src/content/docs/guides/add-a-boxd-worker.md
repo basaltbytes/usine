@@ -45,13 +45,17 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine.
 
-boxd serves SSH through its proxy, and the machine runs no sshd. Workers with a gateway fail when the restored machine joins the tailnet: the gateway setup reloads sshd, and the attempt reports that the SSH worker could not configure its tailnet gateway. Workers that use API keys without a gateway pass the keys to the attempt container on standard input, which the proxy carries. No attempt has been verified end to end on a boxd worker with API keys.
+boxd serves SSH through its proxy, and the machine runs no sshd. usine sends gateway tokens and API keys over standard input, which the proxy carries. Gateway setup configures the host entries and the HTTP socket units.
 
 `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 
-Start a test run with an API-key worker. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
+Start a test run. usine disables auto-hibernate and auto-suspend, pins the SSH proxy host key reported by boxd, and connects as `boxd` at the machine's public IP and assigned port. **Workers** shows the machine until cleanup retires it. [boxd settings](/reference/configuration/workers/#boxd-provisioner) lists all options, including reuse.
 
 Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication.
+
+## Environment variables
+
+boxd terminates SSH at its proxy and runs commands through its exec agent, which ignores OpenSSH `SendEnv` and `SetEnv`. usine sends secret variables to every SSH worker, boxd included, as an environment block on standard input. Each command reads the block before its command input or child protocol starts. Values stay out of command arguments, logs, and credential files. Gateway preflight checks that placeholder variables arrive this way.
 
 ## SSH recovery
 
@@ -61,4 +65,4 @@ usine refreshes the machine's SSH endpoint during recovery because its proxy por
 
 boxd snapshots retain the pulled attempt image. Rebuild the snapshot after upgrading usine to a release with a different attempt image, or when changing a custom image. Preflight logs an absent image at warning level and downloads it before running attempts. Shared pnpm and Turbo cache volumes remain available while a machine is reused and disappear when it is deleted.
 
-To run the opt-in live test, set `BOXD_API_KEY` and `BOXD_TEST_SNAPSHOT` in a local checkout. The snapshot must be a ready `2x8` snapshot in `fra` containing `~/.ssh/usine_worker.pub`. Run `pnpm --filter @usine/executor exec vitest run test/ssh/provisioner/boxd-live.test.ts`. The test creates one machine, runs SSH `true`, and destroys it; it is skipped in CI.
+To run the opt-in live test, set `BOXD_API_KEY` and `BOXD_TEST_SNAPSHOT` in a local checkout. The snapshot must be a ready `2x8` snapshot in `fra` containing `~/.ssh/usine_worker.pub`. Run `pnpm --filter @usine/executor exec vitest run test/ssh/provisioner/boxd-live.test.ts`. The test creates one machine, checks SSH connectivity, sends a variable over stdin and reads it back, and destroys it; it is skipped in CI.

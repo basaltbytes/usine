@@ -1,4 +1,3 @@
-import { catalog } from "@usine/agents/harness";
 import { assert, describe, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import { TailnetAddress } from "@usine/core/worker";
@@ -6,7 +5,6 @@ import { completes, type StubParent } from "@usine/durable/testing";
 import { Effect, FileSystem, Option, Path } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Executor } from "../../../src/executor.ts";
-import { gatewaySentVariables } from "../../../src/ssh/gateway/environment.ts";
 import {
   aloneOnItem,
   fakeMachine,
@@ -67,7 +65,6 @@ describe("Fixed SSH worker gateway over the tailnet", () => {
       yield* fs.writeFileString(path.join(bin, "sudo"), '#!/bin/sh\nshift\nexec "$@"\n', {
         mode: 0o755,
       });
-      yield* fs.writeFileString(path.join(bin, "sshd"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       yield* fs.writeFileString(
         path.join(bin, "systemctl"),
         '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CONFIGURE_LOG"\n',
@@ -128,8 +125,7 @@ describe("Fixed SSH worker gateway over the tailnet", () => {
         for (const { line } of configurations) {
           assert.include(line, "exec 'sudo' '-n' 'sh' '-c'");
           assert.include(line, "'100.64.0.2' 'gw.test'");
-          assert.include(line, gatewaySentVariables(catalog).join(" "));
-          assert.include(line, "/etc/ssh/sshd_config.d/40-usine-gateway.conf");
+          assert.notInclude(line, "sshd");
           assert.include(line, "/etc/systemd/system/usine-gateway-http.socket");
         }
         const prepared = yield* executor.prepare(request);

@@ -189,3 +189,14 @@ Startup admission checks proxy reachability and configured coordinator providers
 Credential preparation selects one harness before exporting descriptor wiring or forwarding provider tokens. The registry also removes other harnesses' variables from allowlisted host environments. Merging every registered descriptor into one attempt environment allowed a new harness's home and configuration variables to affect existing harnesses and their tool commands. Repository-only recovery commands use the base git, gh, and proxy environment; Cloudflare applies the same selection to its placeholder provider credentials.
 
 Saved child continuations contain the native session reference, harness, home, and Codex provider ID separately from billing and credential metadata. Each launch resolves the current credential kind and repeats admission. This allows a gateway credential-kind change on the same route without restoring stale accounting. A changed home or provider ID refuses continuation before another turn because a restart must not select a different configuration for an existing child. Codex 0.164.0 permits a native provider change, as documented in the research probe; the stable-provider check is usine's continuation policy.
+
+## Amendment (2026-11-09, #1101): secret variables over stdin instead of SendEnv
+
+The executor no longer sends the caller token and provisioner API keys with OpenSSH `SendEnv`. Every SSH command that carries them sends a base64 block of quoted exports on standard input, which the remote shell reads and evaluates before the command or child protocol gets the rest of its input. The reasons:
+
+- boxd terminates SSH at a proxy and runs commands through its exec agent. It ignores `SendEnv`, and its machines have no sshd whose `AcceptEnv` could be configured. `SendEnv` can't reach those workers.
+- Keeping `SendEnv` where it works means two transports, probe round trips on every new machine to choose one, and per-connection state to remember the choice. One transport has one tested path.
+- With `SendEnv`, the secrets sit in the local `ssh` client's environment, readable through `/proc/<pid>/environ` or `ps eww`. The stdin block keeps them out of the client's environment and out of both machines' command lines, like `SendEnv` did, and writes no file that a crash could leave behind.
+- The block needs only a POSIX `sh` and `base64` on the machine. The executor's remote command lines already require a POSIX shell, and `base64` ships with coreutils on the supported worker images. sshd needs no `AcceptEnv` entry.
+
+Gateway preflight sends placeholder values over stdin and fails with a `gateway` capability error naming the variables that don't arrive.

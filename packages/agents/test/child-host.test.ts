@@ -7,8 +7,10 @@ import {
   Duration,
   Effect,
   Exit,
+  FileSystem,
   Option,
   Queue,
+  Redacted,
   Ref,
   Schema,
   Scope,
@@ -60,6 +62,77 @@ const remoteLine = (invocation: HostInvocation): string => {
 };
 
 describe("remote shell commands", () => {
+  it("rejects stdin environment names that could become shell syntax", () => {
+    assert.throws(() =>
+      RemoteShell.make({
+        ...host,
+        stdinEnvironment: { "GH_TOKEN; exit 9": Redacted.make("value") },
+      }),
+    );
+  });
+  for (const transport of ["direct", "retained"]) {
+    it.live.skipIf(transport === "retained" && process.platform !== "linux")(
+      `reads secret variables before ${transport} child input without exposing them in arguments`,
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const directory = yield* fs.makeTempDirectoryScoped({
+            prefix: "usine-stdin-environment-",
+          });
+          const ssh = join(directory, "ssh");
+          yield* fs.writeFileString(
+            ssh,
+            '#!/bin/sh\nfor arg do line=$arg; done\nexec sh -c "$line"\n',
+            {
+              mode: 0o700,
+            },
+          );
+          const secret = "it's $HOME; $(exit 9)\n日本語\n\n";
+          const remote = RemoteShell.make({
+            ...host,
+            ssh: { command: ssh, args: [] },
+            // A real SSH login sets PATH; the process owner resolves `node` through it.
+            sshEnvironment: { PATH: yield* Config.String("PATH") },
+            stdinEnvironment: { GH_TOKEN: Redacted.make(secret) },
+          });
+          const input = new Uint8Array([0, 10, 255, 13, 42]);
+          const command = {
+            command: "node",
+            args: [
+              "-e",
+              'process.stdout.write(process.env.GH_TOKEN); process.stdin.pipe(process.stdout); process.stderr.write("diagnostic"); process.exitCode = 7;',
+            ],
+            cwd: directory,
+          };
+          const args = sshArguments(remote, command);
+          assert.notInclude(args.join(" "), secret);
+          const child = yield* startChildProcess(
+            {
+              host: remote,
+              cwd: directory,
+              environment: {},
+              sessionId:
+                transport === "retained"
+                  ? Option.some(AgentSessionId.make("attempt:child:1"))
+                  : Option.none(),
+            },
+            command,
+            Stream.make(input),
+          );
+          const [chunks, exit] = yield* Effect.all([Stream.runCollect(child.stdout), child.exit], {
+            concurrency: "unbounded",
+          });
+          const expected = Buffer.concat([Buffer.from(secret), input]);
+          assert.deepStrictEqual(
+            Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))),
+            expected,
+          );
+          assert.strictEqual(exit.exitCode, 7);
+          assert.strictEqual(exit.stderrTail, "diagnostic");
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+  }
+
   it("keeps a plain command a quoted exec", () => {
     assert.strictEqual(
       remoteLine({ command: "git", args: ["log", "it's"] }),

@@ -18,6 +18,7 @@ import {
   TEST_AGENT,
   WORKER,
   WORKER_ROOT,
+  stdinValue,
 } from "../support.ts";
 import { fakeGateway, gatewayAddress, gatewayRuntime } from "./support.ts";
 
@@ -58,10 +59,9 @@ it.effect(
         windows: aloneOnItem(),
       });
       assert(given !== undefined && Schema.is(RemoteShell)(given.host));
-      const token = given.host.sshEnvironment.SHARED_GATEWAY_TOKEN;
-      assert(token !== undefined);
-      assert.notProperty(given.host.sshEnvironment, "USINE_GATEWAY_TOKEN");
-      assert.include(given.host.ssh.args.join(" "), "SHARED_GATEWAY_TOKEN");
+      const token = stdinValue(given.host, "SHARED_GATEWAY_TOKEN");
+      assert.notProperty(given.host.stdinEnvironment, "USINE_GATEWAY_TOKEN");
+      assert.notProperty(given.host.sshEnvironment, "SHARED_GATEWAY_TOKEN");
       const home = `${WORKER_ROOT}/shared-client/remote-run_execute_1`;
       assert.strictEqual(given.environment.SHARED_HOME, home);
       assert.notProperty(given.environment, "CODEX_HOME");

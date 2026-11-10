@@ -91,12 +91,6 @@ write_files:
       DynamicUser=yes
       PrivateTmp=yes
 
-  # The executor sends each Attempt's caller token in these variables over the SSH connection, so the token never appears on a command line.
-  - path: /etc/ssh/sshd_config.d/40-usine-gateway.conf
-    permissions: "0644"
-    content: |
-      AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN
-
   - path: /etc/skel/.config/gh/config.yml
     permissions: "0644"
     content: |

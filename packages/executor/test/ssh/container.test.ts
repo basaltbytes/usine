@@ -563,17 +563,24 @@ describe("SSH Worker with Docker", () => {
         ]);
         assert(given !== undefined && Schema.is(RemoteShell)(given.host));
         assert.strictEqual(given.host.sshEnvironment.GH_TOKEN, undefined);
-        assert(!given.host.ssh.args.some((arg) => arg.startsWith("SendEnv=")));
-        for (const { command, line } of machine.state.calls) {
+        assert.isUndefined(given.host.stdinEnvironment);
+        for (const { command, line, stdinEnvironment } of machine.state.calls) {
           assert.notInclude(command.args.join(" "), callerToken);
+          assert.strictEqual(command.options.env?.GH_TOKEN, undefined);
           if (line.startsWith("exec 'docker' 'exec' ") || command.args.includes("-N")) continue;
           // Only the cached clone's fetch, as the SSH user, sends the caller token.
-          if (command.options.env?.GH_TOKEN !== undefined)
+          if (stdinEnvironment.GH_TOKEN !== undefined)
             assert.notInclude(line, `'-C' '${WORKTREE}'`);
         }
+        assert(
+          machine.state.calls.some(
+            ({ stdinEnvironment }) => stdinEnvironment.GH_TOKEN !== undefined,
+          ),
+          "the cached clone's fetch sends the caller token",
+        );
         const children = machine.state.calls.filter(({ container }) => container === CONTAINER);
-        for (const { command } of children)
-          assert.strictEqual(command.options.env?.GH_TOKEN, undefined);
+        for (const { stdinEnvironment } of children)
+          assert.strictEqual(stdinEnvironment.GH_TOKEN, undefined);
       }).pipe(
         Effect.scoped,
         Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })),

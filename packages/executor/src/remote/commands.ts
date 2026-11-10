@@ -3,6 +3,7 @@ import {
   RemoteShell,
   type SshCommand,
   sshArguments,
+  sshInput,
 } from "@usine/agents/child-host";
 import type { SshDestination } from "@usine/core/worker";
 import { Effect, Redacted, Stream } from "effect";
@@ -13,7 +14,7 @@ import {
   type CommandResult,
   requireSuccess,
 } from "../child-command.ts";
-import type { ExecutorOperation, ExecutorOperationError } from "../executor.ts";
+import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 
 /**
  * The working directory and extra environment for a remote command. `scrub` is applied to the
@@ -88,28 +89,20 @@ export const DEFAULT_SSH: SshCommand = {
 const encoder = new TextEncoder();
 
 /**
- * Returns `shell` with `variables` sent through OpenSSH `SendEnv` instead of the command line,
- * so the values aren't in arguments, logs, or process listings. The remote sshd drops names
- * not in its `AcceptEnv`.
+ * Returns `shell` with `variables` added to the environment block that each command reads from
+ * stdin before it starts, so the values stay out of command arguments and the SSH client's
+ * environment.
  */
 export const sendingShell = (
   shell: RemoteShell,
   variables: Readonly<Record<string, Redacted.Redacted<string>>>,
-): RemoteShell => {
-  const entries = Object.entries(variables);
-  if (entries.length === 0) return shell;
-  return RemoteShell.make({
-    ssh: {
-      command: shell.ssh.command,
-      args: [...shell.ssh.args, "-o", `SendEnv=${entries.map(([name]) => name).join(" ")}`],
-    },
-    sshEnvironment: {
-      ...shell.sshEnvironment,
-      ...Object.fromEntries(entries.map(([name, value]) => [name, Redacted.value(value)])),
-    },
-    destination: shell.destination,
-  });
-};
+): RemoteShell =>
+  Object.keys(variables).length === 0
+    ? shell
+    : RemoteShell.make({
+        ...shell,
+        stdinEnvironment: { ...shell.stdinEnvironment, ...variables },
+      });
 
 /** The `RemoteCommands` that use this process's spawner and the allowlisted SSH environment. */
 export const remoteCommandsFor = Effect.gen(function* () {
@@ -126,6 +119,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
     args: ReadonlyArray<string>,
     clientEnvironment: Readonly<Record<string, string>>,
     maxOutputBytes?: number,
+    input: Stream.Stream<Uint8Array> = Stream.empty,
   ) {
     yield* Effect.annotateCurrentSpan({ host, operation });
     return yield* collectCommand(
@@ -136,6 +130,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
       {
         env: { ...clientEnvironment },
         extendEnv: false,
+        stdin: input,
       },
       maxOutputBytes,
     );
@@ -163,6 +158,8 @@ export const remoteCommandsFor = Effect.gen(function* () {
       shell.ssh.command,
       sshArguments(shell, { command, args }),
       shell.sshEnvironment,
+      undefined,
+      sshInput(shell, Stream.empty),
     );
 
   const run = Effect.fn("RemoteExecutor.run")(function* (
@@ -185,6 +182,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
       sshArgs,
       shell.sshEnvironment,
       context.maxOutputBytes,
+      sshInput(shell, Stream.empty),
     );
     const scrub = context.scrub ?? ((text: string) => text);
     return yield* requireSuccess(operation, shell.destination, shell.ssh.command, sshArgs, {
@@ -206,7 +204,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
     const result = yield* collectCommand(spawner, operation, shell.ssh.command, sshArgs, {
       env: { ...shell.sshEnvironment },
       extendEnv: false,
-      stdin: Stream.make(encoder.encode(Redacted.value(input))),
+      stdin: sshInput(shell, Stream.make(encoder.encode(Redacted.value(input)))),
     });
     const secret = Redacted.value(input);
     const scrub = (text: string) => (secret === "" ? text : text.replaceAll(secret, "[REDACTED]"));
@@ -217,5 +215,11 @@ export const remoteCommandsFor = Effect.gen(function* () {
     });
   });
 
-  return { shellFor, local, inspect, run, runWithInput } satisfies RemoteCommands;
+  return {
+    shellFor,
+    local,
+    inspect,
+    run,
+    runWithInput,
+  } satisfies RemoteCommands;
 });

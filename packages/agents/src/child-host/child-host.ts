@@ -1,5 +1,6 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { type Brand, Schema } from "effect";
+import { type Brand, Redacted, Schema, Stream } from "effect";
+import { Base64 } from "effect/encoding";
 
 /** A host that runs children as local processes. */
 export class LocalProcess extends Schema.TaggedClass<
@@ -39,6 +40,16 @@ export class RemoteShell extends Schema.TaggedClass<
    * token. Never log this field.
    */
   sshEnvironment: Schema.Record(Schema.String, Schema.String),
+  /** Secrets read from the first stdin line before the command starts. Never log this field. */
+  stdinEnvironment: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.Redacted(Schema.String)).check(
+      Schema.makeFilter(
+        (variables) =>
+          Object.keys(variables).every((name) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)),
+        { message: "Expected shell environment variable names" },
+      ),
+    ),
+  ),
   /** The SSH destination, passed as one argument. */
   destination: Schema.NonEmptyString,
   /**
@@ -103,7 +114,11 @@ const remoteShellCommand = (invocation: HostInvocation): string => {
  * through `<runtime> exec -i`, so its standard streams pass through.
  */
 export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Array<string> => {
-  const line = remoteShellCommand(invocation);
+  const line =
+    (host.stdinEnvironment === undefined
+      ? ""
+      : 'set +x; IFS= read -r usine_environment && usine_environment=$(printf %s "$usine_environment" | base64 -d) && eval "unset usine_environment; $usine_environment" && ') +
+    remoteShellCommand(invocation);
   return [
     ...host.ssh.args,
     host.destination,
@@ -112,6 +127,21 @@ export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Arr
       ? line
       : `exec ${quoted([host.container.runtime, "exec", "-i", host.container.name, "sh", "-c", line])}`,
   ];
+};
+
+/** Prepends the secret environment block consumed by `sshArguments`, preserving command input. */
+export const sshInput = <E, R>(host: RemoteShell, input: Stream.Stream<Uint8Array, E, R>) => {
+  const variables = host.stdinEnvironment;
+  if (variables === undefined) return input;
+  return Stream.concat(
+    Stream.suspend(() => {
+      const exports = Object.entries(variables).map(
+        ([name, value]) => `export ${name}=${quote(Redacted.value(value))}`,
+      );
+      return Stream.make(new TextEncoder().encode(`${Base64.encode(exports.join(";"))}\n`));
+    }),
+    input,
+  );
 };
 
 /** Returns the PID file path of a remote child: next to its worktree, named by the child number in its session ID. */

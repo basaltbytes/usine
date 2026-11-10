@@ -47,7 +47,7 @@ import {
   fakeMachine,
   mintingProvider,
   request,
-  sentVariables,
+  stdinValue,
   writesCredential,
 } from "../support.ts";
 import {
@@ -72,10 +72,8 @@ const sink = {
 
 /** Returns the caller token that a child host sends to the machine. */
 const callerTokenOf = (request: AttemptRequest | undefined): string => {
-  assert(request !== undefined && Schema.is(RemoteShell)(request.host));
-  const token = request.host.sshEnvironment.GH_ENTERPRISE_TOKEN;
-  assert(token !== undefined, "the child host sends the caller token");
-  return token;
+  assert(request !== undefined);
+  return stdinValue(request.host, "GH_ENTERPRISE_TOKEN");
 };
 
 const CODEX_BRAIN = BrainSpec.make({
@@ -157,12 +155,14 @@ describe("SSH Worker behind a Gateway", () => {
         const claims = yield* claimsOf(callerToken);
         assert.strictEqual(claims.attachment, attached.id);
         assert(Schema.is(RemoteShell)(given?.host));
-        assert.include(
-          given.host.ssh.args,
-          "SendEnv=GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN",
-        );
-        assert.strictEqual(given.host.sshEnvironment.GH_TOKEN, callerToken);
-        assert.strictEqual(given.host.sshEnvironment.ANTHROPIC_AUTH_TOKEN, callerToken);
+        assert.sameMembers(Object.keys(given.host.stdinEnvironment ?? {}), [
+          "GIT_CONFIG_VALUE_0",
+          "GH_ENTERPRISE_TOKEN",
+          "GH_TOKEN",
+          "ANTHROPIC_AUTH_TOKEN",
+        ]);
+        assert.strictEqual(stdinValue(given.host, "GH_TOKEN"), callerToken);
+        assert.strictEqual(stdinValue(given.host, "ANTHROPIC_AUTH_TOKEN"), callerToken);
         assert.strictEqual(given.environment.GH_HOST, "git.gw.test");
         assert.strictEqual(given.environment.GH_CONFIG_DIR, `${WORKER_ROOT}/gh`);
         assert.strictEqual(
@@ -179,7 +179,7 @@ describe("SSH Worker behind a Gateway", () => {
         assert.include(clone.line, "'http://git.gw.test/acme/demo.git'");
         assert.include(clone.line, "GIT_CONFIG_KEY_0='http.http://git.gw.test/.extraHeader'");
         assert.strictEqual(
-          clone.command.options.env?.GIT_CONFIG_VALUE_0,
+          clone.stdinEnvironment.GIT_CONFIG_VALUE_0,
           `x-usine-gateway-token: ${callerToken}`,
         );
         assert.include(machine.state.files.get(`${WORKER_ROOT}/gh/config.yml`) ?? "", "http.sock");
@@ -192,12 +192,8 @@ describe("SSH Worker behind a Gateway", () => {
           assert.notInclude(command.args.join(" "), callerToken);
           const json3 = jsonKey(command.options.env);
           assert.notInclude(json3, TOKEN_PREFIX);
-          const sent = new Set(sentVariables(command));
           for (const name of Object.keys(command.options.env ?? {}))
-            assert(
-              allowlisted.has(name) || sent.has(name),
-              `unexpected SSH environment key: ${name}`,
-            );
+            assert(allowlisted.has(name), `unexpected SSH environment key: ${name}`);
         }
         for (const contents of machine.state.files.values()) {
           assert.notInclude(contents, TOKEN_PREFIX);
@@ -538,13 +534,20 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect("pushes a failed Attempt's salvage through the Gateway before detaching", () => {
+  it.effect("pushes salvage before detaching with the caller token on stdin", () => {
     const machine = fakeMachine();
     const credentials = mintingProvider();
     const gateway = fakeGateway(machine);
     machine.state.salvage = "dirty";
+    let given: AttemptRequest | undefined;
+    const parent: StubParent = (context) => {
+      given = context.request;
+      return fails(context);
+    };
+    const logs = capturedLogs();
     return Effect.gen(function* () {
       const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
       const prepared = yield* executor.prepare(request);
       const recorded: Array<AttemptSalvage> = [];
       yield* prepared
@@ -561,12 +564,25 @@ describe("SSH Worker behind a Gateway", () => {
       const push = machine.state.calls.findIndex(({ line }) => line.includes("'push' '--force'"));
       const pushed = machine.state.calls[push];
       assert(pushed !== undefined);
-      assert.include(sentVariables(pushed.command), "GIT_CONFIG_VALUE_0");
+      const callerToken = callerTokenOf(given);
+      assert.strictEqual(
+        pushed.stdinEnvironment.GIT_CONFIG_VALUE_0,
+        `x-usine-gateway-token: ${callerToken}`,
+      );
+      for (const { command } of machine.state.calls) {
+        assert.notInclude(command.args.join(" "), callerToken);
+        assert.notInclude(jsonKey(command.options.env), callerToken);
+      }
+      assert.notInclude(logs.lines.join("\n"), callerToken);
       const detach = gateway.calls.find(({ method }) => method === "DELETE");
       assert((detach?.machineCalls ?? 0) > push, "the salvage push still has the attachment");
     }).pipe(
       Effect.scoped,
-      Effect.provide(gatewayRuntime(machine, credentials, gateway, { parent: fails })),
+      Effect.provide(
+        gatewayRuntime(machine, credentials, gateway, { parent }).pipe(
+          Layer.provideMerge(logs.layer),
+        ),
+      ),
     );
   });
 
@@ -612,6 +628,42 @@ describe("SSH Worker behind a Gateway", () => {
       );
     },
   );
+
+  it.effect("recovers salvage after a restart with the caller token on stdin", () => {
+    const machine = fakeMachine();
+    const credentials = mintingProvider();
+    const gateway = fakeGateway(machine);
+    machine.state.cacheExists = true;
+    machine.state.salvage = "dirty";
+    const recorded: Array<AttemptSalvage> = [];
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.recover(
+        {
+          attemptId: request.attemptId,
+          repository: request.repository,
+          worker: WORKER,
+          ref: request.salvageRef,
+          permissions: "write",
+          succeeded: false,
+          open: false,
+          rejected: Option.none(),
+        },
+        {
+          salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          comments: () => Effect.void,
+          windows: aloneOnItem(),
+        },
+        Effect.succeed(COMMIT_AUTHOR),
+      );
+      assert.strictEqual(recorded[0]?._tag, "Pushed");
+      const push = machine.state.calls.find(({ line }) => line.includes("'push' '--force'"));
+      assert(push !== undefined);
+      assert.include(push.stdinEnvironment.GIT_CONFIG_VALUE_0, "x-usine-gateway-token: ");
+      assert.include(push.command.args.join(" "), "read -r usine_environment");
+      assert.strictEqual((yield* attachmentsInForce).length, 0);
+    }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
+  });
 
   it.effect("detaches what an earlier process left for the Worker before recovering it", () => {
     const machine = fakeMachine();
@@ -737,7 +789,7 @@ describe("SSH Worker behind a Gateway", () => {
   });
 
   it.effect(
-    "preflight checks the admin API, the machine's sshd, and git.<domain>, changing nothing",
+    "preflight checks the admin API, stdin variables, and git.<domain>, changing nothing",
     () => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
@@ -763,33 +815,47 @@ describe("SSH Worker behind a Gateway", () => {
               `preflight ran ${mutating}`,
             );
 
-        machine.state.droppedSentVariables.add("USINE_GATEWAY_TOKEN");
-        yield* executor.preflight(WORKER, [], 1);
-        machine.state.droppedSentVariables.clear();
-
-        machine.state.droppedSentVariables.add("ANTHROPIC_AUTH_TOKEN");
-        const missingProviderToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
-        assert(missingProviderToken._tag === "WorkerCapabilityError");
-        assert.include(missingProviderToken.message, "doesn't accept ANTHROPIC_AUTH_TOKEN.");
-        assert.notInclude(missingProviderToken.message, "USINE_GATEWAY_TOKEN");
-        machine.state.droppedSentVariables.clear();
-
-        machine.state.droppedSentVariables.add("GH_TOKEN");
-        const missingGitHubToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
-        assert(missingGitHubToken._tag === "WorkerCapabilityError");
-        assert.include(missingGitHubToken.message, "doesn't accept GH_TOKEN.");
-        machine.state.droppedSentVariables.clear();
-
-        machine.state.acceptsSentVariables = false;
-        const dropped = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
-        assert(dropped._tag === "WorkerCapabilityError");
-        assert.strictEqual(dropped.capability, "gateway");
-        assert.include(
-          dropped.message,
-          "AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN",
+        const probe = machine.state.calls.find(({ line }) => line.includes("printenv"));
+        assert(probe !== undefined);
+        assert.sameMembers(Object.keys(probe.stdinEnvironment), [
+          "GIT_CONFIG_VALUE_0",
+          "GH_ENTERPRISE_TOKEN",
+          "GH_TOKEN",
+          "ANTHROPIC_AUTH_TOKEN",
+        ]);
+        assert.deepStrictEqual(
+          Object.keys(probe.command.options.env ?? {}).filter((name) => !allowlisted.has(name)),
+          [],
         );
 
-        machine.state.acceptsSentVariables = true;
+        const notReceived =
+          'SSH worker "eu-one" doesn\'t receive GIT_CONFIG_VALUE_0, GH_ENTERPRISE_TOKEN, GH_TOKEN, ANTHROPIC_AUTH_TOKEN over standard input. Its SSH commands must run in a POSIX sh with base64.';
+        machine.state.stdinVariables = "dropped";
+        const dropped = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert(dropped._tag === "WorkerCapabilityError", dropped._tag);
+        assert.strictEqual(dropped.capability, "gateway");
+        assert.strictEqual(dropped.message, notReceived);
+
+        machine.state.stdinVariables = "no-base64";
+        const noBase64 = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert(noBase64._tag === "WorkerCapabilityError", noBase64._tag);
+        assert.strictEqual(noBase64.capability, "gateway");
+        assert.strictEqual(noBase64.message, notReceived);
+        assert.instanceOf(noBase64.cause, Error);
+        assert.strictEqual(noBase64.cause.message, "sh: 1: base64: not found");
+
+        machine.state.stdinVariables = "disconnects";
+        const disconnected = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert(disconnected._tag === "ExecutorOperationError", disconnected._tag);
+        assert.strictEqual(disconnected.operation, "preflight");
+        assert.strictEqual(disconnected.message, "Can't reach usine@203.0.113.7 to run sh");
+        assert.instanceOf(disconnected.cause, Error);
+        assert.strictEqual(
+          disconnected.cause.message,
+          "Connection to 203.0.113.7 closed by remote host.",
+        );
+
+        machine.state.stdinVariables = "received";
         machine.state.gatewayReachable = false;
         const unreachable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(unreachable._tag === "WorkerCapabilityError");
@@ -1140,11 +1206,13 @@ describe("SSH Worker behind a Gateway", () => {
         yield* prepared.launch(sink);
         const callerToken = callerTokenOf(given);
         assert(Schema.is(RemoteShell)(given?.host));
-        assert.include(
-          given.host.ssh.args,
-          "SendEnv=GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN USINE_GATEWAY_TOKEN",
-        );
-        assert.strictEqual(given.host.sshEnvironment.USINE_GATEWAY_TOKEN, callerToken);
+        assert.sameMembers(Object.keys(given.host.stdinEnvironment ?? {}), [
+          "GIT_CONFIG_VALUE_0",
+          "GH_ENTERPRISE_TOKEN",
+          "GH_TOKEN",
+          "USINE_GATEWAY_TOKEN",
+        ]);
+        assert.strictEqual(stdinValue(given.host, "USINE_GATEWAY_TOKEN"), callerToken);
         const codexHome = `${WORKER_ROOT}/codex/remote-run_execute_1`;
         assert.strictEqual(given.environment.CODEX_HOME, codexHome);
         assert.isUndefined(given.environment.ANTHROPIC_BASE_URL);

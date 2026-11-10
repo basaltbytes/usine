@@ -184,8 +184,8 @@ export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(fu
 });
 
 /**
- * Verifies the Gateway from an SSH Worker's machine without attaching anything: the machine's
- * sshd accepts the caller-token variables, and the machine can connect to `git.<domain>`, which
+ * Verifies the Gateway from an SSH Worker's machine without attaching anything: the machine
+ * receives the caller-token variables, and the machine can connect to `git.<domain>`, which
  * rejects a request without a caller token.
  */
 const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine")(function* (
@@ -215,18 +215,26 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
       ),
     ),
   };
-  const received = yield* commands.run("preflight", sendingShell(machine.shell, sent), "sh", [
+  const received = yield* commands.inspect("preflight", sendingShell(machine.shell, sent), "sh", [
     "-c",
     SENT_VARIABLES_SCRIPT,
     "sh",
     ...Object.entries(sent).flatMap(([name, value]) => [name, Redacted.value(value)]),
   ]);
-  const dropped = received.split("\n").filter((name) => name !== "");
+  if (received.exitCode === SSH_FAILURE)
+    return yield* unreachable(machine.shell.destination, "sh", received);
+  const dropped =
+    received.exitCode === 0
+      ? received.stdout.split("\n").filter((name) => name !== "")
+      : Object.keys(sent);
   if (dropped.length > 0)
     return yield* gatewayGap(
       worker,
-      `The sshd on SSH worker "${worker}" doesn't accept ${dropped.join(", ")}. Add AcceptEnv ${Object.keys(sent).join(" ")} to its sshd configuration.`,
-      new Error(`variables not received: ${dropped.join(" ")}`),
+      `SSH worker "${worker}" doesn't receive ${dropped.join(", ")} over standard input. Its SSH commands must run in a POSIX sh with base64.`,
+      new Error(
+        received.stderr.trim() ||
+          `variables not received: ${dropped.join(" ")} (exit code ${String(received.exitCode)})`,
+      ),
     );
 
   const probed = yield* commands.inspect("preflight", machine.shell, "curl", [
