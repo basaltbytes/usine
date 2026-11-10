@@ -1,7 +1,17 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { assert, describe, it } from "@effect/vitest";
 import { MachineId } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Predicate, Redacted, Schema, Stream } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Predicate,
+  Redacted,
+  Schema,
+  Stream,
+} from "effect";
 import { connect, createServer, type Socket } from "node:net";
 import {
   BoxdExec,
@@ -190,12 +200,19 @@ describe("BoxdExec", () => {
           Stream.flatMap(() => Stream.never),
         ),
       );
-      const fiber = yield* run(server.url, "sleep 600").pipe(Effect.forkChild);
+      const services = yield* Layer.build(boxdExecLayer(server.url, Redacted.make(KEY)));
+      const exec = Context.get(services, BoxdExec);
+      const fiber = yield* Effect.gen(function* () {
+        const execution = yield* exec.exec(MACHINE, "sleep 600", Stream.empty);
+        return yield* execution.exitCode;
+      }).pipe(Effect.scoped, Effect.forkChild);
       const signal = yield* Deferred.await(started);
       yield* Fiber.interrupt(fiber);
       yield* Effect.sleep("200 millis");
 
       assert.isTrue(signal.aborted);
+      assert.isAbove(server.sessions.size, 0);
+      for (const session of server.sessions) assert.isFalse(session.closed || session.destroyed);
     }).pipe(Effect.scoped),
   );
 
