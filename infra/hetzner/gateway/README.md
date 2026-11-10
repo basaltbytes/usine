@@ -96,6 +96,8 @@ The table covers all 24 entries in the checked-in `egress-allowlist`. Package-ho
 
 Routing probes on 2026-10-29 kept SNI at the allowlisted host and changed only HTTP/1.1 `Host`, without credentials or redirect following. Both `pypi.org` and `files.pythonhosted.org` returned the Python.org homepage for `Host: www.python.org`; `proxy.golang.org` returned Alphabet Investor Relations for `Host: abc.xyz`. These hosts therefore permit cross-service routing. `registry.npmjs.org` and `nodejs.org` returned Cloudflare `403` responses for `Host: www.cloudflare.com`. Those refusals do not narrow their certificates or establish isolation for other host pairs or HTTP/2.
 
+boxd's documentation host, `docs.boxd.sh`, isn't listed: Vercel serves it, and a routing probe on 2026-11-10 reached other Vercel-hosted sites through a tunnel to it, including sites that anyone can deploy, while the boxd CLI's usage text in the attempt image covers the command and flag checks that reviews need.
+
 ### Paths by client
 
 From the gateway's journal and dnsmasq's query log on 2026-10-15, with the children's environment from the executor (`HTTPS_PROXY=http://<domain>:3128`):

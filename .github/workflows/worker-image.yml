@@ -75,7 +75,16 @@ jobs:
             for tool in node pnpm gh claude codex chromium; do
               printf "%s: " "$tool"
               "$tool" --version
-            done'
+            done
+            if command -v boxd > /dev/null; then
+              printf "boxd: "
+              boxd --version
+              boxd manage regions --help > /dev/null
+              [ ! -e ~/.config/boxd/telemetry ]
+            else
+              echo "boxd: not installed (pin outdated)"
+              echo "::warning title=boxd CLI not installed::boxd no longer serves BOXD_VERSION of infra/worker-image/Dockerfile; update it and both checksums."
+            fi'
       - name: Run pnpm through Corepack offline
         run: |
           package_manager=$(jq -r .packageManager package.json)

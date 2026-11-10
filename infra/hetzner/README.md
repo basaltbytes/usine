@@ -11,7 +11,7 @@ An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. The
 
 ## Attempt containers
 
-The attempt image includes `lsof`, `ss` (from `iproute2`), `ps` (from `procps`), and `curl` for process, port, and HTTP checks.
+The attempt image includes `lsof`, `ss` (from `iproute2`), `ps` (from `procps`), and `curl` for process, port, and HTTP checks. It also includes the boxd CLI at the version of `BOXD_VERSION` in `../worker-image/Dockerfile`, signed out, so that a review can check boxd commands and flags against `boxd <command> --help`. When boxd no longer serves that version, the image builds without the CLI, the build log warns with the pinned and the served version, and the Worker image workflow's smoke test prints `boxd: not installed (pin outdated)`; to add the CLI back, update the version and both checksums.
 
 New workers use rootless Podman. The root-owned `/etc/usine/container-runtime` selects `podman` or `docker`; set `USINE_CONTAINER_RUNTIME=docker` when running `create-worker.sh`, `snapshot.sh`, or `gateway/gateway.sh worker-user-data` to build a Docker worker. On existing machines without the file, the executor selects Podman when installed, then Docker. A selected runtime that fails its checks fails preflight.
 
@@ -23,7 +23,7 @@ Preflight pulls the image, checks rootless mode, cgroup v2, delegation, subordin
 
 Preflight creates the shared `usine-pnpm-store` volume, initializes it with the image's `usine` UID, and logs its allocated size in KiB. Attempt containers mount it read-write at `/home/usine/.local/share/pnpm/store`; it survives container removal. Remove containers that reference it before running `podman volume rm usine-pnpm-store` on the worker to reclaim the space. The `usine-turbo-cache` volume uses the same ownership checks and cleanup procedure. usine does not prune either volume automatically. Provisioned machines delete both volumes after their one attempt. See [Shared pnpm store](https://docs.usine.dev/guides/add-a-worker/#shared-pnpm-store).
 
-Inside a container, the image sets `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`, `TURBO_CACHE_DIR`, and pnpm's store directory, and the executor sets the attempt's credential and gateway variables. The image's entrypoint copies `~/.claude.json` and `~/.codex/config.toml` into the container's home, where the harnesses can write them; `~/.claude/.credentials.json` and `~/.codex/auth.json` are read-write mounts of the machine's files, which the harnesses rewrite when they refresh their tokens.
+Inside a container, the image sets `DISABLE_AUTOUPDATER`, `BOXD_TELEMETRY=0`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`, `TURBO_CACHE_DIR`, and pnpm's store directory, and the executor sets the attempt's credential and gateway variables. The image's entrypoint copies `~/.claude.json` and `~/.codex/config.toml` into the container's home, where the harnesses can write them; `~/.claude/.credentials.json` and `~/.codex/auth.json` are read-write mounts of the machine's files, which the harnesses rewrite when they refresh their tokens.
 
 A machine without either runtime runs each child as a non-interactive SSH session of `usine`, as described in the rest of this file, and preflight reports the worker as degraded. That session gets the variables of `/etc/environment` and reads no shell profile. `/etc/environment` sets:
 
