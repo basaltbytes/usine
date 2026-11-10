@@ -4,6 +4,13 @@ import { agoLabel, dayTimeLabel, timestampLabel } from "~/lib/strings";
 
 export const preparingAttemptImage = "Preparing the attempt image";
 
+export const workerPausedLabel = "Paused";
+/** States what a paused Worker does, for a status line. */
+export const workerPausedLine = "Paused: takes no new attempts";
+/** Explains a paused Worker and how to resume it. */
+export const workerPausedDetail =
+  "This worker takes no new attempts while usine.yaml pauses it. Its running attempts finish. Clear Paused in the worker's configuration to resume it.";
+
 export const providerLabel = {
   hetzner: "Hetzner",
   boat: "Boat",

@@ -1,4 +1,6 @@
 import { useHarnessLabel } from "~/lib/configuration/capabilities";
+import { StatusBadge } from "~/components/status-badge";
+import { workerPausedDetail, workerPausedLabel } from "~/lib/workers/strings";
 import { PreflightAction } from "./action";
 import { preflightTiming } from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
@@ -70,11 +72,17 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
       entity={entityKey("worker", name)}
       title={worker.name}
       marks={
-        <span className="text-sm text-muted-foreground">{workerKindLabel[worker.kind]} worker</span>
+        <>
+          {worker.paused && <StatusBadge state="paused" label={workerPausedLabel} />}
+          <span className="text-sm text-muted-foreground">
+            {workerKindLabel[worker.kind]} worker
+          </span>
+        </>
       }
     >
       <DetailColumns facts={<WorkerFacts worker={worker} />}>
         <DetailSection title="Slots">
+          {worker.paused && <p>{workerPausedDetail}</p>}
           {worker.slots === null ? (
             <p className="text-muted-foreground">No attempts run until the GitHub App is set up.</p>
           ) : (

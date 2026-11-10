@@ -279,6 +279,27 @@ describe("Workers page", () => {
     assert.notInclude(page, "Machine creation failed");
   });
 
+  it("marks a paused Worker on its page and in the list, and says how to resume it", async () => {
+    const configuration = Schema.decodeUnknownSync(ConfigurationView)({
+      ...configurationJson,
+      workers: configurationJson.workers.map((worker) =>
+        worker.name === "local" ? { ...worker, paused: true } : worker,
+      ),
+    });
+    const detail = text(
+      await render(() => <WorkerDetail name="local" configuration={configuration} />),
+    );
+    assert.include(detail, "Paused");
+    assert.include(detail, "takes no new attempts while usine.yaml pauses it");
+    assert.include(detail, "Clear Paused in the worker's configuration to resume it.");
+    const list = text(await render(() => <WorkersList configuration={configuration} />));
+    assert.strictEqual(list.split("Paused: takes no new attempts").length, 2, "only local");
+    const unpaused = text(
+      await render(() => <WorkerDetail name="local" configuration={configurationFixture()} />),
+    );
+    assert.notInclude(unpaused, "Paused");
+  });
+
   it("shows a Worker's slots and its last preflight per harness", async () => {
     const page = text(
       await render(() => <WorkerDetail name="local" configuration={configurationFixture()} />),

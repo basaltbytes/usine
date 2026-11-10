@@ -167,6 +167,23 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       return <RunFailureAsk need={need} dismiss={dismiss} />;
     case "WorkerQuotaNeed":
       return <WorkerQuotaAsk need={need} dismiss={dismiss} />;
+    case "WorkerPausedNeed":
+      return (
+        <NeedItem
+          copy={needCopy(need)}
+          heading={need.worker}
+          dismiss={dismiss}
+          actions={
+            <Button
+              variant="ghost"
+              nativeButton={false}
+              render={<Link to="/configuration/workers/$worker" params={{ worker: need.worker }} />}
+            >
+              {openWorkerLabel}
+            </Button>
+          }
+        />
+      );
     case "WorkerPreflightNeed":
       return (
         <NeedItem
