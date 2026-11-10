@@ -89,7 +89,17 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           ),
         );
         const api = Context.get(context, BoxdApi);
-        return yield* boxdDriverFor(worker, value).pipe(Effect.provideService(BoxdApi, api));
+        return yield* boxdDriverFor(
+          worker,
+          value,
+          Option.match(entry.address.identityFile, {
+            onNone: () => "<identity_file>.pub",
+            onSome: (file) => `${expandHome(file)}.pub`,
+          }),
+        ).pipe(
+          Effect.provideService(BoxdApi, api),
+          Effect.provideService(FileSystem.FileSystem, fs),
+        );
       }
       case "boat": {
         const publicKey = yield* readPublicKey(entry);

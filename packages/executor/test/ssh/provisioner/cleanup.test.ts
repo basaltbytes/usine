@@ -25,7 +25,7 @@ for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
     settings.provider === "hetzner"
       ? hetznerDriverFor(WORKER, settings, false, HETZNER_TEST_API)
       : settings.provider === "boxd"
-        ? boxdDriverFor(WORKER, settings)
+        ? boxdDriverFor(WORKER, settings, "/keys/usine_boxd.pub")
         : boatDriverFor(WORKER, settings, "ssh-ed25519 AAAATest", BOAT_TEST_API);
   const tags = {
     instance: INSTANCE,
@@ -70,7 +70,10 @@ for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          runtimeOf(machine, providers, address).pipe(Layer.provideMerge(providers.layer)),
+          runtimeOf(machine, providers, address).pipe(
+            Layer.provideMerge(providers.layer),
+            Layer.provideMerge(machine.layer),
+          ),
         ),
       );
     },
@@ -108,6 +111,7 @@ for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
         Effect.provide(
           runtimeOf(machine, providers, address).pipe(
             Layer.provideMerge(providers.layer),
+            Layer.provideMerge(machine.layer),
             Layer.provideMerge(logs.layer),
           ),
         ),
