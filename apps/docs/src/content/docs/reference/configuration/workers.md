@@ -211,7 +211,7 @@ provisioner:
   api_keys: { anthropic: USINE_ANTHROPIC_API_KEY }
 ```
 
-boxd requires `identity_file`, whose public key is baked into the snapshot's `/home/boxd/.ssh/authorized_keys`. The driver looks up the region's API endpoint with `ListRegions` on `boxd.sh`, authenticates through that regional gRPC API, and pins its SSH proxy key per machine. Auto-hibernate and auto-suspend are disabled on creation and reuse. A gateway requires `tailnet`; tailnet settings are refused without a gateway. Snapshots retain the attempt image, so rebuild after an upgrade changes the image. See [Add a boxd worker](/guides/add-a-boxd-worker/).
+boxd requires `identity_file`, whose public key is baked into the snapshot's `/home/boxd/.ssh/authorized_keys`. The driver reaches three endpoints: it exchanges the API key for a session over HTTPS at `app.boxd.sh`, lists regions and reads account details over gRPC at `boxd.sh:9443`, and sends machine and snapshot calls to the API endpoint that `ListRegions` lists for the region. Allow egress to all three. If boxd doesn't answer while the driver connects to the region, the attempt waits and tries again. The driver pins its SSH proxy key per machine. Auto-hibernate and auto-suspend are disabled on creation and reuse. A gateway requires `tailnet`; tailnet settings are refused without a gateway. Snapshots retain the attempt image, so rebuild after an upgrade changes the image. See [Add a boxd worker](/guides/add-a-boxd-worker/).
 
 ## Cloudflare connection
 

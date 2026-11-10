@@ -42,6 +42,12 @@ const assignment = (tags: MachineTags) => ({
   "usine.attempts": String(tags.attempts),
 });
 
+/** Codes for a boxd API that doesn't answer or rate-limits, which a later call can outlast. */
+const transientCodes = new Set(["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"]);
+
+const transientMessage = (worker: WorkerName, failure: BoxdCallError): string =>
+  `boxd didn't answer ${failure.operation} for worker "${worker}": ${failure.code}: ${failure.message}. Check that this host reaches app.boxd.sh, boxd.sh:9443, and the API endpoint of the region, or wait for the boxd rate limit to reset.`;
+
 /** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
 export const boxdPreflightError = (
   worker: WorkerName,
@@ -52,7 +58,9 @@ export const boxdPreflightError = (
       ? `boxd has no region "${failure.region}". Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ") || "none"}.`
       : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
         ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
-        : `boxd preflight ${failure.operation} failed: ${failure.code}: ${failure.message}. Check the API endpoint and snapshot; build it with boxd snapshots save.`;
+        : transientCodes.has(failure.code)
+          ? transientMessage(worker, failure)
+          : `boxd preflight ${failure.operation} failed: ${failure.code}: ${failure.message}. Check the API endpoint and snapshot; build it with boxd snapshots save.`;
   return WorkerCapabilityError.make({
     worker,
     capability: "provider",
@@ -60,6 +68,24 @@ export const boxdPreflightError = (
     cause: new Error(message),
   });
 };
+
+/**
+ * Explains a failure while connecting to the region of `worker`: a `MachineUnavailableError`,
+ * which the scheduler retries, when boxd doesn't answer or rate-limits, otherwise the
+ * `boxdPreflightError`.
+ */
+export const boxdConnectError = (
+  worker: WorkerName,
+  failure: BoxdCallError | BoxdUnknownRegion,
+): MachineUnavailableError | WorkerCapabilityError =>
+  failure._tag === "BoxdCallError" && transientCodes.has(failure.code)
+    ? MachineUnavailableError.make({
+        worker,
+        provider: "boxd",
+        reason: reasonOf(failure.code),
+        message: transientMessage(worker, failure),
+      })
+    : boxdPreflightError(worker, failure);
 
 /** A driver retains the create response only until endpoint discovery consumes it. */
 export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>

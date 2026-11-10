@@ -1,7 +1,7 @@
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { assert, it } from "@effect/vitest";
-import { BoxdRegion, MachineId } from "@usine/core/worker";
+import { BoxdRegion, MachineId, WorkerName } from "@usine/core/worker";
 import { Clock, Deferred, Effect, Fiber, Layer, Option, Predicate, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { createServer } from "node:http2";
@@ -9,7 +9,7 @@ import { createServer as createTcpServer } from "node:net";
 import { TestClock } from "effect/testing";
 import { machineDriversFor } from "../../../src/ssh/provisioner/drivers.ts";
 import { fakeMachine, WORKER } from "../support.ts";
-import { boxdAddress } from "./fixtures.ts";
+import { boxdAddress, hetznerAddress } from "./fixtures.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
 import { boxdSettings } from "./support.ts";
 import { jsonKey } from "@usine/core/json-key";
@@ -277,6 +277,10 @@ for (const [status, code] of [
         preflight.message,
         status === 401 || status === 403 ? "boxd refused the API key" : code,
       );
+      if (status === 429 || status === 503) {
+        assert.include(preflight.message, "app.boxd.sh");
+        assert.notInclude(preflight.message, "snapshots save");
+      }
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -509,4 +513,64 @@ it.effect(
         fakeMachine().layer,
       ]),
     ),
+);
+
+for (const [status, reason] of [
+  [503, "unreachable"],
+  [429, "quota"],
+] as const) {
+  it.effect(
+    `fails the launch with a retryable ${reason} unavailability when the token exchange returns HTTP ${status}`,
+    () =>
+      Effect.gen(function* () {
+        const drivers = yield* machineDriversFor({ instance: "regions-test", settings: {} });
+        const failure = yield* drivers
+          .forEntry({ address: boxdAddress, gateway: Option.none(), machine: Option.none() })
+          .pipe(Effect.flip);
+        assert(failure._tag === "MachineUnavailableError");
+        assert.strictEqual(failure.provider, "boxd");
+        assert.strictEqual(failure.reason, reason);
+        assert.include(failure.message, "authenticate");
+        assert.notInclude(failure.message, "snapshots save");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide([
+          Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status }))),
+            ),
+          ),
+          fakeMachine().layer,
+        ]),
+      ),
+  );
+}
+
+it.effect("builds another Worker's driver while a boxd region lookup is pending", () =>
+  Effect.gen(function* () {
+    const lookup = yield* Deferred.make<void>();
+    const drivers = yield* machineDriversFor({
+      instance: "regions-test",
+      settings: {
+        boxdClient: () =>
+          Layer.effect(
+            BoxdApi,
+            Deferred.succeed(lookup, undefined).pipe(Effect.andThen(Effect.never)),
+          ),
+      },
+    });
+    const boxd = yield* drivers
+      .forEntry({ address: boxdAddress, gateway: Option.none(), machine: Option.none() })
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(lookup);
+    const hetzner = yield* drivers.forEntry({
+      address: { ...hetznerAddress, name: WorkerName.make("hetzner-pool") },
+      gateway: Option.none(),
+      machine: Option.none(),
+    });
+    assert.strictEqual(hetzner.provider, "hetzner");
+    assert.isUndefined(boxd.pollUnsafe());
+    yield* Fiber.interrupt(boxd);
+  }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
 );
