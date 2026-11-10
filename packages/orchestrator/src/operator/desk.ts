@@ -298,6 +298,11 @@ export class WorkerView extends Schema.Class<
    * the declared `max_concurrent_attempts` with none leased.
    */
   slots: WorkerSlotsView,
+  /** Whether `usine.yaml` pauses the Worker, so it takes no new Attempts. */
+  paused: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
   /** New attempts cannot use free slots while this upgrade waits. */
   upgradeWait: Schema.NullOr(UpgradeWait).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
@@ -788,6 +793,7 @@ const makeDesk = Effect.gen(function* () {
       const preflight = preflightByWorker.get(name);
       return WorkerView.make({
         name,
+        paused: instance.config.workers.some((worker) => worker.name === name && worker.paused),
         upgradeWait: upgrade?.wait ?? null,
         slots: WorkerSlotsView.make({
           capacity:
