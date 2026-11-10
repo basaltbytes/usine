@@ -421,8 +421,8 @@ const GITHUB_HOSTS = ["github.com", "api.github.com"];
 /**
  * Returns why a boxd egress allowlist conflicts with the worker's gateway, or `undefined` if it
  * doesn't. Behind a gateway, the allowlist must admit Tailscale's coordination and DERP relay
- * servers, and must not admit a host the gateway serves: GitHub, or the login hosts of a provider
- * whose credential the gateway holds, which would receive the caller token.
+ * servers, and must not admit a host the gateway serves: GitHub, or the API and login hosts of a
+ * provider whose credential the gateway holds, which would receive the caller token.
  */
 const boxdEgressConflict = (worker: SshWorker, egress: BoxdEgressAllowlist): string | undefined => {
   if (Option.isNone(worker.gateway)) return undefined;
@@ -434,7 +434,10 @@ const boxdEgressConflict = (worker: SshWorker, egress: BoxdEgressAllowlist): str
     ...catalog.descriptors.flatMap(({ worker: requirements }) =>
       Option.toArray(requirements.credential).flatMap((credential) =>
         llmProviders.includes(credential.protocol)
-          ? credential.hosts.map((host) => ({ host, at: `llm.${domain}` }))
+          ? Array.from(new Set([...credential.hosts, credential.apiHost]), (host) => ({
+              host,
+              at: `llm.${domain}`,
+            }))
           : [],
       ),
     ),

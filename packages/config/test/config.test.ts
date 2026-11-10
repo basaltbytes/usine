@@ -556,6 +556,11 @@ ${egress.join("\n")}
           "admitting platform.claude.com, which the gateway serves at llm.gw.test",
         ],
         ["['*.tailscale.com', '*.openai.com']", "[openai]", "admitting auth.openai.com"],
+        [
+          "['*.tailscale.com', api.openai.com]",
+          "[openai-responses]",
+          "admitting api.openai.com, which the gateway serves at llm.gw.test",
+        ],
       ];
       for (const [egress, llmProviders, expected] of refusals) {
         const failure = yield* parse([`      egress: ${egress}`], llmProviders).pipe(Effect.flip);
