@@ -193,7 +193,7 @@ export const readEgressAllowlist = Effect.fn("GatewayNode.readEgressAllowlist")(
   return yield* Effect.fromResult(parseEgressAllowlist(text));
 });
 
-/** A TCP listen address; port zero requests an available port when starting an embedded gateway. */
+/** A TCP listen address; port zero requests an available port. */
 export interface Listener {
   /** The address or host name to bind; a wildcard address listens on all matching interfaces. */
   readonly host: string;
@@ -211,10 +211,13 @@ export interface GatewayListeners {
   readonly admin: Listener;
 }
 
+/** A TCP port to listen on from 0 through 65535; zero lets the operating system assign one. */
+const ListenPort = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 }));
+
 const listener = (prefix: string, host: string, port: number) =>
   Config.all({
     host: Config.String(`${prefix}_HOST`).pipe(Config.withDefault(host)),
-    port: Config.Port(`${prefix}_PORT`).pipe(Config.withDefault(port)),
+    port: Config.schema(ListenPort, `${prefix}_PORT`).pipe(Config.withDefault(port)),
   });
 
 /**
