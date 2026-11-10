@@ -50,7 +50,7 @@ import {
   WORKER,
 } from "../support.ts";
 import { BOAT_TEST_API, fakeProviders } from "./fake-providers.ts";
-import { boatSettings, boxdSettings } from "./support.ts";
+import { boatSettings, boxdSettings, BOXD_PUBLIC_KEY } from "./support.ts";
 
 const tailnet: BoatTailnet = {
   gatewayAddress: TailnetAddress.make("100.64.0.2"),
@@ -249,7 +249,10 @@ for (const address of [boatAddress, boxdAddress]) {
       `deletes an orphan ${provider} machine after a restart without needing tailnet access`,
       () => {
         const machine = fakeMachine();
-        machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
+        machine.state.localFiles.set(
+          "/keys/boat.pub",
+          provider === "boxd" ? BOXD_PUBLIC_KEY : "ssh-ed25519 AAAATest",
+        );
         machine.state.reachable = false;
         const boat = fakeProviders();
         const api = fakeTailnet();
@@ -270,7 +273,7 @@ for (const address of [boatAddress, boxdAddress]) {
         );
         return Effect.gen(function* () {
           const driver = yield* provider === "boxd"
-            ? boxdDriverFor(WORKER, boxdSettings())
+            ? boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub")
             : boatDriverFor(WORKER, boatSettings(), "ssh-ed25519 AAAATest", BOAT_TEST_API);
           yield* driver.create("earlier-create", {
             instance: INSTANCE,
@@ -290,7 +293,12 @@ for (const address of [boatAddress, boxdAddress]) {
             0,
           );
           assert.lengthOf(api.calls, 0);
-        }).pipe(Effect.scoped, Effect.provide(layer.pipe(Layer.provideMerge(boat.layer))));
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            layer.pipe(Layer.provideMerge(boat.layer), Layer.provideMerge(machine.layer)),
+          ),
+        );
       },
     );
 
@@ -299,7 +307,10 @@ for (const address of [boatAddress, boxdAddress]) {
       () => {
         const machine = fakeMachine();
         machine.state.tailscaleJoin = "refused";
-        machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
+        machine.state.localFiles.set(
+          "/keys/boat.pub",
+          provider === "boxd" ? BOXD_PUBLIC_KEY : "ssh-ed25519 AAAATest",
+        );
         const boat = fakeProviders();
         const api = fakeTailnet();
         const gateway = fakeGateway(machine, providers);
@@ -349,7 +360,10 @@ for (const address of [boatAddress, boxdAddress]) {
           const machine = fakeMachine();
           machine.state.docker = "running";
           machine.state.forwardProxyReachable = false;
-          machine.state.localFiles.set("/keys/boat.pub", "ssh-ed25519 AAAATest");
+          machine.state.localFiles.set(
+            "/keys/boat.pub",
+            provider === "boxd" ? BOXD_PUBLIC_KEY : "ssh-ed25519 AAAATest",
+          );
           const boat = fakeProviders();
           const api = fakeTailnet();
           const gateway = fakeGateway(machine, providers);

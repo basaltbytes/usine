@@ -1,16 +1,14 @@
 #!/bin/sh
-# Captures the worker key, runtime, attempt image, and empty Tailscale state.
+# Captures the runtime, attempt image, and empty Tailscale state.
 # The tests in test/ cover the CLI calls with fakes; a real build is the acceptance test.
 set -eu
-usage() { echo "Usage: $0 [--size 1x4|2x8|4x16|8x32] <snapshot-name> <ssh-identity-file>" >&2; exit 2; }
+usage() { echo "Usage: $0 [--size 1x4|2x8|4x16|8x32] <snapshot-name>" >&2; exit 2; }
 size=2x8
 if [ "${1:-}" = --size ]; then [ "$#" -ge 2 ] || usage; size=$2; shift 2; fi
-[ "$#" -eq 2 ] || usage
+[ "$#" -eq 1 ] || usage
 name=$1
-identity=$2
 case "$size" in 1x4|2x8|4x16|8x32) ;; *) usage;; esac
 printf '%s\n' "$name" | LC_ALL=C grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' || usage
-[ -f "$identity" ] && [ -f "$identity.pub" ] || { echo 'The SSH identity and its .pub file must exist' >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 image=${ATTEMPT_IMAGE:-ghcr.io/basaltbytes/usine-worker:$(cat "$here/../worker-image/tag.txt")}
 runtime=${USINE_CONTAINER_RUNTIME:-docker}
@@ -35,7 +33,6 @@ until ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$m
   tries=$((tries + 1)); [ "$tries" -lt 60 ] || { echo 'SSH readiness timed out' >&2; exit 1; }
   sleep 2
 done
-ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" 'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys' < "$identity.pub"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$machine.boxd" "sh -s -- '$runtime' '$image'" <<'REMOTE'
 # boxd serves SSH through its proxy and exec agent, so sshd configuration in the machine has no effect.
 # Variables sent with SendEnv don't arrive in the machine; see #1101.

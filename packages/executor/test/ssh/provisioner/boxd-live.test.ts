@@ -3,7 +3,17 @@ import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { BoxdSnapshotName, WorkerName } from "@usine/core/worker";
-import { Redacted, Clock, Config, Effect, FileSystem, Layer, Option, Schedule } from "effect";
+import {
+  Redacted,
+  Clock,
+  Config,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Random,
+  Schedule,
+} from "effect";
 import { FetchHttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
@@ -36,12 +46,17 @@ it.live.skipIf(
       const fs = yield* FileSystem.FileSystem;
       const directory = yield* fs.makeTempDirectoryScoped();
       const now = yield* Clock.currentTimeMillis;
+      const suffix = (yield* Random.nextIntBetween(0, 2 ** 32)).toString(16);
       const run = RunId.make(`boxd-live-${now}`);
       yield* Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(WorkerName.make("boxd-live"), settings);
+        const driver = yield* boxdDriverFor(
+          WorkerName.make("boxd-live"),
+          settings,
+          `${homedir()}/.ssh/usine_worker.pub`,
+        );
         yield* driver.verify(WorkerName.make("boxd-live"), 1);
         yield* Effect.acquireUseRelease(
-          driver.create("live", {
+          driver.create(`boxd-live-${now}-${suffix}`, {
             instance: "usine-live-test",
             worker: WorkerName.make("boxd-live"),
             run,

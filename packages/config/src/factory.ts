@@ -433,7 +433,7 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
       if (Option.isSome(provisioner.tailnet) && Option.isNone(worker.gateway))
         return `SSH worker "${worker.name}" sets provisioner.tailnet without a gateway`;
       return Option.isNone(worker.identityFile)
-        ? `SSH worker "${worker.name}" has a boxd provisioner and needs identity_file, whose public key must be baked into the snapshot`
+        ? `SSH worker "${worker.name}" has a boxd provisioner and needs identity_file, whose .pub file must be linked to the boxd account with infra/boxd/link-ssh-key.mjs`
         : undefined;
     case "boat":
       if (

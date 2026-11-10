@@ -11,7 +11,7 @@ Instance admin access, a boxd account with a payment method and available machin
 
 Use a gateway for subscription credentials. Without a gateway, configure API keys for the rostered harnesses.
 
-## Procedure
+## Prepare the snapshot
 
 1. Sign in with `boxd auth login`. Create a member API key:
 
@@ -19,7 +19,7 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
    boxd auth keys create usine --kind member
    ```
 
-   Store the key as `BOXD_API_KEY` in the instance's private `.env`. Restart usine to read new variables. API keys cannot link SSH keys to an account. The snapshot builder uses the CLI's linked device key for setup and writes the worker public key into `/home/boxd/.ssh/authorized_keys`; each restored machine accepts that key without another account link.
+   Store the key as `BOXD_API_KEY` in the instance's private `.env`. Restart usine to read new variables. Worker preflight checks that the worker public key is linked to the boxd account of this API key. The snapshot builder uses the CLI's linked device key for setup.
 
 2. Create the worker key if needed:
 
@@ -30,22 +30,34 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 3. From the usine source checkout, build a snapshot in the intended region using the CLI's regional configuration:
 
    ```sh
-   infra/boxd/build-snapshot.sh --size 2x8 usine-attempt ~/.ssh/usine_worker
+   infra/boxd/build-snapshot.sh --size 2x8 usine-attempt
    ```
 
-   The script creates a temporary Ubuntu machine at the requested size, writes the worker key, prepares Docker, pulls the release's attempt image, installs Tailscale, and saves the snapshot. It deletes the temporary machine and prints the snapshot name. Set `USINE_CONTAINER_RUNTIME=podman` to install Podman instead. Set `ATTEMPT_IMAGE` to bake a custom attempt image.
+   The script creates a temporary Ubuntu machine at the requested size, prepares Docker, pulls the release's attempt image, installs Tailscale, and saves the snapshot. It deletes the temporary machine and prints the snapshot name. Set `USINE_CONTAINER_RUNTIME=podman` to install Podman instead. Set `ATTEMPT_IMAGE` to bake a custom attempt image.
 
-4. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, identity file `~/.ssh/usine_worker`, and the desired concurrency. Select provisioner `boxd`, token variable `BOXD_API_KEY`, region `fra` or the id of the snapshot's region, size `2x8`, and snapshot `usine-attempt`. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
+## Link the worker key
 
-5. For subscription credentials, select gateway `usine-gateway` and enable the provisioner's tailnet settings. Enter the gateway's Tailscale address and OAuth client variable names. The client needs `auth_keys` write access for `tag:usine-attempt`. The [Boat gateway guide](/guides/connect-boat-to-a-gateway/) describes the shared tailnet policy and gateway setup. Each machine joins with an ephemeral single-use key and leaves during cleanup. Package downloads use the machine's direct internet connection.
+The boxd SSH proxy accepts only public keys linked to the account. API keys cannot link SSH keys: linking requires a signed-in session. Use a session for the account that owns the worker's member API key. Set `BOXD_TOKEN` to that signed-in boxd session token, then run this command from the usine source checkout after `pnpm install`:
+
+```sh
+node infra/boxd/link-ssh-key.mjs ~/.ssh/usine_worker.pub boxd-pool
+```
+
+Replace `boxd-pool` with the worker name you use in usine. The script calls `account.linkSshKey` from `@boxd-sh/sdk` with the session token and `deviceId: "usine:<worker name>"`, then prints the linked SHA-256 fingerprint. Repeat this step after rotating the worker key; the same device id replaces its previous key. `BOXD_API_KEY` remains the member API key used by the worker.
+
+## Create the worker
+
+1. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, identity file `~/.ssh/usine_worker`, and the desired concurrency. Select provisioner `boxd`, token variable `BOXD_API_KEY`, region `fra` or the id of the snapshot's region, size `2x8`, and snapshot `usine-attempt`. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
+
+2. For subscription credentials, select gateway `usine-gateway` and enable the provisioner's tailnet settings. Enter the gateway's Tailscale address and OAuth client variable names. The client needs `auth_keys` write access for `tag:usine-attempt`. The [Boat gateway guide](/guides/connect-boat-to-a-gateway/) describes the shared tailnet policy and gateway setup. Each machine joins with an ephemeral single-use key and leaves during cleanup. Package downloads use the machine's direct internet connection.
 
    Without a gateway, set the Anthropic or OpenAI API-key variable names needed by the roster. Save the worker.
 
 ## Check the result
 
-Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists.
+Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. It reads `<identity_file>.pub` next to the worker identity file, computes its OpenSSH SHA-256 fingerprint, and checks the account fingerprints returned by `Whoami`. The verified log includes the fingerprint. A missing, unreadable, or invalid public key fails preflight with a provider capability error that includes the file path. An unlinked key fails with its fingerprint, file path, and a pointer to the linking step. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists.
 
-boxd serves SSH through its proxy, and the machine runs no sshd. usine sends gateway tokens and API keys over standard input, which the proxy carries. Gateway setup configures the host entries and the HTTP socket units.
+boxd's proxy terminates SSH and authenticates account-linked keys; it ignores the machine's `authorized_keys`. The snapshot does not need the worker public key. usine sends gateway tokens and API keys over standard input, which the proxy carries. Gateway setup configures the host entries and the HTTP socket units.
 
 `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 
@@ -65,4 +77,4 @@ usine refreshes the machine's SSH endpoint during recovery because its proxy por
 
 boxd snapshots retain the pulled attempt image. Rebuild the snapshot after upgrading usine to a release with a different attempt image, or when changing a custom image. Preflight logs an absent image at warning level and downloads it before running attempts. Shared pnpm and Turbo cache volumes remain available while a machine is reused and disappear when it is deleted.
 
-To run the opt-in live test, set `BOXD_API_KEY` and `BOXD_TEST_SNAPSHOT` in a local checkout. The snapshot must be a ready `2x8` snapshot in `fra` containing `~/.ssh/usine_worker.pub`. Run `pnpm --filter @usine/executor exec vitest run test/ssh/provisioner/boxd-live.test.ts`. The test creates one machine, checks SSH connectivity, sends a variable over stdin and reads it back, and destroys it; it is skipped in CI.
+To run the opt-in live test, set `BOXD_API_KEY` and `BOXD_TEST_SNAPSHOT` in a local checkout. The snapshot must be a ready `2x8` snapshot in `fra`, and `~/.ssh/usine_worker` and its `.pub` file must exist. Run `pnpm --filter @usine/executor exec vitest run test/ssh/provisioner/boxd-live.test.ts`. Link the test key to the account first with the operator script. The test checks the key fingerprint during preflight, creates one machine with a unique name, checks SSH connectivity, sends a variable over stdin and reads it back, and destroys it; it is skipped in CI.

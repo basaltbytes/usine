@@ -56,16 +56,13 @@ esac
 const fakeSsh = `#!/bin/sh
 printf 'ssh %s\\n' "$*" >> "$BOXD_CALLS"
 case "$*" in
-  *'cat >>'*|*'sh -s'*) cat >> "$BOXD_CALLS";;
+  *'sh -s'*) cat >> "$BOXD_CALLS";;
 esac
 `;
 
 const setUp = async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "boxd-snapshot-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const identity = join(directory, "worker");
-  await writeFile(identity, "private-test-key");
-  await writeFile(`${identity}.pub`, "ssh-ed25519 AAAAWorkerKey\n");
   await writeFile(join(directory, "boxd"), fakeBoxd, { mode: 0o755 });
   await writeFile(join(directory, "ssh"), fakeSsh, { mode: 0o755 });
   const files = {
@@ -82,19 +79,18 @@ const setUp = async (t) => {
     ATTEMPT_IMAGE: "ghcr.io/example/attempt:test",
   };
   const read = (name) => readFile(files[name], "utf8");
-  return { identity, env, read };
+  return { env, read };
 };
 
-test("snapshot setup sizes the machine by vCPU, bakes the worker key and image, and deletes its source", async (t) => {
-  const { identity, env, read } = await setUp(t);
-  const result = await run(["--size", "2x8", "usine-attempt", identity], env);
+test("snapshot setup sizes the machine by vCPU, bakes the image, and deletes its source", async (t) => {
+  const { env, read } = await setUp(t);
+  const result = await run(["--size", "2x8", "usine-attempt"], env);
   assert.equal(result.stdout, "usine-attempt\n");
   assert.match(result.stderr, /Created temporary machine usine-snapshot-/u);
   assert.doesNotMatch(result.stderr, /Delete temporary machine/u);
   assert.equal(await read("vcpu"), "2\n");
   const calls = await read("calls");
   assert.match(calls, /boxd machine new .* --vcpu 2 --isolated --auto-hibernate-timeout 0 --json/u);
-  assert.match(calls, /ssh-ed25519 AAAAWorkerKey/u);
   assert.match(calls, /sh -s -- 'docker' 'ghcr.io\/example\/attempt:test'/u);
   assert.match(calls, /boxd snapshots save usine-snapshot-\S+ usine-attempt\n/u);
   assert.match(calls, /boxd machine remove -y usine-snapshot-/u);
@@ -107,15 +103,15 @@ test("snapshot setup sizes the machine by vCPU, bakes the worker key and image, 
 });
 
 test("snapshot setup maps the largest size to 8 vCPUs", async (t) => {
-  const { identity, env, read } = await setUp(t);
-  const result = await run(["--size", "8x32", "usine-attempt", identity], env);
+  const { env, read } = await setUp(t);
+  const result = await run(["--size", "8x32", "usine-attempt"], env);
   assert.equal(result.stdout, "usine-attempt\n");
   assert.equal(await read("vcpu"), "8\n");
 });
 
 test("snapshot setup deletes its source machine when the save fails", async (t) => {
-  const { identity, env, read } = await setUp(t);
-  await assert.rejects(run(["usine-attempt", identity], { ...env, FAIL_SAVE: "1" }), (error) => {
+  const { env, read } = await setUp(t);
+  await assert.rejects(run(["usine-attempt"], { ...env, FAIL_SAVE: "1" }), (error) => {
     assert.doesNotMatch(error.stderr, /Delete temporary machine/u);
     return true;
   });
