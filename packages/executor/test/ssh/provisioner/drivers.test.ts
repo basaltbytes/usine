@@ -16,8 +16,8 @@ import { Clock, Effect, Fiber, Option, Redacted, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
 import { fakeMachine } from "../support.ts";
-import { boatSettings, boxdSettings, hetznerSettings, BOXD_PUBLIC_KEY } from "./support.ts";
-import { fakeBoxd } from "./fake-boxd.ts";
+import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
+import { BOXD_ENDPOINT, fakeBoxd } from "./fake-boxd.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { hetznerDriverFor } from "../../../src/ssh/provisioner/hetzner.ts";
@@ -268,6 +268,7 @@ describe("Boat driver", () => {
         assert(created !== undefined);
         created.provisioningReads = 2;
         const endpoint = yield* driver.endpoint(id, noWait);
+        assert(endpoint._tag === "Ssh");
         assert.strictEqual(endpoint.destination, "user@198.51.100.20");
         assert.deepStrictEqual(endpoint.hostKey, Option.some(providers.boat.hostKey));
         const key = providers.calls.find(({ path }) => path === `/sandboxes/${id}/sshkey`);
@@ -299,7 +300,9 @@ describe("Boat driver", () => {
           BOAT_TEST_API,
         );
 
-        const endpoint = yield* driver.endpoint((yield* driver.create("x", tags)).id, noWait);
+        const { id } = yield* driver.create("x", tags);
+        const endpoint = yield* driver.endpoint(id, noWait);
+        assert(endpoint._tag === "Ssh");
         assert.strictEqual(endpoint.destination, "user@203.0.113.10");
         assert.deepStrictEqual(endpoint.port, Option.some(22001));
       }).pipe(Effect.provide(providers.layer));
@@ -414,11 +417,11 @@ describe("Boat driver", () => {
 
 describe("boxd driver", () => {
   it.effect(
-    "restores without sizing overrides, labels the machine, disables idle timers, and caches the proxy host key",
+    "restores without sizing overrides, labels the machine, disables idle timers, and returns its Exec endpoint",
     () => {
       const boxd = fakeBoxd();
       return Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
         const first = yield* driver.create("pool-aaaaaaaa", tags);
         assert.isTrue(Option.isNone(first.hostKey));
         assert.deepStrictEqual(boxd.state.creates[0], {
@@ -444,15 +447,11 @@ describe("boxd driver", () => {
           [driver.endpoint(first.id, Effect.void), driver.endpoint(second.id, Effect.void)],
           { concurrency: 2 },
         );
-        assert.strictEqual(endpoint.destination, "boxd@198.51.100.40");
-        assert.deepStrictEqual(endpoint.port, Option.some(12001));
-        assert.deepStrictEqual(endpoint.hostKey, Option.some(boxd.state.hostKey));
+        assert(endpoint._tag === "Exec");
+        assert.strictEqual(endpoint.machine, first.id);
+        assert.strictEqual(endpoint.api, BOXD_ENDPOINT);
+        assert.strictEqual(Redacted.value(endpoint.credential), "bxd_test_key");
         assert.strictEqual(boxd.state.reads, 0, "the create response contains the endpoint");
-        yield* Effect.all(
-          [driver.endpoint(second.id, Effect.void), driver.endpoint(first.id, Effect.void)],
-          { concurrency: 2 },
-        );
-        assert.strictEqual(boxd.state.hostKeyReads, 1);
         boxd.state.timers.length = 0;
         yield* driver.assign(first.id, { ...tags, attempts: 2 });
         assert.deepStrictEqual(boxd.state.timers, [
@@ -468,11 +467,7 @@ describe("boxd driver", () => {
   it.effect("preserves unique names across instances and the disabled isolation setting", () => {
     const boxd = fakeBoxd();
     return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(
-        WORKER,
-        boxdSettings({ isolated: false }),
-        "/keys/usine_boxd.pub",
-      );
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ isolated: false }));
       const first = yield* driver.create("pool-aaaaaaaa", { ...tags, instance: "factory" });
       const second = yield* driver.create("pool-bbbbbbbb", { ...tags, instance: "dev" });
       assert.notStrictEqual(first.id, second.id);
@@ -490,29 +485,22 @@ describe("boxd driver", () => {
     }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
   });
   it.effect(
-    "polls until running, refreshes proxy ports, and reports terminal machines as gone",
+    "polls until running, keeps the endpoint of a live machine, and reports terminal machines as gone",
     () => {
       const boxd = fakeBoxd();
       boxd.state.createMachine = false;
       boxd.state.provisioningReads = 2;
       return Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
         const { id } = yield* driver.create("ignored", tags);
         yield* driver.endpoint(id, Effect.void);
         assert.strictEqual(boxd.state.reads, 3);
         const machine = boxd.state.machines.get(id);
         assert(machine !== undefined);
-        boxd.state.machines.set(id, { ...machine, status: "running", sshPort: 24001 });
-        assert.deepStrictEqual(
-          (yield* driver.refreshEndpoint(id)).pipe(Option.map((value) => value.port)),
-          Option.some(Option.some(24001)),
-        );
-        boxd.state.machines.set(id, { ...machine, sshDisabled: true });
-        const disabled = yield* driver
-          .endpoint(id, Effect.die("must not poll disabled SSH"))
-          .pipe(Effect.flip);
-        assert.strictEqual(disabled.reason, "provider");
-        assert.include(disabled.message, "SSH disabled");
+        const refreshed = yield* driver.refreshEndpoint(id);
+        assert(Option.isSome(refreshed) && refreshed.value._tag === "Exec");
+        assert.strictEqual(refreshed.value.machine, id);
+        assert.strictEqual(refreshed.value.api, BOXD_ENDPOINT);
         for (const status of ["stopped", "failed", "destroyed"]) {
           boxd.state.machines.set(id, { ...machine, status });
           const terminal = yield* driver
@@ -525,10 +513,8 @@ describe("boxd driver", () => {
         }
         for (const status of ["suspended", "hibernated", "migrating", "pending"]) {
           boxd.state.machines.set(id, { ...machine, status });
-          assert.strictEqual(
-            (yield* driver.refreshEndpoint(id).pipe(Effect.flip))._tag,
-            "ProviderApiError",
-          );
+          const live = yield* driver.refreshEndpoint(id);
+          assert.isTrue(Option.isSome(live), `a ${status} machine isn't gone`);
           let polls = 0;
           const endpoint = yield* driver.endpoint(
             id,
@@ -538,7 +524,8 @@ describe("boxd driver", () => {
             }),
           );
           assert.strictEqual(polls, 1, `waits for ${status} machines to resume`);
-          assert.strictEqual(endpoint.destination, "boxd@198.51.100.40");
+          assert(endpoint._tag === "Exec");
+          assert.strictEqual(endpoint.machine, id);
         }
         boxd.state.machines.delete(id);
         const gone = yield* driver.refreshEndpoint(id);
@@ -550,10 +537,10 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
     },
   );
-  it.effect("keeps refresh read and proxy host-key failures as provider errors", () => {
+  it.effect("keeps refresh read failures as provider errors", () => {
     const boxd = fakeBoxd();
     return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
       const { id } = yield* driver.create("pool-aaaaaaaa", tags);
       for (const code of ["UNAVAILABLE", "DEADLINE_EXCEEDED", "UNAUTHENTICATED"]) {
         boxd.state.readFails = Option.some(code);
@@ -563,17 +550,8 @@ describe("boxd driver", () => {
         assert.isTrue(boxd.state.machines.has(id));
       }
       boxd.state.readFails = Option.none();
-      const hostKey = boxd.state.hostKey;
-      boxd.state.hostKey = "";
-      const failure = yield* driver.refreshEndpoint(id).pipe(Effect.flip);
-      assert.strictEqual(failure._tag, "ProviderApiError");
-      assert.include(failure.message, "sshHostKey: INTERNAL");
-      assert.strictEqual(boxd.state.hostKeyReads, 1);
-      assert.isTrue(boxd.state.machines.has(id));
-      boxd.state.hostKey = hostKey;
       const recovered = yield* driver.refreshEndpoint(id);
-      assert(Option.isSome(recovered));
-      assert.deepStrictEqual(recovered.value.hostKey, Option.some(hostKey));
+      assert.isTrue(Option.isSome(recovered));
     }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
   });
   it.effect(
@@ -581,7 +559,7 @@ describe("boxd driver", () => {
     () => {
       const boxd = fakeBoxd();
       return Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
         const { id } = yield* driver.create("x", tags);
         yield* driver.create("y", { ...tags, worker: WorkerName.make("other") });
         yield* driver.create("z", { ...tags, instance: "another" });
@@ -608,11 +586,7 @@ describe("boxd driver", () => {
         BoxdEgressEntry.make(entry),
       );
       return Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(
-          WORKER,
-          boxdSettings({ egress: Option.some(entries) }),
-          "/keys/usine_boxd.pub",
-        );
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress: Option.some(entries) }));
         const started = yield* Clock.currentTimeMillis;
         const { id } = yield* driver.create("pool-aaaaaaaa", tags);
         const returned = yield* Clock.currentTimeMillis;
@@ -630,7 +604,7 @@ describe("boxd driver", () => {
           [entries, entries],
         );
 
-        const unrestricted = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+        const unrestricted = yield* boxdDriverFor(WORKER, boxdSettings());
         const other = yield* unrestricted.create("pool-bbbbbbbb", tags);
         assert.deepStrictEqual(boxd.state.operations.get(other.id), [
           "create",
@@ -655,11 +629,7 @@ describe("boxd driver", () => {
       const boxd = fakeBoxd();
       const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
       return Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(
-          WORKER,
-          boxdSettings({ egress }),
-          "/keys/usine_boxd.pub",
-        );
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
         const creating = yield* Effect.forkChild(driver.create("pool-aaaaaaaa", tags));
         while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
         yield* TestClock.adjust("500 millis");
@@ -672,14 +642,13 @@ describe("boxd driver", () => {
   it.effect("warns at preflight about address entries behind a gateway", () => {
     const boxd = fakeBoxd();
     const host = fakeMachine();
-    host.state.localFiles.set("/keys/usine_boxd.pub", `${BOXD_PUBLIC_KEY}\n`);
     const egress = Option.some(
       ["*.tailscale.com", "registry.npmjs.org", "203.0.113.7", "198.51.100.0/24"].map((entry) =>
         BoxdEgressEntry.make(entry),
       ),
     );
     return Effect.gen(function* () {
-      const direct = yield* boxdDriverFor(WORKER, boxdSettings({ egress }), "/keys/usine_boxd.pub");
+      const direct = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
       assert.deepStrictEqual((yield* direct.verify(WORKER, 1)).warnings, []);
       const gateway = yield* boxdDriverFor(
         WORKER,
@@ -691,7 +660,6 @@ describe("boxd driver", () => {
             clientSecret: Redacted.make("test-client-secret"),
           }),
         }),
-        "/keys/usine_boxd.pub",
       );
       const { warnings } = yield* gateway.verify(WORKER, 1);
       assert.lengthOf(warnings, 1);
@@ -702,7 +670,7 @@ describe("boxd driver", () => {
     const boxd = fakeBoxd();
     const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
     return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }), "/keys/usine_boxd.pub");
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
       boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
       const refused = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
       assert(refused._tag === "MachineUnavailableError");
@@ -723,7 +691,7 @@ describe("boxd driver", () => {
     const boxd = fakeBoxd();
     const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
     return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }), "/keys/usine_boxd.pub");
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
       const creating = yield* Effect.forkChild(driver.create("pool-aaaaaaaa", tags));
       while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
       yield* TestClock.adjust("1 second");
@@ -759,7 +727,7 @@ describe("boxd driver", () => {
     const boxd = fakeBoxd();
     boxd.state.timerFails = Option.some("UNAVAILABLE");
     return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
       const failure = yield* driver.create("ignored", tags).pipe(Effect.flip);
       assert(failure._tag === "MachineUnavailableError");
       assert.strictEqual(failure.reason, "unreachable");
@@ -769,7 +737,7 @@ describe("boxd driver", () => {
   it.effect("classifies gRPC creation failures and pending snapshots for retry", () => {
     const boxd = fakeBoxd();
     return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
       for (const [code, reason] of [
         ["RESOURCE_EXHAUSTED", "quota"],
         ["UNAVAILABLE", "unreachable"],
@@ -795,7 +763,7 @@ describe("boxd driver", () => {
     const boxd = fakeBoxd();
     boxd.state.reservedNames.add("live");
     return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings());
       const reserved = yield* driver.create("live", tags).pipe(Effect.flip);
       assert(reserved._tag === "WorkerCapabilityError");
       assert.strictEqual(reserved.worker, WORKER);
@@ -814,9 +782,8 @@ describe("boxd driver", () => {
     () => {
       const boxd = fakeBoxd();
       const host = fakeMachine();
-      host.state.localFiles.set("/keys/usine_boxd.pub", `${BOXD_PUBLIC_KEY}\n`);
       return Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
         assert.deepStrictEqual((yield* driver.verify(WORKER, 2)).warnings, []);
         boxd.state.maxVms = 2;
         boxd.state.vmCount = 0;

@@ -8,7 +8,15 @@ import {
   type SshPort,
   type WorkerName,
 } from "@usine/core/worker";
-import { type Brand, type DateTime, type Effect, Option, Schema } from "effect";
+import {
+  type Brand,
+  Data,
+  type DateTime,
+  type Effect,
+  Option,
+  type Redacted,
+  Schema,
+} from "effect";
 
 import type { MachineUnavailableError, WorkerCapabilityError } from "../../executor.ts";
 
@@ -42,17 +50,34 @@ export interface ListedMachine {
   readonly attempts: number;
 }
 
-/** Where the executor reaches a machine over SSH. */
-export interface MachineEndpoint {
-  /** `user@address`. */
-  readonly destination: SshDestination;
-  readonly port: Option.Option<SshPort>;
-  /**
-   * The machine's SSH host key that the provider's API reports, as `known_hosts` writes it, or
-   * `None` if the driver set the key when it created the machine (`CreatedMachine.hostKey`).
-   */
-  readonly hostKey: Option.Option<string>;
-}
+/**
+ * Where the executor reaches a machine: `Ssh`, an address that OpenSSH connects to, or `Exec`, a
+ * machine that the boxd shell reaches through boxd's `Exec` API.
+ */
+export type MachineEndpoint = Data.TaggedEnum<{
+  Ssh: {
+    /** `user@address`. */
+    readonly destination: SshDestination;
+    readonly port: Option.Option<SshPort>;
+    /**
+     * The machine's SSH host key that the provider's API reports, as `known_hosts` writes it, or
+     * `None` if the driver set the key when it created the machine (`CreatedMachine.hostKey`).
+     */
+    readonly hostKey: Option.Option<string>;
+  };
+  Exec: {
+    readonly machine: MachineId;
+    /** The API endpoint URL of the machine's region, which serves its `Exec` calls. */
+    readonly api: string;
+    /** The bearer of the `Exec` calls. */
+    readonly credential: Redacted.Redacted<string>;
+  };
+}>;
+export const MachineEndpoint = Data.taggedEnum<MachineEndpoint>();
+/** A machine that OpenSSH connects to. */
+export type SshEndpoint = Data.TaggedEnum.Value<MachineEndpoint, "Ssh">;
+/** A machine that the boxd shell reaches through boxd's `Exec` API. */
+export type ExecEndpoint = Data.TaggedEnum.Value<MachineEndpoint, "Exec">;
 
 /** A machine that a provider accepted to create. */
 interface CreatedMachine {
@@ -99,12 +124,12 @@ export interface MachineDriver {
   ) => Effect.Effect<CreatedMachine, MachineUnavailableError | WorkerCapabilityError>;
   /** Updates the attempt identity before a reused machine starts work. */
   readonly assign: (id: MachineId, tags: MachineTags) => Effect.Effect<void, ProviderApiError>;
-  /** Waits until the machine runs and has an SSH address. Polls every `interval`. */
+  /** Waits until the machine runs and can be reached. Polls every `interval`. */
   readonly endpoint: (
     id: MachineId,
     interval: Effect.Effect<void>,
   ) => Effect.Effect<MachineEndpoint, MachineUnavailableError>;
-  /** Reads a mutable SSH endpoint without waiting; `None` means the machine stopped or was deleted. */
+  /** Reads a machine's endpoint without waiting; `None` means the machine stopped or was deleted. */
   readonly refreshEndpoint?: (
     id: MachineId,
   ) => Effect.Effect<Option.Option<MachineEndpoint>, ProviderApiError>;

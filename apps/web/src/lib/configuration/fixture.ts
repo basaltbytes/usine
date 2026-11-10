@@ -368,7 +368,7 @@ export const configurationJson = {
       maxConcurrentAttempts: 2,
       destination: null,
       port: null,
-      identityFile: "~/.ssh/usine_worker",
+      identityFile: null,
       root: "/home/boxd/.usine",
       gateway: null,
       container: null,

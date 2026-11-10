@@ -29,12 +29,8 @@ import { TestClock } from "effect/testing";
 import { Deferred, Effect, Fiber, Option, Redacted, Schema, Layer, DateTime } from "effect";
 import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
-import {
-  BOXD_PUBLIC_KEY,
-  BOXD_KEY_FINGERPRINT,
-  BOXD_ROTATED_KEY,
-  BOXD_ROTATED_FINGERPRINT,
-} from "./support.ts";
+import { BOXD_SHELL_ENVIRONMENT } from "../../../src/ssh/provisioner/boxd/shell/environment.ts";
+import { BOXD_ENDPOINT } from "./fake-boxd.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
@@ -47,7 +43,7 @@ import {
   WORKER,
   stdinValue,
 } from "../support.ts";
-import { hetznerSettings } from "./support.ts";
+import { boxdSettings, hetznerSettings } from "./support.ts";
 import { fakeGateway, gatewayAddress } from "../gateway/support.ts";
 import { fakeProviders } from "./fake-providers.ts";
 
@@ -932,15 +928,61 @@ describe("Provisioned SSH Worker", () => {
     },
   );
 
-  for (const address of [boatAddress, boxdAddress]) {
-    assert(address.machine._tag === "Provisioned");
-    const provider = address.machine.provisioner.provider;
-    it.live(`creates a ${provider} machine and pins its host key`, () => {
-      const machine = fakeMachine();
-      machine.state.localFiles.set(
-        `/keys/usine_${provider}.pub`,
-        provider === "boxd" ? `${BOXD_PUBLIC_KEY}\n` : "ssh-ed25519 AAAAOperatorKey usine\n",
+  it.live("creates a Boat machine and pins its host key", () => {
+    const machine = fakeMachine();
+    machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const machines = yield* WorkerMachines;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+        TEST_AGENT.brain,
+      ]);
+      const known = machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`);
+      assert.strictEqual(known, `usine-boat-${grant.id} ${providers.boat.hostKey ?? ""}\n`);
+      const key = providers.calls.find(({ path }) => path.endsWith("/sshkey"));
+      assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
+      assert.isTrue(
+        machine.state.calls.some(({ command }) =>
+          command.args.includes("StrictHostKeyChecking=yes"),
+        ),
       );
+      yield* machines.release(grant.hold);
+      assert.strictEqual(providers.boat.sandboxes.size, 0);
+      assert.isUndefined(
+        machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`),
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boatAddress)));
+  });
+
+  it.live(
+    "refuses a Boat machine whose API reports no host key and deletes it without connecting",
+    () => {
+      const machine = fakeMachine();
+      machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
+      const providers = fakeProviders();
+      providers.boat.hostKey = undefined;
+      return Effect.gen(function* () {
+        const machines = yield* WorkerMachines;
+        const refused = yield* machines
+          .create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain])
+          .pipe(Effect.flip);
+        assert(refused._tag === "MachineUnavailableError");
+        assert.strictEqual(refused.reason, "provider");
+        assert.include(refused.message, "doesn't trust the host key of a first connection");
+        assert.lengthOf(machine.state.calls, 0, "nothing connected to the sandbox");
+        assert.strictEqual(providers.boat.sandboxes.size, 0, "the sandbox was deleted");
+        const currentMachines = yield* machines.machines;
+        assert.lengthOf(currentMachines, 0);
+      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boatAddress)));
+    },
+  );
+
+  it.live(
+    "runs a boxd machine's commands through the boxd shell with the API key, without an SSH key or host key",
+    () => {
+      const machine = fakeMachine();
       const providers = fakeProviders();
       return Effect.gen(function* () {
         const executor = yield* Executor;
@@ -949,119 +991,28 @@ describe("Provisioned SSH Worker", () => {
         const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
           TEST_AGENT.brain,
         ]);
-        const known = machine.state.localFiles.get(
-          `${LOCAL_TEMPORARY_DIRECTORY}/${provider}-${grant.id}`,
-        );
-        assert.strictEqual(
-          known,
-          `usine-${provider}-${grant.id} ${provider === "boxd" ? providers.boxd.hostKey : (providers.boat.hostKey ?? "")}\n`,
-        );
-        const key = providers.calls.find(({ path }) => path.endsWith("/sshkey"));
-        if (provider === "boat")
-          assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
-        assert.isTrue(
-          machine.state.calls.some(({ command }) =>
-            command.args.includes("StrictHostKeyChecking=yes"),
-          ),
+        const calls = machine.state.calls.filter(({ command }) => command.args.at(-3) === grant.id);
+        assert.isAbove(calls.length, 0, "commands ran on the new machine");
+        for (const { command } of calls) {
+          assert.strictEqual(command.command, process.execPath);
+          assert.match(command.args[0] ?? "", /boxd\/shell\/shell\.js$/u);
+          assert.notInclude(command.args.join(" "), boxdSettings().token.pipe(Redacted.value));
+          assert.isFalse(command.args.some((arg) => arg.startsWith("StrictHostKeyChecking")));
+          assert.strictEqual(command.options.env?.[BOXD_SHELL_ENVIRONMENT.endpoint], BOXD_ENDPOINT);
+          assert.strictEqual(
+            command.options.env?.[BOXD_SHELL_ENVIRONMENT.credential],
+            Redacted.value(boxdSettings().token),
+          );
+        }
+        assert.isFalse(
+          [...machine.state.localFiles.keys()].some((file) => file.includes(`boxd-${grant.id}`)),
+          "no known_hosts or OpenSSH config file",
         );
         yield* machines.release(grant.hold);
-        assert.strictEqual(
-          (provider === "boxd" ? providers.boxd.machines : providers.boat.sandboxes).size,
-          0,
-        );
-        assert.isUndefined(
-          machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/${provider}-${grant.id}`),
-        );
-      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
-    });
-
-    it.live(
-      `refuses a ${provider} machine whose API reports no host key and deletes it without connecting`,
-      () => {
-        const machine = fakeMachine();
-        machine.state.localFiles.set(
-          `/keys/usine_${provider}.pub`,
-          provider === "boxd" ? `${BOXD_PUBLIC_KEY}\n` : "ssh-ed25519 AAAAOperatorKey usine\n",
-        );
-        const providers = fakeProviders();
-        if (provider === "boxd") providers.boxd.hostKey = "";
-        else providers.boat.hostKey = undefined;
-        return Effect.gen(function* () {
-          const machines = yield* WorkerMachines;
-          const refused = yield* machines
-            .create(WORKER, MACHINE_RUN, request.attemptId, [TEST_AGENT.brain])
-            .pipe(Effect.flip);
-          assert(refused._tag === "MachineUnavailableError");
-          assert.strictEqual(refused.reason, "provider");
-          assert.include(
-            refused.message,
-            provider === "boxd" ? "sshHostKey" : "doesn't trust the host key of a first connection",
-          );
-          assert.lengthOf(machine.state.calls, 0, "nothing connected to the sandbox");
-          assert.strictEqual(
-            (provider === "boxd" ? providers.boxd.machines : providers.boat.sandboxes).size,
-            0,
-            "the sandbox was deleted",
-          );
-          const currentMachines = yield* machines.machines;
-          assert.lengthOf(currentMachines, 0);
-        }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
-      },
-    );
-  }
-  it.live("boxd preflight checks the current public key against the account fingerprints", () => {
-    const machine = fakeMachine();
-    const providers = fakeProviders();
-    const logs = capturedLogs();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      machine.state.localFiles.set("/keys/usine_boxd.pub", `${BOXD_PUBLIC_KEY}\n`);
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-      machine.state.localFiles.set("/keys/usine_boxd.pub", `${BOXD_ROTATED_KEY}\n`);
-      const unlinked = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
-      assert(unlinked._tag === "WorkerCapabilityError");
-      assert.strictEqual(unlinked.capability, "provider");
-      assert.include(unlinked.message, "/keys/usine_boxd.pub");
-      assert.include(unlinked.message, BOXD_ROTATED_FINGERPRINT);
-      assert.include(unlinked.message, "signed-in session");
-      assert.include(
-        unlinked.message,
-        "https://docs.usine.dev/guides/add-a-boxd-worker/#link-the-worker-key",
-      );
-      providers.boxd.sshKeyFingerprints.push(BOXD_ROTATED_FINGERPRINT);
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-      const verified = logs.lines.filter((line) => line.includes("boxd provisioner verified"));
-      assert.lengthOf(verified, 2);
-      assert.include(verified[0] ?? "", BOXD_KEY_FINGERPRINT);
-      assert.include(verified[1] ?? "", BOXD_ROTATED_FINGERPRINT);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        runtimeOf(machine, providers, boxdAddress).pipe(Layer.provideMerge(logs.layer)),
-      ),
-    );
-  });
-
-  for (const key of [undefined, "", "invalid-key", "ssh-ed25519 !!!"]) {
-    it.live(
-      `boxd preflight reports a provider error for ${key === undefined ? "a missing public key" : `public key "${key}"`}`,
-      () => {
-        const machine = fakeMachine();
-        const providers = fakeProviders();
-        if (key !== undefined) machine.state.localFiles.set("/keys/usine_boxd.pub", key);
-        return Effect.gen(function* () {
-          const executor = yield* Executor;
-          const refused = yield* executor
-            .preflight(WORKER, [TEST_AGENT.brain], 1)
-            .pipe(Effect.flip);
-          assert(refused._tag === "WorkerCapabilityError");
-          assert.strictEqual(refused.capability, "provider");
-          assert.include(refused.message, "/keys/usine_boxd.pub");
-          assert.strictEqual(providers.boxd.machines.size, 0);
-        }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
-      },
-    );
-  }
+        assert.strictEqual(providers.boxd.machines.size, 0);
+      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
+    },
+  );
 
   it.live("refuses a Boat Worker whose identity file has no public key", () => {
     const machine = fakeMachine();

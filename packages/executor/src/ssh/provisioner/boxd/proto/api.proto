@@ -26,7 +26,7 @@ syntax = "proto3";
 package boxd.api.v1;
 
 message WhoamiRequest {}
-message WhoamiResponse { string user_id = 1; repeated string pubkey_fingerprints = 2; }
+message WhoamiResponse { string user_id = 1; }
 message GetOrgMachineLimitRequest { string org_id = 1; }
 message GetOrgMachineLimitResponse { uint32 max_vms = 3; uint32 vm_count = 4; }
 message GetSnapshotRequest { string name = 1; string org = 2; }
@@ -55,16 +55,13 @@ message CreateVmResponse { string vm_id = 1; GetVmResponse machine = 9; }
 message GetVmRequest { string vm_id = 1; }
 message GetVmResponse {
   string vm_id = 1;
-  string public_ip = 4;
   string status = 5;
-  uint32 ssh_port = 9;
   int64 created_at = 17;
   map<string, string> labels = 34;
-  bool ssh_disabled = 41;
   repeated string egress_allow = 28;
 }
 message ListVmsRequest { string org = 1; repeated string label_selector = 3; }
-message ListVmsResponse { repeated GetVmResponse vms = 1; string ssh_host_key = 2; }
+message ListVmsResponse { repeated GetVmResponse vms = 1; }
 message UpdateVmLabelsRequest { string vm = 1; map<string, string> set = 2; }
 message UpdateVmLabelsResponse {}
 message DestroyVmRequest { string vm_id = 1; }

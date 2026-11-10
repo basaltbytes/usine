@@ -12,7 +12,7 @@ import {
   attemptsFromTag,
   type ListedMachine,
   type MachineDriver,
-  type MachineEndpoint,
+  MachineEndpoint,
   type MachineTags,
   ProviderApiError,
   tagValue,
@@ -156,11 +156,11 @@ const endpointOf = (
         ProviderUnanswered.make({ detail: "Boat reported an invalid SSH destination" }),
       ),
     );
-    return {
+    return MachineEndpoint.Ssh({
       destination,
       port: target.value.port,
       hostKey: Option.fromUndefinedOr(answer.hostKey),
-    };
+    });
   });
 
 /**

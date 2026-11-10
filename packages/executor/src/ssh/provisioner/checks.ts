@@ -193,7 +193,7 @@ if command -v "$runtime" >/dev/null 2>&1; then
 fi
 `.trim();
 
-/** Waits until the machine answers over SSH and runs `READY_SCRIPT`. */
+/** Waits until the machine answers through its remote shell and runs `READY_SCRIPT`. */
 export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function* (
   commands: RemoteCommands,
   interval: Effect.Effect<void>,
@@ -220,7 +220,11 @@ export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function
       machine.address.root,
     ]);
     if (result.exitCode === 0) {
-      yield* Effect.logInfo("The new machine answers over SSH", { worker, host, tries });
+      yield* Effect.logInfo("The new machine answers through its remote shell", {
+        worker,
+        host,
+        tries,
+      });
       return;
     }
     if (result.exitCode !== SSH_FAILURE)
@@ -230,7 +234,7 @@ export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function
         message: `The new machine of worker "${worker}" at ${host} can't create the root ${machine.address.root}`,
         cause: new Error(result.stderr.trim() || `exit code ${String(result.exitCode)}`),
       });
-    yield* Effect.logDebug("The new machine doesn't answer over SSH yet", {
+    yield* Effect.logDebug("The new machine doesn't answer through its remote shell yet", {
       worker,
       host,
       tries,

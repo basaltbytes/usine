@@ -16,7 +16,9 @@ import type {
   SshWorkerAddress,
   SshWorkerGateway,
 } from "./model.ts";
-import type { MachineEndpoint } from "./provisioner/model.ts";
+import { boxdShellFor } from "./provisioner/boxd/shell/remote-shell.ts";
+import { MachineEndpoint, type SshEndpoint } from "./provisioner/model.ts";
+import { allowlistedEnvironment } from "../child-command.ts";
 
 /** The Workers of the SSH executor, starting with `SshExecutorOptions.workers`. A reload adds and removes Workers at runtime. */
 export class SshWorkers extends Context.Service<
@@ -104,7 +106,7 @@ export interface PinnedHostKey {
 const provisionedSshCommandFor = (
   base: SshCommand,
   entry: SshWorkerEntry,
-  endpoint: MachineEndpoint,
+  endpoint: SshEndpoint,
   hostKey: PinnedHostKey,
 ): SshCommand => ({
   command: base.command,
@@ -147,6 +149,8 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const http = yield* HttpClient.HttpClient;
   const scope = yield* Scope.Scope;
+  /** The environment of a stand-in for `ssh`, before its own endpoint and credential. */
+  const standInEnvironment = yield* allowlistedEnvironment(["HOME", "PATH", "TMPDIR"]);
   const machines = yield* SynchronizedRef.make<Machines>({
     byWorker: new Map(),
     forwards: new Map(),
@@ -352,7 +356,10 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     return entry.machine.value;
   });
 
-  /** Returns the machine at `endpoint` that a provider created for one Attempt on `entry`'s Worker. */
+  /**
+   * Returns the machine at `endpoint` that a provider created for one Attempt on `entry`'s Worker:
+   * reached with OpenSSH and the host key pinned in `hostKey`, or through the boxd shell.
+   */
   const machineAt = (
     entry: SshWorkerEntry,
     id: MachineId,
@@ -361,10 +368,11 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   ): SshMachine => ({
     address: entry.address,
     gateway: entry.gateway,
-    shell: commands.shellFor(
-      provisionedSshCommandFor(base, entry, endpoint, hostKey),
-      endpoint.destination,
-    ),
+    shell: MachineEndpoint.$match(endpoint, {
+      Ssh: (ssh) =>
+        commands.shellFor(provisionedSshCommandFor(base, entry, ssh, hostKey), ssh.destination),
+      Exec: (exec) => boxdShellFor(exec, standInEnvironment),
+    }),
     workerDirectory: workerDirectoryOf(entry.address),
     provisioned: Option.some(id),
   });

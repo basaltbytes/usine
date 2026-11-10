@@ -792,7 +792,7 @@ it.each([
   {
     kind: "boxd",
     source:
-      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nidentity_file: /keys/id_ed25519\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  region: fra\n  size: 2x8\n  snapshot: usine-attempt\n  isolated: false\n",
+      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  region: fra\n  size: 2x8\n  snapshot: usine-attempt\n  isolated: false\n",
     label: "Provider token variable",
     next: "NEW_BOXD_TOKEN",
     expected: {
@@ -837,7 +837,7 @@ it("suggests the hosted boxd regions and saves another region id", async () => {
   await page
     .getByRole("textbox", { name: "Configuration text" })
     .fill(
-      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nidentity_file: /keys/id_ed25519\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
+      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
     );
   await button("Edit as form").click();
   const region = page.getByRole("combobox", { name: "Region", exact: true });
@@ -856,7 +856,7 @@ it("suggests the hosted boxd regions and saves another region id", async () => {
 });
 
 const boxdEgressSource = (egress: string) =>
-  `name: local\nkind: ssh\nroot: /home/boxd/.usine\nidentity_file: /keys/id_ed25519\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n${egress}`;
+  `name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n${egress}`;
 const editBoxdEgress = async (source: string) => {
   await mount();
   await editText();

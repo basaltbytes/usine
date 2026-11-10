@@ -20,6 +20,9 @@ for (const provider of ["boat", "boxd"] as const) {
             client_secret_env: "TS_SECRET",
           },
         };
+        // Boat adds the identity's public key to each sandbox; boxd refuses an identity.
+        const identity: { readonly identity_file?: string } =
+          provider === "boat" ? { identity_file: "/keys/boat" } : {};
         const config = yield* Schema.decodeEffect(UsineConfig)({
           version: 1,
           repos: [],
@@ -28,7 +31,7 @@ for (const provider of ["boat", "boxd"] as const) {
               name: "boat",
               kind: "ssh",
               root: "/home/user/.usine",
-              identity_file: "/keys/boat",
+              ...identity,
               gateway: {
                 domain: "gw.test",
                 destination: "gateway",

@@ -25,7 +25,7 @@ for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
     settings.provider === "hetzner"
       ? hetznerDriverFor(WORKER, settings, false, HETZNER_TEST_API)
       : settings.provider === "boxd"
-        ? boxdDriverFor(WORKER, settings, "/keys/usine_boxd.pub")
+        ? boxdDriverFor(WORKER, settings)
         : boatDriverFor(WORKER, settings, "ssh-ed25519 AAAATest", BOAT_TEST_API);
   const tags = {
     instance: INSTANCE,

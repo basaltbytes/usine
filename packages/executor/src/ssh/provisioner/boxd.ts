@@ -2,12 +2,9 @@ import {
   type BoxdEgressAllowlist,
   isBoxdEgressAddress,
   MachineId,
-  SshDestination,
-  SshPort,
   type WorkerName,
 } from "@usine/core/worker";
-import { type Brand, DateTime, Effect, FileSystem, Option, Schema, Semaphore } from "effect";
-import { Base64 } from "effect/encoding";
+import { type Brand, DateTime, Effect, Option, type Redacted, Schema } from "effect";
 import {
   MachineUnavailableError,
   WorkerCapabilityError,
@@ -21,7 +18,7 @@ import {
   ProviderApiError,
   tagValue,
   type MachineDriver,
-  type MachineEndpoint,
+  MachineEndpoint,
   type MachineTags,
 } from "./model.ts";
 
@@ -111,24 +108,22 @@ export const boxdConnectError = (
       })
     : boxdPreflightError(worker, failure);
 
-/** A driver retains the create response only until endpoint discovery consumes it. */
-export const boxdDriverFor = (
-  worker: WorkerName,
-  settings: BoxdProvisioner,
-  publicKeyFile: string,
-) =>
+/**
+ * Returns the bearer of the boxd shell's `Exec` calls: the API key itself. boxd accepts it as a
+ * bearer without documenting it (question 3 of `docs/research/boxd-byoc.md`). A session token file
+ * that the orchestrator renews can replace it here.
+ */
+const execCredential = (settings: BoxdProvisioner): Redacted.Redacted<string> => settings.token;
+
+/**
+ * Returns the boxd driver for `worker`. Its machines' endpoints are `Exec` endpoints, which the boxd
+ * shell reaches with the API key, so no SSH key is involved. A driver retains the create response
+ * only until endpoint discovery consumes it.
+ */
+export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
   Effect.gen(function* () {
     const api = yield* BoxdApi;
-    const fs = yield* FileSystem.FileSystem;
     const created = new Map<MachineId, BoxdMachine>();
-    let hostKey: Option.Option<string> = Option.none();
-    const hostKeyLock = yield* Semaphore.make(1);
-    const proxyKey = Effect.gen(function* () {
-      if (Option.isSome(hostKey)) return hostKey;
-      const key = yield* api.sshHostKey;
-      hostKey = Option.some(key);
-      return hostKey;
-    }).pipe(hostKeyLock.withPermit);
     const unavailable = (code: string, message: string) =>
       MachineUnavailableError.make({ worker, provider: "boxd", reason: reasonOf(code), message });
     const apiError = (operation: string) => (failure: BoxdCallError) =>
@@ -148,7 +143,7 @@ export const boxdDriverFor = (
     const verify = Effect.fn("BoxdDriver.verify")(
       function* (_worker: WorkerName, maxConcurrentAttempts: number) {
         yield* Effect.annotateCurrentSpan({ worker, region: settings.region });
-        const identity = yield* api.whoami;
+        yield* api.whoami;
         const snapshot = yield* api.snapshot(settings.snapshot);
         if (snapshot.status !== "ready")
           return yield* capability(
@@ -168,35 +163,6 @@ export const boxdDriverFor = (
           return yield* capability(
             `boxd endpoint serves ${thisRegion}; use the endpoint for provisioner.region ${settings.region}.`,
           );
-        const pubkey = yield* fs.readFileString(publicKeyFile).pipe(
-          Effect.mapBoth({
-            onSuccess: (text) => text.trim(),
-            onFailure: () =>
-              capability(
-                `boxd worker "${worker}" needs a readable public key at ${publicKeyFile}. Create the .pub file next to identity_file.`,
-              ),
-          }),
-        );
-        const encoded = /^\S+[ \t]+([A-Za-z0-9+/]+={0,2})(?:[ \t]+[^\r\n]*)?$/u.exec(pubkey)?.[1];
-        if (encoded === undefined)
-          return yield* capability(
-            `boxd worker "${worker}" has an invalid SSH public key at ${publicKeyFile}.`,
-          );
-        const bytes = yield* Effect.fromResult(Base64.decode(encoded)).pipe(
-          Effect.mapError(() =>
-            capability(
-              `boxd worker "${worker}" has an invalid SSH public key at ${publicKeyFile}.`,
-            ),
-          ),
-        );
-        const digest = yield* Effect.promise(() =>
-          crypto.subtle.digest("SHA-256", new Uint8Array(bytes)),
-        );
-        const fingerprint = `SHA256:${Base64.encode(new Uint8Array(digest)).replace(/=+$/u, "")}`;
-        if (!identity.sshKeyFingerprints.includes(fingerprint))
-          return yield* capability(
-            `boxd worker "${worker}" SSH public key ${fingerprint} at ${publicKeyFile} is not linked to the boxd account of the API key. Link the key from a signed-in session; API keys cannot link SSH keys. See https://docs.usine.dev/guides/add-a-boxd-worker/#link-the-worker-key.`,
-          );
         const limit = yield* api.orgMachineLimit;
         const addresses = Option.isSome(settings.tailnet)
           ? Option.getOrElse(settings.egress, () => []).filter(isBoxdEgressAddress)
@@ -215,7 +181,6 @@ export const boxdDriverFor = (
         ];
         yield* Effect.logInfo("boxd provisioner verified", {
           worker,
-          fingerprint,
           region: settings.region,
           egress: Option.match(settings.egress, {
             onNone: () => "unrestricted",
@@ -330,28 +295,12 @@ export const boxdDriverFor = (
           }),
         ),
     );
-    const connectionError = (message: string) =>
-      ProviderApiError.make({
-        provider: "boxd",
-        operation: "read the machine connection",
-        status: Option.none(),
-        message,
+    const endpointOf = (id: MachineId) =>
+      MachineEndpoint.Exec({
+        machine: id,
+        api: api.endpoint,
+        credential: execCredential(settings),
       });
-    const endpointOf = Effect.fn("BoxdDriver.endpointOf")(function* (machine: BoxdMachine) {
-      if (machine.status !== "running" || machine.sshPort === 0 || machine.sshDisabled)
-        return yield* connectionError(
-          `boxd machine ${machine.id} is ${machine.status} or has SSH disabled`,
-        );
-      const destination = yield* Schema.decodeEffect(SshDestination)(
-        `boxd@${machine.publicIp}`,
-      ).pipe(Effect.mapError(() => connectionError("boxd returned an invalid SSH address")));
-      const key = yield* proxyKey;
-      return {
-        destination,
-        port: Option.some(SshPort.make(machine.sshPort)),
-        hostKey: key,
-      } satisfies MachineEndpoint;
-    });
     const endpoint = Effect.fn("BoxdDriver.endpoint")(
       function* (id: MachineId, interval: Effect.Effect<void>) {
         yield* Effect.annotateCurrentSpan({ worker, machine: id });
@@ -360,8 +309,7 @@ export const boxdDriverFor = (
         while (true) {
           const machine = Option.isSome(initial) ? initial.value : yield* api.vm(id);
           initial = Option.none();
-          if (machine.status === "running" && machine.sshPort > 0)
-            return yield* endpointOf(machine);
+          if (machine.status === "running") return endpointOf(id);
           if (terminalStates.has(machine.status))
             return yield* MachineUnavailableError.make({
               worker,
@@ -380,13 +328,6 @@ export const boxdDriverFor = (
       (effect) =>
         effect.pipe(
           Effect.catchTags({
-            ProviderApiError: (failure) =>
-              MachineUnavailableError.make({
-                worker,
-                provider: "boxd",
-                reason: "provider",
-                message: failure.message,
-              }),
             BoxdCallError: (failure) =>
               Effect.fail(
                 failure.code === "NOT_FOUND"
@@ -422,12 +363,7 @@ export const boxdDriverFor = (
         });
         return Option.none<MachineEndpoint>();
       }
-      return yield* endpointOf(machine.value).pipe(
-        Effect.asSome,
-        Effect.catchTag("BoxdCallError", (failure) =>
-          apiError("refresh the machine connection")(failure),
-        ),
-      );
+      return Option.some(endpointOf(id));
     });
     const assign = Effect.fn("BoxdDriver.assign")(function* (id: MachineId, tags: MachineTags) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id, attemptId: tags.attempt });

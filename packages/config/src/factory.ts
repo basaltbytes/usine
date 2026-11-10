@@ -379,7 +379,10 @@ export class SshWorker extends Schema.Class<
   destination: Schema.OptionFromOptionalKey(SshDestination),
   /** The provider settings for a machine per attempt, or `None` for a long-lived machine. */
   provisioner: Schema.OptionFromOptionalKey(WorkerProvisionerFromYaml),
-  /** The local SSH private-key path; Boat also requires the adjacent `.pub` file. */
+  /**
+   * The local SSH private-key path; Boat also requires the adjacent `.pub` file. A boxd
+   * provisioner takes none.
+   */
   identityFile: Schema.OptionFromOptionalKey(SshIdentityFile),
   /**
    * The SSH port override for a long-lived machine; provisioned workers get the port from their
@@ -479,8 +482,8 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
         const conflict = boxdEgressConflict(worker, provisioner.egress.value);
         if (conflict !== undefined) return conflict;
       }
-      return Option.isNone(worker.identityFile)
-        ? `SSH worker "${worker.name}" has a boxd provisioner and needs identity_file, whose .pub file must be linked to the boxd account with infra/boxd/link-ssh-key.mjs`
+      return Option.isSome(worker.identityFile)
+        ? `SSH worker "${worker.name}" sets identity_file, which a boxd provisioner doesn't use: usine runs commands on boxd machines through boxd's Exec API with the API key, so remove identity_file`
         : undefined;
     case "boat":
       if (

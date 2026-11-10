@@ -21,10 +21,7 @@ export class BoxdUnknownRegion extends Schema.TaggedError<
 
 export const BoxdMachine = Schema.Struct({
   id: MachineId,
-  publicIp: Schema.String,
   status: Schema.NonEmptyString,
-  sshPort: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 })),
-  sshDisabled: Schema.Boolean,
   createdAt: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000 })),
   labels: Schema.Record(Schema.String, Schema.String),
   /** The machine's egress allowlist; empty when its egress is unrestricted. */
@@ -42,10 +39,7 @@ export type BoxdSnapshot = typeof BoxdSnapshot.Type;
 
 export const BoxdRegions = Schema.Struct({ thisRegion: Schema.String });
 export const BoxdLimit = Schema.Struct({ maxVms: Schema.Int, vmCount: Schema.Int });
-export const BoxdIdentity = Schema.Struct({
-  userId: Schema.NonEmptyString,
-  sshKeyFingerprints: Schema.Array(Schema.String),
-});
+export const BoxdIdentity = Schema.Struct({ userId: Schema.NonEmptyString });
 export const BoxdCreated = Schema.Struct({
   id: MachineId,
   machine: Schema.OptionFromOptionalKey(BoxdMachine),
@@ -63,6 +57,8 @@ export interface BoxdCreate {
 export class BoxdApi extends Context.Service<
   BoxdApi,
   {
+    /** The API endpoint URL of the configured region, which serves its machines' `Exec` calls. */
+    readonly endpoint: string;
     readonly whoami: Effect.Effect<typeof BoxdIdentity.Type, BoxdCallError>;
     readonly orgMachineLimit: Effect.Effect<typeof BoxdLimit.Type, BoxdCallError>;
     readonly snapshot: (name: string) => Effect.Effect<BoxdSnapshot, BoxdCallError>;
@@ -74,7 +70,6 @@ export class BoxdApi extends Context.Service<
     readonly listVms: (
       selector: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<BoxdMachine>, BoxdCallError>;
-    readonly sshHostKey: Effect.Effect<string, BoxdCallError>;
     readonly updateLabels: (
       id: MachineId,
       set: Record<string, string>,

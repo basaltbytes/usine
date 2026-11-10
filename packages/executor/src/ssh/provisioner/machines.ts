@@ -286,10 +286,10 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   });
 
   /**
-   * Returns the machine at `id` once the provider reports its SSH endpoint, with its host key
-   * pinned: `created`, the key the driver gave the machine, else the key the provider reports,
-   * else the key an earlier process recorded. Fails if there's none, since a first connection's
-   * key isn't trusted.
+   * Returns the machine at `id` once the provider reports its endpoint. An SSH endpoint has its
+   * host key pinned: `created`, the key the driver gave the machine, else the key the provider
+   * reports, else the key an earlier process recorded. Fails if there's none, since a first
+   * connection's key isn't trusted. An `Exec` endpoint has no host key.
    */
   const machineOf = Effect.fn("SshExecutor.machineAtEndpoint")(function* (
     entry: SshWorkerEntry,
@@ -304,9 +304,10 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     };
     if (Option.isSome(created)) yield* pinHostKey(worker, id, pinned, created.value);
     const endpoint = yield* driver.endpoint(id, interval);
-    if (Option.isSome(endpoint.hostKey))
+    if (endpoint._tag === "Ssh" && Option.isSome(endpoint.hostKey))
       yield* pinHostKey(worker, id, pinned, endpoint.hostKey.value);
     else if (
+      endpoint._tag === "Ssh" &&
       Option.isNone(created) &&
       !(yield* fs.exists(pinned.file).pipe(Effect.orElseSucceed(() => false)))
     )
@@ -331,7 +332,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       worker,
       provider,
       reason: "timeout",
-      message: `The new ${provider} machine of worker "${worker}" didn't answer over SSH within ${Duration.format(readyTimeout)}`,
+      message: `The new ${provider} machine of worker "${worker}" didn't answer through its remote shell within ${Duration.format(readyTimeout)}`,
     });
 
   const reuse = machineReuseFor({

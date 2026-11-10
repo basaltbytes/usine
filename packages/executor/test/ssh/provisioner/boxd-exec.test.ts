@@ -1,16 +1,18 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { assert, describe, it } from "@effect/vitest";
 import { MachineId } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Predicate, Redacted, Stream } from "effect";
+import { Deferred, Effect, Fiber, Predicate, Redacted, Schema, Stream } from "effect";
 import { connect, createServer, type Socket } from "node:net";
 import {
   BoxdExec,
   boxdExecLayer,
+  BoxdMachineGone,
   STDIN_CHUNK_BYTES,
 } from "../../../src/ssh/provisioner/boxd/exec.ts";
 import { type ExecHandler, fakeBoxdExec, runLocally } from "./fake-boxd-exec.ts";
 
 const KEY = "bxd_exec_test_key";
+const isGone = Schema.is(BoxdMachineGone);
 const MACHINE = MachineId.make("vm-exec-1");
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -150,7 +152,7 @@ describe("BoxdExec", () => {
         const server = yield* fake(failing(error));
         const failure = yield* run(server.url, "true").pipe(Effect.flip);
         if (expected === "BoxdMachineGone") {
-          assert.strictEqual(failure._tag, "BoxdMachineGone");
+          assert.isTrue(isGone(failure), error.rawMessage);
         } else {
           assert(failure._tag === "BoxdCallError");
           assert.strictEqual(failure.code, expected);
@@ -166,7 +168,7 @@ describe("BoxdExec", () => {
       const unknown = yield* run(server.url, "true", Stream.empty, {
         machine: MachineId.make("vm-unknown"),
       }).pipe(Effect.flip);
-      assert.strictEqual(unknown._tag, "BoxdMachineGone");
+      assert.isTrue(isGone(unknown));
     }).pipe(Effect.scoped),
   );
 

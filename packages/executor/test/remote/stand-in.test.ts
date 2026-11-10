@@ -37,7 +37,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { SHELL_ENVIRONMENT } from "../../src/cloudflare/shell/environment.ts";
-import { parseStandInArguments } from "../../src/remote/stand-in.ts";
+import { parseStandInArguments, TRANSPORT_FAILURE } from "../../src/remote/stand-in.ts";
 import { BOXD_SHELL_ENVIRONMENT } from "../../src/ssh/provisioner/boxd/shell/environment.ts";
 import { fakeBoxdExec } from "../ssh/provisioner/fake-boxd-exec.ts";
 import { runLocally } from "./local-command.ts";
@@ -285,7 +285,7 @@ for (const { name, setup } of subjects) {
     test("exits 255 when it can't reach the machine", (subject) =>
       Effect.gen(function* () {
         const result = yield* runThrough(subject, subject.unreachable, "true");
-        assert.strictEqual(result.exitCode, 255);
+        assert.strictEqual(result.exitCode, TRANSPORT_FAILURE);
         assert.strictEqual(result.stdout.length, 0);
         assert.isAbove(result.stderr.length, 0);
       }));

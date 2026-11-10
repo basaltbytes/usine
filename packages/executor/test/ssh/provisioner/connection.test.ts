@@ -8,7 +8,7 @@ import { CheckoutRequest, Executor, WorkerMachines } from "../../../src/executor
 import { remoteCommandsFor } from "../../../src/remote/commands.ts";
 import { fakeMachine, LOCAL_TEMPORARY_DIRECTORY, request, TEST_AGENT, WORKER } from "../support.ts";
 import { fakeProviders } from "./fake-providers.ts";
-import { MACHINE_RUN, boatAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
+import { MACHINE_RUN, boatAddress, boxdAddress, RUN, runtimeOf, sink } from "./fixtures.ts";
 
 const observing = (notices: Array<AttemptChannel.WorkerNotice>) => ({
   ...sink,
@@ -263,4 +263,57 @@ describe("Boat SSH connection recovery", () => {
       );
     });
   });
+});
+
+describe("boxd Exec connection", () => {
+  it.effect(
+    "reports an unanswering boxd machine as unresponsive and fails it as infrastructure loss once boxd deletes it",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const notices: Array<AttemptChannel.WorkerNotice> = [];
+      return Effect.gen(function* () {
+        const working = yield* Deferred.make<void>();
+        const parent: StubParent = () =>
+          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const machines = yield* WorkerMachines;
+          const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+            TEST_AGENT.brain,
+          ]);
+          const launch = yield* (yield* executor.prepare(request))
+            .launch(observing(notices))
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(working);
+
+          machine.state.reachable = false;
+          const reads = providers.boxd.reads;
+          yield* TestClock.adjust("1 minute");
+          assert.deepStrictEqual(
+            notices.map(({ _tag }) => _tag),
+            ["WorkerUnresponsive"],
+            "a machine that boxd still lists is only unresponsive",
+          );
+          assert.isAbove(providers.boxd.reads, reads, "boxd is asked whether the machine is gone");
+          assert.isFalse(
+            machine.state.localFiles.has(
+              `${LOCAL_TEMPORARY_DIRECTORY}/boxd-${grant.id}.ssh-config`,
+            ),
+            "an Exec endpoint has no OpenSSH config",
+          );
+
+          providers.boxd.machines.delete(grant.id);
+          yield* TestClock.adjust("1 minute");
+          const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+          assert.strictEqual(failure._tag, "InfraFailure");
+          assert.include(failure.message, grant.id);
+          yield* machines.release(grant.hold);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtimeOf(machine, providers, boxdAddress, { parent })),
+        );
+      });
+    },
+  );
 });

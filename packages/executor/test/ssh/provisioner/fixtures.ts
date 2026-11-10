@@ -70,7 +70,7 @@ export const boatAddress: SshWorkerAddress = {
 export const boxdAddress: SshWorkerAddress = {
   ...boatAddress,
   root: WorkerRoot.make("/home/boxd/.usine"),
-  identityFile: Option.some(SshIdentityFile.make("/keys/usine_boxd")),
+  identityFile: Option.none(),
   machine: {
     _tag: "Provisioned",
     provisioner: boxdSettings({

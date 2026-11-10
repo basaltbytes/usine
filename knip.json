@@ -12,11 +12,7 @@
   ],
   "workspaces": {
     ".": {
-      "entry": [
-        "infra/hetzner/gateway/apply.mjs",
-        "infra/boxd/link-ssh-key.mjs",
-        "scripts/effect-diagnostics/*.mjs"
-      ],
+      "entry": ["infra/hetzner/gateway/apply.mjs", "scripts/effect-diagnostics/*.mjs"],
       "project": []
     },
     "packages/agents": {
