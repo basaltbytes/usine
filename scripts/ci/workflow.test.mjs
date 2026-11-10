@@ -52,9 +52,12 @@ test("the server container reaps detached processes and installs its required CL
   assert.match(tests.run, /chown -R pwuser:pwuser "\$GITHUB_WORKSPACE"/u);
   assert.match(tests.run, /runuser -u pwuser -- env "PATH=\$PATH" pnpm turbo run test/u);
   const setup = job.steps[setupIndex];
-  assert.ok(setup["timeout-minutes"] > 0 && setup["timeout-minutes"] <= 5);
+  assert.ok(setup["timeout-minutes"] > 0 && setup["timeout-minutes"] <= 6);
   for (const tool of ["jq", "lsof"]) {
-    assert.match(setup.run, new RegExp(`apt-get [^\\n]*install[^\\n]*\\b${tool}\\b`, "u"));
+    assert.match(
+      setup.run,
+      new RegExp(`apt(-get|_get \\d+) [^\\n]*install[^\\n]*\\b${tool}\\b`, "u"),
+    );
   }
 });
 
@@ -81,6 +84,16 @@ test("the server test tools install from a per-image cache before any apt mirror
   assert.match(save.if, /steps\.server-tools\.outputs\.cache-hit != 'true'/u);
   assert.match(setup.env.APT_OPTIONS, /Acquire::Retries=\d+/u);
   assert.match(setup.env.APT_OPTIONS, /Acquire::http::Timeout=\d+/u);
+  // Every apt-get call has its own time limit, and three attempts fit in the step timeout.
+  const limits = [...setup.run.matchAll(/apt_get (\d+) /gu)].map(([, limit]) => Number(limit));
+  const sleep = Number(setup.run.match(/sleep (\d+)/u)[1]);
+  assert.match(setup.run, /timeout -k 5 "\$limit" apt-get /u);
+  const calls = setup.run.split("\n").filter((line) => !/^\s*#/u.test(line));
+  assert.ok(
+    calls.filter((line) => /\bapt-get /u.test(line)).every((line) => /\btimeout /u.test(line)),
+  );
+  assert.equal(limits.length, 2);
+  assert.ok(3 * limits.reduce((a, b) => a + b, 0) + 2 * sleep < setup["timeout-minutes"] * 60 - 30);
 
   // The apt-get stub mirrors real apt: a failed index fetch only warns and exits 0
   // unless --error-on=any is set, and a missing package index fails the download.
@@ -92,10 +105,26 @@ test("the server test tools install from a per-image cache before any apt mirror
       const calls = join(scratch, "calls");
       const state = join(scratch, "failed-updates");
       const lists = join(scratch, "lists");
+      const seen = join(scratch, "sources");
+      const imageSources = join(scratch, "ubuntu.sources");
       mkdirSync(bin);
       mkdirSync(debs);
       writeFileSync(state, "0");
       writeFileSync(lists, "missing");
+      writeFileSync(
+        imageSources,
+        [
+          "Types: deb",
+          "URIs: http://archive.ubuntu.com/ubuntu/",
+          "Suites: noble noble-updates",
+          "",
+          "## Security updates from security.ubuntu.com",
+          "Types: deb",
+          "URIs: http://security.ubuntu.com/ubuntu/",
+          "Suites: noble-security",
+          "",
+        ].join("\n"),
+      );
       if (cacheHit) writeFileSync(join(debs, "jq.deb"), "");
       const stub = (name, body) =>
         writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${calls}"\n${body}\n`, {
@@ -103,7 +132,13 @@ test("the server test tools install from a per-image cache before any apt mirror
         });
       stub(
         "apt-get",
-        `case " $* " in
+        `for arg; do
+  case "$arg" in
+    Dir::Etc::SourceList=*) echo "list \${arg#*=}" >> "${seen}" ;;
+    Dir::Etc::SourceParts=*) cat "\${arg#*=}"/*.sources >> "${seen}" ;;
+  esac
+done
+case " $* " in
   *" update "*)
     failed=$(cat "${state}")
     if [ "$failed" -lt ${failedUpdates} ]; then
@@ -121,18 +156,25 @@ esac`,
       );
       stub("dpkg", "");
       stub("sleep", "");
+      writeFileSync(
+        join(bin, "timeout"),
+        '#!/bin/sh\nwhile [ "$1" = -k ]; do shift 2; done\nshift\nexec "$@"\n',
+        { mode: 0o755 },
+      );
       const result = spawnSync("sh", ["-e", "-c", setup.run], {
         env: {
           ...process.env,
           ...setup.env,
           CACHE_HIT: cacheHit ? "true" : "",
+          APT_SOURCES: imageSources,
           DEBS: debs,
           PATH: `${bin}:${process.env.PATH}`,
         },
         encoding: "utf8",
       });
       const log = existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [];
-      return { status: result.status, log };
+      const sources = existsSync(seen) ? readFileSync(seen, "utf8") : "";
+      return { status: result.status, log, sources };
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
@@ -158,8 +200,12 @@ esac`,
   );
   assert.ok(flakyMirror.log.some((call) => /--download-only.*\bjq lsof$/u.test(call)));
   assert.ok(flakyMirror.log.at(-1).startsWith("dpkg -i"));
+  // apt reads only the image's archive stanza, never security.ubuntu.com.
+  assert.match(flakyMirror.sources, /^list \/dev\/null$/mu);
+  assert.match(flakyMirror.sources, /URIs: http:\/\/archive\.ubuntu\.com\/ubuntu\//u);
+  assert.doesNotMatch(flakyMirror.sources, /security\.ubuntu\.com/u);
 
-  // A source that stays down (security.ubuntu.com) while the main archive serves jq and lsof.
+  // A source that stays down (such as noble-updates mid-sync) while noble still serves jq and lsof.
   const partialMirror = install({ cacheHit: false, failedUpdates: 3, packagesIndexed: true });
   assert.equal(partialMirror.status, 0, partialMirror.log.join("\n"));
   assert.equal(updates(partialMirror.log).length, 3);

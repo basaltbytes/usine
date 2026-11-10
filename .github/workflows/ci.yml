@@ -108,26 +108,37 @@ jobs:
           key: server-test-tools-${{ matrix.container.image }}-jq-lsof
       - name: Install server test tools
         if: matrix.leg == 'server'
-        timeout-minutes: 5
+        timeout-minutes: 6
         env:
           CACHE_HIT: ${{ steps.server-tools.outputs.cache-hit }}
           DEBS: /var/cache/server-test-tools
+          APT_SOURCES: /etc/apt/sources.list.d/ubuntu.sources
           APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=20
         run: |
           if [ "$CACHE_HIT" != true ]; then
             mkdir -p "$DEBS/partial"
+            # security.ubuntu.com stalls often, and the main archive serves jq and
+            # lsof, so read the image's sources without the security stanza.
+            sources=$(mktemp -d)
+            awk -v RS= -v ORS='\n\n' '!/(^|\n)URIs:[^\n]*security\.ubuntu\.com/' "$APT_SOURCES" > "$sources/ubuntu.sources"
+            # Each call has its own time limit so that three attempts fit in the step timeout.
+            apt_get() {
+              limit=$1
+              shift
+              timeout -k 5 "$limit" apt-get $APT_OPTIONS -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts="$sources" "$@"
+            }
             # apt-get update exits 0 when an index fails to download, so earlier
             # attempts use --error-on=any to retry. The last attempt accepts partial
             # indexes and lets the download decide whether jq and lsof resolve.
             for attempt in 1 2 3; do
               strict=--error-on=any
               [ "$attempt" -lt 3 ] || strict=
-              if apt-get $APT_OPTIONS $strict update &&
-                apt-get $APT_OPTIONS install -y --download-only --no-install-recommends -o Dir::Cache::archives="$DEBS" jq lsof; then
+              if apt_get 60 $strict update &&
+                apt_get 30 install -y --download-only --no-install-recommends -o Dir::Cache::archives="$DEBS" jq lsof; then
                 break
               fi
               [ "$attempt" -lt 3 ] || exit 1
-              sleep 15
+              sleep 10
             done
           fi
           dpkg -i "$DEBS"/*.deb
