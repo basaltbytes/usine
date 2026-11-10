@@ -99,12 +99,38 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
+      - name: Restore server test tools
+        if: matrix.leg == 'server'
+        id: server-tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /var/cache/server-test-tools
+          key: server-test-tools-${{ matrix.container.image }}-jq-lsof
       - name: Install server test tools
         if: matrix.leg == 'server'
-        timeout-minutes: 3
+        timeout-minutes: 5
+        env:
+          CACHE_HIT: ${{ steps.server-tools.outputs.cache-hit }}
+          DEBS: /var/cache/server-test-tools
+          APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=20
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends jq lsof
+          if [ "$CACHE_HIT" != true ]; then
+            mkdir -p "$DEBS/partial"
+            attempt=1
+            until apt-get $APT_OPTIONS update; do
+              [ "$attempt" -lt 3 ] || exit 1
+              attempt=$((attempt + 1))
+              sleep 10
+            done
+            apt-get $APT_OPTIONS install -y --download-only --no-install-recommends -o Dir::Cache::archives="$DEBS" jq lsof
+          fi
+          dpkg -i "$DEBS"/*.deb
+      - name: Save server test tools
+        if: matrix.leg == 'server' && steps.server-tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /var/cache/server-test-tools
+          key: ${{ steps.server-tools.outputs.cache-primary-key }}
       - name: Run tests
         shell: bash
         run: |
