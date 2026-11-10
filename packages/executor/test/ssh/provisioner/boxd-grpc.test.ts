@@ -34,6 +34,7 @@ it.effect(
         sshPort: 12001,
         createdAt: 1_700_000_000n,
         labels: { "usine.worker": "worker" },
+        egressAllow: new Array<string>(),
       };
       const selectors: Array<Array<string>> = [];
       const calls: Array<string> = [];
@@ -79,6 +80,11 @@ it.effect(
               destroyVm: () => {
                 calls.push("destroy");
                 return {};
+              },
+              setVmEgressAllow: (request) => {
+                calls.push(`egress ${request.vm} ${request.entries.join(",")}`);
+                machine.egressAllow = request.entries;
+                return { entries: request.entries };
               },
               setAutoHibernateTimeout: (request) => {
                 assert.strictEqual(request.timeoutSecs, 0);
@@ -159,6 +165,14 @@ it.effect(
         const proxyKey = yield* api.sshHostKey;
         assert.strictEqual(proxyKey, hostKey);
         yield* api.updateLabels(created.id, { "usine.attempts": "2" });
+        assert.deepStrictEqual(vm.egressAllow, []);
+        const inEffect = yield* api.setEgressAllow(created.id, [
+          "*.tailscale.com",
+          "registry.npmjs.org",
+        ]);
+        assert.deepStrictEqual(inEffect, ["*.tailscale.com", "registry.npmjs.org"]);
+        const restricted = yield* api.vm(created.id);
+        assert.deepStrictEqual(restricted.egressAllow, inEffect);
         yield* api.setAutoHibernateTimeout(created.id, 0);
         yield* api.setAutoSuspendTimeout(created.id, 0);
         yield* api.destroy(MachineId.make("vm-1"));
@@ -185,7 +199,13 @@ it.effect(
       }).pipe(Effect.provide(layer));
       assert.strictEqual(exchanges, 2);
       assert.deepStrictEqual(selectors[0], ["usine.worker=worker"]);
-      assert.deepStrictEqual(calls, ["labels", "hibernate", "suspend", "destroy"]);
+      assert.deepStrictEqual(calls, [
+        "labels",
+        "egress vm-1 *.tailscale.com,registry.npmjs.org",
+        "hibernate",
+        "suspend",
+        "destroy",
+      ]);
       const host = fakeMachine();
       host.state.localFiles.set("/keys/usine_boxd.pub", BOXD_PUBLIC_KEY);
       const ambient = fakeBoxd();

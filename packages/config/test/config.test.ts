@@ -502,6 +502,132 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("decodes a boxd egress allowlist and refuses lists that bypass the gateway", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const parse = (egress: ReadonlyArray<string>, llmProviders = "[]") =>
+        parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          `version: 1
+repos: []
+workers:
+  - name: boxd-pool
+    kind: ssh
+    root: /home/boxd/.usine
+    identity_file: ~/.ssh/usine_worker
+    gateway: { domain: gw.test, destination: gateway, admin_token_env: GW_TOKEN, llm_providers: ${llmProviders} }
+    provisioner:
+      provider: boxd
+      token_env: BOXD_API_KEY
+      snapshot: usine-attempt
+      tailnet: { gateway_address: 100.64.0.2, client_id_env: TS_ID, client_secret_env: TS_SECRET }
+${egress.join("\n")}
+`,
+        );
+      const egressOf = (config: UsineConfig): ReadonlyArray<string> | null => {
+        const worker = config.workers[0];
+        assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
+        assert(worker.provisioner.value.provider === "boxd");
+        return Option.getOrNull(worker.provisioner.value.egress);
+      };
+      const unrestricted = yield* parse([]);
+      assert.isNull(egressOf(unrestricted));
+      const allowed = yield* parse([
+        "      egress: ['*.tailscale.com', registry.npmjs.org, 203.0.113.7, 198.51.100.0/24, platform.claude.com]",
+      ]);
+      assert.deepStrictEqual(egressOf(allowed), [
+        "*.tailscale.com",
+        "registry.npmjs.org",
+        "203.0.113.7",
+        "198.51.100.0/24",
+        "platform.claude.com",
+      ]);
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(allowed);
+      const roundTripped = yield* Schema.decodeEffect(UsineConfig)(encoded);
+      assert.deepStrictEqual(roundTripped, allowed);
+
+      const refusals: ReadonlyArray<readonly [string, string, string]> = [
+        ["[registry.npmjs.org]", "[]", "without *.tailscale.com"],
+        ["['*.tailscale.com', '*.github.com']", "[]", "admitting github.com"],
+        ["['*.tailscale.com', api.github.com]", "[]", "admitting api.github.com"],
+        [
+          "['*.tailscale.com', platform.claude.com]",
+          "[anthropic-messages]",
+          "admitting platform.claude.com, which the gateway serves at llm.gw.test",
+        ],
+        ["['*.tailscale.com', '*.openai.com']", "[openai]", "admitting auth.openai.com"],
+        [
+          "['*.tailscale.com', api.openai.com]",
+          "[openai-responses]",
+          "admitting api.openai.com, which the gateway serves at llm.gw.test",
+        ],
+      ];
+      for (const [egress, llmProviders, expected] of refusals) {
+        const failure = yield* parse([`      egress: ${egress}`], llmProviders).pipe(Effect.flip);
+        assert.include(failure.message, expected);
+      }
+      const invalid: ReadonlyArray<readonly [string, string]> = [
+        ["", "Expected at least one entry"],
+        ["none", "Expected none as the only entry"],
+        ["registry.npmjs.org, registry.npmjs.org", "Expected an array with unique items"],
+        ["Registry.npmjs.org", "Expected a lowercase host name"],
+        ["localhost", "Expected a lowercase host name"],
+        ["300.1.1.1", "Expected a lowercase host name"],
+        ["198.51.100.0/33", "Expected a lowercase host name"],
+        ["'https://registry.npmjs.org'", "Expected a lowercase host name"],
+        ["'registry.npmjs.org:443'", "Expected a lowercase host name"],
+        ["'*.*.tailscale.com'", "*.*.tailscale.com is an invalid wildcard"],
+        ["'npm*.org'", "npm*.org is an invalid wildcard"],
+        ["10.0.0.0/8", "10.0.0.0/8 overlaps the reserved range 10.0.0.0/8"],
+        ["127.0.0.1", "127.0.0.1 overlaps the reserved range 127.0.0.0/8"],
+        ["100.64.0.2", "100.64.0.2 overlaps the reserved range 100.64.0.0/10"],
+        ["100.0.0.0/8", "100.0.0.0/8 overlaps the reserved range 100.64.0.0/10"],
+        ["0.0.0.0/0", "0.0.0.0/0 overlaps the reserved range 0.0.0.0/8"],
+        ["172.20.1.1", "172.20.1.1 overlaps the reserved range 172.16.0.0/12"],
+        ["192.168.1.0/24", "192.168.1.0/24 overlaps the reserved range 192.168.0.0/16"],
+        ["169.254.169.254", "169.254.169.254 overlaps the reserved range 169.254.0.0/16"],
+        ["224.0.0.1", "224.0.0.1 overlaps the reserved range 224.0.0.0/4"],
+        ["255.255.255.255", "255.255.255.255 overlaps the reserved range 240.0.0.0/4"],
+        ["198.51.100.7/24", "198.51.100.7/24 has host bits set; did you mean 198.51.100.0/24?"],
+        ["1.2.3.0/7", "1.2.3.0/7 has host bits set; did you mean 0.0.0.0/7?"],
+        ["32.0.0.0/3", "32.0.0.0/3 is wider than /8"],
+      ];
+      for (const [entries, expected] of invalid) {
+        const egress = `['*.tailscale.com'${entries === "" ? "" : `, ${entries}`}]`;
+        const failure = yield* parse([`      egress: ${entries === "" ? "[]" : egress}`]).pipe(
+          Effect.flip,
+        );
+        assert.include(failure.message, expected, entries);
+      }
+      const wide = yield* parse(["      egress: ['*.tailscale.com', 32.0.0.0/8, 203.0.113.0/24]"]);
+      assert.deepStrictEqual(egressOf(wide), ["*.tailscale.com", "32.0.0.0/8", "203.0.113.0/24"]);
+
+      const direct = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        `version: 1
+repos: []
+workers:
+  - name: boxd-direct
+    kind: ssh
+    root: /home/boxd/.usine
+    identity_file: ~/.ssh/usine_worker
+    provisioner:
+      provider: boxd
+      token_env: BOXD_API_KEY
+      snapshot: usine-attempt
+      api_keys:
+        anthropic: USINE_ANTHROPIC_API_KEY
+      egress: [api.anthropic.com, github.com, registry.npmjs.org]
+`,
+      );
+      assert.deepStrictEqual(egressOf(direct), [
+        "api.anthropic.com",
+        "github.com",
+        "registry.npmjs.org",
+      ]);
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses a provisioned ssh Worker's Hetzner and Boat settings with their defaults", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

@@ -3,14 +3,17 @@ import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import {
   BoatSnapshotName,
+  BoxdEgressEntry,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
   HetznerServerType,
   MachineId,
+  TailnetAddress,
   WorkerName,
 } from "@usine/core/worker";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { Clock, Effect, Fiber, Option, Redacted, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
 import { fakeMachine } from "../support.ts";
 import { boatSettings, boxdSettings, hetznerSettings, BOXD_PUBLIC_KEY } from "./support.ts";
@@ -596,6 +599,159 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
     },
   );
+  it.live(
+    "restricts a new machine's egress before anything else, reapplies it on reuse, and leaves an unset setting alone",
+    () => {
+      const boxd = fakeBoxd();
+      const entries = ["*.tailscale.com", "registry.npmjs.org"].map((entry) =>
+        BoxdEgressEntry.make(entry),
+      );
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(
+          WORKER,
+          boxdSettings({ egress: Option.some(entries) }),
+          "/keys/usine_boxd.pub",
+        );
+        const started = yield* Clock.currentTimeMillis;
+        const { id } = yield* driver.create("pool-aaaaaaaa", tags);
+        const returned = yield* Clock.currentTimeMillis;
+        assert.isAtLeast(returned - started, 1000, "waits until boxd enforces the allowlist");
+        assert.deepStrictEqual(boxd.state.operations.get(id), [
+          "create",
+          "egress",
+          "hibernate",
+          "suspend",
+        ]);
+        assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, entries);
+        yield* driver.assign(id, { ...tags, attempts: 2 });
+        assert.deepStrictEqual(
+          boxd.state.egress.map((call) => call.entries),
+          [entries, entries],
+        );
+
+        const unrestricted = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+        const other = yield* unrestricted.create("pool-bbbbbbbb", tags);
+        assert.deepStrictEqual(boxd.state.operations.get(other.id), [
+          "create",
+          "hibernate",
+          "suspend",
+        ]);
+        yield* unrestricted.assign(other.id, { ...tags, attempts: 2 });
+        assert.lengthOf(boxd.state.egress, 2, "an unset egress leaves the machine's list as is");
+        assert.deepStrictEqual(boxd.state.operations.get(other.id), [
+          "create",
+          "hibernate",
+          "suspend",
+          "hibernate",
+          "suspend",
+        ]);
+      }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+    },
+  );
+  it.effect(
+    "deletes a new machine when its creation is interrupted while egress comes into force",
+    () => {
+      const boxd = fakeBoxd();
+      const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(
+          WORKER,
+          boxdSettings({ egress }),
+          "/keys/usine_boxd.pub",
+        );
+        const creating = yield* Effect.forkChild(driver.create("pool-aaaaaaaa", tags));
+        while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
+        yield* TestClock.adjust("500 millis");
+        assert.strictEqual(boxd.state.machines.size, 1, "the machine waits for its allowlist");
+        yield* Fiber.interrupt(creating);
+        assert.strictEqual(boxd.state.machines.size, 0);
+      }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+    },
+  );
+  it.effect("warns at preflight about address entries behind a gateway", () => {
+    const boxd = fakeBoxd();
+    const host = fakeMachine();
+    host.state.localFiles.set("/keys/usine_boxd.pub", `${BOXD_PUBLIC_KEY}\n`);
+    const egress = Option.some(
+      ["*.tailscale.com", "registry.npmjs.org", "203.0.113.7", "198.51.100.0/24"].map((entry) =>
+        BoxdEgressEntry.make(entry),
+      ),
+    );
+    return Effect.gen(function* () {
+      const direct = yield* boxdDriverFor(WORKER, boxdSettings({ egress }), "/keys/usine_boxd.pub");
+      assert.deepStrictEqual((yield* direct.verify(WORKER, 1)).warnings, []);
+      const gateway = yield* boxdDriverFor(
+        WORKER,
+        boxdSettings({
+          egress,
+          tailnet: Option.some({
+            gatewayAddress: TailnetAddress.make("100.64.0.2"),
+            clientId: Redacted.make("test-client"),
+            clientSecret: Redacted.make("test-client-secret"),
+          }),
+        }),
+        "/keys/usine_boxd.pub",
+      );
+      const { warnings } = yield* gateway.verify(WORKER, 1);
+      assert.lengthOf(warnings, 1);
+      assert.include(warnings[0], "admits the addresses 203.0.113.7, 198.51.100.0/24");
+    }).pipe(Effect.provide([boxd.layer, host.layer]));
+  });
+  it.effect("deletes a new machine whose egress allowlist boxd refuses or ignores", () => {
+    const boxd = fakeBoxd();
+    const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }), "/keys/usine_boxd.pub");
+      boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
+      const refused = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
+      assert.strictEqual(refused.reason, "refused");
+      assert.include(refused.message, "didn't apply provisioner.egress");
+      assert.strictEqual(boxd.state.machines.size, 0);
+      boxd.state.egressFails = Option.none();
+      boxd.state.egressIgnored = true;
+      const ignored = yield* driver.create("pool-bbbbbbbb", tags).pipe(Effect.flip);
+      assert.strictEqual(ignored.reason, "provider");
+      assert.include(ignored.message, "unrestricted egress");
+      assert.strictEqual(boxd.state.machines.size, 0);
+      assert.lengthOf(boxd.state.timers, 0);
+    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+  });
+  it.effect("refuses to reuse a machine whose egress allowlist boxd ignores or refuses", () => {
+    const boxd = fakeBoxd();
+    const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }), "/keys/usine_boxd.pub");
+      const creating = yield* Effect.forkChild(driver.create("pool-aaaaaaaa", tags));
+      while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
+      yield* TestClock.adjust("1 second");
+      const { id } = yield* Fiber.join(creating);
+      const created = ["create", "egress", "hibernate", "suspend"];
+      assert.deepStrictEqual(boxd.state.operations.get(id), created);
+
+      boxd.state.egressIgnored = true;
+      const ignored = yield* driver.assign(id, { ...tags, attempts: 2 }).pipe(Effect.flip);
+      assert.strictEqual(ignored._tag, "ProviderApiError");
+      assert.include(ignored.message, "unrestricted egress");
+      assert.include(ignored.message, id);
+      assert.deepStrictEqual(
+        boxd.state.operations.get(id),
+        [...created, "egress"],
+        "no idle timer call follows the ignored allowlist",
+      );
+
+      boxd.state.egressIgnored = false;
+      boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
+      const refused = yield* driver.assign(id, { ...tags, attempts: 3 }).pipe(Effect.flip);
+      assert.strictEqual(refused._tag, "ProviderApiError");
+      assert.include(refused.message, "INVALID_ARGUMENT");
+      assert.deepStrictEqual(
+        boxd.state.operations.get(id),
+        [...created, "egress"],
+        "no idle timer call follows the refused allowlist",
+      );
+      assert.lengthOf(boxd.state.timers, 2);
+    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+  });
   it.effect("deletes a new machine when disabling its idle timers fails", () => {
     const boxd = fakeBoxd();
     boxd.state.timerFails = Option.some("UNAVAILABLE");

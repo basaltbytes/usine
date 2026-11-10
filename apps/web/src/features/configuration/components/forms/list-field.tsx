@@ -9,8 +9,20 @@ import {
   type FormFieldsProps,
 } from "~/features/configuration/lib/forms";
 
-type ListFieldProps = FormFieldsProps & { readonly path: string; readonly label: string };
-export const ListField = ({ value, onChange, problems, path, label }: ListFieldProps) => {
+type ListFieldProps = FormFieldsProps & {
+  readonly path: string;
+  readonly label: string;
+  /** Removes the key when the list is empty, instead of writing an empty list. */
+  readonly optional?: boolean;
+};
+export const ListField = ({
+  value,
+  onChange,
+  problems,
+  path,
+  label,
+  optional = false,
+}: ListFieldProps) => {
   const id = useId();
   const [text, setText] = useState(() =>
     arrayValue(fieldValue(value, path)).map(stringValue).join(", "),
@@ -26,16 +38,11 @@ export const ListField = ({ value, onChange, problems, path, label }: ListFieldP
         aria-describedby={`${id}-errors`}
         onChange={(event) => {
           setText(event.target.value);
-          onChange(
-            withField(
-              value,
-              path,
-              event.target.value
-                .split(",")
-                .map((part) => part.trim())
-                .filter(Boolean),
-            ),
-          );
+          const items = event.target.value
+            .split(",")
+            .map((part) => part.trim())
+            .filter(Boolean);
+          onChange(withField(value, path, optional && items.length === 0 ? undefined : items));
         }}
       />
       <div id={`${id}-errors`}>

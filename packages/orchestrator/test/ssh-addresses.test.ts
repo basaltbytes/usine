@@ -2,6 +2,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { assert, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { ConfigProvider, Effect, Option, Redacted, Schema } from "effect";
+import { provisionerView } from "../src/operator/machines.ts";
 import { sshWorkerAddressesOf } from "../src/ssh.ts";
 
 for (const provider of ["boat", "boxd"] as const) {
@@ -36,7 +37,12 @@ for (const provider of ["boat", "boxd"] as const) {
               },
               provisioner:
                 provider === "boxd"
-                  ? { ...yamlProvisioner, region: "nyc", isolated: false }
+                  ? {
+                      ...yamlProvisioner,
+                      region: "nyc",
+                      isolated: false,
+                      egress: ["*.tailscale.com", "registry.npmjs.org"],
+                    }
                   : yamlProvisioner,
             },
           ],
@@ -64,7 +70,15 @@ for (const provider of ["boat", "boxd"] as const) {
         if (provisioner.provider === "boxd") {
           assert.strictEqual(provisioner.region, "nyc");
           assert.isFalse(provisioner.isolated);
+          const egress: ReadonlyArray<string> | null = Option.getOrNull(provisioner.egress);
+          assert.deepStrictEqual(egress, ["*.tailscale.com", "registry.npmjs.org"]);
           assert.strictEqual(Redacted.value(provisioner.token), "boat");
+          const entry = config.workers[0];
+          assert(entry?.kind === "ssh");
+          const view = provisionerView(entry);
+          assert(view?._tag === "boxd");
+          const viewed: ReadonlyArray<string> | null = view.egress;
+          assert.deepStrictEqual(viewed, ["*.tailscale.com", "registry.npmjs.org"]);
         }
         assert.isTrue(Option.isNone(provisioner.apiKeys.anthropic));
         assert.isTrue(Option.isNone(provisioner.apiKeys.openai));

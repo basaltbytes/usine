@@ -351,6 +351,124 @@ export const BoxdSnapshotName = Schema.String.check(
 ).pipe(Schema.brand("BoxdSnapshotName"));
 export type BoxdSnapshotName = typeof BoxdSnapshotName.Type;
 
+/**
+ * IPv4 ranges that boxd refuses in an egress allowlist: this network, private (RFC 1918), CGNAT,
+ * loopback, link-local, multicast, and reserved addresses.
+ */
+const BOXD_RESERVED_RANGES = [
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "224.0.0.0/4",
+  "240.0.0.0/4",
+];
+
+/** The shortest prefix of a public address range that an egress allowlist accepts. */
+const BOXD_SHORTEST_PREFIX = 8;
+
+/** Parses `a.b.c.d` or `a.b.c.d/p` into an unsigned 32-bit address and a prefix length. */
+const ipv4Range = (entry: string): { address: number; prefix: number } | undefined => {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/u.exec(entry);
+  if (match === null) return undefined;
+  const octets = match.slice(1, 5).map(Number);
+  const prefix = match[5] === undefined ? 32 : Number(match[5]);
+  if (octets.some((octet) => octet > 255) || prefix > 32) return undefined;
+  const address = octets.reduce((value, octet) => value * 256 + octet, 0);
+  return { address, prefix };
+};
+
+/** The network address of `address` under a prefix of length `prefix`. */
+const networkOf = (address: number, prefix: number): number =>
+  prefix === 0 ? 0 : (address & (0xffffffff << (32 - prefix))) >>> 0;
+
+const formatIpv4 = (address: number): string =>
+  [24, 16, 8, 0].map((shift) => (address >>> shift) & 255).join(".");
+
+/**
+ * Returns why boxd refuses the address entry `entry`, or `undefined` if `entry` is a public address
+ * or range that boxd accepts, or not an address.
+ */
+const boxdEgressAddressRefusal = (entry: string): string | undefined => {
+  const range = ipv4Range(entry);
+  if (range === undefined) return undefined;
+  const network = networkOf(range.address, range.prefix);
+  if (network !== range.address)
+    return `${entry} has host bits set; did you mean ${formatIpv4(network)}/${range.prefix}?`;
+  const reserved = BOXD_RESERVED_RANGES.find((candidate) => {
+    const other = ipv4Range(candidate);
+    if (other === undefined) return false;
+    const shared = Math.min(other.prefix, range.prefix);
+    return networkOf(other.address, shared) === networkOf(network, shared);
+  });
+  if (reserved !== undefined) return `${entry} overlaps the reserved range ${reserved}`;
+  return range.prefix < BOXD_SHORTEST_PREFIX
+    ? `${entry} is wider than /${BOXD_SHORTEST_PREFIX}, which no public allowlist entry needs`
+    : undefined;
+};
+
+/** Whether `entry` is an IPv4 address or CIDR range rather than a host name or `none`. */
+export const isBoxdEgressAddress = (entry: string): boolean => ipv4Range(entry) !== undefined;
+
+/**
+ * An entry of a boxd machine's egress allowlist: a lowercase ASCII host name such as
+ * `registry.npmjs.org`, `*.` and a domain for its subdomains, a public IPv4 address or CIDR range
+ * of at most `/8`, or `none`, which admits nothing. boxd admits HTTP and HTTPS by host name and
+ * other traffic by address. Like boxd, the schema refuses a repeated or inner wildcard, a range
+ * with host bits set, and an address that overlaps a private, CGNAT, loopback, link-local,
+ * multicast, or reserved range.
+ */
+export const BoxdEgressEntry = Schema.String.check(
+  Schema.makeFilter(
+    (entry: string) =>
+      !entry.includes("*") ||
+      /^\*\.[^*]+$/u.test(entry) ||
+      `${entry} is an invalid wildcard; use one *. at the start`,
+  ),
+  Schema.isPattern(
+    /^(?:none|(?:\*\.)?(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?|(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\/(?:3[0-2]|[12]?[0-9]))?)$/u,
+    {
+      message:
+        "Expected a lowercase host name with a dot, *. and a domain, an IPv4 address or CIDR range, or none",
+    },
+  ),
+  Schema.makeFilter((entry: string) => boxdEgressAddressRefusal(entry) ?? true),
+).pipe(Schema.brand("BoxdEgressEntry"));
+export type BoxdEgressEntry = typeof BoxdEgressEntry.Type;
+
+/**
+ * A boxd machine's complete egress allowlist: 1 to 256 unique entries, where `none` must be the
+ * only entry.
+ */
+export const BoxdEgressAllowlist = Schema.Array(BoxdEgressEntry).check(
+  Schema.isMinLength(1, {
+    message: "Expected at least one entry; use none to admit nothing, or omit egress",
+  }),
+  Schema.isMaxLength(256),
+  Schema.isUnique(),
+  Schema.makeFilter(
+    (entries: ReadonlyArray<string>) =>
+      entries.length === 1 ||
+      !entries.includes("none") ||
+      "Expected none as the only entry, since boxd ignores it next to other entries",
+  ),
+);
+export type BoxdEgressAllowlist = typeof BoxdEgressAllowlist.Type;
+
+/**
+ * Returns whether `entries` admits `host`. A `*.` entry is treated as admitting its domain too,
+ * so a check for a host that must stay unreachable errs on the side of refusing the list.
+ */
+export const boxdEgressAdmits = (entries: ReadonlyArray<string>, host: string): boolean =>
+  entries.some((entry) =>
+    entry.startsWith("*.")
+      ? host === entry.slice(2) || host.endsWith(entry.slice(1))
+      : entry === host,
+  );
+
 /** A Tailscale IPv4 address in 100.64.0.0/10. */
 export const TailnetAddress = Schema.String.check(
   Schema.isPattern(

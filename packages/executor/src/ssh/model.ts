@@ -9,6 +9,7 @@ import type {
   BoxdSize,
   BoxdRegion,
   BoxdSnapshotName,
+  BoxdEgressAllowlist,
   BoatSnapshotName,
   TailnetAddress,
   ContainerCpus,
@@ -136,6 +137,8 @@ export interface BoxdProvisioner {
   readonly size: BoxdSize;
   readonly snapshot: BoxdSnapshotName;
   readonly isolated: boolean;
+  /** The allowlist each machine gets before usine connects to it, or `None` for unrestricted egress. */
+  readonly egress: Option.Option<BoxdEgressAllowlist>;
   readonly tailnet: Option.Option<ProvisionerTailnet>;
   readonly apiKeys: ProviderApiKeys;
   readonly timings: ProvisionerTimings;

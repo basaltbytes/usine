@@ -3,6 +3,7 @@ import { Label } from "~/components/ui/label";
 import { type FormFieldsProps, fieldValue, withField } from "~/features/configuration/lib/forms";
 import { formCopy, workerFormCopy as copy } from "~/features/configuration/strings";
 import { Fields, type FieldDefinition } from "./fields";
+import { ListField } from "./list-field";
 import { Pairs } from "./pairs";
 
 const timingFields: readonly FieldDefinition[] = [
@@ -78,6 +79,9 @@ export const ProvisionerFields = (fields: FormFieldsProps) => {
       />
       {provider === "hetzner" && (
         <Pairs {...fields} path="provisioner.labels" label={copy.labels} />
+      )}
+      {provider === "boxd" && (
+        <ListField {...fields} path="provisioner.egress" label={copy.egress} optional />
       )}
       {provider === "boxd" && (
         <Label>
