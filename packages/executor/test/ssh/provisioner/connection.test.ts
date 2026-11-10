@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import { completes, type StubParent } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor, WorkerMachines } from "../../../src/executor.ts";
 import { remoteCommandsFor } from "../../../src/remote/commands.ts";
@@ -308,6 +308,51 @@ describe("boxd Exec connection", () => {
           const failure = yield* Fiber.join(launch).pipe(Effect.flip);
           assert.strictEqual(failure._tag, "InfraFailure");
           assert.include(failure.message, grant.id);
+          yield* machines.release(grant.hold);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtimeOf(machine, providers, boxdAddress, { parent })),
+        );
+      });
+    },
+  );
+
+  it.effect(
+    "keeps an unanswering boxd machine unresponsive, not lost, while boxd's API fails",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const notices: Array<AttemptChannel.WorkerNotice> = [];
+      return Effect.gen(function* () {
+        const working = yield* Deferred.make<void>();
+        const parent: StubParent = () =>
+          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const machines = yield* WorkerMachines;
+          const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+            TEST_AGENT.brain,
+          ]);
+          const launch = yield* (yield* executor.prepare(request))
+            .launch(observing(notices))
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(working);
+
+          machine.state.reachable = false;
+          providers.boxd.readFails = Option.some("UNAVAILABLE");
+          const reads = providers.boxd.reads;
+          for (let minute = 0; minute < 3; minute += 1) yield* TestClock.adjust("1 minute");
+          assert.isAbove(providers.boxd.reads, reads, "boxd is asked whether the machine is gone");
+          assert.isNotEmpty(notices);
+          assert.isTrue(notices.every(({ _tag }) => _tag === "WorkerUnresponsive"));
+          assert.isUndefined(launch.pollUnsafe(), "the attempt keeps running");
+
+          providers.boxd.readFails = Option.none();
+          machine.state.reachable = true;
+          yield* TestClock.adjust("1 minute");
+          assert.strictEqual(notices.at(-1)?._tag, "WorkerResponsive");
+          assert.isUndefined(launch.pollUnsafe(), "the attempt keeps running");
+          yield* Fiber.interrupt(launch);
           yield* machines.release(grant.hold);
         }).pipe(
           Effect.scoped,

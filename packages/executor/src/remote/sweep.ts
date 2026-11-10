@@ -1,4 +1,4 @@
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import { AttemptId } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
@@ -52,7 +52,7 @@ export const directChildren = (
 export const attemptPathsOn = Effect.fn("RemoteExecutor.attemptPathsOn")(function* (
   commands: RemoteCommands,
   operation: ExecutorOperation,
-  shell: RemoteShell,
+  shell: RemoteHost,
   attemptsRoot: string,
 ) {
   yield* Effect.annotateCurrentSpan({ host: shell.destination, operation, attemptsRoot });
@@ -80,7 +80,7 @@ export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWork
     const sweep = Effect.fn("RemoteExecutor.sweepAbandonedWorktrees")(function* (
       attemptId: AttemptId,
       worker: WorkerName,
-      shell: RemoteShell,
+      shell: RemoteHost,
       workerDirectory: string,
     ) {
       const host = shell.destination;

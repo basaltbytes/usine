@@ -878,6 +878,8 @@ export const fakeMachine = () => {
   });
   return {
     state,
+    /** The fake's process spawner, which answers commands as the machine would. */
+    spawner: service,
     layer: Layer.mergeAll(
       NodeCrypto.layer,
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service),

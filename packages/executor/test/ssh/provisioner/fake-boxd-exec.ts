@@ -1,12 +1,15 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
-import { Effect, Predicate, Stream } from "effect";
+import { Effect, Predicate, Ref, Stream } from "effect";
+import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { createServer, type Http2Session } from "node:http2";
 import { runLocally as runCommand } from "../../remote/local-command.ts";
 import {
   BoxdApi as BoxdService,
   type ExecChunk,
 } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
+import { BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
+import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
 
 type ExecReply = Partial<Pick<ExecChunk, "data" | "isStderr" | "exitCode">>;
 
@@ -126,4 +129,43 @@ export const fakeBoxdExec = (options: {
     if (address === null || Predicate.isString(address))
       return yield* Effect.die(new Error("the fake boxd server has no port"));
     return { url: `http://127.0.0.1:${address.port}`, calls, sessions };
+  });
+
+/**
+ * Returns a `BoxdExec` that runs each command line through `spawner` as
+ * `boxd-exec <machine> -- <line>`, which `fakeMachine` answers as it answers an SSH command to the
+ * machine, and reports its exit code 255 as a call that boxd ended with `UNAVAILABLE`.
+ */
+export const spawnedBoxdExec = (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
+  BoxdExec.of({
+    exec: (machine, command, stdin) =>
+      Effect.gen(function* () {
+        const handle = yield* spawner
+          .spawn(ChildProcess.make("boxd-exec", [machine, "--", command], { stdin }))
+          .pipe(Effect.orDie);
+        const stderr = yield* Ref.make("");
+        return {
+          stdout: handle.stdout.pipe(Stream.orDie),
+          stderr: handle.stderr.pipe(
+            Stream.orDie,
+            Stream.tap((bytes) =>
+              Ref.update(stderr, (text) => text + new TextDecoder().decode(bytes)),
+            ),
+          ),
+          exitCode: handle.exitCode.pipe(
+            Effect.orDie,
+            Effect.flatMap((code) =>
+              code === 255
+                ? Ref.get(stderr).pipe(
+                    Effect.flatMap((message) =>
+                      Effect.fail(
+                        BoxdCallError.make({ operation: "exec", code: "UNAVAILABLE", message }),
+                      ),
+                    ),
+                  )
+                : Effect.succeed(Number(code)),
+            ),
+          ),
+        };
+      }),
   });

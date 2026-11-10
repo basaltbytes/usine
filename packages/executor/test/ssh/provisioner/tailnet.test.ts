@@ -4,7 +4,7 @@ import { MACHINE_RUN } from "./fixtures.ts";
 import { AttemptId } from "@usine/core/attempt";
 import { remoteCommandsFor } from "../../../src/remote/commands.ts";
 import { assert, describe, it } from "@effect/vitest";
-import { RemoteShell } from "@usine/agents/child-host";
+import { ExecShell, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { RunId } from "@usine/core/run";
@@ -278,6 +278,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
           instance: INSTANCE,
           instanceId: INSTANCE_ID,
           boxdClient: boat.boxdClient,
+          boxdExec: boat.boxdExecOn(machine),
           providerEndpoints: { boat: BOAT_TEST_API },
         }).pipe(
           Layer.provide(harnessesLive),
@@ -332,6 +333,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
           instance: INSTANCE,
           instanceId: INSTANCE_ID,
           boxdClient: boat.boxdClient,
+          boxdExec: boat.boxdExecOn(machine),
           providerEndpoints: { boat: BOAT_TEST_API },
           machinePollInterval: "1 millis",
           machineReadyTimeout: "5 seconds",
@@ -397,8 +399,11 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
                 assert.notInclude(call.line + call.input, "sk-ant-oat01-test");
                 assert.notInclude(call.line + call.input, "test-client-secret");
               }
-              assert(Schema.is(RemoteShell)(context.request.host));
-              assert.notInclude(context.request.host.ssh.args, "-J");
+              if (provider === "boxd") assert(Schema.is(ExecShell)(context.request.host));
+              else {
+                assert(Schema.is(RemoteShell)(context.request.host));
+                assert.notInclude(context.request.host.ssh.args, "-J");
+              }
               assert.strictEqual(context.request.environment.HTTPS_PROXY, "");
               const currentGatewayCredential = yield* context.request.gatewayCredential;
               assert.deepStrictEqual(currentGatewayCredential, Option.some("subscription"));
@@ -410,6 +415,7 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
             instance: INSTANCE,
             instanceId: INSTANCE_ID,
             boxdClient: boat.boxdClient,
+            boxdExec: boat.boxdExecOn(machine),
             providerEndpoints: { boat: BOAT_TEST_API },
             machinePollInterval: "1 millis",
             machineReadyTimeout: "5 seconds",

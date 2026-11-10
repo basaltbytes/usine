@@ -50,6 +50,7 @@ import {
   SessionOperationError,
   UnknownModelError,
 } from "../../runtime.ts";
+import { isRemoteHost } from "../../child-host/child-host.ts";
 import { ChildProcessLost, stopChildProcess } from "../../child-host/process.ts";
 import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
@@ -741,7 +742,7 @@ const makeClaudeChild = Effect.gen(function* () {
 
       const resume = Effect.fn("ClaudeRuntime.resume")(function* (error: SessionOperationError) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, worker: request.worker });
-        if (request.host._tag !== "RemoteShell" || !Schema.is(ChildProcessLost)(error.cause))
+        if (!isRemoteHost(request.host) || !Schema.is(ChildProcessLost)(error.cause))
           return yield* error;
         yield* Effect.logWarning("Remote Claude process stopped; resuming its saved session", {
           sessionId: session.id,
@@ -831,7 +832,7 @@ const makeClaudeChild = Effect.gen(function* () {
     },
   );
   const stop = Effect.fn("ClaudeRuntime.stop")(function* (request: ChildRequest) {
-    if (request.host._tag === "RemoteShell")
+    if (isRemoteHost(request.host))
       yield* stopChildProcess({ ...request, sessionId: Option.some(request.session.id) }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );

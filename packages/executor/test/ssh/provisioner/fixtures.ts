@@ -111,6 +111,7 @@ export const runtimeOf = (
     instanceId: INSTANCE_ID,
     interruptGrace: "2 seconds",
     boxdClient: providers.boxdClient,
+    boxdExec: providers.boxdExecOn(machine),
     providerEndpoints: { hetzner: HETZNER_TEST_API, boat: BOAT_TEST_API },
     machinePollInterval: "1 millis",
   }).pipe(
@@ -144,6 +145,7 @@ export const gatewayRuntimeOf = (
       instanceId: INSTANCE_ID,
       interruptGrace: "2 seconds",
       boxdClient: providers.boxdClient,
+      boxdExec: providers.boxdExecOn(machine),
       providerEndpoints: { hetzner: HETZNER_TEST_API },
       machinePollInterval: "1 millis",
       machineReadyTimeout: "1 second",

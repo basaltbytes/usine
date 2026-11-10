@@ -1,5 +1,5 @@
 import { MachineId } from "@usine/core/worker";
-import { Clock, Effect, Layer, Option } from "effect";
+import { Clock, Effect, Layer, Option, Stream } from "effect";
 import {
   BoxdApi,
   BoxdCallError,
@@ -7,6 +7,7 @@ import {
   type BoxdMachine,
   type BoxdSnapshot,
 } from "../../../src/ssh/provisioner/boxd/client.ts";
+import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
 
 /** The regional API endpoint that the fake reports. */
 export const BOXD_ENDPOINT = "https://fra.boxd.test:9443";
@@ -22,6 +23,10 @@ export const fakeBoxd = () => {
   const operations = new Map<MachineId, Array<string>>();
   const record = (id: MachineId, operation: string) =>
     operations.set(id, [...(operations.get(id) ?? []), operation]);
+  /** Every `Exec` call of the fake's `BoxdExec`, in order. */
+  const execs: Array<{ machine: MachineId; command: string }> = [];
+  /** The endpoint and credential of each `BoxdExec` that the executor built. */
+  const connections: Array<{ endpoint: string; credential: string }> = [];
   const state = {
     machines,
     creates,
@@ -29,6 +34,8 @@ export const fakeBoxd = () => {
     timers,
     egress,
     operations,
+    execs,
+    connections,
     snapshot: {
       status: "ready",
       region: "fra",
@@ -171,5 +178,14 @@ export const fakeBoxd = () => {
     setAutoHibernateTimeout: timer("hibernate"),
     setAutoSuspendTimeout: timer("suspend"),
   });
-  return { state, api, layer: Layer.succeed(BoxdApi, api) };
+  /** Answers every `Exec` call with exit code 0 and no output, and records it in `state.execs`. */
+  const exec = BoxdExec.of({
+    exec: (machine, command) =>
+      Effect.sync(() => {
+        state.execs.push({ machine, command });
+        return { stdout: Stream.empty, stderr: Stream.empty, exitCode: Effect.succeed(0) };
+      }),
+  });
+  const execLayer = Layer.succeed(BoxdExec, exec);
+  return { state, api, execLayer, layer: Layer.merge(Layer.succeed(BoxdApi, api), execLayer) };
 };

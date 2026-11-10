@@ -72,6 +72,7 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
 } from "../../runtime.ts";
+import { isRemoteHost } from "../../child-host/child-host.ts";
 import { ChildProcessLost } from "../../child-host/process.ts";
 import { sessionChannel } from "../session.ts";
 import { type MessageTaken, sessionConversation } from "../conversation.ts";
@@ -507,7 +508,7 @@ const makeCodexChild = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.id });
         if (yield* lifecycle.isStopping) return yield* Effect.never;
         if (
-          request.host._tag !== "RemoteShell" ||
+          !isRemoteHost(request.host) ||
           error._tag !== "SessionOperationError" ||
           !Schema.is(ChildProcessLost)(error.cause)
         )

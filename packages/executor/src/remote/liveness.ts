@@ -1,5 +1,5 @@
 import { jsonKey } from "@usine/core/json-key";
-import { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import {
   type WorkerNotice,
@@ -9,7 +9,7 @@ import {
 } from "@usine/core/attempt/channel";
 import type { MachineId, WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Fiber, Match, Option, Ref, type Scope, Semaphore } from "effect";
-import type { RemoteCommands } from "./commands.ts";
+import { machineShellOf, type RemoteCommands } from "./commands.ts";
 
 const PROBE_INTERVAL = "1 minute";
 /** The SSH `ConnectTimeout` in seconds, covering the TCP connection, server banner, and key exchange. */
@@ -25,7 +25,7 @@ export type ConnectionProbe = Probe | { readonly _tag: "Gone"; readonly reason: 
 
 /** Checks alternate endpoints before reporting an unanswered probe or confirmed machine loss. */
 export type ProbeConnection = (
-  probe: (shell: RemoteShell) => Effect.Effect<Probe>,
+  probe: (shell: RemoteHost) => Effect.Effect<Probe>,
 ) => Effect.Effect<ConnectionProbe>;
 
 type Liveness =
@@ -152,7 +152,7 @@ interface WorkerWatch extends WorkerWatcher {
   readonly worker: WorkerName;
   readonly machine: Option.Option<MachineId>;
   /** The machine's shell, without Attempt secrets. */
-  readonly shell: RemoteShell;
+  readonly shell: RemoteHost;
   readonly probe?: ProbeConnection | undefined;
 }
 
@@ -175,7 +175,7 @@ export interface WorkerWatches {
 const watchWorker = (
   commands: RemoteCommands,
   worker: WorkerName,
-  machineShell: RemoteShell,
+  machineShell: RemoteHost,
   connection: ProbeConnection | undefined,
   lock: Semaphore.Semaphore,
   liveness: Ref.Ref<Liveness>,
@@ -183,15 +183,8 @@ const watchWorker = (
 ): Effect.Effect<never> =>
   Effect.gen(function* () {
     const host = machineShell.destination;
-    const probe = (machineShell: RemoteShell): Effect.Effect<Probe> => {
-      const shell = RemoteShell.make({
-        ssh: {
-          command: machineShell.ssh.command,
-          args: [...machineShell.ssh.args, "-o", `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`],
-        },
-        sshEnvironment: machineShell.sshEnvironment,
-        destination: machineShell.destination,
-      });
+    const probe = (machineShell: RemoteHost): Effect.Effect<Probe> => {
+      const shell = machineShellOf(machineShell, CONNECT_TIMEOUT_SECONDS);
 
       return commands.inspect("launch", shell, "true", []).pipe(
         Effect.timeoutOption(`${PROBE_TIMEOUT_SECONDS} seconds`),
@@ -206,7 +199,10 @@ const watchWorker = (
                 ? { _tag: "Answered" }
                 : {
                     _tag: "Unanswered",
-                    reason: [`ssh exited with code ${result.exitCode}`, lastLine(result.stderr)]
+                    reason: [
+                      `the probe exited with code ${result.exitCode}`,
+                      lastLine(result.stderr),
+                    ]
                       .filter((part) => part !== "")
                       .join(": "),
                   },
@@ -307,7 +303,7 @@ export const workerWatchesFor = (
     // Boat sandboxes can share a destination host while using different forwarded ports.
     const watched = new Map<string, Watched>();
     const keyOf = (watch: WorkerWatch) =>
-      `${watch.worker} ${Option.getOrElse(watch.machine, () => `${watch.shell.destination} ${jsonKey(watch.shell.ssh)}`)}`;
+      `${watch.worker} ${Option.getOrElse(watch.machine, () => `${watch.shell.destination} ${watch.shell._tag === "RemoteShell" ? jsonKey(watch.shell.ssh) : "exec"}`)}`;
 
     const join = (watch: WorkerWatch) =>
       Semaphore.withPermit(

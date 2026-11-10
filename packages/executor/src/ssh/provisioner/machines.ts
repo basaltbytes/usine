@@ -88,6 +88,7 @@ export interface ProvisionedMachinesOptions {
     | "knownHostsDirectory"
     | "providerEndpoints"
     | "boxdClient"
+    | "boxdExec"
     | "machineReadyTimeout"
     | "machinePollInterval"
   >;

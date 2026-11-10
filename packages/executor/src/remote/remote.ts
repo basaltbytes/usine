@@ -1,6 +1,6 @@
 import type { CiHandoff } from "@usine/core/ci";
 import { prepareOutputs, readOutputs } from "../outputs.ts";
-import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
+import { CHILD_KILL_SCRIPT, type RemoteHost } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -92,9 +92,9 @@ const EMPTY_DIRECTORY_SCRIPT = 'find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf {
 interface CheckoutHost {
   readonly isolation: AttemptIsolation;
   /** Returns the shell for commands in the checkout, starting the Attempt's container on first use. */
-  readonly shell: Effect.Effect<RemoteShell, ExecutorError>;
+  readonly shell: Effect.Effect<RemoteHost, ExecutorError>;
   /** Restarts a stopped container before salvage, after the Attempt's commands end. */
-  readonly salvageShell: Effect.Effect<RemoteShell, ExecutorError>;
+  readonly salvageShell: Effect.Effect<RemoteHost, ExecutorError>;
   /** Enables recording container kills before removal; recovery alone doesn't record them. */
   readonly recordOutOfMemory: (record: AttemptChannel.Sink["outOfMemory"]) => Effect.Effect<void>;
 }
@@ -253,7 +253,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         };
         return shared;
       }
-      const started = yield* SynchronizedRef.make(Option.none<RemoteShell>());
+      const started = yield* SynchronizedRef.make(Option.none<RemoteHost>());
       const spec = containerSpec(machine, isolation.settings, attempt, worktree, access, harnesses);
       const marker = containerCheckoutMarker(machine.workerDirectory, attempt.attemptId);
       const memory = yield* containers.trackMemory(machine.shell, spec);
@@ -288,7 +288,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         operation: ExecutorOperation,
         access: RemoteAccess,
         author: BotAccount,
-        shell: Effect.Effect<RemoteShell, ExecutorError> = Effect.succeed(access.shell),
+        shell: Effect.Effect<RemoteHost, ExecutorError> = Effect.succeed(access.shell),
       ) =>
       (args: ReadonlyArray<string>) => {
         const environment = { ...access.gitEnvironment, ...commitIdentity(author) };
@@ -301,7 +301,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       };
 
     const checkoutCommand =
-      (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
+      (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteHost) =>
       (command: string, args: ReadonlyArray<string>, maxOutputBytes?: number) =>
         access.refresh.pipe(
           Effect.andThen(
@@ -315,7 +315,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         );
 
     const harvestCommand =
-      (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteShell) =>
+      (operation: ExecutorOperation, worktree: string, access: RemoteAccess, shell: RemoteHost) =>
       (command: "git" | "gh", args: ReadonlyArray<string>) =>
         checkoutCommand(
           operation,
@@ -551,7 +551,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const harvest = (
       workspace: AttemptWorkspace,
       access: RemoteAccess,
-      shell: RemoteShell,
+      shell: RemoteHost,
       windows: AttemptWindowsRead<AttemptFailure>,
       handoff: Option.Option<CiHandoff>,
     ) =>
@@ -785,7 +785,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         () => worker.released?.(request.attemptId, machine) ?? Effect.void,
       );
       const isolation = yield* worker.isolation(machine);
-      const probeBrain = (shell: RemoteShell) =>
+      const probeBrain = (shell: RemoteHost) =>
         verifyHarnessReadiness(
           request.worker,
           machine.provisioned,

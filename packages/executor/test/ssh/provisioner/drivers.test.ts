@@ -12,12 +12,12 @@ import {
   TailnetAddress,
   WorkerName,
 } from "@usine/core/worker";
-import { Clock, Effect, Fiber, Option, Redacted, Schema } from "effect";
+import { Clock, Effect, Fiber, Option, Redacted, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
 import { fakeMachine } from "../support.ts";
 import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
-import { BOXD_ENDPOINT, fakeBoxd } from "./fake-boxd.ts";
+import { fakeBoxd } from "./fake-boxd.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { hetznerDriverFor } from "../../../src/ssh/provisioner/hetzner.ts";
@@ -449,8 +449,11 @@ describe("boxd driver", () => {
         );
         assert(endpoint._tag === "Exec");
         assert.strictEqual(endpoint.machine, first.id);
-        assert.strictEqual(endpoint.api, BOXD_ENDPOINT);
-        assert.strictEqual(Redacted.value(endpoint.credential), "bxd_test_key");
+        const ran = yield* Effect.scoped(
+          endpoint.transport.run("true", Stream.empty).pipe(Effect.flatMap((ran) => ran.exitCode)),
+        );
+        assert.strictEqual(ran, 0);
+        assert.deepStrictEqual(boxd.state.execs, [{ machine: first.id, command: "true" }]);
         assert.strictEqual(boxd.state.reads, 0, "the create response contains the endpoint");
         boxd.state.timers.length = 0;
         yield* driver.assign(first.id, { ...tags, attempts: 2 });
@@ -500,7 +503,6 @@ describe("boxd driver", () => {
         const refreshed = yield* driver.refreshEndpoint(id);
         assert(Option.isSome(refreshed) && refreshed.value._tag === "Exec");
         assert.strictEqual(refreshed.value.machine, id);
-        assert.strictEqual(refreshed.value.api, BOXD_ENDPOINT);
         for (const status of ["stopped", "failed", "destroyed"]) {
           boxd.state.machines.set(id, { ...machine, status });
           const terminal = yield* driver

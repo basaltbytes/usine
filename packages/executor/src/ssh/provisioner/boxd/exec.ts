@@ -1,5 +1,6 @@
 import { ConnectError, createClient } from "@connectrpc/connect";
 import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
+import { type ExecTransport, HostUnreachable } from "@usine/agents/child-host";
 import { MachineId } from "@usine/core/worker";
 import {
   type Brand,
@@ -7,6 +8,7 @@ import {
   Context,
   Deferred,
   Effect,
+  Exit,
   Layer,
   Queue,
   Redacted,
@@ -36,14 +38,16 @@ export type BoxdExecError = BoxdCallError | BoxdMachineGone;
 
 /**
  * A command that runs on a boxd machine. Read `stdout` and `stderr` at the same time: each holds a
- * few chunks, and the call stops reading from boxd while either is full, as a pipe does.
+ * few chunks, and the call stops reading from boxd while either is full, as a pipe does. Both end
+ * when the call ends, after every chunk boxd sent, so read them to their end before you await a
+ * failed `exitCode`.
  */
 export interface BoxdExecution {
-  readonly stdout: Stream.Stream<Uint8Array, BoxdExecError>;
-  readonly stderr: Stream.Stream<Uint8Array, BoxdExecError>;
+  readonly stdout: Stream.Stream<Uint8Array>;
+  readonly stderr: Stream.Stream<Uint8Array>;
   /**
    * The command's exit code once the call ends: 128 plus the signal number for a command that a
-   * signal ended.
+   * signal ended. Fails if the call ends without one, including when its scope closes first.
    */
   readonly exitCode: Effect.Effect<number, BoxdExecError>;
 }
@@ -169,13 +173,24 @@ export const boxdExecLayer = (
         stdin: Stream.Stream<Uint8Array>,
       ) {
         yield* Effect.annotateCurrentSpan({ machine });
-        const stdout = yield* Queue.bounded<Uint8Array, BoxdExecError | Cause.Done>(
-          OUTPUT_BUFFER_CHUNKS,
-        );
-        const stderr = yield* Queue.bounded<Uint8Array, BoxdExecError | Cause.Done>(
-          OUTPUT_BUFFER_CHUNKS,
-        );
+        const stdout = yield* Queue.bounded<Uint8Array, Cause.Done>(OUTPUT_BUFFER_CHUNKS);
+        const stderr = yield* Queue.bounded<Uint8Array, Cause.Done>(OUTPUT_BUFFER_CHUNKS);
         const exitCode = yield* Deferred.make<number, BoxdExecError>();
+        const settle = (result: Exit.Exit<number, BoxdExecError>) =>
+          Effect.all([Queue.end(stdout), Queue.end(stderr), Deferred.done(exitCode, result)], {
+            discard: true,
+          });
+        yield* Effect.addFinalizer(() =>
+          settle(
+            Exit.fail(
+              BoxdCallError.make({
+                operation: "exec",
+                code: "CANCELLED",
+                message: "the call's scope closed before the command exited",
+              }),
+            ),
+          ),
+        );
         const requests = Stream.concat(
           Stream.succeed<ExecRequest>({ vmId: machine, command }),
           stdin.pipe(
@@ -188,10 +203,16 @@ export const boxdExecLayer = (
             Effect.sync(() => new AbortController()),
             (controller) => Effect.sync(() => controller.abort()),
           );
-          const responses = client.exec(Stream.toAsyncIterable(requests), {
-            signal: controller.signal,
-            headers: { authorization: `Bearer ${secret}` },
-          });
+          // connect-node stops pulling the requests when the response ends, but never returns the
+          // iterator, which would keep waiting for stdin.
+          const iterator = yield* Effect.acquireRelease(
+            Effect.sync(() => Stream.toAsyncIterable(requests)[Symbol.asyncIterator]()),
+            (iterator) => Effect.promise(() => Promise.resolve(iterator.return?.())),
+          );
+          const responses = client.exec(
+            { [Symbol.asyncIterator]: () => iterator },
+            { signal: controller.signal, headers: { authorization: `Bearer ${secret}` } },
+          );
           let exited: number | undefined;
           yield* Stream.fromAsyncIterable(responses, (cause) => failureOf(machine, cause)).pipe(
             Stream.runForEach((chunk) =>
@@ -210,19 +231,7 @@ export const boxdExecLayer = (
             });
           return exited;
         }).pipe(Effect.scoped);
-        yield* call.pipe(
-          Effect.matchEffect({
-            onSuccess: (code) =>
-              Effect.all([Queue.end(stdout), Queue.end(stderr), Deferred.succeed(exitCode, code)]),
-            onFailure: (error) =>
-              Effect.all([
-                Queue.fail(stdout, error),
-                Queue.fail(stderr, error),
-                Deferred.fail(exitCode, error),
-              ]),
-          }),
-          Effect.forkScoped,
-        );
+        yield* call.pipe(Effect.exit, Effect.flatMap(settle), Effect.forkScoped);
         return {
           stdout: Stream.fromQueue(stdout),
           stderr: Stream.fromQueue(stderr),
@@ -232,3 +241,36 @@ export const boxdExecLayer = (
       return BoxdExec.of({ exec });
     }),
   );
+
+/**
+ * Returns the `ExecTransport` that runs command lines on boxd machine `machine` through `exec`. A
+ * call that ends without an exit code fails with `HostUnreachable`, whose message says whether boxd
+ * deleted the machine or which gRPC status ended the call.
+ */
+export const boxdTransport = (exec: BoxdExec["Service"], machine: MachineId): ExecTransport => ({
+  run: (line, stdin) =>
+    exec.exec(machine, line, stdin).pipe(
+      Effect.map((execution) => ({
+        stdout: execution.stdout,
+        stderr: execution.stderr,
+        exitCode: execution.exitCode.pipe(
+          Effect.tapError((error) =>
+            Effect.logDebug("A boxd exec call ended without an exit code", {
+              machine,
+              error: error._tag,
+              code: error._tag === "BoxdCallError" ? error.code : "NOT_FOUND",
+            }),
+          ),
+          Effect.mapError((error) =>
+            HostUnreachable.make({
+              destination: machine,
+              message:
+                error._tag === "BoxdMachineGone"
+                  ? `boxd machine ${machine} is gone: ${error.message}`
+                  : `boxd exec on ${machine} failed: ${error.code}: ${error.message}`,
+            }),
+          ),
+        ),
+      })),
+    ),
+});

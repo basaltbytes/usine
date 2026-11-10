@@ -275,7 +275,7 @@ for (const [status, code] of [
       assert.strictEqual(failure.operation, "authenticate");
       assert.strictEqual(failure.code, code);
       const driver = yield* boxdDriverFor(WORKER, boxdSettings()).pipe(
-        Effect.provide(fakeMachine().layer),
+        Effect.provide(Layer.merge(fakeMachine().layer, fakeBoxd().execLayer)),
       );
       const preflight = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
       assert.include(

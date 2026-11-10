@@ -3,19 +3,15 @@ import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { BoxdSnapshotName, WorkerName } from "@usine/core/worker";
-import { RemoteShell } from "@usine/agents/child-host";
+import { ExecShell } from "@usine/agents/child-host";
 import { Redacted, Clock, Config, Effect, Layer, Option, Random, Schedule } from "effect";
 import { FetchHttpClient } from "effect/http";
-import { fileURLToPath } from "node:url";
 import { remoteCommandsFor, sendingShell } from "../../../src/remote/commands.ts";
-import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
+import { boxdDriverFor, execCredential } from "../../../src/ssh/provisioner/boxd.ts";
+import { BoxdApi } from "../../../src/ssh/provisioner/boxd/client.ts";
+import { boxdExecLayer } from "../../../src/ssh/provisioner/boxd/exec.ts";
 import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
-import { boxdShellFor } from "../../../src/ssh/provisioner/boxd/shell/remote-shell.ts";
 import { boxdSettings } from "./support.ts";
-
-const BOXD_SHELL = fileURLToPath(
-  new URL("../../../src/ssh/provisioner/boxd/shell/shell.ts", import.meta.url),
-);
 
 const environment = Effect.runSync(
   Effect.all({
@@ -42,7 +38,10 @@ it.live.skipIf(
       const suffix = (yield* Random.nextIntBetween(0, 2 ** 32)).toString(16);
       const run = RunId.make(`boxd-live-${now}`);
       yield* Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(WorkerName.make("boxd-live"), settings);
+        const api = yield* BoxdApi;
+        const driver = yield* boxdDriverFor(WorkerName.make("boxd-live"), settings).pipe(
+          Effect.provide(boxdExecLayer(api.endpoint, execCredential(settings))),
+        );
         yield* driver.verify(WorkerName.make("boxd-live"), 1);
         yield* Effect.acquireUseRelease(
           driver.create(`boxd-live-${now}-${suffix}`, {
@@ -60,10 +59,9 @@ it.live.skipIf(
                 .pipe(Effect.timeout("2 minutes"));
               assert(endpoint._tag === "Exec");
               const commands = yield* remoteCommandsFor;
-              // The shell's source, since the test doesn't build the package.
-              const base = RemoteShell.make({
-                ...boxdShellFor(endpoint, {}),
-                ssh: { command: process.execPath, args: ["--no-warnings", BOXD_SHELL] },
+              const base = ExecShell.make({
+                transport: endpoint.transport,
+                destination: endpoint.machine,
               });
               const answered = yield* commands
                 .run("preflight", base, "true", [])

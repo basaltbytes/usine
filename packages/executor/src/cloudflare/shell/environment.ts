@@ -7,3 +7,6 @@ export const SHELL_ENVIRONMENT = {
   accessClientId: "USINE_SANDBOX_ACCESS_CLIENT_ID",
   accessClientSecret: "USINE_SANDBOX_ACCESS_CLIENT_SECRET",
 } as const;
+
+/** The exit code of the sandbox shell when it can't reach the sandbox or follow its command, as OpenSSH uses it. */
+export const SHELL_FAILURE = 255;

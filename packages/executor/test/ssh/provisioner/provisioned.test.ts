@@ -14,6 +14,7 @@ import {
   ContainerMemoryMib,
   ContainerPids,
   type GatewayLlmProtocol,
+  SshIdentityFile,
 } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
@@ -29,7 +30,6 @@ import { TestClock } from "effect/testing";
 import { Deferred, Effect, Fiber, Option, Redacted, Schema, Layer, DateTime } from "effect";
 import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
-import { BOXD_SHELL_ENVIRONMENT } from "../../../src/ssh/provisioner/boxd/shell/environment.ts";
 import { BOXD_ENDPOINT } from "./fake-boxd.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
@@ -980,7 +980,7 @@ describe("Provisioned SSH Worker", () => {
   );
 
   it.live(
-    "runs a boxd machine's commands through the boxd shell with the API key, without an SSH key or host key",
+    "runs a boxd machine's commands in this process over one Exec connection with the API key, without an SSH key or host key",
     () => {
       const machine = fakeMachine();
       const providers = fakeProviders();
@@ -993,17 +993,14 @@ describe("Provisioned SSH Worker", () => {
         ]);
         const calls = machine.state.calls.filter(({ command }) => command.args.at(-3) === grant.id);
         assert.isAbove(calls.length, 0, "commands ran on the new machine");
-        for (const { command } of calls) {
-          assert.strictEqual(command.command, process.execPath);
-          assert.match(command.args[0] ?? "", /boxd\/shell\/shell\.js$/u);
-          assert.notInclude(command.args.join(" "), boxdSettings().token.pipe(Redacted.value));
-          assert.isFalse(command.args.some((arg) => arg.startsWith("StrictHostKeyChecking")));
-          assert.strictEqual(command.options.env?.[BOXD_SHELL_ENVIRONMENT.endpoint], BOXD_ENDPOINT);
-          assert.strictEqual(
-            command.options.env?.[BOXD_SHELL_ENVIRONMENT.credential],
-            Redacted.value(boxdSettings().token),
-          );
-        }
+        for (const { command } of calls) assert.strictEqual(command.command, "boxd-exec");
+        assert.isFalse(
+          machine.state.calls.some(({ command }) => command.command !== "boxd-exec"),
+          "no local process ran a boxd command",
+        );
+        assert.deepStrictEqual(providers.boxd.connections, [
+          { endpoint: BOXD_ENDPOINT, credential: Redacted.value(boxdSettings().token) },
+        ]);
         assert.isFalse(
           [...machine.state.localFiles.keys()].some((file) => file.includes(`boxd-${grant.id}`)),
           "no known_hosts or OpenSSH config file",
@@ -1013,6 +1010,28 @@ describe("Provisioned SSH Worker", () => {
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
     },
   );
+
+  it.live("warns at preflight that a boxd Worker ignores its identity_file", () => {
+    const machine = fakeMachine();
+    const providers = fakeProviders();
+    const logs = capturedLogs();
+    const keyed: SshWorkerAddress = {
+      ...boxdAddress,
+      identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
+    };
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      assert.isTrue(
+        logs.warnings.some(
+          (line) => line.includes("identity_file ~/.ssh/usine_worker") && line.includes("ignores"),
+        ),
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtimeOf(machine, providers, keyed).pipe(Layer.provideMerge(logs.layer))),
+    );
+  });
 
   it.live("refuses a Boat Worker whose identity file has no public key", () => {
     const machine = fakeMachine();

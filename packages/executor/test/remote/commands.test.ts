@@ -24,6 +24,7 @@ exec env -i PATH="$PATH" HOME="$HOME" sh -c "$line"
     const base = commands.shellFor({ command: ssh, args: [] }, SshDestination.make("fake"));
     const secret = "it's $HOME; $(exit 9)\n日本語\n\n";
     const shell = sendingShell(base, { GH_TOKEN: Redacted.make(secret) });
+    assert(shell._tag === "RemoteShell");
     assert.strictEqual(shell.sshEnvironment.GH_TOKEN, undefined);
     const input = "command input\nsecond line\n";
     const result = yield* commands.runWithInput(

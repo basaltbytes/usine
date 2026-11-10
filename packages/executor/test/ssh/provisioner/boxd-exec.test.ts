@@ -1,5 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { assert, describe, it } from "@effect/vitest";
+import { HostUnreachable } from "@usine/agents/child-host";
 import { MachineId } from "@usine/core/worker";
 import {
   Context,
@@ -9,6 +10,7 @@ import {
   Layer,
   Predicate,
   Redacted,
+  Result,
   Schema,
   Stream,
 } from "effect";
@@ -17,6 +19,7 @@ import {
   BoxdExec,
   boxdExecLayer,
   BoxdMachineGone,
+  boxdTransport,
   STDIN_CHUNK_BYTES,
 } from "../../../src/ssh/provisioner/boxd/exec.ts";
 import { type ExecHandler, fakeBoxdExec, runLocally } from "./fake-boxd-exec.ts";
@@ -27,8 +30,11 @@ const MACHINE = MachineId.make("vm-exec-1");
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** Runs `command` on the fake through a fresh `BoxdExec`, collecting both streams and the exit code. */
-const run = (
+/**
+ * Runs `command` on the fake through a fresh `BoxdExec`, collecting both streams to their end, then
+ * the exit code or the error that ended the call.
+ */
+const collect = (
   url: string,
   command: string,
   stdin: Stream.Stream<Uint8Array> = Stream.empty,
@@ -37,19 +43,27 @@ const run = (
   Effect.gen(function* () {
     const exec = yield* BoxdExec;
     const execution = yield* exec.exec(options.machine ?? MACHINE, command, stdin);
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        execution.stdout.pipe(Stream.runCollect),
-        execution.stderr.pipe(Stream.runCollect),
-        execution.exitCode,
-      ],
+    const [stdout, stderr] = yield* Effect.all(
+      [execution.stdout.pipe(Stream.runCollect), execution.stderr.pipe(Stream.runCollect)],
       { concurrency: "unbounded" },
     );
     const join = (chunks: ReadonlyArray<Uint8Array>) => Buffer.concat(chunks);
-    return { stdout: join(stdout), stderr: join(stderr), exitCode };
+    return {
+      stdout: join(stdout),
+      stderr: join(stderr),
+      exitCode: yield* Effect.result(execution.exitCode),
+    };
   }).pipe(
     Effect.scoped,
     Effect.provide(boxdExecLayer(url, Redacted.make(options.credential ?? KEY))),
+  );
+
+/** Runs `command` like `collect` and fails with the error that ended the call. */
+const run = (...args: Parameters<typeof collect>) =>
+  collect(...args).pipe(
+    Effect.flatMap(({ exitCode, ...output }) =>
+      Effect.map(Effect.fromResult(exitCode), (code) => ({ ...output, exitCode: code })),
+    ),
   );
 
 const fake = (handler: ExecHandler = runLocally) =>
@@ -116,22 +130,27 @@ describe("BoxdExec", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("raises the HTTP/2 connection window to 8 MiB before it sends stdin", () =>
+  it.live("raises the HTTP/2 connection and stream windows to 8 MiB before it sends stdin", () =>
     Effect.gen(function* () {
-      const windows: Array<number> = [];
+      const connections: Array<number> = [];
+      const streams: Array<number> = [];
       const server = yield* fakeBoxdExec({
         credential: KEY,
         machines: new Set([MACHINE]),
         handler: () =>
           Stream.sync(() => {
-            for (const session of server.sessions)
-              windows.push(session.state.remoteWindowSize ?? 0);
+            for (const session of server.sessions) {
+              connections.push(session.state.remoteWindowSize ?? 0);
+              // The window that the client grants each new stream.
+              streams.push(session.remoteSettings.initialWindowSize ?? 0);
+            }
             return { exitCode: 0 };
           }),
       });
       yield* run(server.url, "true");
 
-      assert.isAtLeast(Math.max(...windows), 8 * 1024 * 1024 - 1024);
+      assert.isAtLeast(Math.max(...connections), 8 * 1024 * 1024 - 1024);
+      assert.isAtLeast(Math.max(...streams), 8 * 1024 * 1024);
     }).pipe(Effect.scoped),
   );
 
@@ -180,6 +199,73 @@ describe("BoxdExec", () => {
       }).pipe(Effect.flip);
       assert.isTrue(isGone(unknown));
     }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps the output that boxd sent before the call failed", () =>
+    Effect.gen(function* () {
+      const diagnostics = Array.from({ length: 8 }, (_, index) => `diag ${index}\n`);
+      const server = yield* fake(() =>
+        Stream.fromIterable(
+          diagnostics.map((text) => ({ data: encoder.encode(text), isStderr: true })),
+        ).pipe(Stream.concat(Stream.die(new ConnectError("connection reset", Code.Unavailable)))),
+      );
+      for (let tries = 0; tries < 6; tries += 1) {
+        const result = yield* collect(server.url, "true");
+        assert.strictEqual(decoder.decode(result.stderr), diagnostics.join(""));
+        assert(Result.isFailure(result.exitCode));
+        assert(result.exitCode.failure._tag === "BoxdCallError");
+        assert.strictEqual(result.exitCode.failure.code, "UNAVAILABLE");
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("stops reading stdin when the command exits first", () =>
+    Effect.gen(function* () {
+      const closed = yield* Deferred.make<void>();
+      const server = yield* fake(replies({ exitCode: 0 }));
+      const result = yield* run(
+        server.url,
+        "true",
+        Stream.never.pipe(Stream.ensuring(Deferred.succeed(closed, undefined))),
+      );
+      assert.strictEqual(result.exitCode, 0);
+      yield* Deferred.await(closed).pipe(Effect.timeout("2 seconds"));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reports a refused credential, an unavailable endpoint, and a deleted machine as HostUnreachable through its transport",
+    () =>
+      Effect.gen(function* () {
+        const unavailable = yield* fake(
+          failing(new ConnectError("read ETIMEDOUT", Code.Unavailable)),
+        );
+        const server = yield* fake();
+        const closed = yield* fake();
+        const cases = [
+          { url: server.url, credential: "other", machine: MACHINE, says: "UNAUTHENTICATED" },
+          { url: unavailable.url, credential: KEY, machine: MACHINE, says: "UNAVAILABLE" },
+          { url: "http://127.0.0.1:1", credential: KEY, machine: MACHINE, says: "UNAVAILABLE" },
+          { url: closed.url, credential: KEY, machine: MachineId.make("vm-gone"), says: "is gone" },
+        ];
+        for (const { url, credential, machine, says } of cases) {
+          const failure = yield* Effect.gen(function* () {
+            const exec = yield* BoxdExec;
+            const transport = boxdTransport(exec, machine);
+            const process = yield* transport.run("true", Stream.empty);
+            yield* Stream.runDrain(Stream.merge(process.stdout, process.stderr));
+            return yield* process.exitCode;
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(boxdExecLayer(url, Redacted.make(credential))),
+            Effect.flip,
+          );
+          assert(Schema.is(HostUnreachable)(failure), says);
+          assert.strictEqual(failure.destination, machine);
+          assert.include(failure.message, says);
+          assert.notInclude(failure.message, KEY);
+        }
+      }).pipe(Effect.scoped),
   );
 
   it.live("fails when the stream ends without an exit code", () =>

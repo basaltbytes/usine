@@ -3,7 +3,7 @@ import {
   type HarnessCredential,
   type HarnessDescriptor,
 } from "@usine/agents/harness";
-import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
+import { type RemoteHost, SSH_FAILURE } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
@@ -318,7 +318,7 @@ export const gatewayHarnessProbe = (
   machine: SshMachine,
   gateway: MachineGateway,
   probe: HarnessProbe,
-  shell: RemoteShell,
+  shell: RemoteHost,
   apiKeyed: (harness: Harness) => boolean,
   external: HarnessProbe,
 ): HarnessProbe => {

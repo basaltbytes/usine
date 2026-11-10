@@ -1,9 +1,12 @@
 import {
+  ExecShell,
   type HostInvocation,
+  remoteCommandLine,
+  type RemoteHost,
+  remoteInput,
   RemoteShell,
   type SshCommand,
   sshArguments,
-  sshInput,
 } from "@usine/agents/child-host";
 import type { SshDestination } from "@usine/core/worker";
 import { Effect, Redacted, Stream } from "effect";
@@ -11,6 +14,7 @@ import { ChildProcessSpawner } from "effect/process";
 import {
   allowlistedEnvironment,
   collectCommand,
+  collectOutput,
   type CommandResult,
   requireSuccess,
 } from "../child-command.ts";
@@ -36,17 +40,21 @@ export interface RemoteCommands {
     command: string,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, ExecutorOperationError>;
-  /** Runs a remote command and returns its exit code and output without checking the exit code. */
+  /**
+   * Runs a remote command and returns its exit code and output without checking the exit code. On
+   * an `ExecShell`, a transport failure fails with an `ExecutorOperationError` whose cause is
+   * `HostUnreachable`; an SSH client reports one as exit code `SSH_FAILURE`.
+   */
   readonly inspect: (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     command: string,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<CommandResult, ExecutorOperationError>;
   /** Runs a remote command and returns its stdout. Fails if it exits non-zero. */
   readonly run: (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     command: string,
     args: ReadonlyArray<string>,
     context?: RemoteContext,
@@ -54,7 +62,7 @@ export interface RemoteCommands {
   /** Runs a remote command with `input` on stdin, so a secret isn't in the command line or logs. */
   readonly runWithInput: (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     command: string,
     args: ReadonlyArray<string>,
     input: Redacted.Redacted<string>,
@@ -94,15 +102,34 @@ const encoder = new TextEncoder();
  * environment.
  */
 export const sendingShell = (
-  shell: RemoteShell,
+  shell: RemoteHost,
   variables: Readonly<Record<string, Redacted.Redacted<string>>>,
-): RemoteShell =>
+): RemoteHost =>
   Object.keys(variables).length === 0
     ? shell
-    : RemoteShell.make({
-        ...shell,
-        stdinEnvironment: { ...shell.stdinEnvironment, ...variables },
-      });
+    : shell._tag === "RemoteShell"
+      ? RemoteShell.make({
+          ...shell,
+          stdinEnvironment: { ...shell.stdinEnvironment, ...variables },
+        })
+      : ExecShell.make({ ...shell, stdinEnvironment: { ...shell.stdinEnvironment, ...variables } });
+
+/**
+ * Returns the shell of `shell`'s machine outside any container and without a stdin environment.
+ * Its SSH client gives up connecting after `connectTimeoutSeconds`; an exec transport detects a
+ * dead connection with its own keepalive.
+ */
+export const machineShellOf = (shell: RemoteHost, connectTimeoutSeconds: number): RemoteHost =>
+  shell._tag === "RemoteShell"
+    ? RemoteShell.make({
+        ssh: {
+          command: shell.ssh.command,
+          args: [...shell.ssh.args, "-o", `ConnectTimeout=${connectTimeoutSeconds}`],
+        },
+        sshEnvironment: shell.sshEnvironment,
+        destination: shell.destination,
+      })
+    : ExecShell.make({ transport: shell.transport, destination: shell.destination });
 
 /** The `RemoteCommands` that use this process's spawner and the allowlisted SSH environment. */
 export const remoteCommandsFor = Effect.gen(function* () {
@@ -146,46 +173,64 @@ export const remoteCommandsFor = Effect.gen(function* () {
     return yield* requireSuccess(operation, host, command, args, result);
   });
 
+  /** Runs `invocation` on `shell` with `input` on stdin and collects its output. */
+  const execute = Effect.fn("RemoteExecutor.execute")(function* (
+    operation: ExecutorOperation,
+    shell: RemoteHost,
+    invocation: HostInvocation & { readonly command: string },
+    input: Stream.Stream<Uint8Array>,
+    maxOutputBytes?: number,
+  ) {
+    yield* Effect.annotateCurrentSpan({ host: shell.destination, operation });
+    if (shell._tag === "ExecShell")
+      return yield* collectOutput(
+        operation,
+        invocation.command,
+        shell.transport.run(remoteCommandLine(shell, invocation), remoteInput(shell, input)),
+        maxOutputBytes,
+      );
+    return yield* collectCommand(
+      spawner,
+      operation,
+      shell.ssh.command,
+      sshArguments(shell, invocation),
+      { env: { ...shell.sshEnvironment }, extendEnv: false, stdin: remoteInput(shell, input) },
+      maxOutputBytes,
+    );
+  });
+
+  /** Returns the program and arguments to name in an error about `invocation` on `shell`. */
+  const described = (shell: RemoteHost, invocation: HostInvocation) =>
+    shell._tag === "RemoteShell"
+      ? { command: shell.ssh.command, args: sshArguments(shell, invocation) }
+      : { command: invocation.command, args: [...invocation.args] };
+
   const inspect = (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<CommandResult, ExecutorOperationError> =>
-    executeRaw(
-      operation,
-      shell.destination,
-      shell.ssh.command,
-      sshArguments(shell, { command, args }),
-      shell.sshEnvironment,
-      undefined,
-      sshInput(shell, Stream.empty),
-    );
+    execute(operation, shell, { command, args }, Stream.empty);
 
   const run = Effect.fn("RemoteExecutor.run")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     command: string,
     args: ReadonlyArray<string>,
     context: RemoteContext = {},
   ) {
-    const sshArgs = sshArguments(shell, {
-      cwd: context.cwd,
-      environment: context.environment,
-      command,
-      args,
-    });
-    const result = yield* executeRaw(
+    const invocation = { cwd: context.cwd, environment: context.environment, command, args };
+    const result = yield* execute(
       operation,
-      shell.destination,
-      shell.ssh.command,
-      sshArgs,
-      shell.sshEnvironment,
+      shell,
+      invocation,
+      Stream.empty,
       context.maxOutputBytes,
-      sshInput(shell, Stream.empty),
     );
     const scrub = context.scrub ?? ((text: string) => text);
-    return yield* requireSuccess(operation, shell.destination, shell.ssh.command, sshArgs, {
+    const failed = described(shell, invocation);
+    return yield* requireSuccess(operation, shell.destination, failed.command, failed.args, {
       ...result,
       stdout: scrub(result.stdout),
       stderr: scrub(result.stderr),
@@ -194,21 +239,22 @@ export const remoteCommandsFor = Effect.gen(function* () {
 
   const runWithInput = Effect.fn("RemoteExecutor.runWithInput")(function* (
     operation: ExecutorOperation,
-    shell: RemoteShell,
+    shell: RemoteHost,
     command: string,
     args: ReadonlyArray<string>,
     input: Redacted.Redacted<string>,
   ) {
-    yield* Effect.annotateCurrentSpan({ host: shell.destination, operation });
-    const sshArgs = sshArguments(shell, { command, args });
-    const result = yield* collectCommand(spawner, operation, shell.ssh.command, sshArgs, {
-      env: { ...shell.sshEnvironment },
-      extendEnv: false,
-      stdin: sshInput(shell, Stream.make(encoder.encode(Redacted.value(input)))),
-    });
+    const invocation = { command, args };
+    const result = yield* execute(
+      operation,
+      shell,
+      invocation,
+      Stream.make(encoder.encode(Redacted.value(input))),
+    );
     const secret = Redacted.value(input);
     const scrub = (text: string) => (secret === "" ? text : text.replaceAll(secret, "[REDACTED]"));
-    return yield* requireSuccess(operation, shell.destination, shell.ssh.command, sshArgs, {
+    const failed = described(shell, invocation);
+    return yield* requireSuccess(operation, shell.destination, failed.command, failed.args, {
       ...result,
       stdout: scrub(result.stdout),
       stderr: scrub(result.stderr),

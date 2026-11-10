@@ -1,6 +1,6 @@
 import type { HarnessCatalog } from "@usine/agents/harness";
 import { safeSegment } from "@usine/core/repository";
-import type { RemoteShell } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
 import { Effect, Option } from "effect";
 import { ExecutorOperationError } from "../../executor.ts";
@@ -16,8 +16,8 @@ export const machineResetFor = (
   instance: string,
   instanceId: InstanceId,
 ) => {
-  const failures = new WeakSet<RemoteShell>();
-  const failed = (shell: RemoteShell) => Effect.sync(() => void failures.add(shell));
+  const failures = new WeakSet<RemoteHost>();
+  const failed = (shell: RemoteHost) => Effect.sync(() => void failures.add(shell));
   const commands: RemoteCommands = {
     ...raw,
     run: (operation, shell, command, args, context) =>
@@ -86,6 +86,6 @@ export const machineResetFor = (
     commands,
     failed,
     reset,
-    cleanupSucceeded: (shell: RemoteShell) => !failures.has(shell),
+    cleanupSucceeded: (shell: RemoteHost) => !failures.has(shell),
   };
 };

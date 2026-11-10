@@ -3,7 +3,7 @@ import type { ProbeTarget } from "../harness/runtime.ts";
 import type { Harness } from "@usine/core/agent/brain";
 import { HarnessUnavailableError, type HarnessCapability } from "@usine/core/agent/capability";
 import { Effect, Option } from "effect";
-import { type ChildHost, SSH_FAILURE } from "../child-host/child-host.ts";
+import type { ChildHost } from "../child-host/child-host.ts";
 import { hostOutput } from "../child-host/command.ts";
 import { SessionOperationError } from "../runtime.ts";
 
@@ -34,25 +34,16 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   args: ReadonlyArray<string>,
 ) {
   yield* Effect.annotateCurrentSpan({ harness, capability, host: host._tag });
-  const output = hostOutput(host, { environment, command, args });
-  const reachable =
-    host._tag === "RemoteShell"
-      ? output.pipe(
-          Effect.filterOrFail(
-            (result) => result.exitCode !== SSH_FAILURE,
-            () =>
-              SessionOperationError.make({
-                operation: "launch",
-                sessionId: Option.none(),
-                message: `Can't reach ${host.destination} to run ${command}`,
-                cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
-              }),
-          ),
-        )
-      : output;
-  return yield* reachable.pipe(
+  return yield* hostOutput(host, { environment, command, args }).pipe(
     Effect.timeout("30 seconds"),
     Effect.catchTags({
+      HostUnreachable: (unreachable) =>
+        SessionOperationError.make({
+          operation: "launch",
+          sessionId: Option.none(),
+          message: `Can't reach ${unreachable.destination} to run ${command}`,
+          cause: unreachable,
+        }),
       PlatformError: () =>
         HarnessUnavailableError.make({
           harness,

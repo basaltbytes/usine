@@ -381,7 +381,7 @@ export class SshWorker extends Schema.Class<
   provisioner: Schema.OptionFromOptionalKey(WorkerProvisionerFromYaml),
   /**
    * The local SSH private-key path; Boat also requires the adjacent `.pub` file. A boxd
-   * provisioner takes none.
+   * provisioner ignores it, and its preflight warns that it is set.
    */
   identityFile: Schema.OptionFromOptionalKey(SshIdentityFile),
   /**
@@ -482,9 +482,9 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
         const conflict = boxdEgressConflict(worker, provisioner.egress.value);
         if (conflict !== undefined) return conflict;
       }
-      return Option.isSome(worker.identityFile)
-        ? `SSH worker "${worker.name}" sets identity_file, which a boxd provisioner doesn't use: usine runs commands on boxd machines through boxd's Exec API with the API key, so remove identity_file`
-        : undefined;
+      // A boxd worker ignores identity_file, which releases before boxd's Exec transport required,
+      // so a stored worker that still sets it loads.
+      return undefined;
     case "boat":
       if (
         Option.isSome(worker.gateway) &&

@@ -1,9 +1,9 @@
 import { CHILD_LIFELINE } from "./lifeline.ts";
 export { CHILD_LIFELINE } from "./lifeline.ts";
 import { Deferred, Effect, Fiber, Option, Ref, Schema, Stream } from "effect";
-import { ChildProcessSpawner, type ChildProcess } from "effect/process";
-import { childPidFile } from "./child-host.ts";
-import { hostCommand } from "./command.ts";
+import type { ChildProcess } from "effect/process";
+import { childPidFile, isRemoteHost } from "./child-host.ts";
+import { hostCommand, hostSpawn } from "./command.ts";
 import { SessionOperationError } from "../runtime.ts";
 import {
   ChildProcessLost,
@@ -13,11 +13,8 @@ import {
   remoteProcess,
 } from "./process.ts";
 
-/**
- * Returns the command that starts `command` for `target` without a process owner. Throws if
- * `target` is a remote shell and its environment is not empty.
- */
-export const childProcessCommand = (
+/** Returns the invocation and options that start `command` for `target` without a process owner. */
+const childInvocation = (
   target: ProcessTarget,
   command: ProcessCommand,
   stdin?: ChildProcess.CommandOptions["stdin"],
@@ -43,6 +40,20 @@ export const childProcessCommand = (
     };
     options = { ...options, additionalFds: { fd3: { type: "input" } } };
   }
+  return { invocation, options };
+};
+
+/**
+ * Returns the command that starts `command` for `target` without a process owner. Throws if
+ * `target` is a remote host and its environment is not empty, or if it is an `ExecShell`, which
+ * runs commands in this process.
+ */
+export const childProcessCommand = (
+  target: ProcessTarget,
+  command: ProcessCommand,
+  stdin?: ChildProcess.CommandOptions["stdin"],
+) => {
+  const { invocation, options } = childInvocation(target, command, stdin);
   return hostCommand(target.host, invocation, options);
 };
 
@@ -56,7 +67,7 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
   onInputAcknowledged?: (bytes: Uint8Array) => Effect.Effect<number>,
 ) {
   yield* Effect.annotateCurrentSpan({ sessionId: Option.getOrUndefined(target.sessionId) });
-  if (target.host._tag === "RemoteShell" && Option.isSome(target.sessionId))
+  if (isRemoteHost(target.host) && Option.isSome(target.sessionId))
     return yield* remoteProcess(
       { ...target, sessionId: target.sessionId },
       command,
@@ -65,15 +76,13 @@ export const startChildProcess = Effect.fn("ChildHost.startChildProcess")(functi
       acknowledgement,
       onInputAcknowledged,
     );
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const handle = yield* spawner
-    .spawn(
-      childProcessCommand(target, command, {
-        stream: input.pipe(Stream.tap((data) => onInputAcknowledged?.(data) ?? Effect.void)),
-        endOnDone: true,
-      }),
-    )
-    .pipe(Effect.mapError((cause) => processError(target, "Child process failed to start", cause)));
+  const { invocation, options } = childInvocation(target, command, {
+    stream: input.pipe(Stream.tap((data) => onInputAcknowledged?.(data) ?? Effect.void)),
+    endOnDone: true,
+  });
+  const handle = yield* hostSpawn(target.host, invocation, options).pipe(
+    Effect.mapError((cause) => processError(target, "Child process failed to start", cause)),
+  );
   const stderr = yield* Ref.make("");
   const diagnostics = yield* handle.stderr.pipe(
     Stream.decodeText(),

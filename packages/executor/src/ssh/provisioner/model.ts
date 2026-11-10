@@ -1,3 +1,4 @@
+import type { ExecTransport } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import {
@@ -8,15 +9,7 @@ import {
   type SshPort,
   type WorkerName,
 } from "@usine/core/worker";
-import {
-  type Brand,
-  Data,
-  type DateTime,
-  type Effect,
-  Option,
-  type Redacted,
-  Schema,
-} from "effect";
+import { type Brand, Data, type DateTime, type Effect, Option, Schema } from "effect";
 
 import type { MachineUnavailableError, WorkerCapabilityError } from "../../executor.ts";
 
@@ -52,7 +45,7 @@ export interface ListedMachine {
 
 /**
  * Where the executor reaches a machine: `Ssh`, an address that OpenSSH connects to, or `Exec`, a
- * machine that the boxd shell reaches through boxd's `Exec` API.
+ * machine that runs commands through a provider's exec stream API in this process.
  */
 export type MachineEndpoint = Data.TaggedEnum<{
   Ssh: {
@@ -67,17 +60,13 @@ export type MachineEndpoint = Data.TaggedEnum<{
   };
   Exec: {
     readonly machine: MachineId;
-    /** The API endpoint URL of the machine's region, which serves its `Exec` calls. */
-    readonly api: string;
-    /** The bearer of the `Exec` calls. */
-    readonly credential: Redacted.Redacted<string>;
+    /** Runs the machine's commands. It holds the provider credential, so never log it. */
+    readonly transport: ExecTransport;
   };
 }>;
 export const MachineEndpoint = Data.taggedEnum<MachineEndpoint>();
 /** A machine that OpenSSH connects to. */
 export type SshEndpoint = Data.TaggedEnum.Value<MachineEndpoint, "Ssh">;
-/** A machine that the boxd shell reaches through boxd's `Exec` API. */
-export type ExecEndpoint = Data.TaggedEnum.Value<MachineEndpoint, "Exec">;
 
 /** A machine that a provider accepted to create. */
 interface CreatedMachine {

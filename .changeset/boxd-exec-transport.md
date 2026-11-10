@@ -1,8 +1,8 @@
 ---
-"@usine/agents": patch
+"@usine/agents": minor
 "@usine/config": minor
 "@usine/executor": minor
 "@usine/server": minor
 ---
 
-boxd workers run commands over boxd's gRPC `Exec` stream instead of SSH. A boxd worker needs only its API key: it refuses `identity_file`, and neither the boxd account nor the snapshot needs an SSH key. The executor runs each command through the boxd shell, a stand-in for `ssh` that raises the HTTP/2 window, sends stdin in small chunks, and sends keepalive pings, and it no longer pins a proxy host key or refreshes a proxy port. The `SshCommand` contract that stand-ins for `ssh` follow is documented where `SshCommand` is defined, and the Cloudflare sandbox shell shares its argument parsing, stream relay, and exit codes with the boxd shell.
+boxd workers run commands over boxd's gRPC `Exec` stream instead of SSH. A boxd worker needs only its API key: neither the boxd account nor the snapshot needs an SSH key, and a boxd worker that still sets `identity_file`, as earlier releases required, loads and ignores it, with a preflight warning that names the file. The executor runs boxd commands in its own process through a new `ExecShell` child host, with one HTTP/2 connection per worker that raises the receive windows, sends stdin in small chunks, and sends keepalive pings. A lost command is a typed `HostUnreachable` error instead of exit code 255, and the executor no longer pins a proxy host key or refreshes a proxy port for boxd machines.

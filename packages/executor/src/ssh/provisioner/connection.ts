@@ -81,6 +81,8 @@ export const machineConnections = Effect.gen(function* () {
         hostKey: endpoint.hostKey,
       }),
     ).shell;
+    if (base._tag !== "RemoteShell")
+      return yield* Effect.die(new Error(`The SSH endpoint of ${id} has no SSH client`));
     const shell = RemoteShell.make({
       ...base,
       ssh: { command: base.ssh.command, args: ["-F", file, ...base.ssh.args] },

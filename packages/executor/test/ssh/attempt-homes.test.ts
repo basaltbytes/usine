@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
-import { RemoteShell } from "@usine/agents/child-host";
+import { type ChildHost, RemoteShell } from "@usine/agents/child-host";
 import { claudeChildLayer, claudeSdkLive } from "@usine/agents/claude";
 import { codexAppServerLive, codexChildLayer } from "@usine/agents/codex";
 import { catalog } from "@usine/agents/harness";
@@ -228,7 +228,7 @@ it.live.each(["docker", "podman"] as const)(
         });
       });
       const backend = yield* ChildBackend;
-      const childRequest = (host: RemoteShell) =>
+      const childRequest = (host: ChildHost) =>
         ChildRequest.make({
           worker: ADDRESS.name,
           machine: Option.none(),

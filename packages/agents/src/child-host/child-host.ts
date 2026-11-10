@@ -1,5 +1,5 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { type Brand, Redacted, Schema, Stream } from "effect";
+import { type Brand, type Effect, Predicate, Redacted, Schema, type Scope, Stream } from "effect";
 import { Base64 } from "effect/encoding";
 
 /** A host that runs children as local processes. */
@@ -8,26 +8,11 @@ export class LocalProcess extends Schema.TaggedClass<
   Brand.Brand<"@usine/agents/child-host/child-host/LocalProcess">
 >("@usine/agents/LocalProcess")("LocalProcess", {}) {}
 
-/**
- * The local SSH executable and the options before the destination. The executable is OpenSSH's
- * `ssh`, or a stand-in program that reaches the machine another way and follows the same contract:
- *
- * - Arguments: `args`, then any `-o <option>` pairs that usine adds, such as
- *   `-o ConnectTimeout=10`, then the destination, `--`, and one command line for the machine's
- *   POSIX shell. A stand-in accepts and ignores every `-o` option. usine adds other OpenSSH options,
- *   such as `-F`, `-J`, and `-p`, only to an `ssh` that it runs.
- * - Standard streams: the program writes its stdin to the command's stdin until stdin ends, which
- *   closes the command's stdin. It writes the command's stdout and stderr to its own, byte for
- *   byte, each in order.
- * - Exit code: the command's exit code, or 255 when the program can't reach the machine, or loses
- *   the command before it exits. A command that exits 255 itself looks like a transport failure.
- * - Environment: `RemoteShell.sshEnvironment`. A stand-in reads its endpoint and credential there,
- *   and never from its arguments, which process listings show.
- */
+/** The local SSH executable and the options before the destination. */
 export const SshCommand = Schema.Struct({
   /** The SSH executable on the launching machine, resolved through its PATH or an explicit path. */
   command: Schema.NonEmptyString,
-  /** SSH options, or a stand-in's own arguments, before the destination, each a separate argument. */
+  /** SSH options before the destination, each passed as a separate argument. */
   args: Schema.Array(Schema.String),
 });
 export type SshCommand = typeof SshCommand.Type;
@@ -40,6 +25,16 @@ export const ShellContainer = Schema.Struct({
   name: Schema.NonEmptyString,
 });
 export type ShellContainer = typeof ShellContainer.Type;
+
+/** Secret variables that a remote command line reads from its first stdin line. */
+const StdinEnvironment = Schema.optionalKey(
+  Schema.Record(Schema.String, Schema.Redacted(Schema.String)).check(
+    Schema.makeFilter(
+      (variables) => Object.keys(variables).every((name) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)),
+      { message: "Expected shell environment variable names" },
+    ),
+  ),
+);
 
 /** A host that runs each child on another machine as one SSH command, through its standard streams. */
 export class RemoteShell extends Schema.TaggedClass<
@@ -56,19 +51,8 @@ export class RemoteShell extends Schema.TaggedClass<
    */
   sshEnvironment: Schema.Record(Schema.String, Schema.String),
   /** Secrets read from the first stdin line before the command starts. Never log this field. */
-  stdinEnvironment: Schema.optionalKey(
-    Schema.Record(Schema.String, Schema.Redacted(Schema.String)).check(
-      Schema.makeFilter(
-        (variables) =>
-          Object.keys(variables).every((name) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)),
-        { message: "Expected shell environment variable names" },
-      ),
-    ),
-  ),
-  /**
-   * The destination, passed as one argument: an SSH destination, or the name that a stand-in uses
-   * for the machine.
-   */
+  stdinEnvironment: StdinEnvironment,
+  /** The SSH destination, passed as one argument. */
   destination: Schema.NonEmptyString,
   /**
    * The container that runs each command, with the working directory, variables, and PID file
@@ -77,8 +61,79 @@ export class RemoteShell extends Schema.TaggedClass<
   container: Schema.optionalKey(ShellContainer),
 }) {}
 
+/** The error when a host can't run a command, or loses it before the command exits. */
+export class HostUnreachable extends Schema.TaggedError<
+  HostUnreachable,
+  Brand.Brand<"@usine/agents/child-host/HostUnreachable">
+>("@usine/agents/HostUnreachable")("HostUnreachable", {
+  /** The destination of the host. */
+  destination: Schema.String,
+  message: Schema.String,
+}) {}
+
+/** A command that an `ExecTransport` runs. */
+export interface ExecProcess {
+  /**
+   * The command's stdout. It ends when the command exits or the transport loses it, after every
+   * byte the transport received.
+   */
+  readonly stdout: Stream.Stream<Uint8Array>;
+  /** The command's stderr, which ends as `stdout` does. */
+  readonly stderr: Stream.Stream<Uint8Array>;
+  /**
+   * The command's exit code: 128 plus the signal number for a command that a signal ended. Fails
+   * with `HostUnreachable` if the transport loses the command first.
+   */
+  readonly exitCode: Effect.Effect<number, HostUnreachable>;
+}
+
+/** Runs command lines on one machine through a provider's exec stream API, in this process. */
+export interface ExecTransport {
+  /**
+   * Runs `line` with the machine's POSIX shell, in its own process group, and writes `stdin` to
+   * the command's stdin until the stream ends, which closes it. Closing the scope before the
+   * command exits cancels it, and the provider stops its process group.
+   */
+  readonly run: (
+    line: string,
+    stdin: Stream.Stream<Uint8Array>,
+  ) => Effect.Effect<ExecProcess, never, Scope.Scope>;
+}
+
+/**
+ * A host that runs each child on another machine as one command line through an `ExecTransport`
+ * in this process, with no local process per command. Transport failures are `HostUnreachable`
+ * errors instead of an exit code.
+ */
+export class ExecShell extends Schema.TaggedClass<
+  ExecShell,
+  Brand.Brand<"@usine/agents/child-host/child-host/ExecShell">
+>("@usine/agents/ExecShell")("ExecShell", {
+  /** The transport to the machine. Holds its credential, so never log this field. */
+  transport: Schema.declare(
+    (value): value is ExecTransport =>
+      Predicate.hasProperty(value, "run") && Predicate.isFunction(value.run),
+    { expected: "an ExecTransport" },
+  ),
+  /** Secrets read from the first stdin line before the command starts. Never log this field. */
+  stdinEnvironment: StdinEnvironment,
+  /** The name of the machine in the provider, used in logs and errors. */
+  destination: Schema.NonEmptyString,
+  /**
+   * The container that runs each command, with the working directory, variables, and PID file
+   * inside it. If absent, the machine's shell runs the command.
+   */
+  container: Schema.optionalKey(ShellContainer),
+}) {}
+
+/** A host that runs each child on another machine as one shell command line. */
+export type RemoteHost = RemoteShell | ExecShell;
+
+/** Returns whether `host` runs children on another machine. */
+export const isRemoteHost = (host: ChildHost): host is RemoteHost => host._tag !== "LocalProcess";
+
 /** The host that runs an attempt's children, chosen by the worker that prepared its checkout. */
-export const ChildHost = Schema.Union([LocalProcess, RemoteShell]);
+export const ChildHost = Schema.Union([LocalProcess, RemoteShell, ExecShell]);
 export type ChildHost = typeof ChildHost.Type;
 
 /** A command for a host to run. */
@@ -127,28 +182,34 @@ const remoteShellCommand = (invocation: HostInvocation): string => {
 };
 
 /**
- * Returns the SSH client arguments that run `invocation`: the options, the destination, and one
- * remote command line. In a container, the line runs `sh -c` with `invocation`'s command line
- * through `<runtime> exec -i`, so its standard streams pass through.
+ * Returns the command line that runs `invocation` on `host`. In a container, the line runs `sh -c`
+ * with `invocation`'s command line through `<runtime> exec -i`, so its standard streams pass
+ * through.
  */
-export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Array<string> => {
+export const remoteCommandLine = (host: RemoteHost, invocation: HostInvocation): string => {
   const line =
     (host.stdinEnvironment === undefined
       ? ""
       : 'set +x; IFS= read -r usine_environment && usine_environment=$(printf %s "$usine_environment" | base64 -d) && eval "unset usine_environment; $usine_environment" && ') +
     remoteShellCommand(invocation);
-  return [
-    ...host.ssh.args,
-    host.destination,
-    "--",
-    host.container === undefined
-      ? line
-      : `exec ${quoted([host.container.runtime, "exec", "-i", host.container.name, "sh", "-c", line])}`,
-  ];
+  return host.container === undefined
+    ? line
+    : `exec ${quoted([host.container.runtime, "exec", "-i", host.container.name, "sh", "-c", line])}`;
 };
 
-/** Prepends the secret environment block consumed by `sshArguments`, preserving command input. */
-export const sshInput = <E, R>(host: RemoteShell, input: Stream.Stream<Uint8Array, E, R>) => {
+/**
+ * Returns the SSH client arguments that run `invocation`: the options, the destination, and the
+ * `remoteCommandLine`.
+ */
+export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Array<string> => [
+  ...host.ssh.args,
+  host.destination,
+  "--",
+  remoteCommandLine(host, invocation),
+];
+
+/** Prepends the secret environment block consumed by `remoteCommandLine`, preserving command input. */
+export const remoteInput = <E, R>(host: RemoteHost, input: Stream.Stream<Uint8Array, E, R>) => {
   const variables = host.stdinEnvironment;
   if (variables === undefined) return input;
   return Stream.concat(

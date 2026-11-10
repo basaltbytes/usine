@@ -12,6 +12,7 @@ import {
 } from "../../executor.ts";
 import type { BoxdProvisioner } from "../model.ts";
 import { BoxdApi, BoxdCallError, type BoxdMachine, type BoxdUnknownRegion } from "./boxd/client.ts";
+import { BoxdExec, boxdTransport } from "./boxd/exec.ts";
 import {
   attemptTag,
   attemptsFromTag,
@@ -109,20 +110,27 @@ export const boxdConnectError = (
     : boxdPreflightError(worker, failure);
 
 /**
- * Returns the bearer of the boxd shell's `Exec` calls: the API key itself. boxd accepts it as a
- * bearer without documenting it (question 3 of `docs/research/boxd-byoc.md`). A session token file
- * that the orchestrator renews can replace it here.
+ * Returns the bearer of the `Exec` calls: the API key itself. boxd accepts it as a bearer without
+ * documenting it (question 3 of `docs/research/boxd-byoc.md`). A session token file that the
+ * orchestrator renews can replace it here.
  */
-const execCredential = (settings: BoxdProvisioner): Redacted.Redacted<string> => settings.token;
+export const execCredential = (settings: BoxdProvisioner): Redacted.Redacted<string> =>
+  settings.token;
 
 /**
- * Returns the boxd driver for `worker`. Its machines' endpoints are `Exec` endpoints, which the boxd
- * shell reaches with the API key, so no SSH key is involved. A driver retains the create response
+ * Returns the boxd driver for `worker`. Its machines' endpoints are `Exec` endpoints, which run
+ * commands through `BoxdExec` with the API key, so no SSH key is involved: preflight warns that
+ * `identityFile`, the worker's `identity_file`, is ignored. A driver retains the create response
  * only until endpoint discovery consumes it.
  */
-export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
+export const boxdDriverFor = (
+  worker: WorkerName,
+  settings: BoxdProvisioner,
+  identityFile: Option.Option<string> = Option.none(),
+) =>
   Effect.gen(function* () {
     const api = yield* BoxdApi;
+    const exec = yield* BoxdExec;
     const created = new Map<MachineId, BoxdMachine>();
     const unavailable = (code: string, message: string) =>
       MachineUnavailableError.make({ worker, provider: "boxd", reason: reasonOf(code), message });
@@ -168,6 +176,12 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
           ? Option.getOrElse(settings.egress, () => []).filter(isBoxdEgressAddress)
           : [];
         const warnings = [
+          ...Option.match(identityFile, {
+            onNone: () => [],
+            onSome: (file) => [
+              `Worker "${worker}" sets identity_file ${file}, which usine ignores: it runs commands on boxd machines through boxd's Exec API with the API key. Remove identity_file from the worker.`,
+            ],
+          }),
           ...(limit.maxVms - limit.vmCount < maxConcurrentAttempts
             ? [
                 `boxd has ${limit.maxVms - limit.vmCount} machine slots available, fewer than max_concurrent_attempts (${maxConcurrentAttempts}). Free machines or request a higher machine limit.`,
@@ -296,11 +310,7 @@ export const boxdDriverFor = (worker: WorkerName, settings: BoxdProvisioner) =>
         ),
     );
     const endpointOf = (id: MachineId) =>
-      MachineEndpoint.Exec({
-        machine: id,
-        api: api.endpoint,
-        credential: execCredential(settings),
-      });
+      MachineEndpoint.Exec({ machine: id, transport: boxdTransport(exec, id) });
     const endpoint = Effect.fn("BoxdDriver.endpoint")(
       function* (id: MachineId, interval: Effect.Effect<void>) {
         yield* Effect.annotateCurrentSpan({ worker, machine: id });

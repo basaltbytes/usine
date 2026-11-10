@@ -1,4 +1,15 @@
-import { Array as Arr, type Brand, Cause, Config, Effect, Option, Schema, Stream } from "effect";
+import { HostUnreachable } from "@usine/agents/child-host";
+import {
+  Array as Arr,
+  type Brand,
+  Cause,
+  Config,
+  Effect,
+  Option,
+  Schema,
+  type Scope,
+  Stream,
+} from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { ExecutorOperationError, type ExecutorOperation } from "./executor.ts";
 
@@ -45,6 +56,53 @@ export const allowlistedEnvironment = (
     Effect.orDie,
   );
 
+/** A started command's output and exit code. */
+interface StartedCommand<E> {
+  readonly stdout: Stream.Stream<Uint8Array, E>;
+  readonly stderr: Stream.Stream<Uint8Array, E>;
+  readonly exitCode: Effect.Effect<number, E>;
+}
+
+/**
+ * Starts a command with `start`, reads its stdout and stderr to their end, then its exit code, with
+ * a 10-minute timeout, and returns them without checking the exit code. When `maxOutputBytes` is
+ * set, caps each output stream before decoding it. Fails with `ExecutorOperationError`, which
+ * names `command`, if the command can't run or times out; the cause is `HostUnreachable` if a host
+ * couldn't run it or lost it.
+ */
+export const collectOutput = <E>(
+  operation: ExecutorOperation,
+  command: string,
+  start: Effect.Effect<StartedCommand<E>, E, Scope.Scope>,
+  maxOutputBytes?: number,
+): Effect.Effect<CommandResult, ExecutorOperationError> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const started = yield* start;
+      const [stdout, stderr] = yield* Effect.all(
+        [readText(started.stdout, maxOutputBytes), readText(started.stderr, maxOutputBytes)],
+        { concurrency: "unbounded" },
+      );
+      const exitCode = yield* started.exitCode;
+      return { exitCode: Number(exitCode), stderr, stdout } satisfies CommandResult;
+    }),
+  ).pipe(
+    Effect.timeout(COMMAND_TIMEOUT),
+    Effect.mapError((cause) =>
+      ExecutorOperationError.make({
+        operation,
+        message: Cause.isTimeoutError(cause)
+          ? `${command} didn't finish within ${COMMAND_TIMEOUT}`
+          : Schema.is(CommandOutputLimitExceeded)(cause)
+            ? `${command} output exceeds ${cause.maxBytes} bytes`
+            : Schema.is(HostUnreachable)(cause)
+              ? `Can't reach ${cause.destination} to run ${command}: ${cause.message}`
+              : `Can't run ${command}`,
+        cause,
+      }),
+    ),
+  );
+
 /**
  * Runs `command` with a 10-minute timeout and returns its exit code and output without checking
  * the exit code. When `maxOutputBytes` is set, caps each output stream before decoding it.
@@ -58,33 +116,16 @@ export const collectCommand = (
   options: ChildProcess.CommandOptions,
   maxOutputBytes?: number,
 ): Effect.Effect<CommandResult, ExecutorOperationError> =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const handle = yield* spawner.spawn(ChildProcess.make(command, args, options));
-      const [exitCode, stdout, stderr] = yield* Effect.all(
-        [
-          handle.exitCode,
-          readText(handle.stdout, maxOutputBytes),
-          readText(handle.stderr, maxOutputBytes),
-        ],
-        { concurrency: "unbounded" },
-      );
-      return { exitCode: Number(exitCode), stderr, stdout } satisfies CommandResult;
-    }),
-  ).pipe(
-    Effect.timeout(COMMAND_TIMEOUT),
-    Effect.mapError((cause) =>
-      ExecutorOperationError.make({
-        operation,
-        message: Cause.isTimeoutError(cause)
-          ? `${command} didn't finish within ${COMMAND_TIMEOUT}`
-          : Schema.is(CommandOutputLimitExceeded)(cause)
-            ? `${command} output exceeds ${cause.maxBytes} bytes`
-            : `Can't run ${command}`,
-        cause,
-      }),
-    ),
+  collectOutput(
+    operation,
+    command,
+    spawner.spawn(ChildProcess.make(command, args, options)),
+    maxOutputBytes,
   );
+
+/** Returns whether `error` reports that a remote host couldn't run a command or lost it. */
+export const unreachableHost = (error: ExecutorOperationError): boolean =>
+  Schema.is(HostUnreachable)(error.cause);
 
 /** Returns the collected stdout. If the exit code is non-zero, logs a warning and fails with `ExecutorOperationError`. */
 export const requireSuccess = Effect.fn("Executor.requireSuccess")(function* (
