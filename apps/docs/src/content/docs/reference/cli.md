@@ -263,6 +263,8 @@ Environment files listed by `USINE_GATEWAY_ENVIRONMENT_FILES` override process v
 | `USINE_GATEWAY_EGRESS_HOST`, `USINE_GATEWAY_EGRESS_PORT` | host string, integer port 0–65535 | `127.0.0.1`, `3128` | Listener of the forward proxy. |
 | `USINE_GATEWAY_ADMIN_HOST`, `USINE_GATEWAY_ADMIN_PORT` | host string, integer port 0–65535 | `127.0.0.1`, `7070` | Listener of the admin API. `admin_port` in the stored configuration is the same port. The executor forwards a local port to it over SSH. |
 
+A port of `0` lets the operating system assign an available port. Each listener logs its bound host and port when it starts listening.
+
 For example, set `USINE_GATEWAY_DOMAIN=gw.internal`, private listener addresses, and the required secrets in the gateway environment files.
 
 `systemctl reload usine-gateway` sends SIGHUP and rereads provider settings, ChatGPT auth, upstreams, and the egress allowlist. An invalid reload keeps the accepted settings and logs the reason. Attachments and open tunnels continue. Domain, listener, admin-token, and caller-key changes require restart. After a gateway restart loses attachments, the executor registers running attempts again within two minutes. [Configure a gateway](/guides/configure-a-gateway/) describes setup.
