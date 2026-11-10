@@ -587,6 +587,30 @@ ${egress.join("\n")}
       }
       const wide = yield* parse(["      egress: ['*.tailscale.com', 32.0.0.0/8, 203.0.113.0/24]"]);
       assert.deepStrictEqual(egressOf(wide), ["*.tailscale.com", "32.0.0.0/8", "203.0.113.0/24"]);
+
+      const direct = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        `version: 1
+repos: []
+workers:
+  - name: boxd-direct
+    kind: ssh
+    root: /home/boxd/.usine
+    identity_file: ~/.ssh/usine_worker
+    provisioner:
+      provider: boxd
+      token_env: BOXD_API_KEY
+      snapshot: usine-attempt
+      api_keys:
+        anthropic: USINE_ANTHROPIC_API_KEY
+      egress: [api.anthropic.com, github.com, registry.npmjs.org]
+`,
+      );
+      assert.deepStrictEqual(egressOf(direct), [
+        "api.anthropic.com",
+        "github.com",
+        "registry.npmjs.org",
+      ]);
     }).pipe(Effect.provide(parserLayer)),
   );
 
