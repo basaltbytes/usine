@@ -158,3 +158,7 @@ pnpm lint
 ## License
 
 usine is licensed under the [GNU Affero General Public License v3.0](./LICENSE). You can run it, change it, and embed the `@usine/*` packages in your own software. If you offer usine, or software that includes it, to others over a network, you have to publish the complete source of that software under the same license. Versions published before 2026-10-24 remain under the MIT license.
+
+## Author
+
+usine is built by [Basaltbytes](https://basaltbytes.com). For news about the project, follow [@_philDL](https://x.com/_philDL) on X.
