@@ -196,6 +196,7 @@ These fields also belong to `provisioner` when `provider` is `boxd`.
 | `size` | `1x4`, `2x8`, `4x16`, or `8x32` | `2x8` | Required captured snapshot size, in vCPU × GiB. Preflight checks it; creation restores the captured size. |
 | `snapshot` | lowercase name, 1–63 characters | required | Ready snapshot containing the worker public key and attempt image. |
 | `isolated` | boolean | `true` | Excludes the in-machine boxd CLI, integrations, agent logins, and default private network. A snapshot's isolation is inherited even when this is false. |
+| `egress` | list of 1–256 host names, `*.` wildcards, IPv4 addresses, or CIDR ranges, or `[none]` | unrestricted | Complete egress allowlist for each machine. boxd admits HTTP and HTTPS by host name and other traffic by address. `none` admits nothing and must be the only entry. Omit the field for unrestricted egress. |
 | `tailnet.gateway_address` | IPv4 address in `100.64.0.0/10` | required with a gateway | Gateway address reachable through Tailscale. |
 | `tailnet.client_id_env` | environment variable name | required with a gateway | Tailscale OAuth client ID variable. |
 | `tailnet.client_secret_env` | environment variable name | required with a gateway | OAuth secret variable with `auth_keys` write access for `tag:usine-attempt`. |
@@ -212,6 +213,8 @@ provisioner:
 ```
 
 boxd requires `identity_file`, whose public key is baked into the snapshot's `/home/boxd/.ssh/authorized_keys`. The driver reaches three endpoints: it exchanges the API key for a session over HTTPS at `app.boxd.sh`, lists regions and reads account details over gRPC at `boxd.sh:9443`, and sends machine and snapshot calls to the API endpoint that `ListRegions` lists for the region. Allow egress to all three. If boxd doesn't answer while the driver connects to the region, the attempt waits and tries again. The driver pins its SSH proxy key per machine. Auto-hibernate and auto-suspend are disabled on creation and reuse. A gateway requires `tailnet`; tailnet settings are refused without a gateway. Snapshots retain the attempt image, so rebuild after an upgrade changes the image. See [Add a boxd worker](/guides/add-a-boxd-worker/).
+
+With `egress`, the driver replaces each restored machine's allowlist and waits one second for boxd to enforce it before it connects to the machine. It applies the list again when it reuses a machine; reusing a machine after you remove `egress` clears its allowlist. If boxd refuses the list or reports the machine unrestricted afterwards, the driver deletes the machine and retries creation. With a gateway, the list must include `*.tailscale.com`, and must not admit `github.com`, `api.github.com`, or the login hosts of a provider in `gateway.llm_providers`: `api.anthropic.com` and `platform.claude.com` for `anthropic-messages`, `chatgpt.com` and `auth.openai.com` for `openai-responses`. The gateway serves those at `git.<domain>` and `llm.<domain>`. usine refuses the configuration and names the host otherwise. A `*.` entry counts as admitting its domain in this check. See [Restrict egress](/guides/add-a-boxd-worker/#restrict-egress).
 
 ## Cloudflare connection
 

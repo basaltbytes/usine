@@ -7,7 +7,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 | `gateway.sh` | Creates and deletes the network, gateway VM, and firewall with `hcloud`; logs the gateway in to a tailnet; installs `@usine/gateway` from npm or packed tarballs; renders a worker's cloud-init; creates the orchestrator's server in the network and logs it in to the tailnet. |
 | `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, chrony, bastion sshd settings, Tailscale, Node.js, and the `usine-gateway` service. |
 | `gateway-nftables.conf` | The gateway's firewall rules. |
-| `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts and the harness login hosts. |
+| `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts and the harness login hosts. `../../boxd/egress.mjs` renders the same list as a boxd worker's `provisioner.egress`. |
 | `worker-cloud-init.yaml` | What a worker VM needs behind the gateway; `gateway.sh worker-user-data` sends it after the worker file of `../cloud-init.yaml`. |
 | `worker-nftables.conf` | A worker's firewall rules: the gateway only, and the metadata service for root. |
 

@@ -455,4 +455,4 @@ Loops with `outcome_labels` require a configured label added by a GitHub account
 
 Task statistics include `memoryKills`, `memoryKillAttempts`, and `repeatedMemoryKillAttempts` across attempts of tasks merged in the selected window. Successful attempts contribute when they recorded memory kills. Attempt views expose available kernel task names and host PIDs through `outOfMemory.processes`.
 
-SSH worker configuration resolves boxd API and tailnet credentials from named variables. Operator machine views expose boxd region, captured size, snapshot, and isolation settings with credential variable names only.
+SSH worker configuration resolves boxd API and tailnet credentials from named variables. Operator machine views expose boxd region, captured size, snapshot, isolation, and egress allowlist settings with credential variable names only.

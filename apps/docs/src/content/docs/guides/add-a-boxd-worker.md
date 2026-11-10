@@ -39,7 +39,32 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 5. For subscription credentials, select gateway `usine-gateway` and enable the provisioner's tailnet settings. Enter the gateway's Tailscale address and OAuth client variable names. The client needs `auth_keys` write access for `tag:usine-attempt`. The [Boat gateway guide](/guides/connect-boat-to-a-gateway/) describes the shared tailnet policy and gateway setup. Each machine joins with an ephemeral single-use key and leaves during cleanup. Package downloads use the machine's direct internet connection.
 
-   Without a gateway, set the Anthropic or OpenAI API-key variable names needed by the roster. Save the worker.
+   Without a gateway, set the Anthropic or OpenAI API-key variable names needed by the roster.
+
+6. Optionally, restrict each machine's egress; see [Restrict egress](#restrict-egress). Save the worker.
+
+## Restrict egress
+
+A restored boxd machine reaches the whole internet unless `provisioner.egress` lists what it may reach. The gateway's forward proxy enforces the same kind of list for Hetzner workers, so both come from one file: `infra/hetzner/gateway/egress-allowlist`, or the copy you maintain on the gateway at `/etc/usine-gateway/egress-allowlist`. Print it as a boxd allowlist from the usine source checkout:
+
+```sh
+node infra/boxd/egress.mjs                                      # the checked-in list
+node infra/boxd/egress.mjs /path/to/egress-allowlist            # a copy of the gateway's list
+```
+
+The script prints an `egress:` block for `provisioner`, with `*.tailscale.com` first. It refuses a rule with a port, which a boxd allowlist can't express. Paste the block under `provisioner`, or enter the entries in the worker form's **Egress allowlist** field, separated by commas. Leave the field empty for unrestricted egress.
+
+Remove the login hosts of each provider whose credential the gateway holds: `api.anthropic.com` and `platform.claude.com` for `anthropic-messages`, `chatgpt.com` and `auth.openai.com` for `openai-responses`. Attempts reach those providers at `llm.<domain>`, and a direct connection would carry the caller token. usine refuses a configuration that admits them, or `github.com` or `api.github.com`, and names the host.
+
+What each entry is for:
+
+- **Tailscale.** `*.tailscale.com` admits the coordination server that the machine joins through and the DERP relay servers. Git and model traffic to the gateway travels inside the tailnet's WireGuard tunnel, so the gateway's tailnet address needs no entry. Without an entry for the gateway's public IPv4 address, boxd refuses direct WireGuard packets to it, and tailnet traffic goes through a DERP relay. Add that address to let the machine connect to the gateway directly.
+- **Packages.** The package hosts that attempts download from over the machine's direct connection, and `ghcr.io` with `pkg-containers.githubusercontent.com`, from which preflight pulls an attempt image the snapshot lacks.
+- **Harness hosts.** A harness whose provider credential the gateway doesn't hold calls its provider directly with the key from `provisioner.api_keys`. Keep that provider's API host, `api.anthropic.com` or `api.openai.com`; the gateway's list doesn't include `api.openai.com`.
+
+usine applies the list right after boxd restores the machine, then waits one second, the time boxd states the list takes to come into force, before it connects to the machine or starts anything on it. Processes that the snapshot resumes, such as `tailscaled` and the container runtime, run without the list during that second. If boxd refuses the list or reports the machine's egress unrestricted afterwards, usine deletes the machine and retries creation later. A reused machine gets the current list, or none, when it's assigned to an attempt.
+
+Preflight logs the number of entries in `boxd provisioner verified`. If a restricted machine can't join the tailnet or reach the gateway, the error says that `provisioner.egress` restricts the machine.
 
 ## Check the result
 
