@@ -3,9 +3,14 @@ title: Overview
 description: Run coding agents on GitHub issues and pull requests with a self-hosted usine instance.
 ---
 
-import { LinkButton } from "@astrojs/starlight/components";
+import { Aside, LinkButton } from "@astrojs/starlight/components";
 
 usine runs coding agents on GitHub issues and pull requests in the repositories you register. You define loops that select the work, then approve and follow runs in a web UI.
+
+<Aside type="caution" title="Alpha software">
+  The configuration format, the CLI, and the `@usine/*` package APIs can change in any release. Back
+  up the instance folder and read the release notes before you upgrade.
+</Aside>
 
 Use usine when you want to repeat a repository task, such as implementing a labeled issue or fixing review findings, with instructions you control. An instance runs on your machine or server; agents can use Claude Code, Codex, or Pi.
 

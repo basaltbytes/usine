@@ -24,13 +24,13 @@ Success: the operator hands off issue-to-PR work and looks only where a run need
 
 ## Positioning
 
-- **Loops are the operator's files in git.** Each loop and agent is a Markdown file in the instance repo that the UI reads and writes; no behavior exists only in a database.
+- **Loops are the operator's.** The engine has no built-in loop. Loops and agents are stored configuration with a revision history, edited in the UI or the CLI, and exported to or imported from Markdown files.
 - **Agent-agnostic.** One orchestrator runs Claude Code, Codex, and Pi children under a Pi parent, with the operator's harness logins.
 - **Self-hosted.** The orchestrator runs on the operator's machine; attempts run on the local worker, exe.dev VMs, or SSH workers behind a gateway. Each instance pins its engine version in `package.json`. Licensed under the GNU AGPL-3.0.
 
 ## Operating Context
 
-- **Instance repo:** `usine.yaml` (registry, workers, lanes, settings), `loops/`, `agents/`, and a gitignored `.usine/` for runtime state and secrets.
+- **Instance folder:** `.usine/` holds the configuration database, runtime state, and secrets. `usine.yaml`, `agents/`, and `projects/<project>/loops/` are bootstrap, import, and export files.
 - **Process:** `usine up` runs in the foreground in the instance folder and prints the UI address; the operator keeps it alive with tmux, launchd, or systemd.
 - **GitHub:** a GitHub App per instance is the factory's identity. Polling is the truth; webhooks are hints. Loops usually hand off by swapping item labels.
 - **Web UI:** an overview at `/` (Needs attention, running attempts, stalled items with reasons, recent runs, worker slots); a board per project, where dragging a card to a label-backed lane writes labels; a run drawer with the outcome and actions; a run page with the task, event, and attempts beside the conversation; and a Configuration section showing the parsed instance, with loop pauses and reloads.
@@ -44,7 +44,7 @@ Success: the operator hands off issue-to-PR work and looks only where a run need
 - The run drawer links the run's pull request; there's no diff view.
 - Proposed and state-only lanes are read-only. Moves need lanes in `repos[].lanes`. usine never deletes a label.
 - No time or token limits apply unless set. A failed or canceled attempt keeps its work on a salvage branch or in a retained worktree.
-- Distribution is npm only: `pnpm create usine` and `usine up`. Packages are 0.x; APIs change without notice.
+- Distribution is npm only: a global `@usine/server` install or `npm create usine`, then `usine up`. usine is alpha; packages are 0.x and APIs change without notice.
 - Undecided: when outside operators get support, and ADR 0019's first-run onboarding UI.
 
 ## Brand Commitments
@@ -53,7 +53,7 @@ Success: the operator hands off issue-to-PR work and looks only where a run need
 - Voice: plain sentences that say what the product does. No taglines, slogans, or marketing cadence.
 - The web UI meets the category standard of Linear, the Vercel dashboard, and Raycast; usine's character shows only in a few precise details.
 - Factory references (bays, stations, the flow of work) come from floor plans and appear only where they inform. No industrial ornament such as hazard stripes.
-- No logo or wordmark exists yet.
+- The logo is the shaded U of cells in `apps/docs/src/assets/`. No wordmark exists.
 
 ## Evidence on Hand
 
@@ -66,5 +66,5 @@ Success: the operator hands off issue-to-PR work and looks only where a run need
 1. Organize around the work: projects, tasks, and runs, in the operator's vocabulary. Loops, agents, and workers are configuration.
 2. Show attention only where a run needs it. Needs attention and asks list every blocked run.
 3. Explain every outcome. A skipped, failed, or waiting run shows its typed reason and the data behind it.
-4. The operator's files are the truth: the UI round-trips through the instance repo and never invents configuration.
+4. Stored configuration is the truth: every change is a revision, and the UI never invents configuration.
 5. Never destroy work. Guards salvage unfinished attempts; destructive actions ask for confirmation.
