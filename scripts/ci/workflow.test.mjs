@@ -82,16 +82,20 @@ test("the server test tools install from a per-image cache before any apt mirror
   assert.match(setup.env.APT_OPTIONS, /Acquire::Retries=\d+/u);
   assert.match(setup.env.APT_OPTIONS, /Acquire::http::Timeout=\d+/u);
 
-  const install = ({ cacheHit, failedUpdates }) => {
+  // The apt-get stub mirrors real apt: a failed index fetch only warns and exits 0
+  // unless --error-on=any is set, and a missing package index fails the download.
+  const install = ({ cacheHit, failedUpdates, packagesIndexed = false }) => {
     const scratch = mkdtempSync(join(tmpdir(), "server-tools-"));
     try {
       const bin = join(scratch, "bin");
       const debs = join(scratch, "debs");
       const calls = join(scratch, "calls");
       const state = join(scratch, "failed-updates");
+      const lists = join(scratch, "lists");
       mkdirSync(bin);
       mkdirSync(debs);
       writeFileSync(state, "0");
+      writeFileSync(lists, "missing");
       if (cacheHit) writeFileSync(join(debs, "jq.deb"), "");
       const stub = (name, body) =>
         writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${calls}"\n${body}\n`, {
@@ -102,8 +106,17 @@ test("the server test tools install from a per-image cache before any apt mirror
         `case " $* " in
   *" update "*)
     failed=$(cat "${state}")
-    if [ "$failed" -lt ${failedUpdates} ]; then echo $((failed + 1)) > "${state}"; exit 100; fi ;;
-  *" --download-only "*) touch "${debs}/jq.deb" "${debs}/lsof.deb" ;;
+    if [ "$failed" -lt ${failedUpdates} ]; then
+      echo $((failed + 1)) > "${state}"
+      echo "W: Some index files failed to download." >&2
+      case " $* " in *" --error-on=any "*) exit 100 ;; esac
+      echo ${packagesIndexed ? "present" : "missing"} > "${lists}"
+    else
+      echo present > "${lists}"
+    fi ;;
+  *" --download-only "*)
+    if [ "$(cat "${lists}")" != present ]; then echo "E: Unable to locate package jq" >&2; exit 100; fi
+    touch "${debs}/jq.deb" "${debs}/lsof.deb" ;;
 esac`,
       );
       stub("dpkg", "");
@@ -133,14 +146,29 @@ esac`,
   );
   assert.ok(hit.log.some((call) => call.startsWith("dpkg -i") && call.endsWith("jq.deb")));
 
+  const updates = (log) => log.filter((call) => call.endsWith(" update"));
+
   const flakyMirror = install({ cacheHit: false, failedUpdates: 2 });
-  assert.equal(flakyMirror.status, 0);
-  assert.equal(flakyMirror.log.filter((call) => call.endsWith(" update")).length, 3);
+  assert.equal(flakyMirror.status, 0, flakyMirror.log.join("\n"));
+  assert.equal(updates(flakyMirror.log).length, 3);
+  assert.ok(
+    updates(flakyMirror.log)
+      .slice(0, 2)
+      .every((call) => call.includes(" --error-on=any ")),
+  );
   assert.ok(flakyMirror.log.some((call) => /--download-only.*\bjq lsof$/u.test(call)));
   assert.ok(flakyMirror.log.at(-1).startsWith("dpkg -i"));
 
+  // A source that stays down (security.ubuntu.com) while the main archive serves jq and lsof.
+  const partialMirror = install({ cacheHit: false, failedUpdates: 3, packagesIndexed: true });
+  assert.equal(partialMirror.status, 0, partialMirror.log.join("\n"));
+  assert.equal(updates(partialMirror.log).length, 3);
+  assert.ok(!updates(partialMirror.log).at(-1).includes("--error-on=any"));
+  assert.ok(partialMirror.log.at(-1).startsWith("dpkg -i"));
+
   const downMirror = install({ cacheHit: false, failedUpdates: 3 });
   assert.notEqual(downMirror.status, 0);
+  assert.equal(updates(downMirror.log).length, 3);
   assert.ok(downMirror.log.every((call) => !call.startsWith("dpkg")));
 });
 

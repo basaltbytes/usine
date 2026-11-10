@@ -116,13 +116,19 @@ jobs:
         run: |
           if [ "$CACHE_HIT" != true ]; then
             mkdir -p "$DEBS/partial"
-            attempt=1
-            until apt-get $APT_OPTIONS update; do
+            # apt-get update exits 0 when an index fails to download, so earlier
+            # attempts use --error-on=any to retry. The last attempt accepts partial
+            # indexes and lets the download decide whether jq and lsof resolve.
+            for attempt in 1 2 3; do
+              strict=--error-on=any
+              [ "$attempt" -lt 3 ] || strict=
+              if apt-get $APT_OPTIONS $strict update &&
+                apt-get $APT_OPTIONS install -y --download-only --no-install-recommends -o Dir::Cache::archives="$DEBS" jq lsof; then
+                break
+              fi
               [ "$attempt" -lt 3 ] || exit 1
-              attempt=$((attempt + 1))
-              sleep 10
+              sleep 15
             done
-            apt-get $APT_OPTIONS install -y --download-only --no-install-recommends -o Dir::Cache::archives="$DEBS" jq lsof
           fi
           dpkg -i "$DEBS"/*.deb
       - name: Save server test tools
