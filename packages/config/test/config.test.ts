@@ -493,6 +493,82 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("decodes a boxd egress allowlist and refuses lists that bypass the gateway", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const parse = (egress: ReadonlyArray<string>, llmProviders = "[]") =>
+        parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          `version: 1
+repos: []
+workers:
+  - name: boxd-pool
+    kind: ssh
+    root: /home/boxd/.usine
+    identity_file: ~/.ssh/usine_worker
+    gateway: { domain: gw.test, destination: gateway, admin_token_env: GW_TOKEN, llm_providers: ${llmProviders} }
+    provisioner:
+      provider: boxd
+      token_env: BOXD_API_KEY
+      snapshot: usine-attempt
+      tailnet: { gateway_address: 100.64.0.2, client_id_env: TS_ID, client_secret_env: TS_SECRET }
+${egress.join("\n")}
+`,
+        );
+      const egressOf = (config: UsineConfig): ReadonlyArray<string> | null => {
+        const worker = config.workers[0];
+        assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
+        assert(worker.provisioner.value.provider === "boxd");
+        return Option.getOrNull(worker.provisioner.value.egress);
+      };
+      const unrestricted = yield* parse([]);
+      assert.isNull(egressOf(unrestricted));
+      const allowed = yield* parse([
+        "      egress: ['*.tailscale.com', registry.npmjs.org, 203.0.113.7, 198.51.100.0/24, platform.claude.com]",
+      ]);
+      assert.deepStrictEqual(egressOf(allowed), [
+        "*.tailscale.com",
+        "registry.npmjs.org",
+        "203.0.113.7",
+        "198.51.100.0/24",
+        "platform.claude.com",
+      ]);
+      const encoded = yield* Schema.encodeEffect(UsineConfig)(allowed);
+      const roundTripped = yield* Schema.decodeEffect(UsineConfig)(encoded);
+      assert.deepStrictEqual(roundTripped, allowed);
+
+      const refusals: ReadonlyArray<readonly [string, string, string]> = [
+        ["[registry.npmjs.org]", "[]", "without *.tailscale.com"],
+        ["['*.tailscale.com', '*.github.com']", "[]", "admitting github.com"],
+        ["['*.tailscale.com', api.github.com]", "[]", "admitting api.github.com"],
+        [
+          "['*.tailscale.com', platform.claude.com]",
+          "[anthropic-messages]",
+          "admitting platform.claude.com, which the gateway serves at llm.gw.test",
+        ],
+        ["['*.tailscale.com', '*.openai.com']", "[openai]", "admitting auth.openai.com"],
+      ];
+      for (const [egress, llmProviders, expected] of refusals) {
+        const failure = yield* parse([`      egress: ${egress}`], llmProviders).pipe(Effect.flip);
+        assert.include(failure.message, expected);
+      }
+      for (const invalid of [
+        "[]",
+        "[none, registry.npmjs.org]",
+        "[registry.npmjs.org, registry.npmjs.org]",
+        "[Registry.npmjs.org]",
+        "[localhost]",
+        "[300.1.1.1]",
+        "[198.51.100.0/33]",
+        "['https://registry.npmjs.org']",
+        "['registry.npmjs.org:443']",
+      ]) {
+        const result = yield* parse([`      egress: ${invalid}`]).pipe(Effect.result);
+        assert.isTrue(Result.isFailure(result), invalid);
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses a provisioned ssh Worker's Hetzner and Boat settings with their defaults", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

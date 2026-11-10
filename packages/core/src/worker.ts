@@ -351,6 +351,53 @@ export const BoxdSnapshotName = Schema.String.check(
 ).pipe(Schema.brand("BoxdSnapshotName"));
 export type BoxdSnapshotName = typeof BoxdSnapshotName.Type;
 
+/**
+ * An entry of a boxd machine's egress allowlist: a lowercase ASCII host name such as
+ * `registry.npmjs.org`, `*.` and a domain for its subdomains, an IPv4 address or CIDR range, or
+ * `none`, which admits nothing. boxd admits HTTP and HTTPS by host name and other traffic by
+ * address.
+ */
+export const BoxdEgressEntry = Schema.String.check(
+  Schema.isPattern(
+    /^(?:none|(?:\*\.)?(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?|(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\/(?:3[0-2]|[12]?[0-9]))?)$/u,
+    {
+      message:
+        "Expected a lowercase host name with a dot, *. and a domain, an IPv4 address or CIDR range, or none",
+    },
+  ),
+).pipe(Schema.brand("BoxdEgressEntry"));
+export type BoxdEgressEntry = typeof BoxdEgressEntry.Type;
+
+/**
+ * A boxd machine's complete egress allowlist: 1 to 256 unique entries, where `none` must be the
+ * only entry.
+ */
+export const BoxdEgressAllowlist = Schema.Array(BoxdEgressEntry).check(
+  Schema.isMinLength(1, {
+    message: "Expected at least one entry; use none to admit nothing, or omit egress",
+  }),
+  Schema.isMaxLength(256),
+  Schema.isUnique(),
+  Schema.makeFilter(
+    (entries: ReadonlyArray<string>) =>
+      entries.length === 1 ||
+      !entries.includes("none") ||
+      "Expected none as the only entry, since boxd ignores it next to other entries",
+  ),
+);
+export type BoxdEgressAllowlist = typeof BoxdEgressAllowlist.Type;
+
+/**
+ * Returns whether `entries` admits `host`. A `*.` entry is treated as admitting its domain too,
+ * so a check for a host that must stay unreachable errs on the side of refusing the list.
+ */
+export const boxdEgressAdmits = (entries: ReadonlyArray<string>, host: string): boolean =>
+  entries.some((entry) =>
+    entry.startsWith("*.")
+      ? host === entry.slice(2) || host.endsWith(entry.slice(1))
+      : entry === host,
+  );
+
 /** A Tailscale IPv4 address in 100.64.0.0/10. */
 export const TailnetAddress = Schema.String.check(
   Schema.isPattern(

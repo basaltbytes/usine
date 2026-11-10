@@ -1,3 +1,4 @@
+import { catalog } from "@usine/agents/harness";
 import { RoleBinding } from "@usine/core/access";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
 import { Effort, ModelId } from "@usine/core/agent/brain";
@@ -11,6 +12,8 @@ import {
   BoxdSize,
   BoxdRegion,
   BoxdSnapshotName,
+  BoxdEgressAllowlist,
+  boxdEgressAdmits,
   BoatSnapshotName,
   TailnetAddress,
   CloudflareImageName,
@@ -324,6 +327,11 @@ export class BoxdProvisioner extends Schema.Class<
   size: BoxdSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("2x8"))),
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
+  /**
+   * The complete egress allowlist each machine gets before usine connects to it, or `None` to
+   * leave egress unrestricted.
+   */
+  egress: Schema.OptionFromOptionalKey(BoxdEgressAllowlist),
   tailnet: ProvisionerTailnetFromYaml,
   apiKeys: ProviderApiKeysFromYaml,
   timings: ProvisionerTimingsFromYaml,
@@ -405,6 +413,38 @@ export class SshWorker extends Schema.Class<
   ),
 }) {}
 
+/** The boxd egress entry that admits Tailscale's coordination and DERP relay servers. */
+const TAILSCALE_EGRESS = "*.tailscale.com";
+/** GitHub hosts that a machine behind a gateway reaches only at `git.<domain>`. */
+const GITHUB_HOSTS = ["github.com", "api.github.com"];
+
+/**
+ * Returns why a boxd egress allowlist conflicts with the worker's gateway, or `undefined` if it
+ * doesn't. Behind a gateway, the allowlist must admit Tailscale's coordination and DERP relay
+ * servers, and must not admit a host the gateway serves: GitHub, or the login hosts of a provider
+ * whose credential the gateway holds, which would receive the caller token.
+ */
+const boxdEgressConflict = (worker: SshWorker, egress: BoxdEgressAllowlist): string | undefined => {
+  if (Option.isNone(worker.gateway)) return undefined;
+  if (!egress.some((entry) => entry === TAILSCALE_EGRESS))
+    return `SSH worker "${worker.name}" restricts provisioner.egress without ${TAILSCALE_EGRESS}, which each machine needs to join the tailnet through Tailscale's coordination and DERP relay servers`;
+  const { domain, llmProviders } = worker.gateway.value;
+  const served = [
+    ...GITHUB_HOSTS.map((host) => ({ host, at: `git.${domain}` })),
+    ...catalog.descriptors.flatMap(({ worker: requirements }) =>
+      Option.toArray(requirements.credential).flatMap((credential) =>
+        llmProviders.includes(credential.protocol)
+          ? credential.hosts.map((host) => ({ host, at: `llm.${domain}` }))
+          : [],
+      ),
+    ),
+  ];
+  const admitted = served.find(({ host }) => boxdEgressAdmits(egress, host));
+  return admitted === undefined
+    ? undefined
+    : `SSH worker "${worker.name}" has provisioner.egress admitting ${admitted.host}, which the gateway serves at ${admitted.at}; remove it so attempts reach it only through the gateway`;
+};
+
 /** Returns the reason an SSH worker's machine settings conflict, or `undefined` if they don't. */
 const sshMachineConflict = (worker: SshWorker): string | undefined => {
   const provisioner = Option.getOrUndefined(worker.provisioner);
@@ -432,6 +472,10 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
         return `SSH worker "${worker.name}" needs provisioner.tailnet to use a boxd gateway`;
       if (Option.isSome(provisioner.tailnet) && Option.isNone(worker.gateway))
         return `SSH worker "${worker.name}" sets provisioner.tailnet without a gateway`;
+      if (Option.isSome(provisioner.egress)) {
+        const conflict = boxdEgressConflict(worker, provisioner.egress.value);
+        if (conflict !== undefined) return conflict;
+      }
       return Option.isNone(worker.identityFile)
         ? `SSH worker "${worker.name}" has a boxd provisioner and needs identity_file, whose public key must be baked into the snapshot`
         : undefined;
