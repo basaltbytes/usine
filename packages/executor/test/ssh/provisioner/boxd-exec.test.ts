@@ -6,12 +6,14 @@ import {
   Context,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Predicate,
   Redacted,
   Result,
   Schema,
+  Scope,
   Stream,
 } from "effect";
 import { connect, createServer, type Socket } from "node:net";
@@ -299,6 +301,70 @@ describe("BoxdExec", () => {
       assert.isTrue(signal.aborted);
       assert.isAbove(server.sessions.size, 0);
       for (const session of server.sessions) assert.isFalse(session.closed || session.destroyed);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "runs every call of one layer over one HTTP/2 connection, and reconnects after it closes",
+    () =>
+      Effect.gen(function* () {
+        const server = yield* fake();
+        const services = yield* Layer.build(boxdExecLayer(server.url, Redacted.make(KEY)));
+        const exec = Context.get(services, BoxdExec);
+        const exitCodeOf = (command: string) =>
+          Effect.gen(function* () {
+            const execution = yield* exec.exec(MACHINE, command, Stream.empty);
+            yield* Stream.runDrain(Stream.merge(execution.stdout, execution.stderr));
+            return yield* execution.exitCode;
+          }).pipe(Effect.scoped);
+
+        const sequential = yield* Effect.all([
+          exitCodeOf("true"),
+          exitCodeOf("true"),
+          exitCodeOf("true"),
+        ]);
+        assert.deepStrictEqual(sequential, [0, 0, 0]);
+        const concurrent = yield* Effect.all([exitCodeOf("exit 3"), exitCodeOf("exit 4")], {
+          concurrency: "unbounded",
+        });
+        assert.deepStrictEqual(concurrent, [3, 4]);
+        assert.lengthOf(server.calls, 5);
+        assert.strictEqual(server.sessions.size, 1);
+
+        for (const session of server.sessions) session.destroy();
+        yield* Effect.sleep("100 millis");
+        const reconnected = yield* exitCodeOf("exit 5");
+        assert.strictEqual(reconnected, 5);
+        assert.lengthOf(server.calls, 6);
+        assert.strictEqual(server.sessions.size, 2);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("fails the exit code of a call whose scope closes before the command exits", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const server = yield* fake(() =>
+        Stream.fromEffect(Deferred.succeed(started, undefined)).pipe(
+          Stream.flatMap(() => Stream.never),
+        ),
+      );
+      const services = yield* Layer.build(boxdExecLayer(server.url, Redacted.make(KEY)));
+      const exec = Context.get(services, BoxdExec);
+      const scope = yield* Scope.make();
+      const execution = yield* exec
+        .exec(MACHINE, "sleep 600", Stream.empty)
+        .pipe(Scope.provide(scope));
+      const awaiter = yield* Effect.forkChild(Effect.flip(execution.exitCode));
+      yield* Deferred.await(started);
+      yield* Scope.close(scope, Exit.void);
+      const failure = yield* Fiber.join(awaiter).pipe(Effect.timeout("2 seconds"));
+
+      assert(failure._tag === "BoxdCallError");
+      assert.strictEqual(failure.code, "CANCELLED");
+      assert.strictEqual(failure.message, "the call's scope closed before the command exited");
+      yield* Stream.runDrain(Stream.merge(execution.stdout, execution.stderr)).pipe(
+        Effect.timeout("2 seconds"),
+      );
     }).pipe(Effect.scoped),
   );
 

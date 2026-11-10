@@ -1,7 +1,18 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
-import { Deferred, Effect, Exit, Option, Redacted, Scope, Stream } from "effect";
+import {
+  type Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Option,
+  Queue,
+  Redacted,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { ExecShell, type ExecTransport, HostUnreachable } from "../../src/child-host/child-host.ts";
 import { hostOutput, hostSpawn } from "../../src/child-host/command.ts";
@@ -31,6 +42,23 @@ const localTransport = Effect.gen(function* () {
   };
   return { transport, lines };
 });
+
+/** A frame that the process owner relay writes to its stdout. */
+const encodeOwnerFrame = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Finite, Schema.Boolean])),
+  ),
+);
+
+/** Decodes a line of the relay's stdin: an input frame, a heartbeat, or the environment block. */
+const decodeInputFrame = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      data: Schema.optionalKey(Schema.String),
+      eof: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+);
 
 const lost = HostUnreachable.make({ destination: "vm-1", message: "the stream was reset" });
 
@@ -116,6 +144,83 @@ describe("exec shell", () => {
       const stillRunning = yield* handle.isRunning;
       assert.isFalse(stillRunning);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live(
+    "keeps the process owner's stdin open after a finite input ends, so its exit event arrives",
+    () =>
+      Effect.gen(function* () {
+        let stdinEnded = false;
+        // Answers like the owner relay, which exits without an exit event when its stdin closes.
+        const transport: ExecTransport = {
+          run: (line, stdin) =>
+            Effect.gen(function* () {
+              if (line.includes("'stop'") || line.includes("'remove'"))
+                return { stdout: Stream.empty, stderr: Stream.empty, exitCode: Effect.succeed(0) };
+              const frames = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+              const emit = (frame: Readonly<Record<string, string | number | boolean>>) =>
+                encodeOwnerFrame(frame).pipe(
+                  Effect.orDie,
+                  Effect.flatMap((line) => Queue.offer(frames, encoder.encode(`${line}\n`))),
+                );
+              let offset = 0;
+              yield* emit({ offset, ready: true, sequence: 0, retained: false });
+              yield* stdin.pipe(
+                Stream.decodeText(),
+                Stream.splitLines,
+                Stream.runForEach((text) =>
+                  decodeInputFrame(text).pipe(
+                    Effect.orDie,
+                    Effect.flatMap((frame) => {
+                      if (frame.data !== undefined) {
+                        offset += Buffer.from(frame.data, "base64").length;
+                        return emit({ offset, stdout: frame.data });
+                      }
+                      if (frame.eof !== true) return Effect.void;
+                      return Effect.sleep("200 millis").pipe(
+                        Effect.andThen(emit({ offset, exitCode: 0, stderrTail: "" })),
+                        Effect.andThen(Queue.end(frames)),
+                        Effect.forkScoped,
+                      );
+                    }),
+                  ),
+                ),
+                Effect.andThen(
+                  Effect.sync(() => {
+                    stdinEnded = true;
+                  }),
+                ),
+                Effect.andThen(Queue.end(frames)),
+                Effect.forkScoped,
+              );
+              return {
+                stdout: Stream.fromQueue(frames),
+                stderr: Stream.empty,
+                exitCode: Effect.succeed(0),
+              };
+            }),
+        };
+        const scope = yield* Scope.make();
+        const owner = yield* startChildProcess(
+          {
+            host: ExecShell.make({ transport, destination: "vm-1" }),
+            cwd: "/worktree",
+            environment: {},
+            sessionId: Option.some(AgentSessionId.make("attempt:child:1")),
+          },
+          { command: "cat", args: [], cwd: "/worktree" },
+          Stream.make(encoder.encode("hello")),
+        ).pipe(
+          Effect.provideService(ChildSessionLifecycle, { isStopping: Effect.succeed(false) }),
+          Scope.provide(scope),
+        );
+        const received = yield* owner.stdout.pipe(Stream.decodeText(), Stream.mkString);
+        const exited = yield* owner.exit.pipe(Effect.timeout("5 seconds"));
+        assert.strictEqual(received, "hello");
+        assert.strictEqual(exited.exitCode, 0);
+        assert.isFalse(stdinEnded, "the owner's stdin stayed open after the input ended");
+        yield* Scope.close(scope, Exit.void);
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live("reattaches the process owner after the transport loses it", () =>

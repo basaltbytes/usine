@@ -31,7 +31,7 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 ## Create the worker
 
-1. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, and the desired concurrency. Leave the identity file empty: usine refuses one for a boxd worker. Select provisioner `boxd`, token variable `BOXD_API_KEY`, region `fra` or the id of the snapshot's region, size `2x8`, and snapshot `usine-attempt`. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
+1. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, and the desired concurrency. Leave the identity file empty: a boxd worker runs its commands through boxd's `Exec` API with the API key. A boxd worker that sets one loads and ignores it, and its preflight logs a warning that names the file. Select provisioner `boxd`, token variable `BOXD_API_KEY`, region `fra` or the id of the snapshot's region, size `2x8`, and snapshot `usine-attempt`. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
 
 2. For subscription credentials, select gateway `usine-gateway` and enable the provisioner's tailnet settings. Enter the gateway's Tailscale address and OAuth client variable names. The client needs `auth_keys` write access for `tag:usine-attempt`. The [Boat gateway guide](/guides/connect-boat-to-a-gateway/) describes the shared tailnet policy and gateway setup. Each machine joins with an ephemeral single-use key and leaves during cleanup. Package downloads use the machine's direct internet connection.
 

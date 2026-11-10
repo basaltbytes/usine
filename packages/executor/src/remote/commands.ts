@@ -2,11 +2,13 @@ import {
   ExecShell,
   type HostInvocation,
   remoteCommandLine,
+  HostUnreachable,
   type RemoteHost,
   remoteInput,
   RemoteShell,
   type SshCommand,
   sshArguments,
+  SSH_FAILURE,
 } from "@usine/agents/child-host";
 import type { SshDestination } from "@usine/core/worker";
 import { Effect, Redacted, Stream } from "effect";
@@ -41,9 +43,10 @@ export interface RemoteCommands {
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, ExecutorOperationError>;
   /**
-   * Runs a remote command and returns its exit code and output without checking the exit code. On
-   * an `ExecShell`, a transport failure fails with an `ExecutorOperationError` whose cause is
-   * `HostUnreachable`; an SSH client reports one as exit code `SSH_FAILURE`.
+   * Runs a remote command and returns its exit code and output without checking the exit code.
+   * Fails with an `ExecutorOperationError` whose cause is `HostUnreachable` if the host can't run
+   * the command or loses it: an exec transport failure, or an SSH client that exits with
+   * `SSH_FAILURE`.
    */
   readonly inspect: (
     operation: ExecutorOperation,
@@ -173,13 +176,18 @@ export const remoteCommandsFor = Effect.gen(function* () {
     return yield* requireSuccess(operation, host, command, args, result);
   });
 
-  /** Runs `invocation` on `shell` with `input` on stdin and collects its output. */
+  /**
+   * Runs `invocation` on `shell` with `input` on stdin and collects its output. An SSH client's
+   * `SSH_FAILURE` exit fails like an exec transport failure, with an `ExecutorOperationError` whose
+   * cause is `HostUnreachable`; `scrub` is applied to the client's message first.
+   */
   const execute = Effect.fn("RemoteExecutor.execute")(function* (
     operation: ExecutorOperation,
     shell: RemoteHost,
     invocation: HostInvocation & { readonly command: string },
     input: Stream.Stream<Uint8Array>,
     maxOutputBytes?: number,
+    scrub: (text: string) => string = (text) => text,
   ) {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, operation });
     if (shell._tag === "ExecShell")
@@ -189,7 +197,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
         shell.transport.run(remoteCommandLine(shell, invocation), remoteInput(shell, input)),
         maxOutputBytes,
       );
-    return yield* collectCommand(
+    const result = yield* collectCommand(
       spawner,
       operation,
       shell.ssh.command,
@@ -197,6 +205,23 @@ export const remoteCommandsFor = Effect.gen(function* () {
       { env: { ...shell.sshEnvironment }, extendEnv: false, stdin: remoteInput(shell, input) },
       maxOutputBytes,
     );
+    if (result.exitCode !== SSH_FAILURE) return result;
+    const cause = HostUnreachable.make({
+      destination: shell.destination,
+      message:
+        scrub(result.stderr).trim() || `${shell.ssh.command} exited with code ${SSH_FAILURE}`,
+    });
+    yield* Effect.logWarning("The SSH client couldn't reach the host or lost the command", {
+      operation,
+      host: shell.destination,
+      command: invocation.command,
+      message: cause.message,
+    });
+    return yield* ExecutorOperationError.make({
+      operation,
+      message: `Can't reach ${cause.destination} to run ${invocation.command}: ${cause.message}`,
+      cause,
+    });
   });
 
   /** Returns the program and arguments to name in an error about `invocation` on `shell`. */
@@ -221,14 +246,15 @@ export const remoteCommandsFor = Effect.gen(function* () {
     context: RemoteContext = {},
   ) {
     const invocation = { cwd: context.cwd, environment: context.environment, command, args };
+    const scrub = context.scrub ?? ((text: string) => text);
     const result = yield* execute(
       operation,
       shell,
       invocation,
       Stream.empty,
       context.maxOutputBytes,
+      scrub,
     );
-    const scrub = context.scrub ?? ((text: string) => text);
     const failed = described(shell, invocation);
     return yield* requireSuccess(operation, shell.destination, failed.command, failed.args, {
       ...result,
@@ -245,14 +271,16 @@ export const remoteCommandsFor = Effect.gen(function* () {
     input: Redacted.Redacted<string>,
   ) {
     const invocation = { command, args };
+    const secret = Redacted.value(input);
+    const scrub = (text: string) => (secret === "" ? text : text.replaceAll(secret, "[REDACTED]"));
     const result = yield* execute(
       operation,
       shell,
       invocation,
-      Stream.make(encoder.encode(Redacted.value(input))),
+      Stream.make(encoder.encode(secret)),
+      undefined,
+      scrub,
     );
-    const secret = Redacted.value(input);
-    const scrub = (text: string) => (secret === "" ? text : text.replaceAll(secret, "[REDACTED]"));
     const failed = described(shell, invocation);
     return yield* requireSuccess(operation, shell.destination, failed.command, failed.args, {
       ...result,

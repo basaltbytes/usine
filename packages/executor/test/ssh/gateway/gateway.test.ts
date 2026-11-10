@@ -1,7 +1,7 @@
 import { catalog } from "@usine/agents/harness";
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { RemoteShell } from "@usine/agents/child-host";
+import { HostUnreachable, RemoteShell } from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -848,8 +848,11 @@ describe("SSH Worker behind a Gateway", () => {
         const disconnected = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(disconnected._tag === "ExecutorOperationError", disconnected._tag);
         assert.strictEqual(disconnected.operation, "preflight");
-        assert.strictEqual(disconnected.message, "Can't reach usine@203.0.113.7 to run sh");
-        assert.instanceOf(disconnected.cause, Error);
+        assert.strictEqual(
+          disconnected.message,
+          "Can't reach usine@203.0.113.7 to run sh: Connection to 203.0.113.7 closed by remote host.",
+        );
+        assert(Schema.is(HostUnreachable)(disconnected.cause));
         assert.strictEqual(
           disconnected.cause.message,
           "Connection to 203.0.113.7 closed by remote host.",

@@ -1,6 +1,6 @@
 import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
-import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
+import { CHILD_KILL_SCRIPT, HostUnreachable, RemoteShell } from "@usine/agents/child-host";
 import type { ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { completes, type StubParent } from "@usine/durable/testing";
@@ -97,22 +97,34 @@ describe("rootless Podman", () => {
     },
   );
 
-  it.effect.each([1, 125, 255])(
-    "preserves image inspection failure with exit code %s",
-    (exitCode) => {
-      const machine = podmanMachine();
-      machine.state.imageInspectFailure = {
-        exitCode,
-        stderr: "Error: opening image storage: permission denied",
-      };
-      return Effect.gen(function* () {
-        const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
-        assert.strictEqual(error._tag, "WorkerCapabilityError");
-        assert.include(error.message, "Can't inspect the attempt image");
-        assert(!machine.state.calls.some(({ line }) => line.startsWith("exec 'podman' 'pull'")));
-      }).pipe(Effect.provide(runtime(machine, mintingProvider())));
-    },
-  );
+  it.effect.each([1, 125])("preserves image inspection failure with exit code %s", (exitCode) => {
+    const machine = podmanMachine();
+    machine.state.imageInspectFailure = {
+      exitCode,
+      stderr: "Error: opening image storage: permission denied",
+    };
+    return Effect.gen(function* () {
+      const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "WorkerCapabilityError");
+      assert.include(error.message, "Can't inspect the attempt image");
+      assert(!machine.state.calls.some(({ line }) => line.startsWith("exec 'podman' 'pull'")));
+    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+  });
+
+  it.effect("reports an SSH failure during image inspection as an unreachable host", () => {
+    const machine = podmanMachine();
+    machine.state.imageInspectFailure = {
+      exitCode: 255,
+      stderr: "Connection to 203.0.113.7 closed by remote host.",
+    };
+    return Effect.gen(function* () {
+      const error = yield* (yield* Executor).preflight(WORKER, [], 1).pipe(Effect.flip);
+      assert(error._tag === "ExecutorOperationError", error._tag);
+      assert(Schema.is(HostUnreachable)(error.cause));
+      assert.strictEqual(error.cause.message, "Connection to 203.0.113.7 closed by remote host.");
+      assert(!machine.state.calls.some(({ line }) => line.startsWith("exec 'podman' 'pull'")));
+    }).pipe(Effect.provide(runtime(machine, mintingProvider())));
+  });
 
   it.effect("runs preflight through exec and reports runtime evidence", () => {
     const machine = podmanMachine();

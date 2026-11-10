@@ -4,7 +4,6 @@ import {
   type HarnessCatalog,
   type HarnessCredential,
 } from "@usine/agents/harness";
-import { SSH_FAILURE } from "@usine/agents/child-host";
 import { unreachableHost } from "../../child-command.ts";
 import { machineShellOf, type RemoteCommands } from "../../remote/commands.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
@@ -210,11 +209,7 @@ export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function
     const answered = yield* commands
       .inspect("prepare", shell, "sh", ["-c", READY_SCRIPT, "sh", machine.address.root])
       .pipe(
-        Effect.map((result) =>
-          shell._tag === "RemoteShell" && result.exitCode === SSH_FAILURE
-            ? Result.fail(result.stderr.trim())
-            : Result.succeed(result),
-        ),
+        Effect.map((result) => Result.succeed(result)),
         Effect.catchIf(unreachableHost, (error) => Effect.succeed(Result.fail(error.message))),
       );
     if (Result.isSuccess(answered)) {

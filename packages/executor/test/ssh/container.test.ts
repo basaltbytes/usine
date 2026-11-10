@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
+import { CHILD_KILL_SCRIPT, HostUnreachable, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
@@ -25,6 +25,7 @@ import {
   capturedLogs,
   CapturedLog,
   CREDENTIALS,
+  DESTINATION,
   executorLayer,
   fails,
   fakeContainerId,
@@ -471,6 +472,33 @@ describe("SSH Worker with Docker", () => {
       );
     },
   );
+
+  it.effect("reports a machine that SSH can't reach while reading its resources", () => {
+    const machine = dockerMachine();
+    machine.state.resourcesDisconnect = true;
+    const address: SshWorkerAddress = {
+      ...ADDRESS,
+      container: { ...ADDRESS.container, cpus: Option.none(), pids: Option.none() },
+    };
+    return Effect.gen(function* () {
+      const error = yield* (yield* Executor)
+        .preflight(WORKER, [TEST_AGENT.brain], 1)
+        .pipe(Effect.flip);
+      assert(error._tag === "WorkerCapabilityError", error._tag);
+      assert.strictEqual(error.capability, "container");
+      assert.strictEqual(
+        error.message,
+        `Can't reach SSH worker "${WORKER}" at ${DESTINATION} to read its CPUs and memory`,
+      );
+      assert(Schema.is(HostUnreachable)(error.cause));
+      assert.strictEqual(error.cause.message, "Connection to 203.0.113.7 closed by remote host.");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        executorLayer(machine, mintingProvider(), address).pipe(Layer.provide(noGateway)),
+      ),
+    );
+  });
 
   it.effect(
     "mounts the Attempt's Codex home read-write when the Gateway holds the OpenAI credential, and removes it after the container",

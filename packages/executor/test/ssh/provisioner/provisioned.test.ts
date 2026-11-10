@@ -27,7 +27,17 @@ import {
   UpstreamBase,
 } from "@usine/gateway";
 import { TestClock } from "effect/testing";
-import { Deferred, Effect, Fiber, Option, Redacted, Schema, Layer, DateTime } from "effect";
+import {
+  DateTime,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Redacted,
+  Schedule,
+  Schema,
+} from "effect";
 import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { BOXD_ENDPOINT } from "./fake-boxd.ts";
@@ -1010,6 +1020,39 @@ describe("Provisioned SSH Worker", () => {
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
     },
   );
+
+  it.live("waits until a new boxd machine runs commands over Exec, then prepares it", () => {
+    const machine = fakeMachine();
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const machines = yield* WorkerMachines;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      machine.state.reachable = false;
+      yield* Effect.forkScoped(
+        Effect.sync(() => machine.state.refusedCalls).pipe(
+          Effect.repeat({
+            until: (refused) => refused >= 3,
+            schedule: Schedule.spaced("5 millis"),
+          }),
+          Effect.andThen(
+            Effect.sync(() => {
+              machine.state.reachable = true;
+            }),
+          ),
+        ),
+      );
+      const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+        TEST_AGENT.brain,
+      ]);
+      assert.isAtLeast(machine.state.refusedCalls, 3);
+      assert.isTrue(
+        machine.state.calls.some(({ command }) => command.args.at(-3) === grant.id),
+        "the machine ran its readiness check once it answered",
+      );
+      yield* machines.release(grant.hold);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
+  });
 
   it.live("warns at preflight that a boxd Worker ignores its identity_file", () => {
     const machine = fakeMachine();

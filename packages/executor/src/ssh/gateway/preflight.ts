@@ -3,12 +3,11 @@ import {
   type HarnessCredential,
   type HarnessDescriptor,
 } from "@usine/agents/harness";
-import { type RemoteHost, SSH_FAILURE } from "@usine/agents/child-host";
+import type { RemoteHost } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { GatewayCredentialKind, GatewayLlmProtocol, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
-import type { CommandResult } from "../../child-command.ts";
-import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts";
+import { WorkerCapabilityError } from "../../executor.ts";
 import type { HarnessProbe } from "../../harness-preflight.ts";
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
@@ -30,14 +29,6 @@ const REFUSED_WITHOUT_TOKEN = /^x-usine-gateway-refusal:\s*missing-caller-token\
 
 const gatewayGap = (worker: WorkerName, message: string, cause: unknown) =>
   WorkerCapabilityError.make({ worker, capability: "gateway", message, cause });
-
-/** Returns the error for an SSH transport failure, which isn't a capability gap. */
-const unreachable = (host: string, command: string, result: CommandResult) =>
-  ExecutorOperationError.make({
-    operation: "preflight",
-    message: `Can't reach ${host} to run ${command}`,
-    cause: new Error(result.stderr.trim() || `ssh exited with code ${SSH_FAILURE}`),
-  });
 
 /** Each provider's display name and the Gateway variables that set its credential. */
 const PROVIDER_CREDENTIALS = {
@@ -221,8 +212,6 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
     "sh",
     ...Object.entries(sent).flatMap(([name, value]) => [name, Redacted.value(value)]),
   ]);
-  if (received.exitCode === SSH_FAILURE)
-    return yield* unreachable(machine.shell.destination, "sh", received);
   const dropped =
     received.exitCode === 0
       ? received.stdout.split("\n").filter((name) => name !== "")
@@ -249,8 +238,6 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
     "-",
     `http://${gitHost}/`,
   ]);
-  if (probed.exitCode === SSH_FAILURE)
-    return yield* unreachable(machine.shell.destination, "curl", probed);
   if (probed.exitCode !== 0 || !REFUSED_WITHOUT_TOKEN.test(probed.stdout))
     return yield* gatewayGap(
       worker,
@@ -346,7 +333,6 @@ export const gatewayHarnessProbe = (
       proxy,
       ...hosts,
     ]);
-    if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, "curl", result);
     const answers = new Map(
       result.stdout.split("\n").flatMap((line) => {
         const match = LOGIN_HOST_ANSWER.exec(line.trim());

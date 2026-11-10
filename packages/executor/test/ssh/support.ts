@@ -155,6 +155,8 @@ interface FakeMachineState {
   /** The token in each credential directory on the machine, by path. */
   readonly credentials: Map<string, string>;
   reachable: boolean;
+  /** The commands refused because the machine wasn't reachable. */
+  refusedCalls: number;
   readonly closedSshEndpoints: Set<string>;
   /** Whether the machine accepts TCP but its SSH server never responds, so a new command neither runs nor fails. */
   stalled: boolean;
@@ -166,6 +168,8 @@ interface FakeMachineState {
   cpus: number;
   threadsMax: number;
   pidMax: number;
+  /** Whether the SSH connection drops while the machine's resources are read, so `ssh` exits 255. */
+  resourcesDisconnect: boolean;
   cacheExists: boolean;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
@@ -347,6 +351,7 @@ export const fakeMachine = () => {
     calls: [],
     credentials: new Map(),
     reachable: true,
+    refusedCalls: 0,
     closedSshEndpoints: new Set(),
     stalled: false,
     rootWritable: true,
@@ -384,6 +389,7 @@ export const fakeMachine = () => {
     pullError: undefined,
     imageOnMachine: true,
     imageInspectFailure: undefined,
+    resourcesDisconnect: false,
     imageId: "sha256:0123",
     pulledImageId: "sha256:0123",
     beforePull: Effect.void,
@@ -595,12 +601,14 @@ export const fakeMachine = () => {
         `ssh: connect to host ${host} port ${port}: Connection refused`,
       );
     if (state.stalled) return stalledHandle;
-    if (!state.reachable)
+    if (!state.reachable) {
+      state.refusedCalls += 1;
       return oneShotHandle(
         "",
         255,
         "ssh: connect to host 203.0.113.7 port 2222: Connection refused",
       );
+    }
     const docker = respondToDocker(line, input);
     if (docker !== undefined) return docker;
     if (line.includes("# usine-tailnet"))
@@ -669,6 +677,8 @@ export const fakeMachine = () => {
       return oneShotHandle("", state.rootWritable ? 0 : 1);
     if (line === "exec 'cat' '/proc/meminfo'")
       return oneShotHandle(meminfo(state.memoryGib, state.swapGib), 0);
+    if (line.includes("nproc") && state.resourcesDisconnect)
+      return oneShotHandle("", 255, "Connection to 203.0.113.7 closed by remote host.\n");
     if (line.includes("nproc"))
       return oneShotHandle(
         `${state.cpus}\n${state.threadsMax}\n${state.pidMax}\n${meminfo(state.memoryGib, state.swapGib)}`,
