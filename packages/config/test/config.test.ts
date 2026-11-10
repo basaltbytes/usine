@@ -567,6 +567,7 @@ ${egress.join("\n")}
         ["10.0.0.0/8", "10.0.0.0/8 overlaps the reserved range 10.0.0.0/8"],
         ["127.0.0.1", "127.0.0.1 overlaps the reserved range 127.0.0.0/8"],
         ["100.64.0.2", "100.64.0.2 overlaps the reserved range 100.64.0.0/10"],
+        ["100.0.0.0/8", "100.0.0.0/8 overlaps the reserved range 100.64.0.0/10"],
         ["0.0.0.0/0", "0.0.0.0/0 overlaps the reserved range 0.0.0.0/8"],
         ["172.20.1.1", "172.20.1.1 overlaps the reserved range 172.16.0.0/12"],
         ["192.168.1.0/24", "192.168.1.0/24 overlaps the reserved range 192.168.0.0/16"],
