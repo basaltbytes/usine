@@ -12,6 +12,7 @@ Manage workers in **Configuration > Workers**, or edit an existing worker with `
 | `name` | kebab-case string | required | Unique worker identity used by attempts and recovery. |
 | `kind` | `local`, `ssh`, `cloudflare`, or `exe.dev` | required | Executor adapter and applicable connection fields. |
 | `max_concurrent_attempts` | integer ≥ 1 | `1` | Simultaneous attempts, including machines being created by a provisioner. |
+| `paused` | boolean | `false` | When `true`, the worker takes no new attempts, and its running attempts finish. |
 
 Edit a local worker as one record:
 
@@ -20,6 +21,8 @@ name: local
 kind: local
 max_concurrent_attempts: 2
 ```
+
+A paused worker keeps its slots and preflight. The scheduler gives its free slots only to a run that reattaches an attempt that already runs there, and sends every other run to the next unpaused worker in `workers` order. Pausing or resuming a worker applies on reload without a restart or a preflight. While a worker is paused, its page, the **Workers** line on **Overview**, and **Needs attention** show it. Exports omit `paused: false`. See [Pause a worker](/guides/pause-a-worker/).
 
 Local children run as the orchestrator's Unix user and can read that user's credentials. Use local workers only for trusted agents. Cached clones, attempt worktrees, and Turbo outputs are under `.usine/workers/<name>/`. Children also share the user's pnpm store. Pi children require a local worker. Each child process and its tool commands receive the attempt base environment plus only that harness's configuration and credential wiring. Registering another harness does not add its variables to existing harnesses. The server rejects `exe.dev` workers at startup.
 

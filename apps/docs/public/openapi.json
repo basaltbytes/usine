@@ -41585,6 +41585,9 @@
           "slots": {
             "$ref": "#/components/schemas/_usine_orchestrator_WorkerSlotsViewEncoded"
           },
+          "paused": {
+            "type": "boolean"
+          },
           "upgradeWait": {
             "anyOf": [
               {
@@ -44524,6 +44527,9 @@
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
+          },
+          "paused": {
+            "type": "boolean"
           },
           "destination": {
             "anyOf": [
@@ -50495,6 +50501,9 @@
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
                 },
                 {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"
+                },
+                {
                   "$ref": "#/components/schemas/_usine_orchestrator_PoolLimitNeedEncoded"
                 }
               ]
@@ -50548,6 +50557,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
+                },
+                {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_PoolLimitNeedEncoded"
@@ -50620,6 +50632,30 @@
           "window",
           "usedPercent",
           "resetsAt"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_orchestrator_WorkerPausedNeedEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "WorkerPausedNeed"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "worker": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          }
+        },
+        "required": [
+          "_tag",
+          "id",
+          "worker"
         ],
         "additionalProperties": false
       },
@@ -51539,6 +51575,9 @@
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
                 },
                 {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"
+                },
+                {
                   "$ref": "#/components/schemas/_usine_orchestrator_PoolLimitNeedEncoded"
                 }
               ]
@@ -51592,6 +51631,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_WorkerQuotaNeedEncoded"
+                },
+                {
+                  "$ref": "#/components/schemas/_usine_orchestrator_WorkerPausedNeedEncoded"
                 },
                 {
                   "$ref": "#/components/schemas/_usine_orchestrator_PoolLimitNeedEncoded"
