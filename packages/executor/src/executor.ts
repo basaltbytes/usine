@@ -514,6 +514,7 @@ export class WorkerMachines extends Context.Service<
      * Reuses an eligible idle machine or creates one on `worker` for the persisted `attemptId`, labeled with the instance,
      * Worker, Run, and Attempt, and waits until it answers over SSH. The first machine after the configured
      * check interval also gets the preflight checks of `brains`, whose failure is a `WorkerCapabilityError`.
+     * A provider that refuses the creation request itself, which a retry repeats, also fails with one.
      * Call only before preparing the Attempt. A retry first deletes machines from its earlier failed creation.
      * Reused machines always get preflight. On failure or interruption, deletes the machine.
      */

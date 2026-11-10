@@ -484,6 +484,7 @@ describe("boxd driver", () => {
         ],
       );
       const duplicate = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
+      assert(duplicate._tag === "MachineUnavailableError");
       assert.strictEqual(duplicate.reason, "provider");
       assert.include(duplicate.message, "ALREADY_EXISTS");
     }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
@@ -704,12 +705,14 @@ describe("boxd driver", () => {
       const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }), "/keys/usine_boxd.pub");
       boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
       const refused = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
+      assert(refused._tag === "MachineUnavailableError");
       assert.strictEqual(refused.reason, "refused");
       assert.include(refused.message, "didn't apply provisioner.egress");
       assert.strictEqual(boxd.state.machines.size, 0);
       boxd.state.egressFails = Option.none();
       boxd.state.egressIgnored = true;
       const ignored = yield* driver.create("pool-bbbbbbbb", tags).pipe(Effect.flip);
+      assert(ignored._tag === "MachineUnavailableError");
       assert.strictEqual(ignored.reason, "provider");
       assert.include(ignored.message, "unrestricted egress");
       assert.strictEqual(boxd.state.machines.size, 0);
@@ -758,6 +761,7 @@ describe("boxd driver", () => {
     return Effect.gen(function* () {
       const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
       const failure = yield* driver.create("ignored", tags).pipe(Effect.flip);
+      assert(failure._tag === "MachineUnavailableError");
       assert.strictEqual(failure.reason, "unreachable");
       assert.strictEqual(boxd.state.machines.size, 0);
     }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
@@ -772,16 +776,37 @@ describe("boxd driver", () => {
         ["DEADLINE_EXCEEDED", "unreachable"],
         ["UNAUTHENTICATED", "refused"],
         ["PERMISSION_DENIED", "refused"],
-        ["INVALID_ARGUMENT", "refused"],
         ["INTERNAL", "provider"],
         ["ABORTED", "provider"],
       ]) {
         boxd.state.createFails = Option.some(code ?? "UNKNOWN");
-        assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, reason);
+        const failure = yield* driver.create("x", tags).pipe(Effect.flip);
+        assert(failure._tag === "MachineUnavailableError");
+        assert.strictEqual(failure.reason, reason);
       }
       boxd.state.createFails = Option.none();
       boxd.state.snapshot.status = "pending";
-      assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "provider");
+      const pending = yield* driver.create("x", tags).pipe(Effect.flip);
+      assert(pending._tag === "MachineUnavailableError");
+      assert.strictEqual(pending.reason, "provider");
+    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+  });
+  it.effect("reports a creation request that boxd refuses as invalid as a worker fault", () => {
+    const boxd = fakeBoxd();
+    boxd.state.reservedNames.add("live");
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings(), "/keys/usine_boxd.pub");
+      const reserved = yield* driver.create("live", tags).pipe(Effect.flip);
+      assert(reserved._tag === "WorkerCapabilityError");
+      assert.strictEqual(reserved.worker, WORKER);
+      assert.strictEqual(reserved.capability, "provider");
+      assert.include(reserved.message, `machine "live"`);
+      assert.include(reserved.message, "name 'live' is reserved");
+      assert.include(reserved.message, `rename worker "${WORKER}"`);
+      boxd.state.createFails = Option.some("INVALID_ARGUMENT");
+      const invalid = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
+      assert.strictEqual(invalid._tag, "WorkerCapabilityError");
+      assert.strictEqual(boxd.state.machines.size, 0);
     }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
   });
   it.effect(

@@ -254,6 +254,21 @@ export const boxdDriverFor = (
         entries: inEffect.length,
       });
     });
+    /**
+     * Explains a failed creation of machine `name`. A request that boxd refuses as invalid, such as
+     * a reserved name, fails the same way on retry, so it is a fault of the worker's configuration.
+     */
+    const creationError = (name: string, failure: BoxdCallError) =>
+      failure.operation === "createFromSnapshot" && failure.code === "INVALID_ARGUMENT"
+        ? capability(
+            `boxd refused to create machine "${name}" from snapshot "${settings.snapshot}": ${failure.message}. If boxd refuses the name, rename worker "${worker}"; otherwise check its provisioner settings.`,
+          )
+        : unavailable(
+            failure.code,
+            failure.operation === "setEgressAllow"
+              ? `boxd didn't apply provisioner.egress to the new machine, which usine deleted: ${failure.message}`
+              : `boxd didn't create the machine: ${failure.message}`,
+          );
     const create = Effect.fn("BoxdDriver.create")(
       function* (name: string, tags: MachineTags) {
         yield* Effect.annotateCurrentSpan({ worker, attemptId: tags.attempt });
@@ -299,7 +314,7 @@ export const boxdDriverFor = (
         yield* Effect.logInfo("Created boxd machine", { worker, machine: result.id });
         return { id: result.id, hostKey: Option.none<string>() };
       },
-      (effect) =>
+      (effect, name) =>
         effect.pipe(
           Effect.catchTags({
             BoxdEgressNotApplied: (failure) =>
@@ -311,15 +326,7 @@ export const boxdDriverFor = (
                   message: `boxd reported unrestricted egress after usine set ${failure.requested} provisioner.egress entries on the new machine, which usine deleted`,
                 }),
               ),
-            BoxdCallError: (failure) =>
-              Effect.fail(
-                unavailable(
-                  failure.code,
-                  failure.operation === "setEgressAllow"
-                    ? `boxd didn't apply provisioner.egress to the new machine, which usine deleted: ${failure.message}`
-                    : `boxd didn't create the machine: ${failure.message}`,
-                ),
-              ),
+            BoxdCallError: (failure) => Effect.fail(creationError(name, failure)),
           }),
         ),
     );

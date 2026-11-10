@@ -46,6 +46,8 @@ export const fakeBoxd = () => {
     unreachable: false,
     keyRefused: false,
     createFails: Option.none<string>(),
+    /** Machine names that boxd refuses with `INVALID_ARGUMENT`. */
+    reservedNames: new Set<string>(),
     readFails: Option.none<string>(),
     timerFails: Option.none<string>(),
     egressFails: Option.none<string>(),
@@ -85,6 +87,12 @@ export const fakeBoxd = () => {
         Effect.gen(function* () {
           if (Option.isSome(state.createFails))
             return yield* failure("createFromSnapshot", state.createFails.value);
+          if (state.reservedNames.has(request.name))
+            return yield* BoxdCallError.make({
+              operation: "createFromSnapshot",
+              code: "INVALID_ARGUMENT",
+              message: `name '${request.name}' is reserved`,
+            });
           if (state.snapshot.status !== "ready")
             return yield* failure("createFromSnapshot", "FAILED_PRECONDITION");
           if ([...names.values()].includes(request.name))
