@@ -6,4 +6,4 @@
 "@usine/server": minor
 ---
 
-Add boxd as an SSH provisioner with snapshot size and region checks, pinned proxy host keys, machine reuse, and gateway tailnet support. Add worker configuration fields and a snapshot setup guide.
+Add boxd as an SSH provisioner with snapshot size and region checks, machine reuse, and gateway tailnet support. Add worker configuration fields and a snapshot setup guide.

@@ -107,7 +107,7 @@ require an auto-stop of at most two hours and cannot use this worker lifetime.
 
 ## 2026-11-09: boxd provisioner
 
-boxd is a third driver of the SSH provisioner because its Linux VMs are reached through SSH and fit the existing machine lifecycle interface. Its memory-and-disk snapshots preserve the pulled attempt image, avoiding a download on each restore. The snapshot also fixes the machine size, so the configured size is a preflight assertion instead of a restore override; resizing would discard the captured memory state.
+boxd is a third driver of the SSH provisioner because its Linux VMs fit the existing machine lifecycle interface; they were reached through SSH until #1124. Its memory-and-disk snapshots preserve the pulled attempt image, avoiding a download on each restore. The snapshot also fixes the machine size, so the configured size is a preflight assertion instead of a restore override; resizing would discard the captured memory state.
 
 boxd uses gRPC. A client port isolates its transport and decoded responses from the driver. The generated client retains the proxy host key and serving-region metadata that the SDK's public methods discard. Regional endpoints and the region setting keep machines and snapshots in the operator's selected location, including Frankfurt for EU placement. Tailnet joins use the same gateway bootstrap as Boat machines because boxd's own Tailscale integration enrolls its proxies instead of the machines.
 
@@ -120,6 +120,10 @@ The boxd SSH proxy terminates SSH and authenticates keys linked to the account, 
 ## 2026-11-10: boxd's exec stream instead of SSH (#1106)
 
 For boxd machines, boxd's gRPC `Exec` stream fits better than SSH through boxd's proxy ([`boxd-exec-transport.md`](../research/boxd-exec-transport.md)). The proxy accepts only SSH keys linked to the boxd account, and boxd refuses to link a key for an API key, so SSH needs a step from a signed-in session for every account (#1121), which a customer's own boxd account would repeat. `Exec` authenticates with the API key that the driver already holds. It reaches the same in-machine agent that the proxy uses, so a dropped stream ends a command the way a dropped SSH session does, and the child host's process owner, which runs in its own session, survives either. `Exec` reports a failed call or a deleted machine as a gRPC status instead of exit code 255, and it addresses a machine by id, so the proxy's host key, its changing ports, and `SendEnv` no longer concern boxd workers. The Cloudflare worker kind already runs its commands through a program that stands in for `ssh` over a vendor's exec stream, so the child host stays as it is.
+
+## 2026-11-10: boxd workers run commands over `Exec` (#1124)
+
+boxd workers use the `Exec` stream recommended above, with no SSH fallback, and the account-linked key step of #1121 no longer applies to them. A second transport for one provider would keep the operator step and double the boxd test matrix for a path that no measurement needed. The boxd shell takes the seam that the Cloudflare sandbox shell already uses, a program that stands in for `ssh`, so the child host and every caller of a `RemoteShell` stay as they are; an in-process transport port in the child host would change that contract for every worker kind. The two shells share their argument parsing, stream relay, and exit code mapping, and the `SshCommand` contract they follow is written down where `SshCommand` is defined. The adapter keeps connect-node, already the boxd transport, and raises the HTTP/2 connection window on each session itself, because connect-node never does and grpc-js would be a second gRPC stack for one call.
 
 ## 2026-11-10: boxd egress allowlist
 
