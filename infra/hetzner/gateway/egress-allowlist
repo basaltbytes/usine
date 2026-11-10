@@ -21,10 +21,6 @@ platform.claude.com
 chatgpt.com
 auth.openai.com
 
-# boxd's documentation, which reviews read to check the boxd verbs and flags
-# that a change names. The attempt image has the boxd CLI for its usage text.
-docs.boxd.sh
-
 # Package hosts.
 
 # Node.js for Workers (NodeSource apt repository)
