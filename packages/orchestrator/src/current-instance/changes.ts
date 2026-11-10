@@ -180,9 +180,12 @@ export const restartChanges = (
       ]),
 ];
 
+/** The Worker keys that a reload applies to the scheduler's slots alone. */
+const slotKeys: ReadonlySet<string> = new Set(["name", "maxConcurrentAttempts", "paused"]);
+
 /**
- * Returns the keys of a Worker entry, other than `name` and `max_concurrent_attempts`, that differ
- * between `before` and `after`. Returns only `kind` if the kind differs.
+ * Returns the keys of a Worker entry, other than `name`, `max_concurrent_attempts`, and `paused`,
+ * that differ between `before` and `after`. Returns only `kind` if the kind differs.
  */
 const changedWorkerSettings = (
   before: ConfigWorker,
@@ -190,9 +193,7 @@ const changedWorkerSettings = (
 ): ReadonlyArray<string> => {
   if (before.kind !== after.kind) return ["kind"];
   const settings = (worker: ConfigWorker) =>
-    new Map(
-      Object.entries(worker).filter(([key]) => key !== "name" && key !== "maxConcurrentAttempts"),
-    );
+    new Map(Object.entries(worker).filter(([key]) => !slotKeys.has(key)));
   const previous = settings(before);
   const next = settings(after);
   return [...new Set([...previous.keys(), ...next.keys()])].filter(
@@ -210,6 +211,8 @@ interface ResizedWorker {
 /** The changes a reload makes to the `workers` block, by Worker name. */
 export interface WorkersChange {
   readonly resized: ReadonlyArray<ResizedWorker>;
+  /** The kept Workers whose `paused` setting changed, with the new setting. */
+  readonly paused: ReadonlyArray<ConfigWorker>;
   readonly updated: ReadonlyArray<ConfigWorker>;
   readonly added: ReadonlyArray<ConfigWorker>;
   readonly removed: ReadonlyArray<ConfigWorker>;
@@ -229,6 +232,7 @@ export const workersChange = (
   const restart: Array<RestartChange> = [];
   const resized: Array<ResizedWorker> = [];
   const updated: Array<ConfigWorker> = [];
+  const paused: Array<ConfigWorker> = [];
   for (const worker of loaded) {
     const previous = before.get(worker.name);
     if (previous === undefined) continue;
@@ -244,6 +248,7 @@ export const workersChange = (
     if (changed.length === 0 && previous.maxConcurrentAttempts !== worker.maxConcurrentAttempts) {
       resized.push({ worker, from: previous.maxConcurrentAttempts });
     }
+    if (previous.kind === worker.kind && previous.paused !== worker.paused) paused.push(worker);
   }
   const added = loaded.filter(({ name }) => !before.has(name));
   const removed = running.filter(({ name }) => !after.has(name));
@@ -256,7 +261,7 @@ export const workersChange = (
       reason: `worker "${previous.name}" was renamed to "${renamed.name}"`,
     });
   }
-  return { resized, updated, added, removed, restart };
+  return { resized, paused, updated, added, removed, restart };
 };
 
 /** Resolves project-local reloads separately from changes to shared definitions and settings. */
