@@ -194,5 +194,21 @@ it("compares the models of an agent by merged task and marks the configured mode
       ),
     )
     .toBeVisible();
+  // The reviewer's model is not one of the developer's.
+  expect(models.getByText("claude-opus-4-1").elements()).toEqual([]);
   fitsWithoutScrolling(models.element());
+});
+
+it("shows each agent its own models", async () => {
+  queryClient.setQueryData(statisticsQuery("30d").queryKey, statisticsFixture(Date.now(), "30d"));
+  await mount("/configuration/agents/reviewer", 1280);
+  const models = page.getByRole("region", { name: "Models" });
+  await expect.element(models.getByText("12 tasks merged", { exact: true })).toBeVisible();
+  expect(
+    models
+      .getByRole("listitem")
+      .elements()
+      .map(({ textContent }) => textContent.startsWith("claude-opus-4-1")),
+  ).toEqual([true]);
+  expect(models.getByText("gpt-5.6-sol").elements()).toEqual([]);
 });

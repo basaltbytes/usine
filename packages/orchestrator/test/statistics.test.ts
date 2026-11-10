@@ -692,6 +692,59 @@ describe("Model statistics", () => {
         [1, 1, 2 * HOUR, 0, null, null],
       ],
     );
+    // From each task's first attempt, by any agent, not from the reviewer's: 4, 10, and 2 hours.
+    assert.deepStrictEqual(
+      view.agents[1]?.models.map(({ model, medianMillis }) => [model, medianMillis]),
+      [["gpt-5", 4 * HOUR]],
+    );
+  });
+
+  it("orders attempts by their start, not by run, and does not split tasks by reasoning effort", () => {
+    const developerOnLowEffort = agentOf("developer", BrainSpec.make({ ...opus, effort: "low" }));
+    const ordered = taskStatisticsView({
+      window: "7d",
+      now,
+      usage: new Map(),
+      tasks: [
+        // The first run opened first, but its attempt started after the second run's attempt.
+        mergedTask(40, at("24T14:00"), [
+          summary({
+            id: "queued-first",
+            item: 40,
+            loop: startDev,
+            agent: developer,
+            state: RunState.Succeeded.make(),
+            openedAt: "24T08:00",
+            closedAt: "24T12:00",
+            attempts: [
+              { worker: "w1", startedAt: "24T11:00", outcome: succeeded, endedAt: "24T12:00" },
+            ],
+          }),
+          ran("started-first", 41, actOnFindings, developerOnGpt, "24", 9),
+        ]),
+        // The same model at another reasoning effort.
+        mergedTask(42, at("23T20:00"), [
+          ran("high-effort", 42, startDev, developer, "23", 8),
+          ran("low-effort", 43, actOnFindings, developerOnLowEffort, "23", 10),
+        ]),
+      ],
+    });
+    assert.deepStrictEqual(
+      ordered.agents.map(({ agent, models }) => [
+        agent,
+        models.map(({ model, tasks, mixed, medianMillis }) => [model, tasks, mixed, medianMillis]),
+      ]),
+      [
+        [
+          "developer",
+          [
+            // 09:00 to 14:00, from the attempt that started first.
+            ["claude-opus", 1, 0, 12 * HOUR],
+            ["gpt-5", 1, 1, 5 * HOUR],
+          ],
+        ],
+      ],
+    );
   });
 });
 

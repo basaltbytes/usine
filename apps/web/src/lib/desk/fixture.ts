@@ -620,6 +620,25 @@ export const statisticsFixture = (now: number, window: "7d" | "30d") => {
                 }),
               ],
             }),
+            AgentModelsView.make({
+              agent: AgentName.make("reviewer"),
+              tasks: 12,
+              opened: 0,
+              models: [
+                ModelOutcomeView.make({
+                  harness: Harness.make("claude"),
+                  model: ModelId.make("claude-opus-4-1"),
+                  tasks: 12,
+                  mixed: 0,
+                  firstTimeRight: 7,
+                  medianRounds: 1,
+                  medianMillis: 4 * HOUR,
+                  metered: 12,
+                  medianTokens: TokenCount.make(180_000),
+                  cost: null,
+                }),
+              ],
+            }),
           ],
   });
 };
