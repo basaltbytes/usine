@@ -84,6 +84,10 @@ usine assigns Claude's native session UUID and saves it before sending the first
 
 Children run without approval prompts. Claude Code ignores project settings, Codex treats the checkout as untrusted, and Pi ignores project-local configuration. Repository agent instructions still apply.
 
+Claude Code children add no attribution to commits or pull request descriptions. usine starts each one with `attribution` set to an empty `commit` and `pr` text in Claude Code's flag settings, which take precedence over the worker user's `settings.json`. Agents have no field for other harness settings.
+
+Codex adds a `Co-authored-by: Codex <noreply@openai.com>` trailer to commits and a `Generated with Codex` line to pull request descriptions only when it uses a ChatGPT login and that ChatGPT account has Codex commit attribution turned on. Codex reads this setting from the account and has no local configuration for it, so turn it off in the account's Codex settings. API-key credentials add no attribution.
+
 Codex disables the checkout's project-local configuration, hooks, and exec policies even if its saved configuration marks the checkout as trusted. Its app server starts in `/`, outside the checkout and home directory, to avoid loading repository configuration at startup or reporting disabled project configuration in the worker's `.codex` directory. Other Codex diagnostics log at Warning.
 
 ## Preflight
