@@ -378,7 +378,10 @@ const listedRegions = [
 ];
 
 /** Returns a transport factory that records each RPC with the endpoint that served it. */
-const routedTransport = (calls: Array<{ method: string; baseUrl: string }>) =>
+const routedTransport = (
+  calls: Array<{ method: string; baseUrl: string }>,
+  regions: ReadonlyArray<{ id: string; apiEndpoint: string }> = listedRegions,
+) =>
   (({ baseUrl }) =>
     createRouterTransport((router) => {
       router.service(BoxdService, {
@@ -392,11 +395,11 @@ const routedTransport = (calls: Array<{ method: string; baseUrl: string }>) =>
         },
         listRegions: () => {
           calls.push({ method: "listRegions", baseUrl });
-          const served = listedRegions.find(
+          const served = regions.find(
             ({ apiEndpoint }) =>
               (apiEndpoint.includes("://") ? apiEndpoint : `https://${apiEndpoint}`) === baseUrl,
           );
-          return { regions: listedRegions, thisRegion: served?.id ?? "" };
+          return { regions: [...regions], thisRegion: served?.id ?? "" };
         },
       });
     })) satisfies Parameters<typeof boxdApiLayer>[3];
@@ -485,6 +488,40 @@ it.effect("fails preflight with the listed region ids when boxd lists no configu
     assert.strictEqual(failure._tag, "WorkerCapabilityError");
     assert.include(failure.message, 'boxd has no region "lax"');
     assert.include(failure.message, "fra, nyc, eu-own-1");
+    assert.deepStrictEqual(calls, [{ method: "listRegions", baseUrl: "https://boxd.sh:9443" }]);
+  }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
+);
+
+it.effect("fails preflight when boxd lists the configured region without an API endpoint", () =>
+  Effect.gen(function* () {
+    const calls: Array<{ method: string; baseUrl: string }> = [];
+    const drivers = yield* machineDriversFor({
+      instance: "regions-test",
+      settings: {
+        boxdClient: (token, region, endpoint) =>
+          boxdApiLayer(
+            token,
+            region,
+            endpoint,
+            routedTransport(calls, [...listedRegions, { id: "lax", apiEndpoint: "" }]),
+          ),
+      },
+    });
+    const failure = yield* drivers
+      .forEntry({
+        address: {
+          ...boxdAddress,
+          machine: {
+            _tag: "Provisioned",
+            provisioner: boxdSettings({ region: BoxdRegion.make("lax") }),
+          },
+        },
+        gateway: Option.none(),
+        machine: Option.none(),
+      })
+      .pipe(Effect.flip);
+    assert.strictEqual(failure._tag, "WorkerCapabilityError");
+    assert.include(failure.message, "boxd lists region lax without an API endpoint");
     assert.deepStrictEqual(calls, [{ method: "listRegions", baseUrl: "https://boxd.sh:9443" }]);
   }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
 );
