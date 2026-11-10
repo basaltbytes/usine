@@ -86,6 +86,20 @@ export class ManagedRepo extends Schema.Class<
 
 const MaxConcurrentAttempts = PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1)));
 
+/**
+ * Whether a Worker stops taking new Attempts while its running ones finish. Decoding and
+ * construction default to `false`, and encoding omits `false`.
+ */
+const WorkerPaused = Schema.optionalKey(Schema.Boolean).pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transformOptional((paused) =>
+      Option.some(Option.getOrElse(paused, () => false)),
+    ),
+    encode: SchemaGetter.transformOptional(Option.filter((paused) => paused)),
+  }),
+  Schema.withConstructorDefault(Effect.succeed(false)),
+);
+
 /** A worker that runs attempts on the orchestrator's machine. */
 export class LocalWorker extends Schema.Class<
   LocalWorker,
@@ -97,6 +111,8 @@ export class LocalWorker extends Schema.Class<
   kind: Schema.Literal("local"),
   /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
+  /** Whether the worker takes no new attempts while its running ones finish. */
+  paused: WorkerPaused,
 }) {}
 
 /** A worker on the exe.dev VM with the same name. */
@@ -110,6 +126,8 @@ export class ExeDevWorker extends Schema.Class<
   kind: Schema.Literal("exe.dev"),
   /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
+  /** Whether the worker takes no new attempts while its running ones finish. */
+  paused: WorkerPaused,
 }) {}
 
 const EnvironmentVariableName = Schema.String.check(
@@ -375,6 +393,8 @@ export class SshWorker extends Schema.Class<
   kind: Schema.Literal("ssh"),
   /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
+  /** Whether the worker takes no new attempts while its running ones finish. */
+  paused: WorkerPaused,
   /** The SSH destination for a long-lived machine; set this or `provisioner`, but not both. */
   destination: Schema.OptionFromOptionalKey(SshDestination),
   /** The provider settings for a machine per attempt, or `None` for a long-lived machine. */
@@ -541,6 +561,8 @@ export class CloudflareWorker extends Schema.Class<
   kind: Schema.Literal("cloudflare"),
   /** The positive number of attempts this worker can run concurrently; decoding defaults to 1. */
   maxConcurrentAttempts: MaxConcurrentAttempts,
+  /** Whether the worker takes no new attempts while its running ones finish. */
+  paused: WorkerPaused,
   /**
    * The deployed Cloudflare Worker HTTPS origin, without a path, credentials, query, or fragment.
    */

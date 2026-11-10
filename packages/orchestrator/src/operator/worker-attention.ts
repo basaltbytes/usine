@@ -1,4 +1,5 @@
 import { WORKER_UNRESPONSIVE_PROBES } from "@usine/core/attempt/channel";
+import type { Worker } from "@usine/config/factory";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttentionAcknowledgements } from "@usine/engine/attention";
 import type { RunReader } from "@usine/engine/run-reader";
@@ -8,6 +9,7 @@ import { partitionNeeds, projectAttention } from "./attention.ts";
 import {
   type NeedView,
   UnresponsiveWorkerNeed,
+  WorkerPausedNeed,
   WorkerPreflightNeed,
   WorkerQuotaNeed,
 } from "./need.ts";
@@ -30,8 +32,9 @@ export const workerAttentionFor = (
         >;
       }
     >,
-    declared: ReadonlyArray<WorkerName>,
+    workers: ReadonlyArray<Pick<Worker, "name" | "paused">>,
   ) {
+    const declared = workers.map(({ name }) => name);
     const silent = yield* Effect.forEach(
       running.flatMap((run) =>
         run.attempts
@@ -55,11 +58,11 @@ export const workerAttentionFor = (
       }),
       { concurrency: 4 },
     );
-    const workers = new Map<WorkerName, UnresponsiveWorkerNeed>();
+    const unresponsive = new Map<WorkerName, UnresponsiveWorkerNeed>();
     for (const { run, attempt, notice } of silent.flat()) {
-      const previous = workers.get(notice.worker);
+      const previous = unresponsive.get(notice.worker);
       const lastAnsweredAt = DateTime.formatIso(notice.lastAnsweredAt);
-      workers.set(
+      unresponsive.set(
         notice.worker,
         UnresponsiveWorkerNeed.make({
           id: `unresponsive-worker:${notice.worker}`,
@@ -82,10 +85,15 @@ export const workerAttentionFor = (
       );
     }
     yield* Effect.logDebug("Read worker responsiveness", {
-      workers: [...workers.keys()],
+      workers: [...unresponsive.keys()],
       affectedAttempts: silent.flat().length,
     });
-    const needs: Array<NeedView> = [...workers.values()];
+    const needs: Array<NeedView> = [
+      ...unresponsive.values(),
+      ...workers
+        .filter(({ paused }) => paused)
+        .map(({ name }) => WorkerPausedNeed.make({ id: `worker-paused:${name}`, worker: name })),
+    ];
     for (const { worker, message } of yield* status.unavailable) {
       if (!declared.includes(worker)) continue;
       needs.push(WorkerPreflightNeed.make({ id: `worker-preflight:${worker}`, worker, message }));
@@ -101,11 +109,12 @@ export const workerAttentionFor = (
     const { needsYou, dismissedNeeds } = partitionNeeds(needs, storedAcknowledgements);
     const visible = [...overview.needsYou, ...needsYou];
     yield* Effect.logDebug("Refreshed worker attention", {
-      workers: [...workers.keys()],
+      workers: [...unresponsive.keys()],
       attempts: silent.flat().length,
       dismissed: dismissedNeeds.length,
       quotaRefusals: needs.filter((need) => need._tag === "WorkerQuotaNeed").length,
       preflightFailures: needs.filter((need) => need._tag === "WorkerPreflightNeed").length,
+      paused: needs.filter((need) => need._tag === "WorkerPausedNeed").length,
     });
     return ReadyOverview.make({
       ...overview,

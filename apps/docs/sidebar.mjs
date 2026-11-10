@@ -34,6 +34,7 @@ export const guideGroups = [
       { slug: "guides/configure-a-gateway" },
       { slug: "guides/connect-boat-to-a-gateway" },
       { slug: "guides/run-worker-preflight" },
+      { slug: "guides/pause-a-worker" },
       { slug: "guides/remove-a-worker" },
     ],
   },

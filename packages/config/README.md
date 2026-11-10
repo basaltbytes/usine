@@ -8,6 +8,8 @@ Stores versioned configuration and imports and exports the files of a [usine](ht
 - `projects/<project>/loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks trigger, approval, and priority conditions and every `{{ CEL expression }}` against the trigger's payload.
 - `agents/*.md`: harness, model, effort, optional parent model and parent effort, and persona.
 
+Each worker accepts `paused` (default `false`), which keeps new attempts off the worker while its running attempts finish. Encoding omits `paused: false`, so exports of unpaused workers stay unchanged.
+
 `updateYaml` and `updateFrontmatter` change one path in the YAML tree and keep comments, key order, and the Markdown body. Files use snake_case keys (`poll_interval`, `max_concurrent_attempts`); decoded types use camelCase (`pollInterval`, `maxConcurrentAttempts`). The schema does the rename, so edits keep snake_case.
 
 Agent files and agent configuration values validate their harness ID against `@usine/agents/harness`. An unregistered ID fails schema validation before the agent enters the roster. Configuration import and edits also check each coding-agent brain against every configured worker through `admitBrain`. Unsupported placements or credential routes reject the configuration with the agent, worker, role, and adapter reason.

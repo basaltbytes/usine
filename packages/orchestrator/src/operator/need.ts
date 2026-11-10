@@ -251,6 +251,17 @@ export class WorkerQuotaNeed extends Schema.TaggedClass<
   message: Schema.String,
 }) {}
 
+/** A worker that `usine.yaml` pauses, so it takes no new attempts while its running ones finish. */
+export class WorkerPausedNeed extends Schema.TaggedClass<
+  WorkerPausedNeed,
+  Brand.Brand<"@usine/orchestrator/operator/need/WorkerPausedNeed">
+>("@usine/orchestrator/WorkerPausedNeed")("WorkerPausedNeed", {
+  /** The attention entry identity. */
+  id: Schema.String,
+  /** The paused worker. */
+  worker: WorkerName,
+}) {}
+
 export const POOL_LIMIT_WARNING_PERCENT = 80;
 
 /**
@@ -310,6 +321,7 @@ export const NeedView = Schema.Union([
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
   WorkerQuotaNeed,
+  WorkerPausedNeed,
   PoolLimitNeed,
 ]);
 /** One reason the overview asks for operator attention. */

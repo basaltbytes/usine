@@ -27,7 +27,10 @@ Orchestrator heartbeats renew a two-minute lease. When the lease expires, the wo
 1. [Configure a gateway](/guides/configure-a-gateway/)
 2. [Connect Boat to a gateway](/guides/connect-boat-to-a-gateway/)
 3. [Run worker preflight](/guides/run-worker-preflight/)
-4. [Remove a worker](/guides/remove-a-worker/)
+4. [Pause a worker](/guides/pause-a-worker/)
+5. [Remove a worker](/guides/remove-a-worker/)
+
+The scheduler gives each new attempt to the first worker in `workers` order with a free slot. To send attempts to one worker, such as a worker you just added, pause the workers before it.
 
 ## Memory for repository checks
 

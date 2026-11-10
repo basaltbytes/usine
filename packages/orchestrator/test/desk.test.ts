@@ -108,7 +108,7 @@ const instance = Effect.gen(function* () {
     repos: [{ name: repository }],
     workers: [
       { name: "local", kind: "local", max_concurrent_attempts: 2 },
-      { name: "spare", kind: "local", max_concurrent_attempts: 1 },
+      { name: "spare", kind: "local", max_concurrent_attempts: 1, paused: true },
       { name: "fresh", kind: "local", max_concurrent_attempts: 1 },
     ],
   });
@@ -712,7 +712,7 @@ describe("Operator desk", () => {
   );
 
   it.effect(
-    "reports each Worker's slots and last preflight, and when each repository was polled",
+    "reports each Worker's slots, last preflight, and pause, and when each repository was polled",
     () =>
       Effect.gen(function* () {
         const fixtureInstance = yield* instance;
@@ -728,6 +728,14 @@ describe("Operator desk", () => {
             ["local 1/2", `Failed ${DateTime.formatIso(time("06:00:00"))}`],
             ["spare 0/1", `Passed ${DateTime.formatIso(time("05:30:00"))}`],
             ["fresh 0/1", null],
+          ],
+        );
+        assert.deepStrictEqual(
+          desk.workers.map(({ name, paused }) => [name, paused]),
+          [
+            ["local", false],
+            ["spare", true],
+            ["fresh", false],
           ],
         );
         assert.deepStrictEqual(

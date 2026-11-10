@@ -9,6 +9,7 @@ import { WorkerName } from "@usine/core/worker";
 import {
   BlockedFailureView,
   ConfigFileNeed,
+  WorkerPausedNeed,
   WorkerQuotaNeed,
   PoolLimitNeed,
   QuestionFailureView,
@@ -202,4 +203,14 @@ it("explains quota recovery and automatic retries with the provider message", ()
     "retries automatically",
   ])
     assert.include(copy.detail, text);
+});
+
+it("names a paused worker and how to resume it", () => {
+  const copy = needCopy(
+    WorkerPausedNeed.make({ id: "worker-paused:trial", worker: WorkerName.make("trial") }),
+  );
+  assert.strictEqual(copy.title, "trial: paused");
+  assert.include(copy.detail, "takes no new attempts");
+  assert.include(copy.detail, "running attempts finish");
+  assert.strictEqual(copy.repository, null);
 });

@@ -3,7 +3,7 @@ import type { ProvisioningPauseView, WorkerView } from "@usine/orchestrator/oper
 import { StateMark } from "~/components/status-badge";
 import { machineReuseLine } from "~/features/overview/strings";
 import { agoLabel, timestampLabel } from "~/lib/strings";
-import { creationFailureTitle, nextCreationLine } from "~/lib/workers/strings";
+import { creationFailureTitle, nextCreationLine, workerPausedLine } from "~/lib/workers/strings";
 
 const outcome = {
   Passed: { state: "Succeeded", label: "passed", className: undefined },
@@ -67,6 +67,12 @@ export const WorkersLine = ({ workers, now }: WorkersLineProps) => (
             {machineReuseLine(machine, now)}
           </span>
         ))}
+        {worker.paused && (
+          <span>
+            <StateMark state="paused" className="mr-1.5 align-middle" />
+            {workerPausedLine}
+          </span>
+        )}
         {worker.upgradeWait !== null && <span>{upgradeWaitLine(worker.upgradeWait)}</span>}
         <Preflight worker={worker} now={now} />
         {worker.provisioning?.blocked === true && (

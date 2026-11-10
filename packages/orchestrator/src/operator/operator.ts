@@ -774,11 +774,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       }),
     ).pipe(
       Effect.flatMap(({ overview, running, reports }) =>
-        workerAttention(
-          overview,
-          running,
-          instance.config.workers.map(({ name }) => name),
-        ).pipe(
+        workerAttention(overview, running, instance.config.workers).pipe(
           Effect.flatMap(poolAttention),
           Effect.flatMap(upgradeAttention),
           Effect.flatMap((view) => webhookAttention(view, instance.config.webhooks)),
@@ -1625,6 +1621,7 @@ export {
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
   WorkerQuotaNeed,
+  WorkerPausedNeed,
   WebhookSilenceNeed,
   UpgradeDrainNeed,
   UnconfirmedStopNeed,

@@ -252,7 +252,7 @@ export const formCopy = {
   loading: "Loading choices…",
   secret: "Enter an environment variable name. The value lives in .env.",
   restartWorker:
-    "For an existing worker, changes other than the slot count require a restart. Slot changes apply live.",
+    "For an existing worker, changes other than the slot count and Paused require a restart. Those apply live.",
   restartSettings: "Changes to webhooks or tracing require a restart.",
   derived: "Derived at preflight when unset",
   lastPreflight: "Last preflight",
@@ -358,6 +358,7 @@ export const workerFormCopy = {
   kind: "Worker kind",
   slots: "Concurrent attempts",
   slotsHint: "Maximum attempts running on this worker at once.",
+  paused: "Paused: take no new attempts; running attempts finish",
   root: "Working directory",
   destination: "SSH destination",
   identity: "SSH identity file",

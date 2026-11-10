@@ -127,7 +127,7 @@ import {
   TailTranscriptRequest,
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
-import { PoolLimitNeed, UnconfiguredWorkerNeed } from "../src/operator/need.ts";
+import { PoolLimitNeed, UnconfiguredWorkerNeed, WorkerPausedNeed } from "../src/operator/need.ts";
 import { boardTaskRuns, Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import {
@@ -873,6 +873,39 @@ describe("Operator", () => {
       );
 
       assert.deepStrictEqual((yield* refresh(overview, [], [])).needsYou, []);
+    }),
+  );
+
+  it.effect("asks for attention for each paused worker until a reload resumes it", () =>
+    Effect.gen(function* () {
+      const refresh = workerAttentionFor(
+        { transcript: () => Effect.succeed([]) },
+        { list: Effect.succeed([]) },
+        { unavailable: Effect.succeed([]), provisioning: Effect.succeed([]) },
+      );
+      const overview = ReadyOverview.make({ projects: [], loops: [], needsYou: [] });
+      const trial = WorkerName.make("trial");
+      const local = WorkerName.make("local");
+      const paused = (yield* refresh(
+        overview,
+        [],
+        [
+          { name: local, paused: true },
+          { name: trial, paused: false },
+        ],
+      )).needsYou;
+      assert.deepStrictEqual(paused, [
+        WorkerPausedNeed.make({ id: "worker-paused:local", worker: local }),
+      ]);
+      const resumed = yield* refresh(
+        overview,
+        [],
+        [
+          { name: local, paused: false },
+          { name: trial, paused: false },
+        ],
+      );
+      assert.deepStrictEqual(resumed.needsYou, []);
     }),
   );
 
