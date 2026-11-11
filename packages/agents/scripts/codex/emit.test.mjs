@@ -400,6 +400,27 @@ describe("emitDeclarations", () => {
         [untagged, variant("PlanItem", "plan")],
         "Variant TextItem accepts the values of variant PlanItem; they need distinct tags",
       ],
+      [
+        [
+          untagged,
+          {
+            title: "PlanItem",
+            type: "object",
+            properties: { type: tag("plan"), text: { type: "string" } },
+            required: ["type"],
+          },
+        ],
+        "Variant TextItem accepts the values of variant PlanItem; they need distinct tags",
+      ],
+      ...[
+        { type: "object" },
+        { type: "object", properties: {} },
+        { type: "object", additionalProperties: { type: "string" } },
+        { type: "object", additionalProperties: true },
+      ].map((bag) => [
+        [untagged, { title: "BagItem", ...bag }],
+        "Variant TextItem accepts the values of variant BagItem; they need distinct tags",
+      ]),
     ]) {
       const definitions = { Item: { anyOf: alternatives } };
       expect(() => emitDeclarations(definitions, ["Item"])).toThrow(message);

@@ -58,6 +58,7 @@ import {
 } from "../../../src/harness/codex/app-server.ts";
 import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { codexChildLayer } from "../../../src/harness/codex/codex.ts";
+import { collectLogs } from "../../logs.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
 
@@ -157,6 +158,11 @@ describe("Codex child backend", () => {
         ];
         const delivered: string[] = [];
         const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+        const logs = collectLogs(["Info", "Warn"]);
+        const skips = [
+          "Skipping an undecodable Codex tool item",
+          "Skipping a Codex item without a transcript event",
+        ];
         const server = connectionLayer(
           {
             ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
@@ -170,6 +176,7 @@ describe("Codex child backend", () => {
                     status: "inProgress",
                     items: [
                       { type: "commandExecution", id: "tool-1", status: "inProgress" },
+                      { type: "mcpToolCall", status: "inProgress" },
                       ...(savedAnswer
                         ? [
                             {
@@ -198,6 +205,13 @@ describe("Codex child backend", () => {
                   content: [{ type: "text", text: "Check the diff", text_elements: [] }],
                 },
               },
+            })),
+            ...[
+              { type: "fileChange", status: "inProgress" },
+              { type: "collabAgentToolCall", id: "agent-1" },
+            ].map((item) => ({
+              method: "item/started",
+              params: { threadId: "thread-1", turnId: "active-turn", item },
             })),
             {
               method: "item/completed",
@@ -250,9 +264,23 @@ describe("Codex child backend", () => {
               delivered,
               unread.map(({ id }) => id),
             );
+            assert.deepStrictEqual(
+              logs.records.flatMap(({ level, message, annotations }) =>
+                Array.isArray(message) && skips.includes(message[0])
+                  ? [{ level, message: message[0], itemType: annotations["itemType"] }]
+                  : [],
+              ),
+              [
+                { level: "Warn", message: skips[0], itemType: "mcpToolCall" },
+                { level: "Warn", message: skips[0], itemType: "fileChange" },
+                { level: "Info", message: skips[1], itemType: "collabAgentToolCall" },
+              ],
+            );
           }),
         ).pipe(
-          Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+          Effect.provide(
+            codexChildLayer.pipe(Layer.provide(server), Layer.provideMerge(logs.layer)),
+          ),
           Effect.provideService(ChildSessionJournal, {
             started: () => Effect.void,
             prompted: Effect.void,

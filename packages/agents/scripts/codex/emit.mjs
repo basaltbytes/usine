@@ -108,9 +108,11 @@ export function emitDeclarations(definitions, roots) {
           const [first, second] = [earlier, later].map(({ target }) => target.properties?.[key]);
           return isTag(first) && isTag(second) && first.enum[0] !== second.enum[0];
         });
-        const covered = (earlier.target.required ?? []).every(
-          (key) => key in (later.target.properties ?? {}),
-        );
+        // A later variant without fields generates a record, which accepts every key.
+        const fields = later.target.properties ?? {};
+        const covered =
+          Object.keys(fields).length === 0 ||
+          (earlier.target.required ?? []).every((key) => key in fields);
         assert(
           tagged || !covered,
           `Variant ${earlier.name} accepts the values of variant ${later.name}; they need distinct tags`,

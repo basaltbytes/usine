@@ -55,6 +55,7 @@ import {
   userMessageText,
   decodeResponse,
   decodeNotification,
+  decodeNotifiedToolItem,
   decodeToolItem,
   providerRetryMessage,
   turnFailure,
@@ -612,7 +613,7 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: notification.value.turnId,
                 });
               }
-              const tool = yield* decodeToolItem(session.id, item);
+              const tool = yield* decodeNotifiedToolItem(session.id, item);
               if (Option.isNone(tool)) return;
               toolsInFlight.set(tool.value.id, toolName(tool.value));
               return yield* channel.emit(
@@ -646,7 +647,7 @@ const makeCodexChild = Effect.gen(function* () {
                 if (isMessagePhase(item.phase, "final_answer")) finalText = text;
                 return yield* channel.emit(TextOutput.make({ session, text }));
               }
-              const tool = yield* decodeToolItem(session.id, item);
+              const tool = yield* decodeNotifiedToolItem(session.id, item);
               if (Option.isNone(tool)) return;
               toolsInFlight.delete(tool.value.id);
               yield* channel.emit(

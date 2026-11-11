@@ -77,6 +77,24 @@ export const decodeToolItem = (
       )
     : Effect.succeedNone;
 
+const MessageKindItem = Schema.Struct({ type: Schema.Literals(["agentMessage", "userMessage"]) });
+const ItemKind = Schema.Struct({ type: Schema.String });
+
+/**
+ * Decodes a notified thread item as a tool item, like `decodeToolItem`. Returns `None` for message
+ * items, which the notification handlers handle separately. Logs every other skipped kind at Info.
+ */
+export const decodeNotifiedToolItem = (
+  sessionId: AgentSessionId,
+  item: Schema.Json,
+): Effect.Effect<Option.Option<typeof ToolItem.Type>> =>
+  Schema.is(ToolKindItem)(item) || Schema.is(MessageKindItem)(item)
+    ? decodeToolItem(sessionId, item)
+    : Effect.logInfo("Skipping a Codex item without a transcript event", { sessionId }).pipe(
+        Effect.annotateLogs({ itemType: Schema.is(ItemKind)(item) ? item.type : undefined }),
+        Effect.as(Option.none()),
+      );
+
 /** Returns the transcript tool name for a Codex tool item. */
 export const toolName = (item: typeof ToolItem.Type): string => {
   switch (item.type) {
