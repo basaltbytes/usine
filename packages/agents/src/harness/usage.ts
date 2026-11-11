@@ -1,4 +1,9 @@
-import { TokenBreakdown, TokenCount, UsdAmount } from "@usine/core/agent/session";
+import {
+  type SessionTokensUpdated,
+  TokenBreakdown,
+  TokenCount,
+  UsdAmount,
+} from "@usine/core/agent/session";
 import { flow, Option, Schema } from "effect";
 import type { CodexTokenUsage } from "../protocol/codex/codex.ts";
 import { UsageCount } from "../protocol/count.ts";
@@ -65,11 +70,8 @@ const ClaudeResultUsage = Schema.Struct({
 const decodeAssistant = Schema.decodeUnknownOption(ClaudeAssistantUsage);
 const decodeResult = Schema.decodeUnknownOption(ClaudeResultUsage);
 
-/** A Claude process's cumulative usage. */
-export interface ProcessUsage extends SessionUsage {
-  /** Tokens counted per assistant message ID that can recur or remain uncheckpointed. */
-  readonly messages?: Readonly<Record<string, TokenCount>>;
-}
+/** A Claude process's cumulative usage, as `SessionTokensUpdated` saves it. */
+export type ProcessUsage = Option.Option.Value<SessionTokensUpdated["processUsage"]>;
 
 /**
  * Returns a Claude token meter: live message usage between results, reconciled with the cumulative
@@ -83,14 +85,23 @@ export interface ProcessUsage extends SessionUsage {
 export const claudeTokenMeter = (seed: ProcessUsage = NO_USAGE) => {
   let total: number = seed.totalTokens;
   let cost = seed.costUsd;
-  const replayable = new Map(Object.entries(seed.messages ?? {}));
-  const messages = new Map<string, number>(replayable);
+  const messages = new Map<string, TokenCount>(Object.entries(seed.messages ?? {}));
+  // The IDs whose counts are saved, because their messages can recur or remain uncheckpointed.
+  const replayable = new Set(messages.keys());
   const active = new Map<string | null, string>();
   const superseded = new Set<string>();
   const usage = (): ProcessUsage => {
     const counted = { totalTokens: TokenCount.make(total), costUsd: cost };
     if (replayable.size === 0) return counted;
-    return { ...counted, messages: Object.fromEntries(replayable) };
+    return {
+      ...counted,
+      messages: Object.fromEntries(
+        [...replayable].flatMap((id) => {
+          const count = messages.get(id);
+          return count === undefined ? [] : [[id, count] as const];
+        }),
+      ),
+    };
   };
   return {
     read: (message: Schema.Json): Option.Option<ProcessUsage> => {
@@ -105,13 +116,13 @@ export const claudeTokenMeter = (seed: ProcessUsage = NO_USAGE) => {
           tokens.output_tokens + tokens.input_tokens + (tokens.cache_creation_input_tokens ?? 0);
         const previous = messages.get(id) ?? 0;
         total += Math.max(0, consumed - previous);
-        messages.set(id, Math.max(previous, consumed));
-        replayable.set(id, TokenCount.make(Math.max(previous, consumed)));
+        messages.set(id, TokenCount.make(Math.max(previous, consumed)));
+        replayable.add(id);
         return Option.some(usage());
       }
       const result = decodeResult(message);
       if (Option.isNone(result)) return Option.none();
-      for (const id of replayable.keys()) superseded.add(id);
+      for (const id of replayable) superseded.add(id);
       active.clear();
       const models = Object.values(result.value.modelUsage);
       const consumed = models.reduce(
