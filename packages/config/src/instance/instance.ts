@@ -50,6 +50,7 @@ export {
   UndeclaredTriggerLabelWarning,
   UndeclaredOutcomeLabelWarning,
   ConfigWarning,
+  logConfigWarnings,
 } from "./diagnostics.ts";
 
 export { referenceIndex } from "./references.ts";

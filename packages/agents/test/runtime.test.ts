@@ -253,6 +253,18 @@ it("recognizes a report header after a closed code fence", () => {
   assert.strictEqual(report.value.message, "Permission denied.");
 });
 
+it.each([
+  "- Ex:\n\n    ```\n    [usine:question]\n    ```\n[usine:blocked]\nNo access.",
+  "- Ex:\n\n\t~~~\n\t[usine:question]\n\t~~~\n[usine:blocked]\nNo access.",
+  "I wrapped the output in ```text fences.\n[usine:blocked]\nNo access.",
+  "Ran ```pnpm test```.[usine:blocked]\nNo access.",
+])("recognizes a report header after an indented fence or inline backticks: %j", (answer) => {
+  const report = reportedOutcome(Option.none(), answer);
+  assert(Option.isSome(report));
+  assert.strictEqual(report.value._tag, "AgentBlockedError");
+  assert.strictEqual(report.value.message, "No access.");
+});
+
 it("uses the first blocker or question when a final answer includes multiple reports", () => {
   const report = reportedOutcome(
     Option.none(),

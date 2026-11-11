@@ -4,6 +4,7 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
+import { SqlClient } from "effect/sql";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { OperatorLogin } from "@usine/core/operator";
@@ -42,6 +43,7 @@ import {
   formatConfigurationEntity,
   parseConfigurationEntity,
 } from "../src/configuration/folder.ts";
+import { LoopJson } from "../src/configuration/entities.ts";
 import { memoryConfigurationLayer } from "../src/configuration/memory.ts";
 import { sqliteConfigurationLayer } from "../src/configuration/sqlite/store.ts";
 
@@ -740,5 +742,87 @@ it.live("observes another SQLite connection and preserves history after reopenin
     expect((yield* reopened.read).number).toBe(2);
 
     expect((yield* reopened.list(Option.none())).map(({ number }) => number)).toEqual([1, 2]);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
+);
+
+it.live("rewrites stored outcome labels that the loop rules reject when it opens", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
+    const sqlite = SqliteClient.layer({ filename: `${directory}/configuration.sqlite` });
+    const open = Effect.map(
+      Layer.build(sqliteConfigurationLayer.pipe(Layer.provide(parserLayer), Layer.provide(sqlite))),
+      (services) => Context.get(services, ConfigurationStore),
+    );
+    const first = yield* open;
+    const nightly = yield* parser.parseLoopFile(
+      InstancePath.make("loops/nightly.md"),
+      "---\ntrigger: { on: schedule, cron: '0 3 * * *', if: 'true' }\nagent: developer\n---\nCheck the build.\n",
+    );
+    const nightlyValue = yield* Schema.encodeEffect(LoopJson)(nightly);
+    const imported = yield* initialChanges;
+    yield* first.commit({
+      expected: zero,
+      changes: [
+        ...imported,
+        ConfigurationChange.make({
+          key: ConfigurationEntityKey.make({
+            kind: "loop",
+            identifier: ConfigurationEntityId.make("nightly"),
+          }),
+          before: Option.none(),
+          after: Option.some(nightlyValue),
+        }),
+      ],
+      ...metadata,
+    });
+
+    // Outcome labels as releases before the schedule and letter-case rules stored them.
+    const sqlServices = yield* Layer.build(sqlite);
+    const sql = Context.get(sqlServices, SqlClient.SqlClient);
+    const StoredRow = Schema.fromJsonString(
+      Schema.Struct({ key: Schema.Json, value: Schema.JsonObject }),
+    );
+    const legacy = { "loop:implement": ["ready", "Ready", "review"], "loop:nightly": ["passed"] };
+    for (const [key, outcomeLabels] of Object.entries(legacy)) {
+      const [row] = yield* sql<{
+        readonly value: string;
+      }>`SELECT value FROM usine_configuration_entities WHERE key = ${key}`;
+      if (row === undefined) return yield* Effect.die(`missing ${key}`);
+      const entity = yield* Schema.decodeEffect(StoredRow)(row.value);
+      const value = yield* Schema.encodeEffect(StoredRow)({
+        ...entity,
+        value: { ...entity.value, outcomeLabels },
+      });
+      yield* sql`UPDATE usine_configuration_entities SET value = ${value} WHERE key = ${key}`;
+    }
+    const refused = yield* first.read.pipe(Effect.flip);
+    expect(String(refused.cause)).toContain("ConfigurationInvalid");
+
+    const reopened = yield* open;
+    const upgraded = yield* reopened.read;
+    expect(upgraded.number).toBe(2);
+    assert(Option.isSome(upgraded.instance));
+    expect(
+      Object.fromEntries(
+        upgraded.instance.value.loops.map(({ name, outcomeLabels }) => [name, outcomeLabels]),
+      ),
+    ).toEqual({ implement: ["ready", "review"], nightly: [] });
+    const revision = yield* reopened.revision(ConfigurationRevisionNumber.make(2));
+    assert(Option.isSome(revision));
+    expect(revision.value.actor).toEqual(Option.none());
+    expect(revision.value.changes.map(({ key }) => key.key).sort()).toEqual([
+      "loop:implement",
+      "loop:nightly",
+    ]);
+    const edited = yield* reopened.commit({
+      expected: upgraded.number,
+      changes: [],
+      ...metadata,
+    });
+    expect(edited.number).toBe(3);
+    expect((yield* (yield* open).list(Option.none())).map(({ number }) => number)).toEqual([
+      1, 2, 3,
+    ]);
   }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
 );

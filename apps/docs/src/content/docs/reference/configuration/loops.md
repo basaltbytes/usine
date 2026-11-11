@@ -95,7 +95,9 @@ The label-event read, including bot-account lookup and all accounts used by the 
 
 The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the handoff's `on_green` actions instead. Don't list an `on_green` label in `outcome_labels`: usine checks the outcome labels when the agent ends, before the CI wait starts, so the label isn't there yet and the run fails.
 
-A schedule loop can't set `outcome_labels` because its runs have no item to label; the loop fails to load with a schema error. Labels that differ only in letter case are rejected. A label that `usine.yaml` doesn't declare under `labels` still loads, but usine logs `Loop outcome label is not a declared GitHub label`, and the loop's page in **Configuration > Loops** shows a warning next to its outcome labels.
+A schedule loop can't set `outcome_labels` because its runs have no item to label; the loop fails to load with a schema error. Labels that differ only in letter case are rejected. A label that `usine.yaml` doesn't declare under `labels` still loads, but usine logs `Loop outcome label is not a declared GitHub label` at startup and each time it applies a configuration revision, and the loop's page in **Configuration > Loops** shows a warning next to its outcome labels.
+
+Earlier versions accepted outcome labels on a schedule loop and labels that differ only in letter case. When usine opens a stored configuration that contains them, it removes the schedule loop's outcome labels and each repeated label, keeping the first spelling. It records the change as one configuration revision without an actor and logs `Removed stored outcome labels that the loop rules reject` for each loop.
 
 ## Priority
 

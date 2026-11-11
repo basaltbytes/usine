@@ -399,6 +399,28 @@ describe("CurrentInstance", () => {
     ).pipe(Effect.provide(changeBusLayer), Effect.scoped),
   );
 
+  it.live("logs undeclared outcome labels at startup and when it applies a revision", () => {
+    const warnings: Array<unknown> = [];
+    const message = "Loop outcome label is not a declared GitHub label";
+    const logged = () => warnings.filter((warning) => warning === message).length;
+    return withFolder(
+      () =>
+        Effect.gen(function* () {
+          // The test store reads the folder, which logs once before each install logs again.
+          assert.strictEqual(logged(), 2);
+          yield* (yield* CurrentInstance).reload;
+          assert.strictEqual(logged(), 4);
+        }),
+      [
+        ...initialFiles.filter(([file]) => file !== "loops/start-dev.md"),
+        [
+          "loops/start-dev.md",
+          loopFile("developer").replace("step:", "outcome_labels: [shipped]\nstep:"),
+        ],
+      ],
+    ).pipe(Effect.withLogger(warningsIn(warnings)));
+  });
+
   it.live("keeps the running instance when the configuration store cannot be read", () =>
     withFolder((root) =>
       Effect.gen(function* () {

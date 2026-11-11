@@ -1,5 +1,5 @@
 import { RepositoryName } from "@usine/core/repository";
-import { type Brand, Schema } from "effect";
+import { type Brand, Effect, Match, Schema } from "effect";
 import { LaneName } from "../board.ts";
 import { GitHubLabelName } from "@usine/core/label";
 import { LoopFile } from "../loop.ts";
@@ -54,3 +54,26 @@ export const ConfigWarning = Schema.Union([
 ]);
 
 export type ConfigWarning = typeof ConfigWarning.Type;
+
+/** Logs each warning at Warning level, naming the label and the lane or loop that uses it. */
+export const logConfigWarnings = Effect.fn("Config.logWarnings")(function* (
+  warnings: ReadonlyArray<ConfigWarning>,
+) {
+  yield* Effect.forEach(
+    warnings,
+    (warning) =>
+      Match.valueTags(warning, {
+        UndeclaredLaneLabelWarning: ({ repository, lane, label }) =>
+          Effect.logWarning("Board Lane references an undeclared GitHub label", {
+            repository,
+            lane,
+            label,
+          }),
+        UndeclaredTriggerLabelWarning: ({ loop, label }) =>
+          Effect.logWarning("Loop trigger references an undeclared GitHub label", { loop, label }),
+        UndeclaredOutcomeLabelWarning: ({ loop, label }) =>
+          Effect.logWarning("Loop outcome label is not a declared GitHub label", { loop, label }),
+      }),
+    { discard: true },
+  );
+});

@@ -1,8 +1,9 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import { Context, Effect, FileSystem, Layer, Match, Option, Path, Result } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
 import { type AgentFile, InvalidAgent } from "./agent.ts";
 import { ConfigFileError, FactoryConfigError, InstancePath } from "./file.ts";
 import { LoadedInstance } from "./instance/instance.ts";
+import { logConfigWarnings } from "./instance/diagnostics.ts";
 import { type LoopFile, QuarantinedLoop } from "./loop.ts";
 import { loopReferenceFailure, referenceIndex } from "./instance/references.ts";
 import { ConfigParser } from "./parser.ts";
@@ -195,29 +196,7 @@ export class InstanceFolder extends Context.Service<
                   ).pipe(Effect.as([])),
                 ),
               );
-              yield* Effect.forEach(
-                warnings,
-                (warning) =>
-                  Match.valueTags(warning, {
-                    UndeclaredLaneLabelWarning: ({ repository, lane, label }) =>
-                      Effect.logWarning("Board Lane references an undeclared GitHub label", {
-                        repository,
-                        lane,
-                        label,
-                      }),
-                    UndeclaredTriggerLabelWarning: ({ loop, label }) =>
-                      Effect.logWarning("Loop trigger references an undeclared GitHub label", {
-                        loop,
-                        label,
-                      }),
-                    UndeclaredOutcomeLabelWarning: ({ loop, label }) =>
-                      Effect.logWarning("Loop outcome label is not a declared GitHub label", {
-                        loop,
-                        label,
-                      }),
-                  }),
-                { discard: true },
-              );
+              yield* logConfigWarnings(warnings);
 
               return LoadedInstance.make({
                 config,
