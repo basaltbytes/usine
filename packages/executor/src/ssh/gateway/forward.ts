@@ -48,9 +48,9 @@ export class GatewayForwardClosed extends Schema.TaggedError<
 }) {}
 
 /**
- * An SSH forward from a local port to a Gateway's admin API (ADR 0027, amendment of
- * 2026-10-19). It opens with the first Worker behind the Gateway, reopens after a pause when
- * its client exits, and closes with the last Worker or the executor.
+ * An SSH forward from a local port to a Gateway's admin API. It opens with the first Worker
+ * behind the Gateway, reopens after a pause when its client exits, and closes with the last
+ * Worker or the executor.
  */
 export interface GatewayForward {
   /** The Gateway's SSH destination, used to identify it in logs and messages. */

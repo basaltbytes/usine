@@ -47,9 +47,9 @@ const credentialsRoot = (machine: SshMachine): string => `${machine.workerDirect
 
 /**
  * Writes each Attempt's token to a directory next to the Worker's checkouts that only the SSH
- * user can read, renews it before expiry, and removes it when the Attempt's scope closes. All
- * Attempts on the Worker can read each other's tokens (ADR 0026). `reclaim` removes credentials
- * left by an earlier process, once per process.
+ * user can read, renews it before expiry, and removes it when the Attempt's scope closes. Without
+ * a container runtime, Attempts on the Worker share that user and can read each other's tokens.
+ * `reclaim` removes credentials left by an earlier process, once per process.
  */
 export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(function* (
   commands: RemoteCommands,
