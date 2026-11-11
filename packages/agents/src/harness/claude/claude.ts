@@ -173,11 +173,10 @@ interface ClaudeLaunch {
    */
   readonly login: Exclude<LoginCheck, "waiting"> | "undecided";
   readonly retained: boolean;
-  /**
-   * Checkpoints a handled message; returns whether the checkpoint covers the message and all output
-   * read before it.
-   */
-  readonly acknowledge: (message: Schema.Json) => Effect.Effect<boolean>;
+  /** Checkpoints a handled message. */
+  readonly acknowledge: (message: Schema.Json) => Effect.Effect<void>;
+  /** Whether the checkpoint covers every acknowledged message and the output read before it. */
+  readonly covered: Effect.Effect<boolean>;
   /** The scope of the launch's process, input, and output reader. */
   readonly scope: Scope.Closeable;
 }
@@ -282,7 +281,7 @@ const makeClaudeChild = Effect.gen(function* () {
           ),
         ),
       );
-      const checkpoint = claudeOutputCheckpoint(recordPrompt);
+      const checkpoint = yield* claudeOutputCheckpoint(recordPrompt);
       const owner = yield* sdkProcessSpawner(
         {
           host: request.host,
@@ -290,9 +289,11 @@ const makeClaudeChild = Effect.gen(function* () {
           sessionId: Option.some(request.session.id),
           environment: request.environment,
         },
-        transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
-        checkpoint.read,
-        checkpoint.inputAcknowledged,
+        {
+          transport: transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
+          readOutput: checkpoint.read,
+          onInputAcknowledged: checkpoint.inputAcknowledged,
+        },
       ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
       const query = sdk.open(input, { ...options, spawnClaudeCodeProcess: owner.spawn });
       const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
@@ -353,13 +354,8 @@ const makeClaudeChild = Effect.gen(function* () {
         login,
         retained,
         acknowledge: (message: Schema.Json) =>
-          checkpoint
-            .handled(message)
-            .pipe(
-              Effect.flatMap(({ bytes, covered }) =>
-                owner.acknowledge(bytes).pipe(Effect.as(covered)),
-              ),
-            ),
+          checkpoint.handled(message).pipe(Effect.flatMap(owner.acknowledge)),
+        covered: checkpoint.covered,
       } satisfies Omit<ClaudeLaunch, "scope">;
     }).pipe(Effect.ensuring(release));
   });
@@ -771,11 +767,12 @@ const makeClaudeChild = Effect.gen(function* () {
             Stream.runForEach(
               Result.match({
                 onSuccess: (message) =>
-                  handle(message).pipe(
-                    Effect.andThen(launch.acknowledge(message)),
+                  launch.covered.pipe(
                     Effect.flatMap((covered) =>
                       covered ? Effect.sync(() => usage.covered()) : Effect.void,
                     ),
+                    Effect.andThen(handle(message)),
+                    Effect.andThen(launch.acknowledge(message)),
                   ),
                 onFailure: (error) =>
                   Effect.sync(() => {
