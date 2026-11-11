@@ -23,6 +23,8 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { ItemNumber } from "@usine/core/item";
+import * as RunState from "@usine/core/run/state";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { PullRequest, StepCompletion, StepResult } from "@usine/core/step/result";
@@ -560,71 +562,19 @@ it.live("green CI observed after the deadline applies the recorded labels once",
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live.each(["closed", "merged"] as const)(
-  "a pull request %s before CI settles ends the wait without labels or a fix",
-  (pullRequest) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-        const setup = yield* scenario(3600);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const runId = yield* openWait(setup.timeoutSeconds);
-          yield* Ref.set(
-            setup.observed,
-            CheckSnapshot.make({ pullRequest, head, state: "pending" }),
-          );
+const closedPullRequestCases = [
+  { pullRequest: "closed", state: "pending" },
+  { pullRequest: "closed", state: "failure" },
+  { pullRequest: "closed", state: "conflict" },
+  { pullRequest: "closed", state: "success" },
+  { pullRequest: "merged", state: "pending" },
+  { pullRequest: "merged", state: "failure" },
+  { pullRequest: "merged", state: "conflict" },
+] as const;
 
-          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
-
-          const failed = yield* engine.inspect(runId);
-          assert.strictEqual(failed.run.state._tag, "Failed");
-          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
-          assert(outcome?._tag === "Failed");
-          assert.strictEqual(
-            outcome.failure.message,
-            `Pull request #815 was ${pullRequest} before CI settled on head ${head}. usine applied no completion labels and started no fix.`,
-          );
-          const mutations = yield* Ref.get(setup.mutations);
-          assert.deepStrictEqual(mutations, []);
-          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
-        }).pipe(Effect.provide(setup.runtime));
-      }),
-    ).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.live.each(["closed", "merged"] as const)(
-  "green CI on a pull request %s after CI settled applies the recorded labels",
-  (pullRequest) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-        const setup = yield* scenario(3600);
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const runId = yield* openWait(setup.timeoutSeconds);
-          yield* Ref.set(
-            setup.observed,
-            CheckSnapshot.make({ pullRequest, head, state: "success" }),
-          );
-
-          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
-
-          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Succeeded");
-          assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
-          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
-        }).pipe(Effect.provide(setup.runtime));
-      }),
-    ).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.live.each([
-  { pullRequest: "closed", state: "failure", when: "after CI failed" },
-  { pullRequest: "merged", state: "failure", when: "after CI failed" },
-  { pullRequest: "closed", state: "conflict", when: "while it conflicted with its base branch" },
-] as const)(
-  "a pull request $pullRequest with $state CI ends the wait without labels or a fix",
-  ({ pullRequest, state, when }) =>
+it.live.each(closedPullRequestCases)(
+  "a pull request $pullRequest with $state CI ends the wait without labels, a fix, or an agent failure",
+  ({ pullRequest, state }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixtureInstance = yield* instance;
@@ -636,14 +586,102 @@ it.live.each([
 
           yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
-          const failed = yield* engine.inspect(runId);
-          assert.strictEqual(failed.run.state._tag, "Failed");
-          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
-          assert(outcome?._tag === "Failed");
-          assert.strictEqual(
-            outcome.failure.message,
-            `Pull request #815 was ${pullRequest} ${when} on head ${head}. usine applied no completion labels and started no fix.`,
+          const settled = yield* engine.inspect(runId);
+          const outcome = Option.getOrNull(settled.attempts.at(-1)?.outcome ?? Option.none());
+          if (pullRequest === "merged") {
+            assert.strictEqual(settled.run.state._tag, "Succeeded");
+            assert.strictEqual(outcome?._tag, "Succeeded");
+          } else {
+            assert(settled.run.state._tag === "Canceled");
+            assert.deepStrictEqual(
+              settled.run.state.reason,
+              RunState.PullRequestClosed.make({ pullRequest: ItemNumber.make(815) }),
+            );
+            assert.strictEqual(outcome?._tag, "Canceled");
+          }
+          const mutations = yield* Ref.get(setup.mutations);
+          assert.deepStrictEqual(mutations, []);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("green CI on a merged pull request applies the recorded labels", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "merged", head, state: "success" }),
+        );
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Succeeded");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a force-pushed branch of a closed pull request supersedes the wait", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const runId = yield* openWait(setup.timeoutSeconds);
+        const pushed = CommitSha.make("c".repeat(40));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "closed", head: pushed, state: "pending" }),
+        );
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        const settled = yield* engine.inspect(runId);
+        assert(settled.run.state._tag === "Canceled");
+        assert.deepStrictEqual(
+          settled.run.state.reason,
+          RunState.HeadChanged.make({ head: pushed }),
+        );
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each(["CLOSED", "MERGED"] as const)(
+  "a pull request %s before its CI fix starts ends the wait without a fix or an agent failure",
+  (itemState) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
           );
+          yield* Ref.set(setup.itemState, itemState);
+
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+          const settled = yield* engine.inspect(runId);
+          if (itemState === "MERGED") {
+            assert.strictEqual(settled.run.state._tag, "Succeeded");
+          } else {
+            assert(settled.run.state._tag === "Canceled");
+            assert.strictEqual(settled.run.state.reason._tag, "PullRequestClosed");
+          }
           const mutations = yield* Ref.get(setup.mutations);
           assert.deepStrictEqual(mutations, []);
           assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);

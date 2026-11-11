@@ -115,6 +115,14 @@ export class CiSuperseded extends Schema.TaggedClass<
   head: CommitSha,
 }) {}
 
+/** A person closed the pull request without merging it before CI on the recorded head passed. */
+export class CiPullRequestClosed extends Schema.TaggedClass<
+  CiPullRequestClosed,
+  Brand.Brand<"@usine/core/ci/CiPullRequestClosed">
+>()("CiPullRequestClosed", {
+  pullRequest: ItemNumber,
+}) {}
+
 /** A terminal observation of the recorded head's CI. */
 export const CiResolution = Schema.Union([
   CiPassed,
@@ -123,6 +131,7 @@ export const CiResolution = Schema.Union([
   CiIncomplete,
   CiHandedOff,
   CiSuperseded,
+  CiPullRequestClosed,
 ]);
 export type CiResolution = typeof CiResolution.Type;
 
