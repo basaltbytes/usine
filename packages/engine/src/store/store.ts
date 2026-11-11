@@ -715,6 +715,27 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("discard attempt leftovers"));
 
+  const discardClosedAttempt = Effect.fn("RunStore.discardClosedAttempt")(function* (
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const discardedAt = yield* DateTime.now;
+    const worker = yield* transact((transaction, record) =>
+      leftoverQueries(transaction)
+        .discardClosedAttempt(attemptId, discardedAt)
+        .pipe(
+          Effect.tap(
+            Option.match({
+              onNone: () => Effect.void,
+              onSome: (worker) =>
+                record({ audience: InstanceScope.make(), target: { kind: "worker", id: worker } }),
+            }),
+          ),
+        ),
+    );
+    return Option.isSome(worker);
+  }, persistence("discard a closed attempt's leftovers"));
+
   const openAttempts = Effect.fn("RunStore.openAttempts")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
     return yield* leftoverQueries(database).openAttempts(worker);
@@ -1170,6 +1191,7 @@ const makeRunStore = Effect.gen(function* () {
     recordOutOfMemory,
     attemptWindows,
     discardLeftovers,
+    discardClosedAttempt,
     openAttempts,
     submission: (runId: RunId) =>
       queries.eventRouteByRun(runId).pipe(
@@ -1311,6 +1333,12 @@ export class RunStore extends Context.Service<
     readonly discardLeftovers: (
       worker: WorkerName,
     ) => Effect.Effect<ReadonlyArray<AttemptId>, RunStoreError>;
+    /**
+     * Marks `attemptId`, a closed Attempt whose recovery found nothing left on its Worker, so
+     * reconciliation skips it. Returns whether it marked the Attempt; an open or already discarded
+     * Attempt stays as it is.
+     */
+    readonly discardClosedAttempt: (attemptId: AttemptId) => Effect.Effect<boolean, RunStoreError>;
     /** Returns the number of Attempts on `worker` without an outcome, excluding discarded leftovers. */
     readonly openAttempts: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**

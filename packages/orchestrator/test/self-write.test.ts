@@ -216,7 +216,7 @@ describe("Board self-writes", () => {
             workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeedNone,
-            recover: () => Effect.void,
+            recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),

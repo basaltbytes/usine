@@ -10,7 +10,11 @@ import { jsonKey } from "@usine/core/json-key";
 import { assert, describe, it } from "@effect/vitest";
 import type { Attempt, AttemptId, StopReason } from "@usine/core/attempt";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { type AttemptRecovery, SalvagePushed } from "@usine/core/attempt/salvage";
+import {
+  type AttemptRecovery,
+  type RecoveredLeftovers,
+  SalvagePushed,
+} from "@usine/core/attempt/salvage";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { CommitSha } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
@@ -81,18 +85,23 @@ const deliverOneAttempt = (directory: InstanceDirectory, number: number) =>
 
 /**
  * Returns a restarted runtime's executor that runs `workers`, starts nothing, and records each
- * `recover` call, and each `discard` call in `discarded`.
+ * `recover` call, and each `discard` call in `discarded`. `recover` then returns `leftovers`.
  */
 const recordingExecutor = (
   workers: ReadonlyArray<string>,
   recovered: Ref.Ref<ReadonlyArray<AttemptId>>,
   discarded?: Ref.Ref<ReadonlyArray<readonly [WorkerName, ReadonlyArray<AttemptId>]>>,
+  leftovers: (attempt: AttemptRecovery) => Effect.Effect<RecoveredLeftovers, AttemptFailure> = () =>
+    Effect.succeed("found"),
 ) =>
   Layer.succeed(StepExecutor)({
     workers: Effect.succeed(workers.map((worker) => WorkerName.make(worker))),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeedNone,
-    recover: (attempt) => Ref.update(recovered, (ids) => [...ids, attempt.attemptId]),
+    recover: (attempt) =>
+      Ref.update(recovered, (ids) => [...ids, attempt.attemptId]).pipe(
+        Effect.andThen(leftovers(attempt)),
+      ),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.never,
@@ -232,6 +241,7 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
         yield* record.salvage(
           SalvagePushed.make({ ref: attempt.ref, commit: CommitSha.make("a".repeat(40)) }),
         );
+        return "found" as const;
       }),
     intervene: () => Effect.void,
     interrupt: stop,
@@ -376,7 +386,8 @@ describe("engine restart", () => {
           const base = Context.get(currentServices, StepExecutor);
           const restarted = Layer.succeed(StepExecutor)({
             ...base,
-            recover: (attempt) => recorded(`recover ${attempt.attemptId}`),
+            recover: (attempt) =>
+              recorded(`recover ${attempt.attemptId}`).pipe(Effect.as("found" as const)),
             sweep: recorded("sweep"),
           });
           const secondScope = yield* Scope.make();
@@ -402,7 +413,7 @@ describe("engine restart", () => {
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: (attemptId) => Ref.get(live).pipe(Effect.map((ids) => ids.has(attemptId))),
           outcome: () => Effect.succeedNone,
-          recover: () => Effect.void,
+          recover: () => Effect.succeed("found" as const),
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
@@ -484,7 +495,7 @@ describe("engine restart", () => {
                   workers: Effect.succeed([local, spare]),
                   isLive: () => Effect.succeed(false),
                   outcome: () => Effect.succeedNone,
-                  recover: () => Effect.void,
+                  recover: () => Effect.succeed("found" as const),
                   intervene: () => Effect.void,
                   interrupt: () => Effect.void,
                   occupy: () => Effect.die("no open Attempt survives into the first runtime"),
@@ -569,7 +580,7 @@ describe("engine restart", () => {
                 Effect.as(liveIds.has(attemptId)),
               ),
             outcome: () => Effect.succeedNone,
-            recover: () => Effect.void,
+            recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             occupy: (worker) => counted(worker, 1).pipe(Effect.as(leaseOn(worker))),
@@ -696,6 +707,7 @@ describe("engine restart", () => {
                       ])
                     : Effect.void;
                 }),
+                Effect.as("found" as const),
               ),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -1346,6 +1358,77 @@ describe("engine restart", () => {
         yield* Scope.close(scope, Exit.void);
       }),
     ),
+  );
+
+  it.live(
+    "stops tracking a closed Attempt whose recovery found nothing left, and keeps visiting the rest",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const gone = (yield* deliverOneAttempt(directory, 41)).attempts.map(({ id }) => id);
+          const failing = (yield* deliverOneAttempt(directory, 42)).attempts.map(({ id }) => id);
+          const open = (yield* stopDuringAttempts(directory, [submission({ number: 43 })])).map(
+            ({ id }) => id,
+          );
+          const summaries: Array<string> = [];
+          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+            const line = jsonKey(message);
+            if (logLevel === "Info" && line.includes("finished on a Worker")) summaries.push(line);
+          });
+
+          // The machines of the delivered and the open Attempts are gone; the other recovery fails.
+          const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+          const firstScope = yield* Scope.make();
+          const context = yield* Scope.provide(
+            Layer.build(
+              engineLayer(
+                directory,
+                recordingExecutor(["local", "spare"], recovered, undefined, (attempt) =>
+                  failing.includes(attempt.attemptId)
+                    ? Effect.fail(
+                        InfraFailure.make({
+                          message: "the machine is unreachable",
+                          cause: undefined,
+                        }),
+                      )
+                    : Effect.succeed("gone"),
+                ),
+              ),
+            ),
+            firstScope,
+          ).pipe(Effect.provide(Logger.layer([logger])));
+          const recoveredState = yield* Ref.get(recovered);
+          assert.sameMembers([...recoveredState], [...gone, ...failing, ...open]);
+          assert.deepStrictEqual(summaries, [
+            jsonKey([
+              "Startup checkout reconciliation finished on a Worker",
+              { worker: "local", visited: 3, kept: 2, discarded: 1 },
+            ]),
+            jsonKey([
+              "Startup checkout reconciliation finished on a Worker",
+              { worker: "spare", visited: 0, kept: 0, discarded: 0 },
+            ]),
+          ]);
+          const reader = Context.get(context, RunReader);
+          const tracked = yield* reader.attemptsByWorker;
+          assert.deepStrictEqual(
+            tracked.map(({ worker, attempts }) => [worker, attempts]),
+            [["local", 2]],
+          );
+          yield* Scope.close(firstScope, Exit.void);
+
+          // The next start skips the discarded Attempt and visits the failed and the open ones.
+          const revisited = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+          const secondScope = yield* Scope.make();
+          yield* Scope.provide(
+            Layer.build(engineLayer(directory, recordingExecutor(["local"], revisited))),
+            secondScope,
+          );
+          const revisitedState = yield* Ref.get(revisited);
+          assert.sameMembers([...revisitedState], [...failing, ...open]);
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
   );
 
   it.live(

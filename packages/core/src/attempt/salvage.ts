@@ -109,6 +109,14 @@ export interface AttemptRecovery {
   readonly rejected: Option.Option<SalvageRejected>;
 }
 
+/**
+ * What recovery found of an Attempt on its Worker. `gone`: neither the Attempt's machine nor its
+ * checkout is left, so a later recovery has nothing to reconcile. `found`: recovery found the
+ * machine or the checkout, which it reconciled or kept.
+ */
+export const RecoveredLeftovers = Schema.Literals(["gone", "found"]);
+export type RecoveredLeftovers = typeof RecoveredLeftovers.Type;
+
 /** The storage that startup reconciliation uses for a persisted Attempt's salvage, comments, and windows. */
 export interface RecoverySink<E> {
   /** Records the recovery result for this attempt; fails with `E` if storage fails. */

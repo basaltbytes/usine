@@ -4,7 +4,12 @@ import { CHILD_KILL_SCRIPT, type RemoteHost } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
+import type {
+  AttemptRecovery,
+  AttemptSalvage,
+  RecoveredLeftovers,
+  RecoverySink,
+} from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type CommitSha, RepositoryName, safeSegment } from "@usine/core/repository";
 import type { BotAccount, WorkerName } from "@usine/core/worker";
@@ -499,12 +504,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.stopForRecovery(attempt);
       const located = yield* leftoversOf(attempt);
       if (Option.isNone(located)) {
-        yield* Effect.logInfo("The Attempt's machine is gone; nothing is left to reconcile", {
+        yield* Effect.logDebug("The Attempt's machine is gone; nothing is left to reconcile", {
           attemptId: attempt.attemptId,
           worker: attempt.worker,
         });
         yield* session.recoverPostedComments(attempt, Option.none(), record);
-        return;
+        return "gone" satisfies RecoveredLeftovers;
       }
       const { machine, checkouts } = located.value;
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
@@ -522,8 +527,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           : Option.none(),
         record,
       );
-      if (!present) return;
-      yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
+      // The machine stays until the finalizers release it, so a later recovery visits it again.
+      if (present)
+        yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
+      return "found" satisfies RecoveredLeftovers;
     }, Effect.scoped);
 
     /** Reconciles a kept checkout after its parent stops; skips a missing checkout. */
