@@ -210,7 +210,7 @@ Add members by GitHub login on **Members**. The last member cannot be removed. R
 
 Run `usine sign-in <instance-origin>`, open the GitHub device page, and enter the printed code. After authorization, the CLI prints an instance token once. Store it in a secret manager and send it as `Authorization: Bearer <token>`. The instance stores only its hash. After reading identity, usine requests revocation of the GitHub user token and wipes its local copy. A failed revocation logs a warning and preserves the sign-in result.
 
-**Tokens** lists the signed-in member's browsers and devices, creation times, and last use, updated at most once a minute per token. Listing tokens deletes expired credentials and excludes them from the response. Revoke an entry to end access. Device tokens remain valid until revoked; browser sessions expire after 30 days. **Sign out** revokes the current browser session.
+**Tokens** lists the signed-in member's browsers and devices, creation times, and last use, updated at most once a minute per token. Listing tokens deletes expired credentials and excludes them from the response. Revoke an entry to end access. A device token remains valid until revoked unless it was created with an expiry; browser sessions expire after 30 days. A device token can also carry an operation ceiling, the operation IDs it may call, such as `operator.approve`; **Tokens** shows the ceiling and the expiry. **Sign out** revokes the current browser session.
 
 Browser sessions use an `HttpOnly`, `SameSite=Strict` cookie, with `Secure` except for local HTTP origins. Browser writes require `X-Usine-CSRF`. The bundled UI reads its CSRF cookie and sends that header. Health and sign-in endpoints are public; the separate GitHub webhook listener verifies delivery signatures. Sign-in initiation, link issuance, GitHub exchanges, and invalid challenges have separate instance-wide limits of 60 requests per operation per minute. Invalid challenges do not consume the limits for valid sign-ins. Device polls also honor GitHub's interval.
 
@@ -228,9 +228,13 @@ Loop checks at `/api/configuration/loops/check` validate integer CEL priorities.
 
 ## API schema
 
-`GET /api/openapi.json` publicly serves the generated OpenAPI 3.1 contract, including sign-in, members, and tokens. It describes request and response schemas and authentication requirements without reading instance state. See the [HTTP API reference](https://docs.usine.dev/reference/operator-api/) for endpoint descriptions and the downloadable document.
+`GET /api/openapi.json` publicly serves the generated OpenAPI 3.1 contract, including sign-in, members, and tokens. It describes request and response schemas and authentication requirements without reading instance state. Each operation's `x-usine-permission` names the permission it requires: `public`, `read`, `operate`, `maintain`, `admin`, `session`, `tokens`, `local`, or `setup`. The docs check fails when an operation has none. See the [HTTP API reference](https://docs.usine.dev/reference/operator-api/) for endpoint descriptions and the downloadable document.
 
 Route definitions and schema annotations generate the contract. Authentication handlers use the paths and request schemas in `src/auth/api.ts`; setup handlers use `src/setup/api.ts`; the server combines those definitions with `OperatorApi` in `src/openapi.ts`. After changing a contract, regenerate and commit `apps/docs/public/openapi.json` as described in the [docs README](../docs/README.md#operator-http-api-reference).
+
+## MCP tools
+
+`src/mcp/` serves each operator operation as an MCP tool named by its endpoint identifier, such as `approve`, generated from the OpenAPI document. `POST /api/mcp` serves the tools over Streamable HTTP with the request's bearer token, and `usine mcp` serves them over stdio. A caller lists only the tools that its grants and operation ceiling permit. Each call goes through the operator API with the caller's credential, so the route permissions and audit apply. Results are JSON text cut at 100 KB, with a hint that names a narrower operation. See the [MCP guide](https://docs.usine.dev/guides/connect-an-mcp-client/).
 
 Apps created through `/setup` already have the web callback and client credentials. Enable the device flow in the App settings before using CLI device sign-in.
 

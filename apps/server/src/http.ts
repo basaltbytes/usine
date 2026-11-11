@@ -16,6 +16,7 @@ import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { authenticatedRoutes, RequestOperations, type AuthServices } from "./auth/http.ts";
 import { ceilingAdmits } from "./auth/model.ts";
+import { mcpRoutes } from "./mcp/http.ts";
 import { EFFORTS } from "@usine/core/agent/brain";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
@@ -650,6 +651,10 @@ export const serverLayer = (
     setupHttp?.protected.pipe(Layer.provide(authenticated.guard.layer)) ?? Layer.empty,
     setupHttp?.callback ?? Layer.empty,
     apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
+    mcpRoutes(auth.authentication.origins).pipe(
+      Layer.provide(authenticated.guard.layer),
+      Layer.provide(NodeHttpServer.layerHttpServices),
+    ),
     providerRoutes.pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,
