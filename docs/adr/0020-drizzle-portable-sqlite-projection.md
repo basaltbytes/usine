@@ -21,7 +21,7 @@ This revises [ADR 0010](./0010-single-sqlite-runtime-store.md): migrations come 
 
 ## Amendment (2026-10-11, #176): no shared `SqlClient`
 
-With Effect Cluster removed (ADR 0003 amendment of the same date), the database layer provides only `RunDatabase` and shares no `SqlClient`.
+With Effect Cluster removed (ADR 0003), the database layer provides only `RunDatabase` and shares no `SqlClient`.
 
 ## Amendment (2026-10-19, #336): Drizzle `1.0.0-rc.5-5935859` without a patch
 

@@ -27,6 +27,16 @@ import { attemptRequest } from "./support.ts";
 const encodeEvent = Schema.encodeEffect(Schema.toCodecJson(CoordinatorEvent));
 const contextJson = Schema.encodeEffect(Schema.fromJsonString(Schema.toCodecJson(AttemptContext)));
 
+/** A text of `length` characters whose first half is `start` and second half is `end`. */
+const halves = (length: number, start: string, end: string) =>
+  start.repeat(Math.ceil(length / 2)) + end.repeat(Math.floor(length / 2));
+
+/** The task of `length` characters: "a" in its first half and "z" in its second. */
+const task = (length: number) => halves(length, "a", "z");
+
+/** The output of `length` characters: "s" in its first half and "e" in its second. */
+const output = (length: number) => halves(length, "s", "e");
+
 const report = (child: number, length: number) =>
   ChildReported.make({
     child: ChildSessionCount.make(child),
@@ -38,7 +48,8 @@ const report = (child: number, length: number) =>
 /**
  * Returns the snapshot in which a child reported each of `earlier` in order, then the last child
  * left `output` and ended with `event`, as the coordinator records it before handling `event`. The
- * task and payload have the given lengths.
+ * task, output, and payload have the given lengths; the task and output are built with `task` and
+ * `output`.
  */
 const journalWith = (sizes: {
   readonly task: number;
@@ -52,7 +63,7 @@ const journalWith = (sizes: {
     const base = attemptRequest("context/sizes");
     const spec = AttemptChannel.RunSpec.make({
       ...base.spec,
-      task: AttemptTask.make("t".repeat(sizes.task)),
+      task: AttemptTask.make(task(sizes.task)),
       payload: { body: "p".repeat(sizes.payload) },
       outcomeLabels: ["ready-for-review"],
       requiresCi: true,
@@ -83,7 +94,7 @@ const journalWith = (sizes: {
         yield* journal.saveProgress(
           attemptId,
           child,
-          OutputSaved.make({ output: "o".repeat(sizes.output) }),
+          OutputSaved.make({ output: output(sizes.output) }),
         );
       const encoded = yield* encodeEvent(event);
       yield* journal.settleDelegation(attemptId, child, EncodedEvent.make(encoded));
@@ -108,8 +119,9 @@ describe("AttemptContext.build", () => {
       const encoded = yield* contextJson(context);
 
       assert.isAtMost(encoded.length, CONTEXT_CHARACTERS);
-      assert.strictEqual(context.task.length, 4_000);
-      assert.strictEqual(context.output.length, 2_000);
+      // The start of the task and the end of the output.
+      assert.strictEqual(context.task, "a".repeat(4_000));
+      assert.strictEqual(context.output, "e".repeat(2_000));
       assert.deepStrictEqual(context.outcomeLabels, ["ready-for-review"]);
       assert.isTrue(context.requiresCi);
       assert.deepStrictEqual(context.event, event);
@@ -128,7 +140,7 @@ describe("AttemptContext.build", () => {
     }),
   );
 
-  it.effect("shortens the task, output, and earlier report to fit, and keeps the event whole", () =>
+  it.effect("shortens the task first to fit, keeping its start, and keeps the event whole", () =>
     Effect.gen(function* () {
       const event = report(2, 9_000);
       const snapshot = yield* journalWith({
@@ -143,6 +155,15 @@ describe("AttemptContext.build", () => {
 
       assert.isAtMost(encoded.length, CONTEXT_CHARACTERS);
       assert.deepStrictEqual(context.event, event);
+      // Shortening the task alone fits the cap, so the output and the report keep their limits.
+      assert.isAbove(context.task.length, 0);
+      assert.isBelow(context.task.length, 4_000);
+      assert.strictEqual(context.task, "a".repeat(context.task.length));
+      assert.strictEqual(context.output, "e".repeat(2_000));
+      assert.deepStrictEqual(
+        context.delegations.map(({ report }) => Option.map(report, (text) => text.length)),
+        [Option.some(4_000), Option.none()],
+      );
     }),
   );
 
@@ -206,6 +227,29 @@ describe("AttemptContext.build", () => {
       assert.isAbove(second ?? 0, 160);
       assert.isBelow(second ?? 0, 4_000);
       assert.strictEqual(handled, 0);
+    }),
+  );
+
+  it.effect("shortens the output from its start once the task is empty", () =>
+    Effect.gen(function* () {
+      const event = report(1, 14_500);
+      const snapshot = yield* journalWith({
+        task: 100,
+        payload: 0,
+        earlier: [],
+        output: 2_000,
+        event,
+      });
+      const context = yield* buildAttemptContext(snapshot, event);
+      const encoded = yield* contextJson(context);
+
+      assert.isAtMost(encoded.length, CONTEXT_CHARACTERS);
+      assert.deepStrictEqual(context.event, event);
+      assert.strictEqual(context.task, "");
+      // Part of the output still fits, and it's the end of the output.
+      assert.isAbove(context.output.length, 0);
+      assert.isBelow(context.output.length, 2_000);
+      assert.strictEqual(context.output, output(2_000).slice(-context.output.length));
     }),
   );
 });

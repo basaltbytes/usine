@@ -113,7 +113,7 @@ The sink also reads back the attempt's current-protocol envelopes in append orde
 
 ### Lifecycle decisions
 
-The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, interrupted-attempt recovery, cancellation, operator retry, and whether a new event can replace a run. `RunStore` applies each decision and its step result in one transaction. Completion and restart recovery share the three-attempt cap, and a late executor result can't settle a replacement attempt. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. [ADR 0003](../../docs/adr/0003-durable-execution-on-effect-workflow.md) records why the engine drives runs itself.
+The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, interrupted-attempt recovery, cancellation, operator retry, and whether a new event can replace a run. `RunStore` applies each decision and its step result in one transaction. Completion and restart recovery share the three-attempt cap, and a late executor result can't settle a replacement attempt. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. [ADR 0003](../../docs/adr/0003-run-fibers-and-resumable-attempts.md) records why the engine drives runs itself.
 
 ## Cycle budgets
 
