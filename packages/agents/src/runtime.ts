@@ -388,8 +388,11 @@ const reportHeader = new RegExp(
   "u",
 );
 
-/** A Markdown code fence: its group is the run of backticks or tildes. */
-const codeFence = /^ {0,3}(`{3,}|~{3,})/u;
+/**
+ * A Markdown code fence at any indentation, so a fence nested in a list item still quotes its
+ * contents: its group is the run of backticks or tildes.
+ */
+const codeFence = /^[ \t]*(`{3,}|~{3,})/u;
 
 /** Returns whether `line` closes a code block opened by `opener`: same character, no shorter. */
 const closesFence = (line: string, opener: string): boolean => {
