@@ -633,3 +633,30 @@ it("keeps errors local with retry and shows an empty commit comparison", async (
   await changes.getByRole("button", { name: "Retry", exact: true }).click();
   await expect.element(changes.getByText("No files changed in this comparison")).toBeVisible();
 });
+
+it("says when the pull request's attempts pushed no new commits", async () => {
+  const task = taskWithChanges();
+  tasks.set(
+    "40",
+    TaskView.make({
+      ...task,
+      attemptChanges: EffectArray.map(task.attemptChanges, (attempt) =>
+        TaskAttemptChangesView.make({ ...attempt, base: attempt.head }),
+      ),
+    }),
+  );
+  await mount(40);
+  await page
+    .getByRole("region", { name: /^Pull requests/u })
+    .getByText("Changes", { exact: true })
+    .nth(1)
+    .click();
+  const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
+  await expect
+    .element(changes.getByText("Attempts on this pull request pushed no new commits"))
+    .toBeVisible();
+  await expect.element(changes.getByRole("combobox", { name: "Compare" })).not.toBeInTheDocument();
+  await expect
+    .element(changes.getByText("No attempt commits recorded", { exact: false }))
+    .not.toBeInTheDocument();
+});

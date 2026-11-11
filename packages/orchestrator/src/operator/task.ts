@@ -149,7 +149,10 @@ export class TaskView extends Schema.Class<
   ),
   /** The harvested comments and reviews of those Runs, newest Run first, and newest first within a Run. */
   comments: Schema.Array(TaskCommentView),
-  /** Recorded attempt commit ranges, including runs outside the first history page. */
+  /**
+   * Recorded attempt commit ranges, including runs outside the first history page and attempts
+   * that pushed no new commits.
+   */
   attemptChanges: Schema.Array(TaskAttemptChangesView).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
     Schema.withConstructorDefault(Effect.succeed([])),

@@ -2,7 +2,6 @@ import { CaretRightIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import type { ItemNumber } from "@usine/core/item";
 import type { ProjectId } from "@usine/core/project";
-import type { RepositoryName } from "@usine/core/repository";
 import { CommitRangeFilesQuery, PullRequestFilesQuery } from "@usine/github/file-changes";
 import type { TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { lazy, Suspense, useId, useState } from "react";
@@ -20,6 +19,7 @@ import {
   compareChanges,
   loadingChanges,
   noChangedFiles,
+  noNewAttemptCommits,
   noRecordedAttempts,
   noRecordedHead,
   retryChanges,
@@ -41,22 +41,18 @@ const LoadingChanges = () => (
 
 type PullRequestFilesProps = {
   readonly project: ProjectId;
-  readonly repository: RepositoryName;
+  readonly task: TaskView;
   readonly number: ItemNumber;
   readonly state: NonNullable<TaskItemView["pullRequest"]>;
   readonly attempts: TaskView["attemptChanges"];
 };
 
-const PullRequestFiles = ({
-  project,
-  repository,
-  number,
-  state,
-  attempts,
-}: PullRequestFilesProps) => {
+const PullRequestFiles = ({ project, task, number, state, attempts }: PullRequestFilesProps) => {
+  const { repository } = task;
   const selectId = useId();
   const [selected, setSelected] = useState("whole");
-  const attempt = attempts.find(({ attemptId }) => attemptId === selected);
+  const ranges = attempts.filter(({ base, head }) => base !== head);
+  const attempt = ranges.find(({ attemptId }) => attemptId === selected);
   const selection =
     attempt === undefined
       ? PullRequestFilesQuery.make({ base: state.base, head: state.head })
@@ -66,7 +62,7 @@ const PullRequestFiles = ({
     <div className="min-w-0 space-y-3 pb-3">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
         <div className="flex min-w-0 items-center gap-2">
-          {attempts.length === 0 ? (
+          {ranges.length === 0 ? (
             <>
               <span>{compareChanges}</span>
               <span className="text-foreground">{wholePullRequest}</span>
@@ -81,7 +77,7 @@ const PullRequestFiles = ({
                 className="min-w-0 max-w-full"
               >
                 <NativeSelectOption value="whole">{wholePullRequest}</NativeSelectOption>
-                {attempts.map((attempt) => (
+                {ranges.map((attempt) => (
                   <NativeSelectOption key={attempt.attemptId} value={attempt.attemptId}>
                     {attemptChangesLabel(attempt.loop, attempt.number, attempt.head)}
                   </NativeSelectOption>
@@ -104,8 +100,10 @@ const PullRequestFiles = ({
           </>
         )}
       </div>
-      {attempts.length === 0 && (
-        <p className="text-xs text-muted-foreground">{noRecordedAttempts}</p>
+      {ranges.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          {attempts.length === 0 ? noRecordedAttempts : noNewAttemptCommits}
+        </p>
       )}
       {files.isPending ? (
         <LoadingChanges />
@@ -167,7 +165,7 @@ export const PullRequestChanges = ({ project, task, pullRequest }: PullRequestCh
           ) : (
             <PullRequestFiles
               project={project}
-              repository={task.repository}
+              task={task}
               number={pullRequest.number}
               state={pullRequest.pullRequest}
               attempts={task.attemptChanges.filter(
