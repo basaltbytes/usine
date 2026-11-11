@@ -244,21 +244,51 @@ it.effect("splits stdout lines the same way whatever the read boundaries", () =>
   }),
 );
 
-it.effect("does not let a cancelled request's late response answer a later request", () =>
-  Effect.gen(function* () {
-    const hook = yield* hookRequest;
-    const response = yield* hookResponse;
-    const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "hook" });
-    const checkpoint = yield* claudeOutputCheckpoint();
-    const released = yield* checkpoint.read(Buffer.concat([hook, cancel]));
-    assert.strictEqual(released, hook.length + cancel.length);
-    const late = yield* checkpoint.inputAcknowledged(response);
-    assert.strictEqual(late, 0);
-    const reused = yield* checkpoint.read(hook);
-    assert.strictEqual(reused, 0);
-    const answered = yield* checkpoint.inputAcknowledged(response);
-    assert.strictEqual(answered, hook.length);
-  }),
+for (const order of ["response-first", "request-first"] as const)
+  it.effect(
+    `does not let a cancelled request's late response answer a later request (${order})`,
+    () =>
+      Effect.gen(function* () {
+        const hook = yield* hookRequest;
+        const response = yield* hookResponse;
+        const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "hook" });
+        const checkpoint = yield* claudeOutputCheckpoint();
+        const released = yield* checkpoint.read(Buffer.concat([hook, cancel]));
+        assert.strictEqual(released, hook.length + cancel.length);
+        if (order === "response-first") {
+          const late = yield* checkpoint.inputAcknowledged(response);
+          assert.strictEqual(late, 0);
+          const reused = yield* checkpoint.read(hook);
+          assert.strictEqual(reused, 0);
+        } else {
+          const reused = yield* checkpoint.read(hook);
+          assert.strictEqual(reused, 0);
+          const late = yield* checkpoint.inputAcknowledged(response);
+          assert.strictEqual(late, 0);
+        }
+        const answered = yield* checkpoint.inputAcknowledged(response);
+        assert.strictEqual(answered, hook.length);
+      }),
+  );
+
+it.effect(
+  "lets a reused request's response answer it after an answered request's cancellation",
+  () =>
+    Effect.gen(function* () {
+      const hook = yield* hookRequest;
+      const response = yield* hookResponse;
+      const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "hook" });
+      const checkpoint = yield* claudeOutputCheckpoint();
+      yield* checkpoint.read(hook);
+      const answered = yield* checkpoint.inputAcknowledged(response);
+      assert.strictEqual(answered, hook.length);
+      const cancelled = yield* checkpoint.read(cancel);
+      assert.strictEqual(cancelled, cancel.length);
+      const reused = yield* checkpoint.read(hook);
+      assert.strictEqual(reused, 0);
+      const own = yield* checkpoint.inputAcknowledged(response);
+      assert.strictEqual(own, hook.length);
+    }),
 );
 
 it.effect("logs an unanswered control request at the first turn result only", () =>

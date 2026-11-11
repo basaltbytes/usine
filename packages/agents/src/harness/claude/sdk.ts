@@ -373,7 +373,9 @@ const acknowledgeInput =
       }
       if (!Schema.is(ControlResponse)(decoded.value)) continue;
       const id = decoded.value.response.request_id;
-      if (!release(pending, id) && !cancelled.delete(id)) answered.add(id);
+      // The SDK's late response to a cancelled request comes before the response to a later
+      // request that reuses its ID.
+      if (!cancelled.delete(id) && !release(pending, id)) answered.add(id);
     }
     const flushed = flush(pending);
     return [
