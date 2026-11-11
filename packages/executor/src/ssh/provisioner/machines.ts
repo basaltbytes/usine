@@ -888,7 +888,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     );
     protectedAttempts.delete(attemptId);
     const machine = Option.flatMap(located, ({ machine }) => machine);
-    yield* Effect.logInfo("Resolved retained SSH machine for attempt recovery", {
+    yield* Effect.logDebug("Resolved retained SSH machine for attempt recovery", {
       worker,
       attemptId,
       found: Option.isSome(machine),

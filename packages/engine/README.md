@@ -79,7 +79,7 @@ A recorded `SalvageRetained.pushFailure` ends the attempt with `GitHubPushFailur
 
 Startup checkout reconciliation logs its attempt count, progress every 50 attempts, and completion at Info. It completes before run fibers start; hosts can serve a health endpoint while building the engine.
 
-Also at startup, the engine passes every stored attempt on a worker in `StepExecutor.workers` to `StepExecutor.recover`, which records its salvage and reconciles its checkout. An attempt whose recorded salvage is `Rejected` carries it in `AttemptRecovery.rejected`, so the recovery doesn't push the same commit again. It first stops the parent task of each closed attempt. An open attempt whose parent task is live, or whose liveness can't be read, keeps its checkout for the run. Each reconcile, the startup one included, ends with `StepExecutor.sweep`, which removes the worker resources that no attempt holds, such as a provisioned worker's machines ([#550](https://github.com/basaltbytes/usine/issues/550)) or the Codex homes that a crash left on an SSH worker ([#592](https://github.com/basaltbytes/usine/issues/592)).
+Also at startup, the engine passes every stored attempt on a worker in `StepExecutor.workers` to `StepExecutor.recover`, which records its salvage and reconciles its checkout. An attempt whose recorded salvage is `Rejected` carries it in `AttemptRecovery.rejected`, so the recovery doesn't push the same commit again. It first stops the parent task of each closed attempt. An open attempt whose parent task is live, or whose liveness can't be read, keeps its checkout for the run. When `recover` returns `gone` for a closed attempt, because neither its machine nor its checkout is left, the engine stops tracking it with `RunStore.discardClosedAttempt`, so later startups skip it. Open attempts and failed recoveries stay tracked. Startup logs one line per worker in `StepExecutor.workers` with the attempts visited, kept, and discarded. Each reconcile, the startup one included, ends with `StepExecutor.sweep`, which removes the worker resources that no attempt holds, such as a provisioned worker's machines ([#550](https://github.com/basaltbytes/usine/issues/550)) or the Codex homes that a crash left on an SSH worker ([#592](https://github.com/basaltbytes/usine/issues/592)).
 
 The engine handles that checkout's recovery until the reattaching execution runs `ExecutionSink.checkoutAcquired`, which `StepExecutor.execute` runs once preparation has the checkout, never on a failed preparation. If the run closes the attempt first (the task stopped before the run reserved a worker, liveness can't be read, the reattachment failed, or the operator canceled), the engine stops the parent task with `interrupt` and passes the still-open attempt to `recover`, which reconciles regardless of `isLive`. The next attempt resumes from that salvage.
 
@@ -153,7 +153,7 @@ import { LoopControl } from "@usine/engine/loop-control"
 const StepExecutorLive = Layer.succeed(StepExecutor)({
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
-  recover: () => Effect.void,
+  recover: () => Effect.succeed("found" as const),
   intervene: () => Effect.void,
   reserve: () => Effect.succeed({
     worker: WorkerName.make("local"),

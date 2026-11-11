@@ -450,6 +450,34 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           }),
         ),
     );
+    it.live("stops tracking a closed Attempt once, and never an open one", () =>
+      withPersistence(
+        adapter,
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("closed-attempt-discard");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(first._tag === "AttemptStarted");
+          const open = first.execution.attempt.id;
+          const whileOpen = yield* store.discardClosedAttempt(open);
+          assert.isFalse(whileOpen);
+
+          yield* store.finishAttempt(
+            first.execution.attempt,
+            Result.fail(AgentFailure.make({ message: "Checks failed" })),
+          );
+          const closed = yield* store.discardClosedAttempt(open);
+          assert.isTrue(closed);
+          const again = yield* store.discardClosedAttempt(open);
+          assert.isFalse(again);
+          const candidates = yield* store.salvageCandidates;
+          assert.deepStrictEqual(candidates, []);
+          const candidate = yield* store.salvageCandidate(open);
+          assert.isTrue(Option.isNone(candidate));
+        }),
+      ),
+    );
     it.live("keeps a canceled Run closed when its recovered Attempt reports late", () =>
       withPersistence(
         adapter,

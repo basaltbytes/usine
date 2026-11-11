@@ -71,7 +71,7 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
           open: false,
           rejected: Option.none(),
         };
-        yield* executor.recover(
+        const found = yield* executor.recover(
           attempt,
           {
             ...sink,
@@ -82,6 +82,7 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
           },
           Effect.succeed(request.commitAuthor),
         );
+        assert.strictEqual(found, "found");
         assert.strictEqual(salvages, 1, "the original checkout is salvaged before deletion");
         if (Option.isSome(hold)) {
           assert.isTrue(providers.hetzner.servers.has(21), "the occupied slot retains its machine");
@@ -93,14 +94,19 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
         );
         assert.strictEqual(providers.hetzner.servers.size, 0, "the machine is deleted after");
         machine.state.cacheExists = false;
-        // An Attempt whose machine is gone has nothing to reconcile.
-        yield* executor.recover(
+        // An Attempt whose machine is gone has nothing to reconcile. A fixed address keeps its
+        // machine, which recovery still finds.
+        const second = yield* executor.recover(
           {
             ...attempt,
             attemptId: AttemptId.make("remote-run/execute/2"),
           },
           sink,
           Effect.succeed(request.commitAuthor),
+        );
+        assert.strictEqual(
+          second,
+          connection === "replaced" || connection === "restarted" ? "found" : "gone",
         );
       }).pipe(
         Effect.scoped,

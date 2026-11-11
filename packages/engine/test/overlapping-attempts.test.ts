@@ -26,7 +26,7 @@ const onPullRequest = (number: number, loop: string) =>
 
 const executorWith = (
   execute: StepExecutor["Service"]["execute"],
-  recover: StepExecutor["Service"]["recover"] = () => Effect.void,
+  recover: StepExecutor["Service"]["recover"] = () => Effect.succeed("found" as const),
   interrupt: StepExecutor["Service"]["interrupt"] = () => Effect.void,
 ) =>
   Layer.succeed(StepExecutor)({
@@ -117,7 +117,7 @@ describe("an Attempt's windows", () => {
               Effect.flatMap((windows) => Deferred.succeed(harvested, windows)),
               Effect.andThen(Effect.never),
             ),
-          () => Effect.void,
+          () => Effect.succeed("found" as const),
           () =>
             Deferred.succeed(stopping, undefined).pipe(
               Effect.andThen(Effect.asVoid(Deferred.await(harvested))),
@@ -184,8 +184,9 @@ describe("an Attempt's windows", () => {
                         ),
                       ),
                     ),
+                    Effect.as("found" as const),
                   )
-                : Effect.void,
+                : Effect.succeed("found" as const),
           ),
         );
         const secondScope = yield* Scope.make();

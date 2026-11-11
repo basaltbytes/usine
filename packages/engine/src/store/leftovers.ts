@@ -1,6 +1,7 @@
+import type { AttemptId } from "@usine/core/attempt";
 import type { WorkerName } from "@usine/core/worker";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { type DateTime, Effect, Schema } from "effect";
+import { and, asc, eq, isNull, not, sql } from "drizzle-orm";
+import { type DateTime, Array as EffectArray, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { attempts } from "../database/schema.ts";
 import { WorkerAttempts } from "../run-reader/model.ts";
@@ -48,5 +49,22 @@ export const leftoverQueries = (database: RunDatabaseClient) => {
     return discarded.map(({ attemptId }) => attemptId);
   });
 
-  return { attemptCountsByWorker, openAttempts, discardLeftovers } as const;
+  /**
+   * Stops tracking `attemptId` if it is closed and still tracked. Returns the Attempt's Worker, or
+   * `None` if nothing was marked.
+   */
+  const discardClosedAttempt = Effect.fn("RunStoreQueries.discardClosedAttempt")(function* (
+    attemptId: AttemptId,
+    discardedAt: DateTime.Utc,
+  ) {
+    const discarded = yield* database
+      .update(attempts)
+      .set({ leftoversDiscardedAt: encodeDateTime(discardedAt) })
+      .where(and(eq(attempts.attemptId, attemptId), tracked, not(open)))
+      .returning({ worker: attempts.workerName })
+      .execute();
+    return Option.map(EffectArray.head(discarded), ({ worker }) => worker);
+  });
+
+  return { attemptCountsByWorker, openAttempts, discardLeftovers, discardClosedAttempt } as const;
 };
