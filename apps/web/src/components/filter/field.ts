@@ -1,6 +1,6 @@
 import type { Icon } from "@phosphor-icons/react";
 
-export type FilterOption = { readonly value: string; readonly label: string };
+type FilterOption = { readonly value: string; readonly label: string };
 
 export type FilterField<Id extends string = string> = {
   readonly id: Id;
