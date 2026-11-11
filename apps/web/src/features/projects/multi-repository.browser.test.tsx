@@ -200,6 +200,20 @@ it("names the repository of a legacy URL that no project includes", async () => 
   await expect.element(page.getByText(/No project has the ID/u)).not.toBeInTheDocument();
 });
 
+it("names the unknown page of a URL under an existing project", async () => {
+  await mount("/projects/product/board", 1440);
+  await expect.element(page.getByText("Page not found", { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByText("The project product has no page board.", { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(/No project includes the repository/u))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByText("Project not found", { exact: true }))
+    .not.toBeInTheDocument();
+});
+
 it("says a run belongs to another project instead of calling the URL project missing", async () => {
   const run = overview()
     .projects.flatMap(({ board }) =>

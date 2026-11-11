@@ -12,6 +12,10 @@ export const missingProjectDescription = (project: string): string =>
 export const missingRepositoryDescription = (repository: string): string =>
   `No project includes the repository ${repository}. ${manageProjects}`;
 
+/** Describes a URL under an existing project whose trailing segment names no page. */
+export const missingPageDescription = (project: string, page: string): string =>
+  `The project ${project} has no page ${page}.`;
+
 /** Describes a run URL whose run does not belong to the project in the URL. */
 export const runOutsideProjectDescription = (run: string, project: string): string =>
   `Run ${run} does not belong to the project ${project}. ${manageProjects}`;
