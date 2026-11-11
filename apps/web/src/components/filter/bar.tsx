@@ -51,11 +51,7 @@ export const FilterBar = <Id extends string>({
           onValueChange(index === -1 ? [...value, next] : replace(value, index, next));
         }}
         trigger={
-          <Button
-            ref={button}
-            variant="outline"
-            className="max-sm:h-11 pointer-coarse:h-11"
-          >
+          <Button ref={button} variant="outline" className="max-sm:h-11 pointer-coarse:h-11">
             <FunnelSimpleIcon
               data-icon="inline-start"
               aria-hidden="true"
