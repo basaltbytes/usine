@@ -171,6 +171,8 @@ interface FakeMachineState {
   /** Whether the SSH connection drops while the machine's resources are read, so `ssh` exits 255. */
   resourcesDisconnect: boolean;
   cacheExists: boolean;
+  /** Paths that `find` lists under the Worker's `attempts` directory besides the existing checkout. */
+  readonly attemptPaths: Array<string>;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
   /** The checkout the salvage finds: clean, dirty, or one whose `git status` never answers. */
@@ -361,6 +363,7 @@ export const fakeMachine = () => {
     threadsMax: 62_000,
     pidMax: 4_194_304,
     cacheExists: false,
+    attemptPaths: [],
     cloneEchoesToken: false,
     salvage: "clean",
     salvageCommitted: false,
@@ -725,7 +728,10 @@ export const fakeMachine = () => {
       return oneShotHandle("", 0);
     }
     if (line.startsWith("exec 'find' ") && line.includes("/attempts'")) {
-      const listed = state.cacheExists ? [`${WORKER_ROOT}/attempts/remote-run_execute_1`] : [];
+      const listed = [
+        ...(state.cacheExists ? [`${WORKER_ROOT}/attempts/remote-run_execute_1`] : []),
+        ...state.attemptPaths,
+      ];
       return oneShotHandle(listed.map((entry) => `${entry}${NUL}`).join(""), 0);
     }
     if (line.startsWith("exec 'find' ") && line.includes("/repos'"))
