@@ -270,8 +270,9 @@ it.effect("splits input lines the same way whatever the acknowledgement boundari
 for (const order of ["response-first", "request-first"] as const)
   it.effect(
     `does not let a cancelled request's late response answer a later request (${order})`,
-    () =>
-      Effect.gen(function* () {
+    () => {
+      const { logs, layer } = logsAt("Info");
+      return Effect.gen(function* () {
         const hook = yield* hookRequest;
         const response = yield* hookResponse;
         const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "hook" });
@@ -289,9 +290,18 @@ for (const order of ["response-first", "request-first"] as const)
           const late = yield* checkpoint.inputAcknowledged(response);
           assert.strictEqual(late, 0);
         }
+        assert.deepStrictEqual(logs, [
+          ["Claude cancelled a control request", { requestId: "hook" }],
+          [
+            "Claude acknowledged the late response to a cancelled control request",
+            { requestId: "hook" },
+          ],
+        ]);
         const answered = yield* checkpoint.inputAcknowledged(response);
         assert.strictEqual(answered, hook.length);
-      }),
+        assert.lengthOf(logs, 2);
+      }).pipe(Effect.provide(layer));
+    },
   );
 
 it.effect(

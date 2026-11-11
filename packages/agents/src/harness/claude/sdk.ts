@@ -354,7 +354,15 @@ const acknowledgeInput =
   (bytes: Uint8Array) =>
   (
     state: CheckpointState,
-  ): readonly [{ readonly bytes: number; readonly userInputs: number }, CheckpointState] => {
+  ): readonly [
+    {
+      readonly bytes: number;
+      readonly userInputs: number;
+      /** Request IDs of acknowledged late responses to cancelled requests, which release nothing. */
+      readonly lateResponses: ReadonlyArray<string>;
+    },
+    CheckpointState,
+  ] => {
     const { lines, rest } = splitLines(
       Buffer.concat([state.input, bytes]),
       state.input.length,
@@ -363,6 +371,7 @@ const acknowledgeInput =
     const pending = [...state.pending];
     const answered = new Set(state.answered);
     const cancelled = new Set(state.cancelled);
+    const lateResponses: Array<string> = [];
     let userInputs = 0;
     for (const line of lines) {
       const decoded = decodeMessage(line.toString());
@@ -375,11 +384,12 @@ const acknowledgeInput =
       const id = decoded.value.response.request_id;
       // The SDK's late response to a cancelled request comes before the response to a later
       // request that reuses its ID.
-      if (!cancelled.delete(id) && !release(pending, id)) answered.add(id);
+      if (cancelled.delete(id)) lateResponses.push(id);
+      else if (!release(pending, id)) answered.add(id);
     }
     const flushed = flush(pending);
     return [
-      { bytes: flushed.bytes, userInputs },
+      { bytes: flushed.bytes, userInputs, lateResponses },
       { ...state, input: rest, pending: flushed.pending, answered, cancelled },
     ];
   };
@@ -455,6 +465,11 @@ export const claudeOutputCheckpoint = Effect.fn("ClaudeOutputCheckpoint.make")(f
     inputAcknowledged: (bytes: Uint8Array) =>
       Effect.gen(function* () {
         const acknowledged = yield* Ref.modify(state, acknowledgeInput(bytes));
+        for (const requestId of acknowledged.lateResponses)
+          yield* Effect.logInfo(
+            "Claude acknowledged the late response to a cancelled control request",
+            { requestId },
+          );
         for (let index = 0; index < acknowledged.userInputs; index++) yield* onUserInput;
         return acknowledged.bytes;
       }),
