@@ -289,7 +289,7 @@ describe("remote shell commands", () => {
         "--input-format",
         "stream-json",
         "--model",
-        "claude-opus-4-1",
+        "opus",
         "--permission-mode",
         "bypassPermissions",
         "--setting-sources",
