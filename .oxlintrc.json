@@ -52,7 +52,7 @@
           {
             "patterns": [
               {
-                "group": ["@earendil-works/*"],
+                "group": ["@earendil-works/*", "@earendil-works/*/**"],
                 "message": "The coordinator journal runs without pi-durable."
               }
             ]

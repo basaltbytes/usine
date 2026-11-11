@@ -9,6 +9,7 @@ import { DateTime, Effect, Equal, Exit, Option, References, Result } from "effec
 import { AttemptReport, StoredRequest } from "../../src/attempt-runtime.ts";
 import {
   AttemptJournal,
+  type CoordinatorSnapshot,
   Delegate,
   Delegation,
   EncodedDecision,
@@ -345,7 +346,7 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
       }).pipe(Effect.scoped),
     );
 
-    it.effect("settles an Attempt with its outcome and refuses later transitions", () =>
+    it.effect("settles an Attempt with its outcome and outbox and refuses later transitions", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
         const finished = storedRequest("attempt-finished");
@@ -363,8 +364,13 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
               step("ChildReported", {
                 decision: "Complete",
                 intents: [Finish.make({ outcome })],
+                outbound: [
+                  envelope(finished.spec.attemptId, 1),
+                  envelope(finished.spec.attemptId, 2),
+                ],
               }),
             );
+            yield* store.reserve(canceled.spec.attemptId, [envelope(canceled.spec.attemptId, 1)]);
             yield* store.settle(finished.spec.attemptId);
             yield* store.settle(finished.spec.attemptId);
             yield* store.settle(canceled.spec.attemptId);
@@ -398,6 +404,20 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
         assert.deepStrictEqual(
           Option.map(reopened.canceled, ({ status, revision }) => ({ status, revision })),
           Option.some({ status: Settled.make({ outcome: Option.none() }), revision: revision(1) }),
+        );
+        const delivery = ({ outbox, nextOutbound }: CoordinatorSnapshot) => ({
+          outbox: outbox.map(({ attemptId, sequence, payload }) => [attemptId, sequence, payload]),
+          nextOutbound,
+        });
+        const pending = (attemptId: AttemptId, sequences: ReadonlyArray<number>) =>
+          sequences.map((sequence) => [attemptId, sequence, envelope(attemptId, sequence).payload]);
+        assert.deepStrictEqual(
+          Option.map(reopened.finished, delivery),
+          Option.some({ outbox: pending(finished.spec.attemptId, [1, 2]), nextOutbound: 3 }),
+        );
+        assert.deepStrictEqual(
+          Option.map(reopened.canceled, delivery),
+          Option.some({ outbox: pending(canceled.spec.attemptId, [1]), nextOutbound: 2 }),
         );
       }).pipe(Effect.scoped),
     );
