@@ -216,15 +216,16 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
     received.exitCode === 0
       ? received.stdout.split("\n").filter((name) => name !== "")
       : Object.keys(sent);
-  if (dropped.length > 0)
+  if (dropped.length > 0) {
+    const stderr = received.stderr.trim();
     return yield* gatewayGap(
       worker,
       `SSH worker "${worker}" doesn't receive ${dropped.join(", ")} over standard input. Its SSH commands must run in a POSIX sh with base64.`,
       new Error(
-        received.stderr.trim() ||
-          `variables not received: ${dropped.join(" ")} (exit code ${String(received.exitCode)})`,
+        `variables not received: ${dropped.join(" ")} (exit code ${String(received.exitCode)})${stderr === "" ? "" : `: ${stderr}`}`,
       ),
     );
+  }
 
   const probed = yield* commands.inspect("preflight", machine.shell, "curl", [
     "-sS",
