@@ -164,16 +164,18 @@ for the first attempt command when the driver doesn't wait.
 [#1161](https://github.com/basaltbytes/usine/pull/1161), with a snapshot built by
 `infra/boxd/build-snapshot.mjs`. This probe answers [question 23](#questions-for-boxd): the
 allowlist isn't in force when a restore resumes, even when the snapshot and the restore request both
-carry it ([issue #1196](https://github.com/basaltbytes/usine/issues/1196)).
+carry one ([issue #1196](https://github.com/basaltbytes/usine/issues/1196)).
 
 - Snapshot `usine-attempt-2` was built from a machine whose spec lists the 25-entry egress
   allowlist. The builder checks that boxd recorded the list in the spec.
-- The probe's source was a machine restored from `usine-attempt-2` with the same list in its spec,
-  running the leak loop of [`fork.mjs`](./boxd-attempt-machine-sources/fork.mjs): every 100 ms, an
-  HTTPS request to `example.com` at a fixed address, and an uncached DNS query. That machine was
-  saved as a second snapshot.
-- That snapshot was restored six times with `restore.mjs <suffix> spec`, which puts the allowlist in
-  the spec of the restore request too. Times are from the start of the create call.
+- The probe's source was a machine restored from `usine-attempt-2`, which carries the 25 entries in
+  its spec, running the leak loop of [`fork.mjs`](./boxd-attempt-machine-sources/fork.mjs): every
+  100 ms, an HTTPS request to `example.com` at a fixed address, and an uncached DNS query. That
+  machine was saved as a second snapshot.
+- That snapshot was restored six times with `restore.mjs <suffix> spec`. The script sends its own
+  two-entry allowlist, `*.tailscale.com` and `registry.npmjs.org`, in the spec of the restore
+  request; boxd merges that spec over the snapshot's, and both entries are already among the 25.
+  `example.com` is outside both lists. Times are from the start of the create call.
 
 | Restore | First `exec` | Requests outside the allowlist that got through (ms after start: HTTP code) |
 | --- | --- | --- |
@@ -185,8 +187,9 @@ carry it ([issue #1196](https://github.com/basaltbytes/usine/issues/1196)).
 | 6 | 960 ms | +861: 200, +1,062: 200, +1,215: 200 |
 
 - In four of six restores, a resumed process reached a host outside the allowlist for up to 1.2 s
-  after the create call started. DNS for the name stayed blocked in every sample; the requests that
-  got through went to a fixed address with the name as SNI.
+  after the create call started. The requests that got through went to a fixed address with the name
+  as SNI. The loop's DNS query failed in every sample, as in the earlier probes, so it says nothing
+  about DNS filtering.
 - Every create response already reported the 25 entries in `egressAllow`, so boxd reports the list
   before it enforces it.
 - At the first `exec` through the probe, 0.7 to 1.0 s after the start, `example.com` by name was
@@ -386,7 +389,8 @@ These continue the numbered list in
 
 23. When is the allowlist enforced on a restored machine, and can it be enforced before the machine
     resumes? Answered by measurement on our side, see [Egress from birth](#egress-from-birth): with
-    the allowlist in the spec of both the snapshot and `CreateVmFromSnapshot`, a resumed process
+    an allowlist in the spec of both the snapshot (25 entries) and `CreateVmFromSnapshot` (the
+    probe's two entries), a resumed process
     reached a host outside the list in four of six restores, up to 1.2 s after the create call
     started and about 650 ms after the create response, which already reported the list in
     `egressAllow`. An earlier run saw the same in one of four restores, 0.74 and 0.89 s after the
