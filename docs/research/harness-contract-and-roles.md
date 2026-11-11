@@ -389,6 +389,15 @@ Steps 21 to 23, OpenCode (step 9), and a `LanguageModel` layer over `complete` f
 3. **Configuration for role brains.** Recommended: agent `decision: { model, effort }`, with the harness inherited from the agent so the decision session uses the child's route; instance `orchestrator: { harness, model, effort }`; `parent_model` and `parent_effort` removed with #1166; `parent: none` renamed before #1158. Default: as recommended.
 4. **When Pi moves to workers (step 21).** Until it does, an operator whose only route is a Pi route can't use SSH, container, or sandbox workers, which is the provider-agnostic gap that remains after #1160. Recommended: in parallel with #1164, before step 23. Default: after #1164.
 
+### Decisions taken
+
+The owner answered on 2026-11-11:
+
+- **Decision 1:** option A. #1165 calls `complete` through the harness contract (step 20, #1208).
+- **Decision 3:** configuration names no harness. The switch is `coordinator: session | events` (#1158), an agent gets `decision: { model, effort }`, and `parent_model` and `parent_effort` go with #1166.
+- **Role name:** the role this note calls "orchestrator agent" keeps the name **supervisor**, as in the code and #799. Read every "orchestrator agent" and `orchestrator-agent` in this note as supervisor, and the instance brain key as `supervisor`.
+- Decisions 2 and 4 keep their defaults.
+
 ## Not verified
 
 - Codex 0.164.0: how dynamic tools are registered on a thread under `experimentalApi`, whether a thread can turn off shell and edit tools, and whether a `config` override can add an MCP server.
