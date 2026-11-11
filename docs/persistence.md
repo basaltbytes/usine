@@ -1,6 +1,6 @@
 # Persistence adapters
 
-This inventory covers the persistence boundaries at commit `fbd379acb3b42f1868eb97c8cee0d6e39eac259c`, with the contract tests and dialect extraction in #896 and transcript sealing in #893. [ADR 0020](adr/0020-drizzle-portable-sqlite-projection.md#amendment-2026-11-03-896-sqlite-and-postgres-adapters) defines the dual-adapter decision.
+This inventory covers the persistence boundaries at commit `fbd379acb3b42f1868eb97c8cee0d6e39eac259c`, with the contract tests and dialect extraction in #896 and transcript sealing in #893. [ADR 0010](adr/0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md) records the dual-adapter decision.
 
 ## Runtime and configuration
 

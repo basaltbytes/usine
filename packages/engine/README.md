@@ -251,7 +251,7 @@ Polling run summaries omit task prompts, step results, attempt prompts, harveste
 
 ## Persistence contracts
 
-The domain services are the persistence boundary. `RunDatabase` is the current SQLite composition service; another SQL dialect supplies the same domain ports through Effect layers. [ADR 0020](../../docs/adr/0020-drizzle-portable-sqlite-projection.md#amendment-2026-11-03-896-sqlite-and-postgres-adapters) defines SQLite for self-hosted instances and Postgres as the next hosted backend, with schemas and migrations owned by each adapter.
+The domain services are the persistence boundary. `RunDatabase` is the current SQLite composition service; another SQL dialect supplies the same domain ports through Effect layers. [ADR 0010](../../docs/adr/0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md) records SQLite for self-hosted instances and Postgres for hosted instances, with schemas and migrations owned by each adapter.
 
 `src/database/dialect.ts` centralizes SQLite query expressions, including JSON access and aggregation. Keep JSON paths literal where they match expression indexes. The [persistence inventory](../../docs/persistence.md) lists every store and its dialect dependencies.
 

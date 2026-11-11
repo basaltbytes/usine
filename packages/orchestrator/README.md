@@ -438,7 +438,7 @@ The overview includes every open run and the latest 50 closed runs across the in
 
 Board polling uses current runs selected in SQL and aggregate history, including links from older run results. Complete prompts, results, and harvested comments are read for detail views.
 
-The operator HTTP contract includes identifier-only change notices, scoped navigation and attention representations, worker reads, and paginated board cards and task runs. See [ADR 0034](../../docs/adr/0034-web-change-notices.md).
+The operator HTTP contract includes identifier-only change notices, scoped navigation and attention representations, worker reads, and paginated board cards and task runs. See [Change notices](../../docs/architecture/operator-surfaces.mdx#change-notices).
 
 ## Schema contracts
 

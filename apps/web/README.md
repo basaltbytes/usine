@@ -406,7 +406,7 @@ Board cards use compact run summaries and aggregate counts and usage. The task l
 
 ## Data updates
 
-One server-sent events connection invalidates scoped queries. Disconnected screens revalidate active reads every minute and show connection status in the refresh indicator. Navigation uses compact task identities; attention, boards, workers, and task run history have separate queries. Settled lanes load 50 cards per page, and task run histories load 25 runs per page. Long lists virtualize their rows. Route intent preloading fetches task and run pages on hover or focus. See [ADR 0034](../../docs/adr/0034-web-change-notices.md).
+One server-sent events connection invalidates scoped queries. Disconnected screens revalidate active reads every minute and show connection status in the refresh indicator. Navigation uses compact task identities; attention, boards, workers, and task run history have separate queries. Settled lanes load 50 cards per page, and task run histories load 25 runs per page. Long lists virtualize their rows. Route intent preloading fetches task and run pages on hover or focus. See [Change notices](../../docs/architecture/operator-surfaces.mdx#change-notices).
 
 ## Operator records
 

@@ -213,20 +213,22 @@ The drawer summarizes one run ([run-drawer.tsx][]): a header with facts, worker 
 
 On the run page, the composer under the reader while an attempt runs ([workspace.tsx][]) sends `OperatorMessage` to the parent or a child. Pause session sends `Interrupt`; Release child and Release parent send `Release`, and Release parent appears only while the parent is held or paused ([session-composer.tsx][]). The run page stores each reader's position in browser storage ([remember.tsx][], [ADR 0025](https://github.com/basaltbytes/usine/blob/main/docs/adr/0025-run-conversation-reader-bookmarks.md)).
 
-The UI polls:
-
-- The overview every 2 seconds while a run can be canceled, else every 15, and not in setup mode ([overview.ts:25][]).
-- The desk, which the board and Tasks list also read, every 3 seconds while an attempt runs or a run waits for a worker, else every 15 ([desk/query.ts][]).
-- The task statistics of the selected window every 60 seconds, and its run statistics while **Details** is open; while another window loads, the previous one stays, dimmed ([desk/statistics/query.ts][]).
-- The run detail, on the run page and in an open drawer, every second while the run can be canceled ([run-transcript/query.ts:46][]). The run page reads the item's GitHub changes on open, when an attempt starts or ends, and every 30 seconds while one runs ([run-page/github-changes.ts:6][]).
-- The board every second while a move is pending ([moves.ts:61][]).
-- A task page every 2 seconds while one of its runs can be canceled, else every 15, and whenever a run action or board move refreshes the overview ([task/query.ts][]).
-
 The scheduler keeps each worker's last preflight in memory ([worker-status.ts][]), from startup or any reload, refused or not. A harness that reports itself unavailable fails that harness and passes the ones checked before it; any other failure fails the worker's prerequisites.
 
 Under the run's facts, the run page and drawer show the newest attempt's worker and the attempts' total duration, counting while one runs; the run page adds tokens, expandable per pool and session ([header.tsx][], [usage.tsx][]). The outline shows each attempt's start reason, folds a session's consecutive turns into one entry, and keeps blockers, questions, operator input, connectivity notices, and outcomes separate ([outline.tsx][]). A red count steps through what the run ended with or the operator must read, a grey one through tool failures the agent recovered from ([navigation/model.ts][], [ADR 0025](https://github.com/basaltbytes/usine/blob/main/docs/adr/0025-run-conversation-reader-bookmarks.md)).
 
 The UI has no page for editing configuration, worker preflight on demand, or GitHub App creation.
+
+### Change notices
+
+The web app keeps one authenticated server-sent events connection to `GET /api/changes` and uses it only to invalidate reads. A notice carries a revision and the identifiers of the affected projects, items, runs, attempts, workers, configuration, attention, activity, or navigation, never their contents; the browser then refetches those reads through TanStack Query. While connected, the app polls only two reads: provider login status, and the session of a member without read access.
+
+- Writes publish to one in-process change bus after they commit (`packages/core/src/changes.ts`). An engine transaction collects its targets and publishes them once after commit; a failed transaction publishes nothing (`packages/engine/src/store/changes.ts`).
+- The bus keeps the latest 256 notices. A reconnecting browser sends `Last-Event-ID` and receives the notices after it. A missing, expired, or future cursor, or a gap after a slow subscriber drops notices, gets a reset notice, which refreshes every active read.
+- The server filters each notice by the subscriber's permissions before it sends identifiers, and checks the subscriber's credentials before each delivery and at a heartbeat every 15 seconds (`apps/server/src/changes/`).
+- Each query declares the targets that refresh it in its TanStack Query `meta` (`apps/web/src/lib/query-changes.ts`). Statistics queries also refresh at each UTC midnight.
+- While the stream is disconnected, the app refreshes active reads every 60 seconds and the refresh indicator shows the disconnection (`apps/web/src/lib/changes.ts`).
+- Successful JSON reads carry private ETags, so an unchanged read returns 304 without a body.
 
 ## CLI
 
@@ -302,13 +304,11 @@ Every service method is an `Effect.fn` span annotated with domain ids (`runId`, 
 [need.ts]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/packages/orchestrator/src/operator/need.ts
 [api.ts:6]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/api.ts#L6
 [desk/desk.tsx]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/desk/desk.tsx
-[desk/query.ts]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/desk/query.ts
 [desk.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/operator/desk.ts
 [statistics.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/operator/statistics/statistics.ts
 [tasks.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/operator/statistics/tasks.ts
 [runs.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/operator/statistics/runs.ts
 [desk/statistics/statistics.tsx]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/desk/statistics/statistics.tsx
-[desk/statistics/query.ts]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/desk/statistics/query.ts
 [loop-matches.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/loop-matches.ts
 [tasks.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/board/tasks.ts
 [routes/projects/$owner/$name/index.tsx]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/routes/projects/$owner/$name/index.tsx
@@ -321,17 +321,12 @@ Every service method is an `Effect.fn` span annotated with domain ids (`runId`, 
 [workspace.tsx]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/run-page/workspace.tsx
 [remember.tsx]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/run-transcript/reader/remember.tsx
 [run-page/page.tsx]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/run-page/page.tsx
-[run-transcript/query.ts:46]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/run-transcript/query.ts#L46
-[run-page/github-changes.ts:6]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/run-page/github-changes.ts#L6
 [open-run.ts]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/open-run.ts
 [task.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/operator/task.ts
 [task/list.tsx]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/task/list.tsx
 [task/page.tsx]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/task/page.tsx
-[task/query.ts]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/task/query.ts
 [root-layout]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/routes/__root.tsx
 [session-composer.tsx]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/run-intervention/session-composer.tsx
-[overview.ts:25]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/overview.ts#L25
-[moves.ts:61]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/apps/web/src/board/moves.ts#L61
 [node/main.ts:7]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/packages/gateway/src/node/main.ts#L7
 [polling.ts:703]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/packages/orchestrator/src/polling/polling.ts#L703
 [loop-evaluation.ts:180]: https://github.com/basaltbytes/usine/blob/a38610863e1d43adaaba85f49b90c69c1beaed53/packages/orchestrator/src/polling/loop-evaluation.ts#L180

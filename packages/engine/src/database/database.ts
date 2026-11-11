@@ -23,7 +23,7 @@ export const ReadSnapshot = Context.Reference<{
 
 /**
  * The SQLite composition service for engine records, with atomic transactions and migrations
- * applied before use. Other dialects implement the domain ports directly (ADR 0020).
+ * applied before use. Other dialects implement the domain ports directly (ADR 0010).
  */
 export class RunDatabase extends Context.Service<RunDatabase, RunDatabaseClient>()(
   "@usine/engine/database/database/RunDatabase",
