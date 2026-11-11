@@ -24,7 +24,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Array as Arr, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import {
   AccountUpdated,
   AgentMessageItem,
@@ -57,7 +57,6 @@ import {
   decodeNotification,
   decodeToolItem,
   providerRetryMessage,
-  resumedToolItems,
   turnFailure,
   toolName,
   rateLimitWindow,
@@ -324,10 +323,10 @@ const makeCodexChild = Effect.gen(function* () {
       let turnId = Option.match(thread.activeTurn, { onNone: () => "", onSome: (turn) => turn.id });
       let turnActive = Option.isSome(thread.activeTurn);
       let interrupting = false;
-      const resumedTools = yield* resumedToolItems(
-        session.id,
+      const resumedTools = yield* Effect.forEach(
         Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
-      );
+        (item) => decodeToolItem(session.id, item),
+      ).pipe(Effect.map(Arr.getSomes));
       const toolsInFlight = new Map<string, string>(
         resumedTools
           .filter((item) => isToolStatus(item.status, "inProgress"))
@@ -613,7 +612,7 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: notification.value.turnId,
                 });
               }
-              const tool = yield* decodeToolItem(session.id, notification.value.item);
+              const tool = yield* decodeToolItem(session.id, item);
               if (Option.isNone(tool)) return;
               toolsInFlight.set(tool.value.id, toolName(tool.value));
               return yield* channel.emit(
@@ -621,7 +620,7 @@ const makeCodexChild = Effect.gen(function* () {
                   session,
                   callId: tool.value.id,
                   tool: toolName(tool.value),
-                  input: tool.value,
+                  input: item,
                 }),
               );
             }
@@ -655,7 +654,7 @@ const makeCodexChild = Effect.gen(function* () {
                   session,
                   callId: tool.value.id,
                   tool: toolName(tool.value),
-                  output: tool.value,
+                  output: item,
                   isError:
                     isToolStatus(tool.value.status, "failed") ||
                     isApprovalToolStatus(tool.value.status, "declined") ||

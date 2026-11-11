@@ -1179,6 +1179,19 @@ describe("Codex child backend", () => {
 
   it.effect("normalizes completed messages, tools, and ChatGPT rate windows", () => {
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+    const startedTool = {
+      type: "commandExecution",
+      id: "tool-1",
+      status: "inProgress",
+      command: "ls -la",
+      cwd: "/repo",
+    };
+    const finishedTool = {
+      ...startedTool,
+      status: "completed",
+      aggregatedOutput: "total 0",
+      exitCode: 0,
+    };
     const notifications: ReadonlyArray<CodexNotification> = [
       {
         method: "item/agentMessage/delta",
@@ -1186,19 +1199,11 @@ describe("Codex child backend", () => {
       },
       {
         method: "item/started",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: { type: "commandExecution", id: "tool-1", status: "inProgress" },
-        },
+        params: { threadId: "thread-1", turnId: "turn-1", item: startedTool },
       },
       {
         method: "item/completed",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: { type: "commandExecution", id: "tool-1", status: "completed" },
-        },
+        params: { threadId: "thread-1", turnId: "turn-1", item: finishedTool },
       },
       {
         method: "item/completed",
@@ -1259,6 +1264,12 @@ describe("Codex child backend", () => {
             "SessionFinished",
           ],
         );
+        const toolStarted = events.find((event) => event._tag === "ToolStarted");
+        assert(toolStarted?._tag === "ToolStarted");
+        assert.deepStrictEqual(toolStarted.input, startedTool);
+        const toolFinished = events.find((event) => event._tag === "ToolFinished");
+        assert(toolFinished?._tag === "ToolFinished");
+        assert.deepStrictEqual(toolFinished.output, finishedTool);
         const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
         assert(limits?._tag === "PoolRateLimitsUpdated");
         assert.strictEqual(Option.getOrNull(limits.login), "operator@example.com");

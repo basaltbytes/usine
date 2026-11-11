@@ -264,12 +264,7 @@ export const ThreadResumeResponse = GeneratedThreadResumeResponse.mapFields(
         turns.value.mapFields(({ id, status, items }) => ({
           id: replaces(id, Schema.NonEmptyString),
           status,
-          items: replaces(
-            items,
-            Schema.Array(
-              Schema.Union([ToolItem, AgentMessageItem, Schema.Struct({ type: Schema.String })]),
-            ),
-          ),
+          items: replaces(items, Schema.Array(Schema.Json)),
         })),
       ),
     })),

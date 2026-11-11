@@ -452,16 +452,58 @@ describe("emitDeclarations", () => {
   });
 
   it("rejects a null alternative beside common properties", () => {
-    const definitions = {
-      Item: {
-        type: "object",
-        properties: { id: { type: "string" } },
-        required: ["id"],
-        anyOf: [variant("PlanItem", "plan"), { type: "null" }],
+    for (const alternative of [{ type: "null" }, { type: ["null"] }]) {
+      const definitions = {
+        Item: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+          anyOf: [variant("PlanItem", "plan"), alternative],
+        },
+      };
+      expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+        "A null alternative beside common properties needs explicit support",
+      );
+    }
+  });
+
+  it("compares the variants of a nested union with the variants beside it", () => {
+    const tagged = (title, type, required) => ({
+      title,
+      type: "object",
+      properties: { type: tag(type), x: { type: "string" } },
+      required,
+    });
+    for (const definitions of [
+      {
+        Item: { anyOf: [ref("Inner"), tagged("BItem", "b", ["type", "x"])] },
+        Inner: { oneOf: [tagged("AItem", "b", ["type"]), tagged("CItem", "c", ["type"])] },
       },
+      {
+        Item: { anyOf: [tagged("BItem", "b", ["type"]), ref("Inner")] },
+        Inner: { oneOf: [tagged("AItem", "b", ["type", "x"]), tagged("CItem", "c", ["type"])] },
+      },
+    ]) {
+      expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+        /Variant [AB]Item accepts the values of variant [AB]Item/u,
+      );
+    }
+  });
+
+  it("keeps a nested union whose variants the outer variants tell apart", () => {
+    const definitions = {
+      Item: { anyOf: [ref("Inner"), variant("BItem", "b"), { type: "string" }] },
+      Inner: { oneOf: [variant("AItem", "a"), variant("CItem", "c")] },
     };
+    expect(emitDeclarations(definitions, ["Item"]).get("Item")).toBe(
+      "Schema.Union([Inner, BItem, Schema.String])",
+    );
+  });
+
+  it("rejects a union that contains itself", () => {
+    const definitions = { Item: { anyOf: [ref("Item"), variant("BItem", "b")] } };
     expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
-      "A null alternative beside common properties needs explicit support",
+      "Recursive union needs explicit support",
     );
   });
 

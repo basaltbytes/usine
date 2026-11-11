@@ -84,12 +84,7 @@ export function emitDeclarations(definitions, roots) {
    * member and drops the keys it doesn't declare, so a variant must not accept a later one's values.
    */
   function assertDistinguishable(members) {
-    const variants = members
-      .filter((member) => !isNull(member))
-      .map((member) => {
-        const target = resolve(member);
-        return { name: target.title ?? member.title ?? "without a title", target };
-      });
+    const variants = members.flatMap((member) => leaves(member, new Set()));
     if (variants.length < 2) return;
     const objects = variants.filter(({ target }) => isObjectSchema(target));
     const tagKeys = new Set(
@@ -124,6 +119,23 @@ export function emitDeclarations(definitions, roots) {
     }
   }
 
+  /**
+   * Returns the non-null alternatives that `member` decodes as, in decoding order. A member that
+   * resolves to a nested union contributes the alternatives of that union.
+   */
+  function leaves(member, seen) {
+    if (isNull(member)) return [];
+    const target = resolve(member);
+    const alternatives = target.oneOf ?? target.anyOf;
+    if (!alternatives)
+      return isNull(target)
+        ? []
+        : [{ name: target.title ?? member.title ?? "without a title", target }];
+    assert(!seen.has(target), "Recursive union needs explicit support");
+    const path = new Set([...seen, target]);
+    return alternatives.flatMap((branch) => leaves(mergeCommon(target, branch), path));
+  }
+
   function emit(schema) {
     if (schema === true) return "Schema.Json";
     if (schema === false) return "Schema.Never";
@@ -144,18 +156,7 @@ export function emitDeclarations(definitions, roots) {
         schema.type === undefined || schema.type === "object",
         "Union sibling constraints need explicit support",
       );
-      const members = schema[keyword].map((branch) => {
-        if (!schema.properties) return branch;
-        assert(
-          !isNull(branch),
-          "A null alternative beside common properties needs explicit support",
-        );
-        return {
-          ...branch,
-          properties: { ...schema.properties, ...branch.properties },
-          required: [...(schema.required ?? []), ...(branch.required ?? [])],
-        };
-      });
+      const members = schema[keyword].map((branch) => mergeCommon(schema, branch));
       assertDistinguishable(members);
       return union(
         members.map((member) => {
@@ -221,6 +222,17 @@ export function emitDeclarations(definitions, roots) {
 
   for (const name of roots) reference(`#/definitions/v2/${name}`);
   return declarations;
+}
+
+/** Returns `branch` of the union `schema` with the union's common properties and required keys. */
+function mergeCommon(schema, branch) {
+  if (!schema.properties) return branch;
+  assert(!isNull(branch), "A null alternative beside common properties needs explicit support");
+  return {
+    ...branch,
+    properties: { ...schema.properties, ...branch.properties },
+    required: [...(schema.required ?? []), ...(branch.required ?? [])],
+  };
 }
 
 /** Returns whether `schema` is an inline enum of one string, the shape of a union tag. */

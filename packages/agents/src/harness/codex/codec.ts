@@ -4,7 +4,6 @@ import {
   type ErrorNotification,
   isCodexErrorCode,
   type RateLimitWindow,
-  type ThreadResumeResponse,
   ToolItem,
   type TurnCompleted,
   type UserMessageItem,
@@ -73,36 +72,10 @@ export const decodeToolItem = (
   item: Schema.Json,
 ): Effect.Effect<Option.Option<typeof ToolItem.Type>> =>
   Schema.is(ToolKindItem)(item)
-    ? Schema.decodeUnknownEffect(ToolItem)(item).pipe(
-        Effect.asSome,
-        Effect.catch((cause) =>
-          Effect.logWarning("Skipping an undecodable Codex tool item", {
-            cause,
-            sessionId,
-            itemType: item.type,
-          }).pipe(Effect.as(Option.none())),
-        ),
+    ? decodeNotification(ToolItem, "tool item", sessionId, item).pipe(
+        Effect.annotateLogs({ itemType: item.type }),
       )
     : Effect.succeedNone;
-
-/**
- * Returns the tool items of a resumed turn. The resume response keeps only the type of an item that
- * does not decode, so the warning for an item of a tool kind names that type without a cause.
- */
-export const resumedToolItems = Effect.fn("CodexRuntime.resumedToolItems")(function* (
-  sessionId: AgentSessionId,
-  items: (typeof ThreadResumeResponse.Type)["thread"]["turns"][number]["items"],
-) {
-  for (const item of items) {
-    if (Schema.is(ToolKindItem)(item) && !Schema.is(ToolItem)(item))
-      yield* Effect.logWarning("Skipping an undecodable Codex tool item", {
-        sessionId,
-        itemType: item.type,
-        resumed: true,
-      });
-  }
-  return items.filter(Schema.is(ToolItem));
-});
 
 /** Returns the transcript tool name for a Codex tool item. */
 export const toolName = (item: typeof ToolItem.Type): string => {

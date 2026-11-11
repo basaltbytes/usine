@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
-import { Effect, Logger, Option, Schema } from "effect";
+import { Effect, Logger, Option, References, Schema } from "effect";
 import {
   AccountResponse,
   AgentMessageItem,
@@ -25,7 +25,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
 import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
-import { decodeToolItem, resumedToolItems } from "../src/harness/codex/codec.ts";
+import { decodeToolItem } from "../src/harness/codex/codec.ts";
 import {
   CommandExecutionStatusValues,
   DynamicToolCallStatusValues,
@@ -188,7 +188,7 @@ describe("generated Codex protocol selections", () => {
 
   it.effect("decodes new enum members in saved turns and assistant messages", () =>
     Effect.gen(function* () {
-      const response = yield* Schema.decodeUnknownEffect(ThreadResumeResponse)({
+      const response = yield* Schema.decodeEffect(ThreadResumeResponse)({
         modelProvider: "openai",
         thread: {
           id: "saved-thread",
@@ -209,7 +209,7 @@ describe("generated Codex protocol selections", () => {
       const items = response.thread.turns[0]?.items ?? [];
       expect(items.filter(Schema.is(AgentMessageItem))[0]?.phase).toBe("new_phase");
       expect(items.filter(Schema.is(ToolItem))[0]?.status).toBe("waitingForApproval");
-      expect(items.at(-1)?.type).toBe("futureItem");
+      expect(items.at(-1)).toEqual({ type: "futureItem", payload: { anything: true } });
       expect(Schema.is(ToolItem)({ type: "futureTool", id: "tool" })).toBe(false);
     }),
   );
@@ -286,15 +286,20 @@ describe("generated Codex protocol selections", () => {
 
 describe("Codex tool item decoding", () => {
   const sessionId = AgentSessionId.make("session");
+  const collectWarnings = () => {
+    const warnings: Array<unknown> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message, fiber }) => {
+      if (logLevel === "Warn")
+        warnings.push({ message, annotations: fiber.getRef(References.CurrentLogAnnotations) });
+    });
+    return { warnings, layer: Logger.layer([logger]) };
+  };
 
   it.effect("logs a tool item that does not decode and skips other item kinds silently", () =>
     Effect.gen(function* () {
-      const warnings: Array<unknown> = [];
-      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(message);
-      });
+      const { warnings, layer } = collectWarnings();
       const decode = (item: Schema.Json) =>
-        decodeToolItem(sessionId, item).pipe(Effect.provide(Logger.layer([logger])));
+        decodeToolItem(sessionId, item).pipe(Effect.provide(layer));
 
       const tool = yield* decode({ type: "mcpToolCall", id: "call", status: "completed" });
       expect(Option.map(tool, ({ id }) => id)).toEqual(Option.some("call"));
@@ -304,21 +309,22 @@ describe("Codex tool item decoding", () => {
 
       const malformed = yield* decode({ type: "mcpToolCall", status: "completed" });
       expect(malformed).toEqual(Option.none());
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toEqual([
-        "Skipping an undecodable Codex tool item",
-        expect.objectContaining({ sessionId, itemType: "mcpToolCall" }),
+      expect(warnings).toEqual([
+        {
+          message: [
+            "Skipping an undecodable Codex tool item",
+            { sessionId, cause: expect.anything() },
+          ],
+          annotations: { itemType: "mcpToolCall" },
+        },
       ]);
     }),
   );
 
-  it.effect("logs the type of a resumed tool item that does not decode", () =>
+  it.effect("keeps every item of a resumed turn for the tool item decoder", () =>
     Effect.gen(function* () {
-      const warnings: Array<unknown> = [];
-      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(message);
-      });
-      const response = yield* Schema.decodeUnknownEffect(ThreadResumeResponse)({
+      const { warnings, layer } = collectWarnings();
+      const response = yield* Schema.decodeEffect(ThreadResumeResponse)({
         modelProvider: "openai",
         thread: {
           id: "saved-thread",
@@ -335,15 +341,18 @@ describe("Codex tool item decoding", () => {
           ],
         },
       });
-      const tools = yield* resumedToolItems(sessionId, response.thread.turns[0]?.items ?? []).pipe(
-        Effect.provide(Logger.layer([logger])),
-      );
-      expect(tools.map(({ id }) => id)).toEqual(["command"]);
+      const tools = yield* Effect.forEach(response.thread.turns[0]?.items ?? [], (item) =>
+        decodeToolItem(sessionId, item),
+      ).pipe(Effect.provide(layer));
+      expect(tools.flatMap(Option.toArray).map(({ id }) => id)).toEqual(["command"]);
       expect(warnings).toEqual([
-        [
-          "Skipping an undecodable Codex tool item",
-          { sessionId, itemType: "dynamicToolCall", resumed: true },
-        ],
+        {
+          message: [
+            "Skipping an undecodable Codex tool item",
+            { sessionId, cause: expect.anything() },
+          ],
+          annotations: { itemType: "dynamicToolCall" },
+        },
       ]);
     }),
   );
