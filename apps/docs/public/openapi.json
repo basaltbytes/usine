@@ -595,7 +595,8 @@
           }
         },
         "description": "Returns the running release, available release, and upgrade progress.",
-        "summary": "Read upgrade status"
+        "summary": "Read upgrade status",
+        "x-usine-permission": "admin"
       },
       "delete": {
         "tags": [
@@ -1222,7 +1223,8 @@
           }
         },
         "description": "Cancels a pending upgrade before installation begins and resumes deferred runs.",
-        "summary": "Cancel a waiting upgrade"
+        "summary": "Cancel a waiting upgrade",
+        "x-usine-permission": "admin"
       },
       "post": {
         "tags": [
@@ -1859,7 +1861,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "admin"
       }
     },
     "/api/version": {
@@ -2418,7 +2421,8 @@
           }
         },
         "description": "Public health check that returns the running release string.",
-        "summary": "Read the running release"
+        "summary": "Read the running release",
+        "x-usine-permission": "public"
       }
     },
     "/api/ready": {
@@ -3014,7 +3018,8 @@
           }
         },
         "description": "Public readiness check. Returns 503 with Retry-After during startup recovery and 200 after runtime routes are installed.",
-        "summary": "Check startup readiness"
+        "summary": "Check startup readiness",
+        "x-usine-permission": "public"
       }
     },
     "/api/changes": {
@@ -3606,7 +3611,8 @@
           }
         },
         "description": "Streams authorized entity identifiers and monotonic revisions. Resumes from Last-Event-ID or requests a cache reset.",
-        "summary": "Subscribe to entity change notices"
+        "summary": "Subscribe to entity change notices",
+        "x-usine-permission": "read"
       }
     },
     "/api/workers": {
@@ -4217,7 +4223,8 @@
           }
         },
         "description": "Returns configured and removed workers with current slot usage.",
-        "summary": "Read workers and slot usage"
+        "summary": "Read workers and slot usage",
+        "x-usine-permission": "admin"
       }
     },
     "/api/overview": {
@@ -4816,7 +4823,8 @@
           }
         },
         "description": "Returns project boards, loops, workers, and instance readiness.",
-        "summary": "Read the instance overview"
+        "summary": "Read the instance overview",
+        "x-usine-permission": "read"
       }
     },
     "/api/attention/dismiss": {
@@ -5455,7 +5463,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "admin"
       }
     },
     "/api/attention/undo": {
@@ -6094,7 +6103,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "admin"
       }
     },
     "/api/agents": {
@@ -6690,7 +6700,8 @@
           }
         },
         "description": "Returns the names of saved agent definitions available for runs.",
-        "summary": "List agents"
+        "summary": "List agents",
+        "x-usine-permission": "read"
       }
     },
     "/api/runs/{runId}/edit-and-retry": {
@@ -7339,7 +7350,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/runs/{runId}/run-again": {
@@ -7981,7 +7993,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/runs/{runId}/intervene": {
@@ -8630,7 +8643,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/cycle-budgets/reset": {
@@ -9265,7 +9279,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/runs/{runId}": {
@@ -9899,7 +9914,8 @@
           }
         },
         "description": "Without cursors, returns the latest transcript page. Use after for updates, or before and attempt together for earlier messages.",
-        "summary": "Read a run and its transcript"
+        "summary": "Read a run and its transcript",
+        "x-usine-permission": "read"
       }
     },
     "/api/runs/{runId}/github-changes": {
@@ -10501,7 +10517,8 @@
           }
         },
         "description": "Returns GitHub writes grouped by attempt window.",
-        "summary": "Read GitHub changes for a run"
+        "summary": "Read GitHub changes for a run",
+        "x-usine-permission": "read"
       }
     },
     "/api/runs/{runId}/approve": {
@@ -11140,7 +11157,8 @@
           }
         },
         "description": "Records the signed-in member approval for a run waiting at a gate.",
-        "summary": "Approve a waiting run"
+        "summary": "Approve a waiting run",
+        "x-usine-permission": "operate"
       }
     },
     "/api/runs/{runId}/resolve-failure": {
@@ -11799,7 +11817,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/runs/{runId}/retry": {
@@ -12438,7 +12457,8 @@
           }
         },
         "description": "Starts another attempt of a failed run with its saved definitions.",
-        "summary": "Retry a failed run"
+        "summary": "Retry a failed run",
+        "x-usine-permission": "operate"
       }
     },
     "/api/runs/{runId}/cancel": {
@@ -13077,7 +13097,8 @@
           }
         },
         "description": "Cancels an open run and requests that any active attempt stop.",
-        "summary": "Cancel a run"
+        "summary": "Cancel a run",
+        "x-usine-permission": "operate"
       }
     },
     "/api/projects/{project}": {
@@ -13679,7 +13700,8 @@
           }
         },
         "description": "Returns the project and its board across member repositories.",
-        "summary": "Read a project board"
+        "summary": "Read a project board",
+        "x-usine-permission": "read"
       }
     },
     "/api/projects/{project}/lanes/{lane}/items": {
@@ -14330,7 +14352,8 @@
           }
         },
         "description": "Returns up to 50 items and the next offset for a project lane.",
-        "summary": "Read the next page of board cards"
+        "summary": "Read the next page of board cards",
+        "x-usine-permission": "read"
       }
     },
     "/api/projects/{project}/pull-requests/{repository}/{item}/files": {
@@ -14983,7 +15006,8 @@
           }
         },
         "description": "Returns commit-pinned files for a whole pull request or a comparison from an attempt checkout base to its pushed head. Reports missing patches and truncated file lists. Requires read access to the repository's project.",
-        "summary": "Read pull request or attempt changes"
+        "summary": "Read pull request or attempt changes",
+        "x-usine-permission": "read"
       }
     },
     "/api/projects/{project}/tasks/{item}": {
@@ -15602,7 +15626,8 @@
           }
         },
         "description": "Returns linked issues, pull requests, and runs for an item in a project repository.",
-        "summary": "Read a project task"
+        "summary": "Read a project task",
+        "x-usine-permission": "read"
       }
     },
     "/api/projects/{project}/items/{item}/lane": {
@@ -16274,7 +16299,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/loops/{project}/{loop}/pause": {
@@ -16922,7 +16948,8 @@
           }
         },
         "description": "Stops the loop from opening new runs without canceling existing runs.",
-        "summary": "Pause a project loop"
+        "summary": "Pause a project loop",
+        "x-usine-permission": "operate"
       }
     },
     "/api/loops/{project}/{loop}/unpause": {
@@ -17570,7 +17597,8 @@
           }
         },
         "description": "Allows the loop to open runs for matching items.",
-        "summary": "Resume a project loop"
+        "summary": "Resume a project loop",
+        "x-usine-permission": "operate"
       }
     },
     "/api/projects/{owner}/{repository}/items/{item}/lane": {
@@ -18246,7 +18274,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/workers/{worker}/preflight": {
@@ -18871,7 +18900,8 @@
           }
         },
         "description": "Checks one idle worker and replaces its stored capability results, including failures with remediation. Returns 409 while an attempt or another preflight uses the worker.",
-        "summary": "Run worker preflight"
+        "summary": "Run worker preflight",
+        "x-usine-permission": "admin"
       }
     },
     "/api/workers/{worker}/discard-leftovers": {
@@ -19510,7 +19540,8 @@
           }
         },
         "description": "Discards a removed worker only after its running attempts have ended.",
-        "summary": "Discard worker leftovers"
+        "summary": "Discard worker leftovers",
+        "x-usine-permission": "admin"
       }
     },
     "/api/loops/{loop}/pause": {
@@ -20149,7 +20180,8 @@
           }
         },
         "description": "Accepts a qualified project/loop name, or a short name while it is unique. Encode slashes in the path segment.",
-        "summary": "Pause a loop"
+        "summary": "Pause a loop",
+        "x-usine-permission": "operate"
       }
     },
     "/api/loops/{loop}/unpause": {
@@ -20788,7 +20820,8 @@
           }
         },
         "description": "Accepts a qualified project/loop name, or a short name while it is unique. Encode slashes in the path segment.",
-        "summary": "Resume a loop"
+        "summary": "Resume a loop",
+        "x-usine-permission": "operate"
       }
     },
     "/api/projects/{owner}/{repository}/tasks/{item}/runs": {
@@ -21447,7 +21480,8 @@
           }
         },
         "description": "Returns up to 25 runs and the next offset for a repository task.",
-        "summary": "Read a page of task runs"
+        "summary": "Read a page of task runs",
+        "x-usine-permission": "read"
       }
     },
     "/api/projects/{owner}/{repository}/tasks/{item}": {
@@ -22066,7 +22100,8 @@
           }
         },
         "description": "Returns linked items and runs for the repository item.",
-        "summary": "Read a repository task"
+        "summary": "Read a repository task",
+        "x-usine-permission": "read"
       }
     },
     "/api/configuration/loops/check": {
@@ -22758,7 +22793,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "maintain"
       }
     },
     "/api/configuration/loops/preview": {
@@ -23409,7 +23445,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "read"
       }
     },
     "/api/configuration/head": {
@@ -24038,7 +24075,8 @@
           }
         },
         "description": "Returns the revision number used to detect stale configuration writes.",
-        "summary": "Read the current configuration revision"
+        "summary": "Read the current configuration revision",
+        "x-usine-permission": "read"
       }
     },
     "/api/configuration/capabilities": {
@@ -24666,7 +24704,8 @@
           }
         },
         "description": "Returns supported harnesses and reasoning efforts.",
-        "summary": "List configuration capabilities"
+        "summary": "List configuration capabilities",
+        "x-usine-permission": "read"
       }
     },
     "/api/configuration/repositories": {
@@ -25262,7 +25301,8 @@
           }
         },
         "description": "Returns repositories available to the instance GitHub App installation.",
-        "summary": "List installation repositories"
+        "summary": "List installation repositories",
+        "x-usine-permission": "admin"
       }
     },
     "/api/configuration/labels/{repository}": {
@@ -25867,7 +25907,8 @@
           }
         },
         "description": "Reads live GitHub labels. Encode the repository slash in the path segment.",
-        "summary": "List repository labels"
+        "summary": "List repository labels",
+        "x-usine-permission": "read"
       }
     },
     "/api/configuration/revisions": {
@@ -26582,7 +26623,8 @@
           }
         },
         "description": "Returns a page of revisions, newest first. Pass nextBefore as before for the next page; the default limit is 50.",
-        "summary": "List configuration revisions"
+        "summary": "List configuration revisions",
+        "x-usine-permission": "read"
       }
     },
     "/api/configuration/revisions/{number}": {
@@ -27209,7 +27251,8 @@
           }
         },
         "description": "Returns each changed entity with its values before and after the revision.",
-        "summary": "Read a configuration revision"
+        "summary": "Read a configuration revision",
+        "x-usine-permission": "read"
       }
     },
     "/api/configuration/entities/{kind}/{identifier}": {
@@ -27845,7 +27888,8 @@
           }
         },
         "description": "Returns the current JSON value, export-format text, and revision number.",
-        "summary": "Read a configuration entity"
+        "summary": "Read a configuration entity",
+        "x-usine-permission": "read"
       },
       "put": {
         "tags": [
@@ -28569,7 +28613,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "maintain"
       },
       "delete": {
         "tags": [
@@ -29236,7 +29281,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "maintain"
       }
     },
     "/api/configuration/revisions/{number}/revert": {
@@ -29896,7 +29942,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "maintain"
       }
     },
     "/api/configuration": {
@@ -30488,7 +30535,8 @@
           }
         },
         "description": "Returns stored configuration for the configuration editor.",
-        "summary": "Read instance configuration"
+        "summary": "Read instance configuration",
+        "x-usine-permission": "read"
       }
     },
     "/api/desk": {
@@ -31080,7 +31128,8 @@
           }
         },
         "description": "Returns attention items, active attempts, recent runs, and worker slots.",
-        "summary": "Read overview attention and activity"
+        "summary": "Read overview attention and activity",
+        "x-usine-permission": "read"
       }
     },
     "/api/statistics": {
@@ -31697,7 +31746,8 @@
           }
         },
         "description": "Aggregates task outcomes and worker utilization for the requested window, defaulting to 30d.",
-        "summary": "Read task statistics"
+        "summary": "Read task statistics",
+        "x-usine-permission": "read"
       }
     },
     "/api/statistics/runs": {
@@ -32314,7 +32364,8 @@
           }
         },
         "description": "Aggregates runs, attempts, retries, and durations for the requested window, defaulting to 30d.",
-        "summary": "Read run statistics"
+        "summary": "Read run statistics",
+        "x-usine-permission": "read"
       }
     },
     "/api/health": {
@@ -32384,7 +32435,8 @@
           }
         },
         "description": "Public liveness check with the SQLite reader state; does not require instance setup.",
-        "summary": "Check server health"
+        "summary": "Check server health",
+        "x-usine-permission": "public"
       }
     },
     "/api/auth/info": {
@@ -32443,7 +32495,8 @@
           }
         },
         "description": "Reports whether GitHub sign-in is configured.",
-        "summary": "Read sign-in availability"
+        "summary": "Read sign-in availability",
+        "x-usine-permission": "public"
       }
     },
     "/api/auth/session": {
@@ -32739,7 +32792,8 @@
           }
         },
         "description": "Returns the signed-in member and CSRF token. Setup sessions have a null member.",
-        "summary": "Read the current session"
+        "summary": "Read the current session",
+        "x-usine-permission": "session"
       }
     },
     "/api/auth/link": {
@@ -33040,7 +33094,8 @@
           }
         },
         "description": "Requires the local admin bearer token. Returns a single-use link valid for ten minutes.",
-        "summary": "Create a sign-in link"
+        "summary": "Create a sign-in link",
+        "x-usine-permission": "local"
       }
     },
     "/api/auth/link/consume": {
@@ -33339,7 +33394,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "public"
       }
     },
     "/api/auth/github": {
@@ -33595,7 +33651,8 @@
           }
         },
         "description": "Redirects to GitHub and sets a short-lived state cookie. First enrollment requires a setup session.",
-        "summary": "Start GitHub web sign-in"
+        "summary": "Start GitHub web sign-in",
+        "x-usine-permission": "public"
       }
     },
     "/api/auth/callback": {
@@ -33655,7 +33712,8 @@
           }
         },
         "description": "Verifies state against the browser cookie, sets a session, and redirects to the UI. Failed sign-ins redirect to the sign-in page.",
-        "summary": "Complete GitHub web sign-in"
+        "summary": "Complete GitHub web sign-in",
+        "x-usine-permission": "public"
       }
     },
     "/api/auth/device": {
@@ -33960,7 +34018,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "public"
       }
     },
     "/api/auth/device/poll": {
@@ -34271,7 +34330,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "public"
       }
     },
     "/api/auth/sign-out": {
@@ -34576,7 +34636,8 @@
           }
         },
         "description": "Revokes the current credential and expires browser cookies.",
-        "summary": "Sign out"
+        "summary": "Sign out",
+        "x-usine-permission": "session"
       }
     },
     "/api/members": {
@@ -34848,7 +34909,8 @@
           }
         },
         "description": "Returns enrolled members. Requires a member session or token.",
-        "summary": "List members"
+        "summary": "List members",
+        "x-usine-permission": "admin"
       },
       "post": {
         "tags": [
@@ -35171,7 +35233,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "admin"
       }
     },
     "/api/members/{id}": {
@@ -35485,7 +35548,8 @@
           }
         },
         "description": "Revokes the member credentials and removes membership. The last member cannot be removed.",
-        "summary": "Remove a member"
+        "summary": "Remove a member",
+        "x-usine-permission": "admin"
       }
     },
     "/api/tokens": {
@@ -35850,7 +35914,8 @@
           }
         },
         "description": "Returns the current member devices and browser sessions, excluding expired credentials and token secrets.",
-        "summary": "List member tokens"
+        "summary": "List member tokens",
+        "x-usine-permission": "tokens"
       },
       "post": {
         "tags": [
@@ -36177,7 +36242,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "tokens"
       }
     },
     "/api/tokens/{id}/scopes": {
@@ -36514,7 +36580,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "tokens"
       }
     },
     "/api/tokens/{id}": {
@@ -36829,7 +36896,8 @@
           }
         },
         "description": "Revokes a device or browser session belonging to the current member.",
-        "summary": "Revoke a token"
+        "summary": "Revoke a token",
+        "x-usine-permission": "tokens"
       }
     },
     "/api/setup": {
@@ -37194,7 +37262,8 @@
           }
         },
         "description": "Checks App credentials, installation, sign-in, and registry state.",
-        "summary": "Read setup progress"
+        "summary": "Read setup progress",
+        "x-usine-permission": "setup"
       }
     },
     "/api/setup/manifest": {
@@ -37524,7 +37593,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "setup"
       }
     },
     "/api/setup/callback": {
@@ -37584,7 +37654,8 @@
           }
         },
         "description": "Verifies the single-use state and browser cookie, exchanges GitHub's code, and saves credentials. Redirects to setup on success or failure.",
-        "summary": "Complete GitHub App creation"
+        "summary": "Complete GitHub App creation",
+        "x-usine-permission": "public"
       }
     },
     "/api/setup/restore": {
@@ -37908,7 +37979,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "setup"
       }
     },
     "/api/setup/activate": {
@@ -38212,7 +38284,8 @@
           }
         },
         "description": "Starts the runtime with saved credentials. Poll the runtime endpoint before navigating while the HTTP listener restarts.",
-        "summary": "Activate the configured instance"
+        "summary": "Activate the configured instance",
+        "x-usine-permission": "setup"
       }
     },
     "/api/setup/runtime": {
@@ -38490,7 +38563,8 @@
           }
         },
         "description": "Returns true when the instance serves the active runtime.",
-        "summary": "Check runtime readiness"
+        "summary": "Check runtime readiness",
+        "x-usine-permission": "setup"
       }
     },
     "/api/providers": {
@@ -39019,7 +39093,8 @@
           }
         },
         "description": "Returns credential metadata and pending authorization prompts for configured gateways or local harnesses. Requires instance admin or setup access.",
-        "summary": "Read provider connections"
+        "summary": "Read provider connections",
+        "x-usine-permission": "setup"
       }
     },
     "/api/providers/login": {
@@ -39459,7 +39534,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "setup"
       }
     },
     "/api/providers/code": {
@@ -39786,7 +39862,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "setup"
       }
     },
     "/api/providers/login/{id}": {
@@ -40096,7 +40173,8 @@
           }
         },
         "description": "Stops an unfinished login and preserves the previously saved credential.",
-        "summary": "Cancel provider sign-in"
+        "summary": "Cancel provider sign-in",
+        "x-usine-permission": "setup"
       }
     },
     "/api/providers/key": {
@@ -40432,7 +40510,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "setup"
       }
     },
     "/api/providers/disconnect": {
@@ -40761,7 +40840,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "setup"
       }
     },
     "/api/openapi.json": {
@@ -40813,7 +40893,8 @@
           }
         },
         "description": "Public OpenAPI 3.1 document generated from the registered API contracts.",
-        "summary": "Read the API schema"
+        "summary": "Read the API schema",
+        "x-usine-permission": "public"
       }
     }
   },
