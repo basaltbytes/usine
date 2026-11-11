@@ -1539,7 +1539,7 @@ it.live.each([
     snapshotFails: false,
   },
 ] as const)(
-  "a replayed CI fix recorded with approval $recorded takes approval $current from the current loop (GitHub read fails: $snapshotFails)",
+  "a replayed CI fix recorded with approval $recorded takes approval $current from the current loop (first GitHub read fails: $snapshotFails)",
   ({ recorded, current, expected, snapshotFails }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1590,6 +1590,11 @@ it.live.each([
                 }),
               ),
             );
+            yield* engine.reconcile;
+            // The fix stays queued until a recheck can read the pull request.
+            const held = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+            assert(Option.isNone(held));
+            yield* Ref.set(setup.snapshotFailure, Option.none());
             yield* engine.reconcile;
           } else {
             const cycle = yield* (yield* PollingTriggers).poll(edited);

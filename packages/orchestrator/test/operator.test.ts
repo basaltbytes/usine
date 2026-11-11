@@ -516,6 +516,7 @@ const testLayer = (
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.succeed(runSnapshot),
     reconcile: Effect.void,
+    admitCiFixes: Effect.succeed([]),
     drain: Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,

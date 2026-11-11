@@ -6,7 +6,7 @@ import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunEngine } from "@usine/engine/engine";
 import { ItemProjectionReader, ItemProjectionWriter } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
@@ -70,7 +70,8 @@ export const itemProjectionReaderLayer = Layer.succeed(ItemProjectionReader)(noI
 
 /** A `TriggerCondition` whose recheck always matches with the saved settings. */
 export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
-  recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+  recheck: (submission) =>
+    Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
 });
 
 export const emptyCycleBudgets: CycleBudgets["Service"] = {
@@ -170,6 +171,7 @@ export const pollingTestLayer = (
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
     reconcile: Effect.die("unused"),
+    admitCiFixes: Effect.die("unused"),
     drain: Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,

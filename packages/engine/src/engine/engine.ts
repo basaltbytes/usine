@@ -324,6 +324,7 @@ const makeRunEngine = Effect.gen(function* () {
     inspect,
     intervene,
     reconcile: driver.reconcile,
+    admitCiFixes: driver.admitCiFixes,
     retry,
     resolveFailure,
     revoke,
@@ -391,6 +392,11 @@ export class RunEngine extends Context.Service<
      * `ReconcileInterval`.
      */
     readonly reconcile: Effect.Effect<void, RunEngineError>;
+    /**
+     * Rechecks the queued CI fixes of Items without an open Run, as `reconcile` does, and opens the
+     * Runs of those whose pull request head still needs a fix. Returns the opened Runs.
+     */
+    readonly admitCiFixes: Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
     /**
      * Marks the current failed Attempt as resolved without changing its outcome. If the Attempt
      * stopped with a question or blocker, the Loop evaluates the Item's queued Events again.

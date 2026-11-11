@@ -34,7 +34,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 
@@ -173,7 +173,8 @@ const seed = (directory: string) =>
         Layer.provide(executor),
         Layer.provide(
           Layer.succeed(TriggerCondition)({
-            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+            recheck: (submission) =>
+              Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
           }),
         ),
         Layer.provide(CompletionCheck.unverified),
