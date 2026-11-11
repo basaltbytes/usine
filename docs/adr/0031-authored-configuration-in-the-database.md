@@ -1,50 +1,16 @@
 # Authored configuration in the database, with revisions
 
-Loops, agents, workers, lane maps, the registry, and settings move from files in the instance repo to tables in the runtime store, which becomes their only source of truth. Decided on 2026-10-28 ([#633](https://github.com/basaltbytes/usine/issues/633)). This replaces the file parts of [ADR 0001](./0001-loops-live-in-the-instance-repo.md) and [ADR 0016](./0016-config-editing-forms-first-preview-before-arming.md).
+Settings, workers, repositories, projects, labels, loops, agents, and role bindings are entities in the instance database, their only source of truth (ADR 0010). Every change is a revision: the actor, the time, an optional message, and each entity's value before and after. A revert saves a new revision. Validation runs before saving, so stored configuration is always valid. Revisions apply live, except tracing, sign-in, and worker kind changes, which wait for the next start. A loop that a revision creates starts paused, so new work is armed on purpose.
 
-ADR 0001 kept usine files out of the managed repos, so the configuration ended up in a separate repository, the instance repo. The operator's verdict after two months of use: that repository is a remote database with a worse interface. It has no schema check at write time, no transactions, no per-member permissions, and no live reads; loop files load at startup, and a `usine.yaml` change needs a reload or a restart. Without a remote, its history exists on one disk, and the UI doesn't show it. On 2026-10-27 the dogfood instance's agents moved from Claude to Codex through an uncommitted file edit, with no author, time, or reason recorded. The form editors of ADR 0016 were never built, so the UI can only pause and unpause loops. Two needs make files unworkable:
+Managed repositories contain no usine files. A loop belongs to a project and runs on every repository in it unless its selector narrows it. Loops in each repository would copy generic loops into all of them and make a loop edit need commit access everywhere.
 
-- **Members and remote clients** ([ADR 0030](./0030-operator-api-authentication-and-access-control.md)). A configuration change must pass the API's authorization and record the member who made it. A file edited over SSH bypasses both, and an iOS app or a UI on another origin can change configuration only through the API.
-- **Projects with several repositories.** A project has repositories, lanes, and loops, which are rows and links, not a YAML registry.
+Files are an import and export format only: `usine config export`, `import`, and `edit` use Markdown with YAML frontmatter, and nothing syncs with git. Startup imports the instance folder only into an empty database. Files keep only bootstrap values and secrets: `.env`, the GitHub App credentials, the listen address, and the instance ID. Configuration names a secret by its environment variable, never its value.
 
-The decision:
-
-- **The database is the only source of truth** for authored configuration, in the runtime database behind the `ConfigurationStore` port ([ADR 0010](./0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md)).
-- **Every change is a revision**: the member, the time, the entity, its value before and after, and an optional message. Reverting a change creates a new revision. The UI shows each entity's history and diff. Schema and CEL checks run before a revision is saved, so the stored configuration is always valid.
-- **Revisions apply live**, with no reload or restart. A loop that a revision creates starts paused, as ADR 0016 required for loops created in the UI.
-- **A loop belongs to a project**, a named group of managed repos, and runs on every repository in it unless its selector narrows it to some. The board shows the project's tasks from all its repositories in one set of lanes.
-- **Files are an import and export format only.** `usine config export` and `usine config import` use today's Markdown and frontmatter format, for templates, backups, and bulk edits. `usine config edit <entity>` opens `$EDITOR` and saves the result as a revision. Nothing syncs with git.
-- **Files keep only bootstrap values and secrets**: `.env` or a secret store, the GitHub App key, and the listen address. Secrets never go into configuration tables.
-- **Migration**: the first start of the version that has the tables imports the instance folder as revision 1, attributed to the instance's `operator:` value, and keeps each loop's pause state. Each managed repo becomes a project with one repository. Later starts ignore the folder.
+An instance repository of files was a remote database with a worse interface: no schema check at write time, no transactions, no per-member permissions, and no live reads. Members and remote clients (ADR 0030) must pass the API's authorization and be recorded as the author of each change, which a file edited over SSH bypasses.
 
 ## Considered options
 
-- **Keep the files** (ADR 0001): git history, loop edits reviewable in PRs, and agents editing loops with file tools. In practice the instance repo has no remote, nobody reviews loop edits in PRs, and the UI shows no history, while files can't enforce a member's permissions or record who changed them.
-- **Files with a UI writer through the YAML AST** (ADR 0016, never built): the files stay, but every API write rewrites YAML and commits to a local repository, edits made outside the API still bypass authorization, two members editing one file conflict, and reads still need a reload.
-- **The database with an optional git sync**, where a push to a git repository is imported as a revision: suits teams that review configuration in PRs, but two write paths conflict, and a failed sync needs error states of its own.
-- **The database with export and import** (chosen): one write path through the API, with authorization and a revision for every change.
-
-## Consequences
-
-- The earlier instance-repo decision rejected "config in the database, files as export" because it lost git history, PR-reviewable loop edits, and agents editing loops with file tools. Revisions replace the git history and show it in the UI, and `usine config export`, `import`, and `edit` replace the file tools; review of configuration in PRs is dropped.
-- Form edits save fields to the database, so they don't need ADR 0004's targeted YAML-AST writer, and export writes whole files. A raw editor in the UI edits an entity in the export format.
-- An import that fails validation saves no revision, so the quarantine of invalid files is no longer needed for configuration that the API writes.
-- The runtime store is the whole configuration, so a backup of the store is a backup of the instance's configuration, with the secrets files beside it.
-- The glossary's loop, instance repo, registry, and project change meaning. The project entry changes with this ADR; the others change when #633's implementation replaces the files.
-- Every guide and reference page that tells the reader to edit `usine.yaml` or a loop file changes with the implementation.
-
-## Project configuration format (2026-10-29)
-
-Configuration version 2 introduces project entities with slug IDs, display names, ordered registry names, and lanes. A repository belongs to at most one project. Unassigned repositories have no board or loop execution. Loop identities are `project/loop`; API and CLI operations accept short names only when unambiguous. Selectors narrow membership within the project.
-
-The version 1 codec remains available for historical revisions. Startup converts a stored version 1 snapshot in one revision with the message “Migrated repositories and loops to projects”. Each repository becomes a project; each selected loop is copied with its body unchanged. Configuration and runtime references migrate in the same SQL transaction before execution starts. Run and event IDs remain stable, while loop references and deduplication keys change to the project namespace.
-
-Exports use a `projects` block in `usine.yaml` and `projects/<project>/loops/*.md`. Legacy imports convert through the same configuration transformation. Version 2 commits reject version 1 downgrades because reverting configuration alone cannot undo migrated runtime identities. The repository lane field remains in the version 1 codec and repository-scoped board views; version 2 persistence owns lanes only on projects. The existing single-repository editor translates its lane writes to project changes in the same revision.
-
-## Attempt connections across revisions
-
-SSH and Cloudflare connection revisions apply to new work. An attempt retains the configuration of its connection through reattachment, salvage, and resource deletion, even when the orchestrator restarts with a newer revision ([#801](https://github.com/basaltbytes/usine/issues/801)). Provider drivers and container settings belong to that connection rather than the worker name.
-
-The Node compositions persist a schema-encoded worker record under `.usine/attempt-connections/` before allocating resources. These files are recovery metadata, not authored configuration: the database remains the source for new work. Atomic replacement prevents partial records; mode `0600` restricts local access. Records contain environment variable names rather than resolved credentials, and the host resolves those names on restart. They remain available while resources can need historical recovery and belong in instance backups alongside known-hosts records. SSH cleanup removes a connection record after its resources are released. Failed cleanup keeps the original connection for recovery. Startup lists each fixed SSH connection once and records a legacy connection only for an attempt with a listed checkout (#813). Cloudflare retains its records for sandbox recovery. An unreadable record fails recovery and protects the attempt's machine from sweeping. Attempts created before records existed use the configured connection; operators must recover those attempts under their original settings before changing it.
-
-The executor accepts a platform-free connection-store interface. The filesystem implementation belongs to the Node composition, leaving other hosts free to provide durable storage. Recording metadata at the resource boundary keeps crash recovery independent of when a configuration revision or run projection is read.
+- **Loops in managed repositories**, alone or overriding instance loops by name: copies per repository, and two discovery and write paths.
+- **An instance repository of files**: git history and file tools, but no permissions or live reads, and nobody reviewed loop edits in pull requests.
+- **The UI writing files through the YAML syntax tree**: outside edits still bypass authorization, and members editing one file conflict.
+- **The database with a git sync**: two conflicting write paths, and sync failures that need states of their own.
