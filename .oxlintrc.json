@@ -45,6 +45,22 @@
       }
     },
     {
+      "files": ["packages/durable/src/coordinator/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@earendil-works/*"],
+                "message": "The coordinator journal runs without pi-durable."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["tooling/oxlint/**"],
       "rules": {
         "usine/no-chained-type-assertions": "off",
