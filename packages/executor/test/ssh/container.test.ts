@@ -1281,6 +1281,14 @@ describe("SSH Worker with Docker", () => {
           identified: MAX_KILLED_PROCESSES + 1,
           kept: MAX_KILLED_PROCESSES,
         });
+        const read = logs.infos.filter((line) =>
+          line.includes("Read the kernel OOM process details on the worker"),
+        );
+        assert.lengthOf(read, 1);
+        const [, readFields] = yield* Schema.decodeEffect(CapturedLog)(read[0] ?? "").pipe(
+          Effect.orDie,
+        );
+        assert.deepInclude(readFields, { source: "journal", identified: MAX_KILLED_PROCESSES + 1 });
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -1372,6 +1380,17 @@ describe("SSH Worker with Docker", () => {
           logs.infos.filter((line) => line.includes(skip)),
           1,
         );
+        const read = logs.infos.filter((line) =>
+          line.includes("Read the kernel OOM process details on the worker"),
+        );
+        if (kernelMemory === "unreadable") assert.lengthOf(read, 0);
+        else {
+          assert.lengthOf(read, 1);
+          const [, fields] = yield* Schema.decodeEffect(CapturedLog)(read[0] ?? "").pipe(
+            Effect.orDie,
+          );
+          assert.deepInclude(fields, { source: "dmesg", identified: 0 });
+        }
       }).pipe(
         Effect.scoped,
         Effect.provide(

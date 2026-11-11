@@ -42,7 +42,18 @@ printf '"%s"\\n' '${created}'
           path.join(directory, "journalctl"),
           `#!/bin/sh
 [ "$1" = -k ] || exit 2
-${journal === "unreadable" ? "exit 1" : ""}
+${
+  journal === "unreadable"
+    ? // Like journalctl 257 for a user outside systemd-journal: exits 0 with no entries, prints a
+      // placeholder unless quiet, and exits 1 for --grep.
+      `for arg in "$@"; do
+  [ "$arg" = -q ] && quiet=1
+  [ "$arg" = --grep ] && exit 1
+done
+[ -n "\${quiet:-}" ] || echo '-- No entries --'
+exit 0`
+    : ""
+}
 # The readability check reads the latest entry of the boot.
 [ "$2" = -b ] && echo 'Linux version 6.18.0' && exit 0
 [ "$2" = --since ] && [ "$3" = '${created}' ] || exit 2

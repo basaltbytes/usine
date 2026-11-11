@@ -6,6 +6,12 @@ import type { RemoteCommands } from "./commands.ts";
 import type { ContainerRuntime } from "./runtime.ts";
 
 /**
+ * A shell condition that holds if the user can read the host kernel's journal for the current boot.
+ * An unreadable journal exits 0 with no entries, so the condition tests the output.
+ */
+const JOURNAL_READABLE = String.raw`[ -n "$(journalctl -k -b -n 1 --no-pager -o cat -q 2>/dev/null)" ]`;
+
+/**
  * Prints `source journal` or `source dmesg`, then the host kernel's OOM diagnostics since the
  * creation of container `$2` from the journal, or every one in the ring buffer if the journal has
  * none. When the journal has none and the ring buffer is unreadable, prints `source journal` alone
@@ -21,7 +27,7 @@ if logs=$(journalctl -k --since "$created" --no-pager -o cat -q --grep 'oom-kill
 elif logs=$(dmesg --color=never); then
   echo 'source dmesg'
   printf '%s\n' "$logs" | grep -F 'oom-kill:' || true
-elif [ -n "$(journalctl -k -b -n 1 --no-pager -o cat -q 2>/dev/null)" ]; then
+elif ${JOURNAL_READABLE}; then
   echo 'source journal'
 else
   exit 1
@@ -30,7 +36,7 @@ fi
 
 /** A script that succeeds if the user can read the host kernel's journal or ring buffer. */
 export const KERNEL_LOG_READABLE_SCRIPT = String.raw`
-[ -n "$(journalctl -k -b -n 1 --no-pager -o cat -q 2>/dev/null)" ] || dmesg --color=never >/dev/null 2>&1
+${JOURNAL_READABLE} || dmesg --color=never >/dev/null 2>&1
 `.trim();
 
 /** The kernel log that `KERNEL_MEMORY_SCRIPT` read, in its first line. */
