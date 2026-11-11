@@ -317,8 +317,21 @@ export const boxdApiLayer = (
         }),
         createFromSnapshot: Effect.fn("BoxdApi.createFromSnapshot")((request: BoxdCreate) =>
           call(machines, "createFromSnapshot", (opts) =>
-            // Machines keep the SSH setting they had before commands moved to `Exec`.
-            client.createVmFromSnapshot({ ...request, config: { network: { ssh: true } } }, opts),
+            client.createVmFromSnapshot(
+              {
+                snapshot: request.snapshot,
+                name: request.name,
+                // Machines keep the SSH setting they had before commands moved to `Exec`.
+                config: { network: { ssh: true } },
+                spec: {
+                  version: 1,
+                  isolated: request.isolated,
+                  labels: request.labels,
+                  egress: [...request.egress],
+                },
+              },
+              opts,
+            ),
           ).pipe(
             Effect.flatMap((value) =>
               decode(

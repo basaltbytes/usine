@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
-import { BoxdSnapshotName, WorkerName } from "@usine/core/worker";
+import { BoxdEgressEntry, BoxdSnapshotName, WorkerName } from "@usine/core/worker";
 import { ExecShell } from "@usine/agents/child-host";
 import { Redacted, Clock, Config, Effect, Layer, Option, Random, Schedule } from "effect";
 import { FetchHttpClient } from "effect/http";
@@ -27,13 +27,17 @@ it.live.skipIf(
     Option.isNone(environment.snapshot) ||
     Option.isSome(environment.ci),
 )(
-  "creates a boxd machine, runs a command and a variable over stdin through Exec, and destroys it",
+  "creates a boxd machine with its egress allowlist, runs a command and a variable over stdin through Exec, and destroys it",
   () =>
     Effect.gen(function* () {
       if (Option.isNone(environment.token) || Option.isNone(environment.snapshot)) return;
+      const egress = ["*.tailscale.com", "registry.npmjs.org"].map((entry) =>
+        BoxdEgressEntry.make(entry),
+      );
       const settings = boxdSettings({
         token: environment.token.value,
         snapshot: BoxdSnapshotName.make(environment.snapshot.value),
+        egress: Option.some(egress),
       });
       const now = yield* Clock.currentTimeMillis;
       const suffix = (yield* Random.nextIntBetween(0, 2 ** 32)).toString(16);
@@ -55,6 +59,8 @@ it.live.skipIf(
           }),
           ({ id }) =>
             Effect.gen(function* () {
+              const machine = yield* api.vm(id);
+              assert.sameMembers([...machine.egressAllow], egress, "GetVm reports the allowlist");
               const endpoint = yield* driver
                 .endpoint(id, Effect.sleep("100 millis"))
                 .pipe(Effect.timeout("2 minutes"));

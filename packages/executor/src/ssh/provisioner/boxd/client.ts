@@ -79,11 +79,17 @@ export const BoxdCreated = Schema.Struct({
   machine: Schema.OptionFromOptionalKey(BoxdMachine),
 });
 
+/**
+ * A restore of `snapshot` as machine `name`. The client sends `isolated`, `labels`, and `egress` in
+ * the machine spec of the request, so the machine is born with them.
+ */
 export interface BoxdCreate {
   readonly snapshot: string;
   readonly name: string;
   readonly isolated: boolean;
   readonly labels: Record<string, string>;
+  /** The egress allowlist of the new machine; empty sets none. */
+  readonly egress: ReadonlyArray<string>;
 }
 
 /** Transport boundary: responses contain only decoded values used by the driver. */

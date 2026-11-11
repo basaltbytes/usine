@@ -81,8 +81,11 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
             },
             createVmFromSnapshot: (request) => {
               assert.strictEqual(request.config?.network?.ssh, true);
-              assert.strictEqual(request.isolated, true);
+              assert.strictEqual(request.spec?.version, 1);
+              assert.strictEqual(request.spec?.isolated, true);
+              assert.deepStrictEqual(request.spec?.labels, { "usine.worker": "worker" });
               if (refused) throw new ConnectError(`quota: ${key} ${jwt}`, Code.ResourceExhausted);
+              machine.egressAllow = request.spec?.egress ?? [];
               return { vmId: machine.vmId, machine };
             },
             getVm: () => machine,
@@ -171,15 +174,21 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
         snapshot: "usine",
         name: "worker",
         isolated: true,
-        labels: {},
+        labels: { "usine.worker": "worker" },
+        egress: ["*.tailscale.com"],
       };
       const created = yield* api.createFromSnapshot(request);
       assert.strictEqual(created.id, "vm-1");
+      assert.deepStrictEqual(
+        Option.map(created.machine, ({ egressAllow }) => egressAllow),
+        Option.some(["*.tailscale.com"]),
+        "the create response reports the allowlist of the spec",
+      );
       const vm = yield* api.vm(created.id);
       assert.strictEqual(vm.createdAt, 1_700_000_000);
       yield* api.listVms(["usine.worker=worker"]);
       yield* api.updateLabels(created.id, { "usine.attempts": "2" });
-      assert.deepStrictEqual(vm.egressAllow, []);
+      assert.deepStrictEqual(vm.egressAllow, ["*.tailscale.com"]);
       const inEffect = yield* api.setEgressAllow(created.id, [
         "*.tailscale.com",
         "registry.npmjs.org",
