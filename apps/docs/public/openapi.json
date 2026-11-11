@@ -45199,6 +45199,12 @@
             "items": {
               "$ref": "#/components/schemas/_usine_orchestrator_HarnessPreflightViewEncoded"
             }
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -45218,7 +45224,8 @@
           "slots",
           "prerequisites",
           "preflightRunning",
-          "harnesses"
+          "harnesses",
+          "findings"
         ],
         "additionalProperties": false
       },
@@ -47913,13 +47920,20 @@
                 "type": "null"
               }
             ]
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "worker",
           "prerequisites",
           "harnesses",
-          "containerLimits"
+          "containerLimits",
+          "findings"
         ],
         "additionalProperties": false
       },

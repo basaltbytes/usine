@@ -12,6 +12,8 @@ export class WorkerPreflightView extends Schema.Class<
   prerequisites: Schema.NullOr(PreflightCheckView),
   harnesses: Schema.Array(HarnessPreflightView),
   containerLimits: Schema.NullOr(ContainerLimits),
+  /** What the preflight found missing that Attempts run without, as in the Worker's view. */
+  findings: Schema.Array(Schema.String),
 }) {}
 
 export const workerPreflightView = (preflight: WorkerPreflight): WorkerPreflightView =>
@@ -22,4 +24,5 @@ export const workerPreflightView = (preflight: WorkerPreflight): WorkerPreflight
       HarnessPreflightView.make({ harness, check: checkView(check) }),
     ),
     containerLimits: Option.getOrNull(preflight.containerLimits),
+    findings: preflight.findings,
   });

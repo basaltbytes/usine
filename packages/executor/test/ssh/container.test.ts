@@ -473,6 +473,25 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
+  it.effect.each(["readable", "unreadable"] as const)(
+    "reports a kernel log that the SSH user can't read as a preflight finding: %s",
+    (kernelMemory) => {
+      const machine = dockerMachine();
+      machine.state.kernelMemory = kernelMemory;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        assert.isTrue(Option.isNone(report.degraded));
+        if (kernelMemory === "readable") assert.deepStrictEqual(report.findings, []);
+        else {
+          assert.strictEqual(report.findings.length, 1);
+          assert.include(report.findings[0], "can't read the kernel journal or ring buffer");
+          assert.include(report.findings[0], "systemd-journal");
+        }
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
   it.effect("reports a machine that SSH can't reach while reading its resources", () => {
     const machine = dockerMachine();
     machine.state.resourcesDisconnect = true;
@@ -634,6 +653,7 @@ describe("SSH Worker with Docker", () => {
           "Neither Podman nor Docker is installed",
         );
         assert.include(logs.lines.join("\n"), "SSH Worker has no Docker or Podman");
+        assert.deepStrictEqual(report.findings, [], "no container records OOM kills");
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
         assert(given !== undefined && Schema.is(RemoteShell)(given.host));

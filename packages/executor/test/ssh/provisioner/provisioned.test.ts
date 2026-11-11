@@ -338,7 +338,11 @@ describe("Provisioned SSH Worker", () => {
         assert.deepStrictEqual(
           grant.checked,
           Option.some(
-            MachineCheck.make({ brains: [TEST_AGENT.brain], containerLimits: Option.none() }),
+            MachineCheck.make({
+              brains: [TEST_AGENT.brain],
+              containerLimits: Option.none(),
+              findings: [],
+            }),
           ),
         );
         const statuses = yield* machines.machines;
@@ -524,6 +528,7 @@ describe("Provisioned SSH Worker", () => {
       Effect.gen(function* () {
         const machine = fakeMachine();
         machine.state.docker = "running";
+        machine.state.kernelMemory = "readable";
         machine.state.memoryGib = 8;
         const providers = fakeProviders();
         providers.hetzner.startingReads = 0;
@@ -573,6 +578,7 @@ describe("Provisioned SSH Worker", () => {
                     pids: ContainerPids.make(60976),
                   }),
                 ),
+                findings: [],
               }),
             ),
           );

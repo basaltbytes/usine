@@ -13,6 +13,7 @@ import {
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import { verifyLinuxMemory } from "../memory-preflight.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
+import { verifyKernelLog } from "../remote/memory.ts";
 import type { SshContainers } from "./container.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
@@ -39,7 +40,8 @@ const capabilityError = (
  * sudo. With a container runtime, it derives the container limits that `usine.yaml` leaves unset
  * for `maxConcurrentAttempts` containers, which the report gives, and
  * brains are probed in a container from the image; without, as the SSH user, which the report
- * gives as degraded. Each runtime synchronizes its login checks.
+ * gives as degraded. With a container runtime, the report gives as a finding a kernel log that
+ * the SSH user can't read. Each runtime synchronizes its login checks.
  */
 export const sshMachinePreflightFor = (
   catalog: HarnessCatalog,
@@ -122,6 +124,11 @@ export const sshMachinePreflightFor = (
       yield* verifyGateway(catalog, commands, worker, machine, machine.gateway.value);
     }
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
+    // Only containers record out-of-memory kills, so only they need the kernel log.
+    const findings =
+      containerCheck._tag === "Container"
+        ? yield* verifyKernelLog(commands, machine.shell).pipe(Effect.map(Option.toArray))
+        : [];
     if (containerCheck._tag === "Container") {
       const memoryMib = containerCheck.limits.limits.memoryMib;
       const hostMemoryMib = Math.floor(memory.totalBytes / 1024 ** 2);
@@ -178,6 +185,7 @@ export const sshMachinePreflightFor = (
       gitVersion,
       isolation: containerCheck._tag,
       harnesses: harnesses.join(","),
+      findings: findings.length,
     };
     return yield* Match.valueTags(containerCheck, {
       Container: ({ limits }) =>
@@ -187,6 +195,7 @@ export const sshMachinePreflightFor = (
             degraded: Option.none(),
             deferred: Option.none(),
             containerLimits: Option.some(limits.limits),
+            findings,
           } satisfies PreflightReport,
         ),
       SharedUser: ({ degraded }) =>
@@ -194,6 +203,7 @@ export const sshMachinePreflightFor = (
           degraded: Option.some(degraded),
           deferred: Option.none(),
           containerLimits: Option.none(),
+          findings,
         } satisfies PreflightReport),
     });
   });

@@ -545,6 +545,9 @@ export const fakeMachine = () => {
         0,
       );
     }
+    if (line.includes("journalctl -k -b")) {
+      return oneShotHandle("", state.kernelMemory === "readable" ? 0 : 1);
+    }
     if (line.includes("journalctl -k")) {
       if (state.kernelMemory === "unreadable")
         return oneShotHandle("", 1, "dmesg: read kernel buffer failed: Operation not permitted");

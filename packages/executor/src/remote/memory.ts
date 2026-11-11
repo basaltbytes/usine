@@ -23,6 +23,11 @@ else
 fi
 `.trim();
 
+/** A script that succeeds if the user can read the host kernel's journal or ring buffer. */
+const KERNEL_LOG_READABLE_SCRIPT = String.raw`
+[ -n "$(journalctl -k -b -n 1 --no-pager -o cat -q 2>/dev/null)" ] || dmesg --color=never >/dev/null 2>&1
+`.trim();
+
 /** The kernel log that `KERNEL_MEMORY_SCRIPT` read, in its first line. */
 const SOURCE_LINE = /^source (journal|dmesg)$/mu;
 
@@ -98,6 +103,48 @@ export const readKilledProcesses = Effect.fn("RemoteExecutor.readMemoryKilledPro
           host: shell.destination,
           message: error.message,
         }).pipe(Effect.as([])),
+      ),
+    ),
+);
+
+/**
+ * Returns a preflight finding if the SSH user of `shell` can't read the host kernel's log, from
+ * which out-of-memory kills get their process names, or `None` if it can.
+ */
+export const verifyKernelLog = Effect.fn("RemoteExecutor.verifyKernelLog")(
+  function* (commands: RemoteCommands, shell: RemoteHost) {
+    const host = shell.destination;
+    yield* Effect.annotateCurrentSpan({ host });
+    const result = yield* commands.inspect("preflight", shell, "sh", [
+      "-c",
+      KERNEL_LOG_READABLE_SCRIPT,
+    ]);
+    if (result.exitCode === 0) {
+      yield* Effect.logDebug("The SSH user can read the kernel log", { host });
+      return Option.none<string>();
+    }
+    yield* Effect.logWarning("The SSH user can't read the kernel log", {
+      host,
+      exitCode: result.exitCode,
+      stderr: result.stderr,
+    });
+    return Option.some(
+      `The SSH user can't read the kernel journal or ring buffer on ${host}, so out-of-memory kills record no process names. Add the user to the systemd-journal group.`,
+    );
+  },
+  (effect, _commands, shell) =>
+    effect.pipe(
+      Effect.catchTag("ExecutorOperationError", (error) =>
+        Effect.logWarning("Could not check whether the SSH user can read the kernel log", {
+          host: shell.destination,
+          message: error.message,
+        }).pipe(
+          Effect.as(
+            Option.some(
+              `Could not check whether the SSH user can read the kernel log on ${shell.destination}: ${error.message}`,
+            ),
+          ),
+        ),
       ),
     ),
 );

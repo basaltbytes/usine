@@ -166,7 +166,13 @@ export const machineChecksFor = (
     const checkFinishedAt = yield* DateTime.now;
     const checkedAt = DateTime.toEpochMillis(checkFinishedAt);
     checkedOn.set(machine.address, checkedAt);
-    return Option.some(MachineCheck.make({ brains, containerLimits: report.containerLimits }));
+    return Option.some(
+      MachineCheck.make({
+        brains,
+        containerLimits: report.containerLimits,
+        findings: report.findings,
+      }),
+    );
   });
 
   return { check: checkMachine };
