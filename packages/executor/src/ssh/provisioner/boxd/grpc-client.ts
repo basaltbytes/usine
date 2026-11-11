@@ -6,12 +6,13 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { BoxdApi as BoxdService, type GetVmResponse } from "./api-pb.ts";
 import {
   BoxdApi,
+  type BoxdApiLayer,
   BoxdCallError,
   BoxdCreated,
   BoxdIdentity,
   BoxdLimit,
   BoxdMachine,
-  BoxdRegions,
+  BoxdRegionList,
   BoxdSnapshot,
   BoxdUnknownRegion,
   type BoxdCreate,
@@ -25,9 +26,27 @@ class RpcRejection extends Schema.TaggedError<RpcRejection, { readonly brand: un
 
 /** The account endpoint, which also lists every region with its API endpoint. */
 const BOXD_API = "https://boxd.sh:9443";
-const RegionList = Schema.Struct({
-  regions: Schema.Array(Schema.Struct({ id: Schema.String, apiEndpoint: Schema.String })),
-});
+/** How long before its expiry a session is exchanged again, as the boxd SDK does. */
+const REFRESH_MARGIN_SECONDS = 300;
+/** Returns the gRPC status name for an HTTP status of the token exchange. */
+const exchangeCode = (status: number): string => {
+  switch (status) {
+    case 400:
+      return "INVALID_ARGUMENT";
+    case 401:
+      return "UNAUTHENTICATED";
+    case 403:
+      return "PERMISSION_DENIED";
+    case 429:
+      return "RESOURCE_EXHAUSTED";
+    case 502:
+    case 503:
+    case 504:
+      return "UNAVAILABLE";
+    default:
+      return status >= 500 ? "INTERNAL" : "UNKNOWN";
+  }
+};
 /** Returns `endpoint` as a URL, adding `https://` when boxd lists only the host and port. */
 const endpointUrl = (endpoint: string): string =>
   /^[a-z][a-z0-9+.-]*:\/\//iu.test(endpoint) ? endpoint : `https://${endpoint}`;
@@ -42,15 +61,18 @@ const machineValue = (value: GetVmResponse) => ({
  *
  * Building the layer exchanges the API key for a session and calls `ListRegions` on the account
  * endpoint to find the API endpoint of `region`. It fails with `BoxdUnknownRegion` when boxd lists
- * no such region. When `endpoint` is set, it serves both account and regional calls and the
- * layer skips the lookup.
+ * no such region with an API endpoint. When `endpoint` is set, it serves both account and
+ * regional calls and the layer skips the lookup.
+ *
+ * A call that boxd refuses with `UNAUTHENTICATED` drops the session and runs once more with a new
+ * one.
  */
 export const boxdApiLayer = (
   token: Redacted.Redacted<string>,
   region: BoxdRegion,
   endpoint?: string,
   transport: typeof createGrpcTransport = createGrpcTransport,
-) =>
+): ReturnType<BoxdApiLayer> =>
   Layer.effect(
     BoxdApi,
     Effect.gen(function* () {
@@ -73,7 +95,7 @@ export const boxdApiLayer = (
         const now = yield* DateTime.now;
         if (
           Option.isSome(session) &&
-          session.value.expires_at > DateTime.toEpochMillis(now) / 1000 + 60
+          session.value.expires_at > DateTime.toEpochMillis(now) / 1000 + REFRESH_MARGIN_SECONDS
         )
           return session.value.token;
         yield* Effect.logInfo("Exchanging boxd API key for a session", {
@@ -88,14 +110,7 @@ export const boxdApiLayer = (
         if (response.status !== 200)
           return yield* BoxdCallError.make({
             operation: "authenticate",
-            code:
-              response.status === 401
-                ? "UNAUTHENTICATED"
-                : response.status === 403
-                  ? "PERMISSION_DENIED"
-                  : response.status === 429
-                    ? "RESOURCE_EXHAUSTED"
-                    : "UNAVAILABLE",
+            code: exchangeCode(response.status),
             message: `Token exchange returned HTTP ${response.status}`,
           });
         const decoded = yield* HttpClientResponse.schemaBodyJson(Session)(response);
@@ -139,25 +154,47 @@ export const boxdApiLayer = (
             ),
         }),
       );
+      const invokeWith = <A>(
+        operation: string,
+        invoke: (options: CallOptions) => Promise<A>,
+        jwt: string,
+      ) =>
+        Effect.tryPromise({
+          try: (signal) => invoke({ signal, headers: { authorization: `Bearer ${jwt}` } }),
+          catch: (cause) => RpcRejection.make({ cause }),
+        }).pipe(
+          Effect.catch((failure) =>
+            failure.cause instanceof ConnectError
+              ? Effect.fail(
+                  BoxdCallError.make({
+                    operation,
+                    code: failureCode(failure.cause),
+                    message: failure.cause.rawMessage
+                      .replaceAll(Redacted.value(token), "[redacted]")
+                      .replaceAll(jwt, "[redacted]"),
+                  }),
+                )
+              : Effect.die(failure.cause),
+          ),
+        );
       const call = <A>(operation: string, invoke: (options: CallOptions) => Promise<A>) =>
         Effect.gen(function* () {
           const jwt = yield* bearer;
-          return yield* Effect.tryPromise({
-            try: (signal) => invoke({ signal, headers: { authorization: `Bearer ${jwt}` } }),
-            catch: (cause) => RpcRejection.make({ cause }),
-          }).pipe(
-            Effect.catch((failure) =>
-              failure.cause instanceof ConnectError
-                ? Effect.fail(
-                    BoxdCallError.make({
-                      operation,
-                      code: failureCode(failure.cause),
-                      message: failure.cause.rawMessage
-                        .replaceAll(Redacted.value(token), "[redacted]")
-                        .replaceAll(jwt, "[redacted]"),
-                    }),
-                  )
-                : Effect.die(failure.cause),
+          return yield* invokeWith(operation, invoke, jwt).pipe(
+            Effect.catchIf(
+              (failure) => failure.code === "UNAUTHENTICATED",
+              () =>
+                Effect.gen(function* () {
+                  yield* Effect.logInfo("boxd refused the session; exchanging the API key again", {
+                    region,
+                    operation,
+                  });
+                  // A concurrent call may already hold a newer session, which stays.
+                  if (Option.isSome(session) && session.value.token === jwt)
+                    session = Option.none();
+                  const renewed = yield* bearer;
+                  return yield* invokeWith(operation, invoke, renewed);
+                }),
             ),
           );
         }).pipe(Effect.withSpan(`BoxdApi.${operation}`));
@@ -173,31 +210,41 @@ export const boxdApiLayer = (
               }),
             ),
           );
-      const regional = Effect.gen(function* () {
-        const listed = yield* call("listRegions", (opts) => account.listRegions({}, opts)).pipe(
-          Effect.flatMap(decode(RegionList, "listRegions")),
+      const listRegions = (client: typeof account) =>
+        call("listRegions", (opts) => client.listRegions({}, opts)).pipe(
+          Effect.flatMap(decode(BoxdRegionList, "listRegions")),
         );
-        const match = listed.regions.find(({ id }) => id === region);
-        if (match === undefined) {
-          const available = listed.regions.map(({ id }) => id);
-          yield* Effect.logWarning("boxd lists no region with the configured id", {
-            region,
-            available,
-          });
-          return yield* BoxdUnknownRegion.make({ region, available });
-        }
-        if (match.apiEndpoint.length === 0)
-          return yield* BoxdCallError.make({
-            operation: "listRegions",
-            code: "INTERNAL",
-            message: `boxd lists region ${region} without an API endpoint`,
-          });
+      // The driver's boundary logs an unknown region once, with the worker.
+      const regional = Effect.gen(function* () {
+        const listed = yield* listRegions(account);
+        const usable = listed.regions.filter(({ apiEndpoint }) => apiEndpoint.length > 0);
+        const match = usable.find(({ id }) => id === region);
+        if (match === undefined)
+          return yield* BoxdUnknownRegion.make({ region, available: usable.map(({ id }) => id) });
         const url = endpointUrl(match.apiEndpoint);
         yield* Effect.logInfo("Resolved the boxd regional endpoint", { region, endpoint: url });
-        return { url, client: url === BOXD_API ? account : yield* clientFor(url) };
+        return {
+          url,
+          client: url === BOXD_API ? account : yield* clientFor(url),
+          servedRegion: Effect.succeed<string>(region),
+        };
       }).pipe(Effect.withSpan("BoxdApi.resolveRegion", { attributes: { region } }));
-      const { url: regionalUrl, client } =
-        endpoint === undefined ? yield* regional : { url: endpoint, client: account };
+      const overridden = (url: string) =>
+        Effect.logInfo("Using the boxd endpoint override instead of listing regions", {
+          region,
+          endpoint: url,
+        }).pipe(
+          Effect.as({
+            url,
+            client: account,
+            servedRegion: listRegions(account).pipe(Effect.map(({ thisRegion }) => thisRegion)),
+          }),
+        );
+      const {
+        url: regionalUrl,
+        client,
+        servedRegion,
+      } = endpoint === undefined ? yield* regional : yield* overridden(endpoint);
       const list = (selector: ReadonlyArray<string>) =>
         call("listVms", (opts) => client.listVms({ labelSelector: [...selector] }, opts));
       return BoxdApi.of({
@@ -222,11 +269,12 @@ export const boxdApiLayer = (
             ),
           ),
         ),
-        regions: call("regions", (opts) => client.listRegions({}, opts)).pipe(
-          Effect.flatMap(decode(BoxdRegions, "regions")),
-        ),
+        servedRegion,
         createFromSnapshot: Effect.fn("BoxdApi.createFromSnapshot")((request: BoxdCreate) =>
-          call("createFromSnapshot", (opts) => client.createVmFromSnapshot(request, opts)).pipe(
+          call("createFromSnapshot", (opts) =>
+            // Machines keep the SSH setting they had before commands moved to `Exec`.
+            client.createVmFromSnapshot({ ...request, config: { network: { ssh: true } } }, opts),
+          ).pipe(
             Effect.flatMap((value) =>
               decode(
                 BoxdCreated,

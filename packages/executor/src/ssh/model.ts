@@ -1,4 +1,4 @@
-import type { boxdApiLayer } from "./provisioner/boxd/grpc-client.ts";
+import type { BoxdApiLayer } from "./provisioner/boxd/client.ts";
 import type { boxdExecLayer } from "./provisioner/boxd/exec.ts";
 import type { AttemptConnections } from "../attempt-connections.ts";
 import type { SshCommand } from "@usine/agents/child-host";
@@ -211,7 +211,7 @@ export interface SshExecutorOptions {
    */
   readonly workerRecordsDirectory?: string;
   /** Builds the boxd transport. Defaults to the gRPC adapter. */
-  readonly boxdClient?: typeof boxdApiLayer;
+  readonly boxdClient?: BoxdApiLayer;
   /**
    * Builds the `BoxdExec` of a boxd Worker from its region's API endpoint and credential. Defaults
    * to the gRPC adapter, with one HTTP/2 connection per Worker.

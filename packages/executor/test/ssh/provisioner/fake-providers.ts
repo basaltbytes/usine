@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest";
-import type { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import type { BoxdApiLayer } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
 import { spawnedBoxdExec } from "./fake-boxd-exec.ts";
 import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
@@ -529,7 +529,7 @@ export const fakeProviders = () => {
       assert.strictEqual(Redacted.value(token), boxd.state.token);
       assert.strictEqual(region, boxd.state.region);
       return boxd.layer;
-    }) satisfies typeof boxdApiLayer,
+    }) satisfies BoxdApiLayer,
     /**
      * Returns the `SshExecutorOptions.boxdExec` that runs boxd commands on `machine` and records
      * the endpoint and credential of each connection in `boxd.connections`.

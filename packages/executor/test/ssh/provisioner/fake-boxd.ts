@@ -41,6 +41,7 @@ export const fakeBoxd = () => {
       region: "fra",
       vcpu: 2,
       memoryBytes: 8 * 1024 ** 3,
+      storage: "local",
     } satisfies BoxdSnapshot,
     token: "bxd_test_key",
     region: "fra",
@@ -86,7 +87,7 @@ export const fakeBoxd = () => {
       Effect.succeed({ maxVms: state.maxVms, vmCount: state.vmCount }),
     ),
     snapshot: () => call("snapshot", () => Effect.succeed(state.snapshot)),
-    regions: call("regions", () => Effect.succeed({ thisRegion: state.region })),
+    servedRegion: call("servedRegion", () => Effect.succeed(state.region)),
     createFromSnapshot: (request) =>
       call("createFromSnapshot", () =>
         Effect.gen(function* () {

@@ -69,11 +69,30 @@ describe("Provisioned machine reuse behind a gateway", () => {
           ]);
           if (detachFails) assert.notEqual(second.id, first.id);
           else assert.strictEqual(second.id, first.id);
+          const reusedCalls = machine.state.calls.length;
           yield* Effect.scoped(
             Effect.gen(function* () {
               yield* (yield* executor.prepare(nextRequest)).launch(sink);
             }),
           );
+          // Every attempt's commands carry its caller token in the stdin block, on a reused
+          // machine as on a new one.
+          const tokensOf = (calls: typeof machine.state.calls) =>
+            new Set(
+              calls.flatMap(({ stdinEnvironment, line, command }) => {
+                const token = stdinEnvironment.GH_TOKEN;
+                // The gateway preflight's round trip sends a placeholder and names it.
+                if (token === undefined || token === "usine-preflight") return [];
+                assert.notInclude(line, token);
+                assert.notInclude(command.args.join(" "), token);
+                return [token];
+              }),
+            );
+          const before = tokensOf(machine.state.calls.slice(0, reusedCalls));
+          const after = tokensOf(machine.state.calls.slice(reusedCalls));
+          assert.isNotEmpty(after, "the next attempt's commands read the stdin block");
+          for (const token of after)
+            assert.isFalse(before.has(token), "the next attempt sends its own caller token");
           const changes = gateway.calls.filter(
             ({ method }) => method === "POST" || method === "DELETE",
           );

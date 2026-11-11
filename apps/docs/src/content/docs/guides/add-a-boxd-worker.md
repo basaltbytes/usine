@@ -62,13 +62,13 @@ What each entry is for:
 
 usine applies the list right after boxd restores the machine, then waits one second, the time boxd states the list takes to come into force, before it connects to the machine or starts anything on it. Processes that the snapshot resumes, such as `tailscaled` and the container runtime, run under the snapshot's allowlist, not yet under yours, during that second. If boxd refuses the list or reports the machine's egress unrestricted afterwards, usine deletes the machine and retries creation later. When usine reuses a machine for another attempt, it applies the list again.
 
-An address entry admits all traffic to that address, and usine can't tell whose address it is. The gateway check therefore covers host names only: behind a gateway, preflight logs a warning that names the address entries. Make sure none of them belongs to GitHub or to a provider the gateway serves. Like boxd, usine refuses an address or range with host bits set, one that overlaps a private, CGNAT, loopback, link-local, multicast, or reserved range, and a range wider than `/8`.
+An address entry admits all traffic to that address, and usine can't tell whose address it is. The gateway check therefore covers host names only: behind a gateway, preflight logs a warning that names the address entries. Make sure none of them belongs to GitHub or to a provider the gateway serves. Like boxd, usine refuses an address or range with host bits set, and one that overlaps a private, CGNAT, loopback, link-local, multicast, or reserved range. usine also refuses a range with a prefix length under 8.
 
 Preflight logs the number of entries in `boxd provisioner verified`. If a restricted machine can't join the tailnet or reach the gateway, the error says that `provisioner.egress` restricts the machine.
 
 ## Check the result
 
-Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists.
+Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id and an API endpoint for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists. If boxd reports the snapshot's storage as `archiving`, `archived`, or `unarchiving` rather than `local`, preflight logs a warning that names the state: boxd creates machines only from a local snapshot.
 
 usine reaches each machine through boxd's `Exec` API at the region's API endpoint, with the worker's API key as the bearer. Nothing on the machine or the boxd account needs an SSH key, and the snapshot needs none. usine sends gateway tokens and API keys over standard input. Gateway setup configures the host entries and the HTTP socket units.
 
@@ -78,7 +78,9 @@ Start a test run. usine disables auto-hibernate and auto-suspend, then runs each
 
 If boxd refuses to create the machine as invalid, for example because it reserves the machine name `usine-<worker name>-<8 hex digits>`, worker preflight fails with boxd's message, which names the machine. Rename the worker or correct the provisioner settings; retrying the same request fails the same way.
 
-Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication.
+Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication, each with its own 30 seconds. usine exchanges the API key for a new session 5 minutes before the session expires. When boxd refuses a session before then, usine exchanges the key again and retries the call once.
+
+A token exchange that answers HTTP 429 counts as a rate limit, and HTTP 502, 503, or 504 counts as an unreachable provider: usine retries the attempt's launch later. Any other error status fails preflight with the status.
 
 ## How commands run
 

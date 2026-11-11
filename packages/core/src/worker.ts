@@ -367,7 +367,7 @@ const BOXD_RESERVED_RANGES = [
   "240.0.0.0/4",
 ];
 
-/** The shortest prefix of a public address range that an egress allowlist accepts. */
+/** The shortest prefix length of a public address range that an egress allowlist accepts. */
 const BOXD_SHORTEST_PREFIX = 8;
 
 /** Parses `a.b.c.d` or `a.b.c.d/p` into an unsigned 32-bit address and a prefix length. */
@@ -415,11 +415,12 @@ export const isBoxdEgressAddress = (entry: string): boolean => ipv4Range(entry) 
 
 /**
  * An entry of a boxd machine's egress allowlist: a lowercase ASCII host name such as
- * `registry.npmjs.org`, `*.` and a domain for its subdomains, a public IPv4 address or CIDR range
- * of at most `/8`, or `none`, which admits nothing. boxd admits HTTP and HTTPS by host name and
- * other traffic by address. Like boxd, the schema refuses a repeated or inner wildcard, a range
- * with host bits set, and an address that overlaps a private, CGNAT, loopback, link-local,
- * multicast, or reserved range.
+ * `registry.npmjs.org`, `*.` and a domain for its subdomains, a public IPv4 address, a public CIDR
+ * range with a prefix length of 8 or more, or `none`, which admits nothing. boxd admits HTTP and
+ * HTTPS by host name and other traffic by address. Like boxd, the schema refuses a repeated or
+ * inner wildcard, a range with host bits set, and an address that overlaps a private, CGNAT,
+ * loopback, link-local, multicast, or reserved range. It also refuses a range with a prefix
+ * length under 8, which no public allowlist entry needs.
  */
 export const BoxdEgressEntry = Schema.String.check(
   Schema.makeFilter(

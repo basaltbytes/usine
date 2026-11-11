@@ -39,6 +39,12 @@ const reasonOf = (code: string): MachineUnavailableReason => {
   }
 };
 
+/** Whether a later call can outlast `code`: boxd doesn't answer or rate-limits. */
+const isTransient = (code: string): boolean => {
+  const reason = reasonOf(code);
+  return reason === "unreachable" || reason === "quota";
+};
+
 const terminalStates = new Set(["stopped", "failed", "destroyed"]);
 
 /** How long boxd takes to enforce an egress allowlist after `SetVmEgressAllow` returns. */
@@ -54,7 +60,6 @@ class BoxdEgressNotApplied extends Schema.TaggedError<
 >()("BoxdEgressNotApplied", {
   machine: MachineId,
   requested: Schema.Int,
-  inEffect: Schema.Int,
 }) {}
 
 const assignment = (tags: MachineTags) => ({
@@ -64,32 +69,33 @@ const assignment = (tags: MachineTags) => ({
   "usine.attempts": String(tags.attempts),
 });
 
-/** Codes for a boxd API that doesn't answer or rate-limits, which a later call can outlast. */
-const transientCodes = new Set(["UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"]);
-
 const transientMessage = (worker: WorkerName, failure: BoxdCallError): string =>
   `boxd didn't answer ${failure.operation} for worker "${worker}": ${failure.code}: ${failure.message}. Check that this host reaches app.boxd.sh, boxd.sh:9443, and the API endpoint of the region, or wait for the boxd rate limit to reset.`;
 
-/** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
-const boxdPreflightError = (
-  worker: WorkerName,
-  failure: BoxdCallError | BoxdUnknownRegion,
-): WorkerCapabilityError => {
-  const message =
-    failure._tag === "BoxdUnknownRegion"
-      ? `boxd has no region "${failure.region}". Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ") || "none"}.`
-      : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
-        ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
-        : transientCodes.has(failure.code)
-          ? transientMessage(worker, failure)
-          : `boxd preflight ${failure.operation} failed: ${failure.code}: ${failure.message}. Check the API endpoint and snapshot; build it with boxd snapshots save.`;
-  return WorkerCapabilityError.make({
+/** Returns the configuration fault of `worker`'s boxd provisioner that `message` explains. */
+const providerFault = (worker: WorkerName, message: string): WorkerCapabilityError =>
+  WorkerCapabilityError.make({
     worker,
     capability: "provider",
     message,
     cause: new Error(message),
   });
-};
+
+/** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
+export const boxdPreflightError = (
+  worker: WorkerName,
+  failure: BoxdCallError | BoxdUnknownRegion,
+): WorkerCapabilityError =>
+  providerFault(
+    worker,
+    failure._tag === "BoxdUnknownRegion"
+      ? `boxd has no region "${failure.region}" with an API endpoint. Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ") || "none"}.`
+      : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
+        ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
+        : isTransient(failure.code)
+          ? transientMessage(worker, failure)
+          : `boxd preflight couldn't ${failure.operation}: ${failure.code}: ${failure.message}.${failure.operation === "snapshot" ? " Check the snapshot; build it with boxd snapshots save." : ""}`,
+  );
 
 /**
  * Explains a failure while connecting to the region of `worker`: a `MachineUnavailableError`,
@@ -100,7 +106,7 @@ export const boxdConnectError = (
   worker: WorkerName,
   failure: BoxdCallError | BoxdUnknownRegion,
 ): MachineUnavailableError | WorkerCapabilityError =>
-  failure._tag === "BoxdCallError" && transientCodes.has(failure.code)
+  failure._tag === "BoxdCallError" && isTransient(failure.code)
     ? MachineUnavailableError.make({
         worker,
         provider: "boxd",
@@ -141,13 +147,7 @@ export const boxdDriverFor = (
         status: Option.none(),
         message: `boxd couldn't ${operation}: ${failure.code}: ${failure.message}`,
       });
-    const capability = (message: string) =>
-      WorkerCapabilityError.make({
-        worker,
-        capability: "provider",
-        message,
-        cause: new Error(message),
-      });
+    const capability = (message: string) => providerFault(worker, message);
     const verify = Effect.fn("BoxdDriver.verify")(
       function* (_worker: WorkerName, maxConcurrentAttempts: number) {
         yield* Effect.annotateCurrentSpan({ worker, region: settings.region });
@@ -166,10 +166,10 @@ export const boxdDriverFor = (
           return yield* capability(
             `boxd snapshot "${settings.snapshot}" captured ${snapshot.vcpu} vCPU and ${snapshot.memoryBytes / 1024 ** 3} GiB, but provisioner.size is ${settings.size}. Rebuild the snapshot at ${settings.size} or change size to match the captured size.`,
           );
-        const { thisRegion } = yield* api.regions;
-        if (thisRegion !== settings.region)
+        const served = yield* api.servedRegion;
+        if (served !== settings.region)
           return yield* capability(
-            `boxd endpoint serves ${thisRegion}; use the endpoint for provisioner.region ${settings.region}.`,
+            `boxd endpoint ${api.endpoint}, set by providerEndpoints.boxd, serves region ${served}, but provisioner.region of worker "${worker}" is ${settings.region}. Set providerEndpoints.boxd to the API endpoint of ${settings.region}, or remove it so usine finds the endpoint in boxd's region list.`,
           );
         const limit = yield* api.orgMachineLimit;
         const addresses = Option.isSome(settings.tailnet)
@@ -185,6 +185,11 @@ export const boxdDriverFor = (
           ...(limit.maxVms - limit.vmCount < maxConcurrentAttempts
             ? [
                 `boxd has ${limit.maxVms - limit.vmCount} machine slots available, fewer than max_concurrent_attempts (${maxConcurrentAttempts}). Free machines or request a higher machine limit.`,
+              ]
+            : []),
+          ...(snapshot.storage !== "" && snapshot.storage !== "local"
+            ? [
+                `boxd snapshot "${settings.snapshot}" is ${snapshot.storage}, and boxd creates machines only from a local snapshot, so machine creation can fail until boxd restores it. Restore the snapshot or rebuild it with boxd snapshots save.`,
               ]
             : []),
           ...(addresses.length > 0
@@ -222,11 +227,7 @@ export const boxdDriverFor = (
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       const inEffect = yield* api.setEgressAllow(id, entries);
       if (inEffect.length === 0)
-        return yield* BoxdEgressNotApplied.make({
-          machine: id,
-          requested: entries.length,
-          inEffect: inEffect.length,
-        });
+        return yield* BoxdEgressNotApplied.make({ machine: id, requested: entries.length });
       yield* Effect.logInfo("Restricted boxd machine egress", {
         worker,
         machine: id,
@@ -255,7 +256,6 @@ export const boxdDriverFor = (
           snapshot: settings.snapshot,
           name,
           isolated: settings.isolated,
-          config: { network: { ssh: true } },
           labels: {
             "usine.instance": tagValue(tags.instance),
             "usine.worker": tagValue(tags.worker),
@@ -405,14 +405,17 @@ export const boxdDriverFor = (
     const remove = Effect.fn("BoxdDriver.remove")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       created.delete(id);
-      yield* api.destroy(id).pipe(
+      const deleted = yield* api.destroy(id).pipe(
+        Effect.as(true),
         Effect.catchIf(
           (failure) => failure.code === "NOT_FOUND",
-          () => Effect.void,
+          () => Effect.succeed(false),
         ),
         Effect.mapError(apiError("delete the machine")),
       );
-      yield* Effect.logInfo("Deleted boxd machine", { worker, machine: id });
+      yield* deleted
+        ? Effect.logInfo("Deleted boxd machine", { worker, machine: id })
+        : Effect.logInfo("boxd machine was already deleted", { worker, machine: id });
     });
     const list = Effect.fn("BoxdDriver.list")(function* (
       instance: string,
