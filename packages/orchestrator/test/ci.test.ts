@@ -206,14 +206,16 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const pendingFailure = yield* Ref.make(Option.none<GitHubApiError>());
   const pendingStarted = yield* Deferred.make<void>();
   const pendingStalled = yield* Ref.make(false);
+  const pendingHistoryDeadline = yield* Ref.make(Option.none<DateTime.Utc>());
   const workflowRuns = yield* Ref.make<Effect.Effect<HeadWorkflowRunState, GitHubApiError>>(
     Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [] })),
   );
   const failedJobs = yield* Ref.make<ReadonlyArray<string>>(["ci"]);
   const checks = Layer.succeed(GitHubChecks)({
     workflowRuns: () => Effect.flatten(Ref.get(workflowRuns)),
-    pendingDetails: () =>
+    pendingDetails: (_repository, _head, historyDeadline) =>
       Effect.gen(function* () {
+        yield* Ref.set(pendingHistoryDeadline, Option.some(historyDeadline));
         yield* Deferred.succeed(pendingStarted, undefined);
         if (yield* Ref.get(pendingStalled)) return yield* Effect.never;
         const failure = yield* Ref.get(pendingFailure);
@@ -361,6 +363,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     pendingFailure,
     pendingStarted,
     pendingStalled,
+    pendingHistoryDeadline,
     workflowRuns,
     failedJobs,
     mergeable,
@@ -1218,12 +1221,16 @@ it.effect("a pending diagnostic read that never finishes still settles the CI ti
       const waiting = yield* engine.inspect(runId);
       const endedAt = waiting.attempts.at(-1)?.endedAt ?? Option.none();
       assert(Option.isSome(endedAt));
-      yield* TestClock.setTime(DateTime.toEpochMillis(endedAt.value) + 1001);
+      const timedOutAt = DateTime.toEpochMillis(endedAt.value) + 1001;
+      yield* TestClock.setTime(timedOutAt);
       yield* Ref.set(setup.pendingStalled, true);
       const reconcile = yield* (yield* CiMonitor)
         .reconcile(fixtureInstance, Option.none())
         .pipe(Effect.forkChild);
       yield* Deferred.await(setup.pendingStarted);
+      const historyDeadline = yield* Ref.get(setup.pendingHistoryDeadline);
+      assert(Option.isSome(historyDeadline));
+      assert.strictEqual(DateTime.toEpochMillis(historyDeadline.value), timedOutAt + 7000);
       yield* TestClock.adjust("10 seconds");
       const result = yield* Fiber.join(reconcile).pipe(
         Effect.timeout("1 second"),
