@@ -135,7 +135,7 @@ usine export-run <runId> --output /path/to/evidence.json
 
 The default is `run-<encoded-runId>.json` in the current directory, with characters such as `/` percent-encoded; the output directory must exist. The command writes a complete owner-only file, never overwrites one, and prints its path. A missing run, unreadable store, encoding failure, or write failure exits nonzero.
 
-The versioned JSON has `exportedAt`, the full run `snapshot` (event, effective task and agent, revision, step result, and all attempts), and every saved transcript envelope in append order, from one transaction, including history past the drawer's page. Active runs keep adding history, so export a settled run. The export opens `.usine/runtime.sqlite` read-only, without creating tables, migrating, starting attempts, or polling. Transcripts can contain repo content and tool output; check the file before you share it. For a restorable database, use `usine backup` ([ADR 0010](../../docs/adr/0010-single-sqlite-runtime-store.md)).
+The versioned JSON has `exportedAt`, the full run `snapshot` (event, effective task and agent, revision, step result, and all attempts), and every saved transcript envelope in append order, from one transaction, including history past the drawer's page. Active runs keep adding history, so export a settled run. The export opens `.usine/runtime.sqlite` read-only, without creating tables, migrating, starting attempts, or polling. Transcripts can contain repo content and tool output; check the file before you share it. For a restorable database, use `usine backup` ([ADR 0010](../../docs/adr/0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md)).
 
 ## Stop the server
 
@@ -253,7 +253,7 @@ Members receive access through configuration role bindings. Browser sessions use
 
 `GET /api/overview` returns compact board cards and every open run plus the latest 50 closed runs across the instance. Cards retain counts, aggregate usage, and summaries needed for their current state and actions. Task and run endpoints provide complete history and prompts.
 
-The web UI uses `GET /api/changes` for entity invalidation. The authenticated stream supports `Last-Event-ID`, bounded replay, and 15-second heartbeats. Reverse proxies must allow streaming responses without buffering. JSON reads support private ETags and conditional 304 responses. See [ADR 0034](../../docs/adr/0034-web-change-notices.md) for read projections and pagination.
+The web UI uses `GET /api/changes` for entity invalidation. The authenticated stream supports `Last-Event-ID`, bounded replay, and 15-second heartbeats. Reverse proxies must allow streaming responses without buffering. JSON reads support private ETags and conditional 304 responses. See [Change notices](../../docs/architecture/operator-surfaces.mdx#change-notices).
 
 ## Event-loop delay
 

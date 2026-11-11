@@ -9,7 +9,7 @@ ADR 0001 kept usine files out of the managed repos, so the configuration ended u
 
 The decision:
 
-- **The database is the only source of truth** for authored configuration, in the runtime store ([ADR 0010](./0010-single-sqlite-runtime-store.md)) through Drizzle, which keeps Postgres and D1 possible ([ADR 0020](./0020-drizzle-portable-sqlite-projection.md)).
+- **The database is the only source of truth** for authored configuration, in the runtime database behind the `ConfigurationStore` port ([ADR 0010](./0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md)).
 - **Every change is a revision**: the member, the time, the entity, its value before and after, and an optional message. Reverting a change creates a new revision. The UI shows each entity's history and diff. Schema and CEL checks run before a revision is saved, so the stored configuration is always valid.
 - **Revisions apply live**, with no reload or restart. A loop that a revision creates starts paused, as ADR 0016 required for loops created in the UI.
 - **A loop belongs to a project**, a named group of managed repos, and runs on every repository in it unless its selector narrows it to some. The board shows the project's tasks from all its repositories in one set of lanes.

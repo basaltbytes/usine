@@ -4,7 +4,7 @@ v1 distributes only through **npm**: `apps/server` publishes as **`@usine/server
 
 **`pnpm create usine`** (`create-usine`) creates an instance folder: a local git repo, a `usine.yaml` skeleton (schema `version:`, empty registry, implicit local worker, `webhooks.mode: off`), empty `loops/` and `agents/`, a `.gitignore` for `.usine/` and `node_modules/`, and a **`package.json` and lockfile that exact-pin `@usine/server`**, then installs and commits.
 
-The pin is the point: the engine version is **per-instance, committed, authored config**. To upgrade, edit the pin and restart; forward-only SQLite migrations run at startup (back up by stopping and copying the folder, [ADR 0010](./0010-single-sqlite-runtime-store.md)). Sharing the repo reproduces the instance, engine included. No example loop or agent is scaffolded; the first ones are made in the UI, paused.
+The pin is the point: the engine version is **per-instance, committed, authored config**. To upgrade, edit the pin and restart; forward-only SQLite migrations run at startup (back up with `usine backup`, [ADR 0010](./0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md)). Sharing the repo reproduces the instance, engine included. No example loop or agent is scaffolded; the first ones are made in the UI, paused.
 
 `usine up` runs the orchestrator as a **foreground CLI** in the instance folder, using the local install, printing the UI URL, and opening the browser on first run. Keeping it running (tmux, launchd, systemd) is the operator's job (copy-paste docs); service management, Docker, and a binary can come later.
 
