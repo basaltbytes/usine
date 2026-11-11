@@ -45,13 +45,22 @@ message Region { string id = 1; string api_endpoint = 4; bool home = 8; }
 message ListRegionsResponse { repeated Region regions = 1; string this_region = 3; }
 message NetworkConfig { optional bool ssh = 1; }
 message VmConfig { NetworkConfig network = 5; }
+// A machine spec merged on top of the snapshot's own spec; version must be 1. egress is the
+// allowlist the machine is born with, the list that SetVmEgressAllow replaces.
+message MachineSpec {
+  uint32 version = 1;
+  map<string, string> labels = 4;
+  bool isolated = 6;
+  repeated string egress = 7;
+}
+// boxd refuses a spec combined with the request's own isolated and labels fields, which the
+// projection omits.
 message CreateVmFromSnapshotRequest {
   string snapshot = 1;
   string name = 2;
   VmConfig config = 3;
   string org = 4;
-  bool isolated = 5;
-  map<string, string> labels = 6;
+  MachineSpec spec = 7;
 }
 message CreateVmResponse { string vm_id = 1; GetVmResponse machine = 9; }
 message GetVmRequest { string vm_id = 1; }

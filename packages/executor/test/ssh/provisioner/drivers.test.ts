@@ -428,6 +428,7 @@ describe("boxd driver", () => {
           snapshot: "usine-attempt",
           name: "pool-aaaaaaaa",
           isolated: true,
+          egress: [],
           labels: {
             "usine.instance": tags.instance,
             "usine.worker": WORKER,
@@ -580,7 +581,7 @@ describe("boxd driver", () => {
     },
   );
   it.live(
-    "restricts a new machine's egress before anything else, reapplies it on reuse, and leaves an unset setting alone",
+    "creates a machine with its egress allowlist, waits for it, reapplies it on reuse, and leaves an unset setting alone",
     () => {
       const boxd = fakeBoxd();
       const entries = ["*.tailscale.com", "registry.npmjs.org"].map((entry) =>
@@ -592,28 +593,27 @@ describe("boxd driver", () => {
         const { id } = yield* driver.create("pool-aaaaaaaa", tags);
         const returned = yield* Clock.currentTimeMillis;
         assert.isAtLeast(returned - started, 1000, "waits until boxd enforces the allowlist");
-        assert.deepStrictEqual(boxd.state.operations.get(id), [
-          "create",
-          "egress",
-          "hibernate",
-          "suspend",
-        ]);
+        assert.isBelow(returned - started, 2000);
+        assert.deepStrictEqual(boxd.state.creates[0]?.egress, entries);
+        assert.deepStrictEqual(boxd.state.operations.get(id), ["create", "hibernate", "suspend"]);
         assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, entries);
+        assert.lengthOf(boxd.state.egress, 0, "the create request carries the allowlist");
         yield* driver.assign(id, { ...tags, attempts: 2 });
         assert.deepStrictEqual(
           boxd.state.egress.map((call) => call.entries),
-          [entries, entries],
+          [entries],
         );
 
         const unrestricted = yield* boxdDriverFor(WORKER, boxdSettings());
         const other = yield* unrestricted.create("pool-bbbbbbbb", tags);
+        assert.deepStrictEqual(boxd.state.creates[1]?.egress, []);
         assert.deepStrictEqual(boxd.state.operations.get(other.id), [
           "create",
           "hibernate",
           "suspend",
         ]);
         yield* unrestricted.assign(other.id, { ...tags, attempts: 2 });
-        assert.lengthOf(boxd.state.egress, 2, "an unset egress leaves the machine's list as is");
+        assert.lengthOf(boxd.state.egress, 1, "an unset egress leaves the machine's list as is");
         assert.deepStrictEqual(boxd.state.operations.get(other.id), [
           "create",
           "hibernate",
@@ -667,27 +667,39 @@ describe("boxd driver", () => {
       assert.include(warnings[0], "admits the addresses 203.0.113.7, 198.51.100.0/24");
     }).pipe(Effect.provide([boxd.layer, host.layer]));
   });
-  it.effect("deletes a new machine whose egress allowlist boxd refuses or ignores", () => {
-    const boxd = fakeBoxd();
-    const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
-    return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
-      boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
-      const refused = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
-      assert(refused._tag === "MachineUnavailableError");
-      assert.strictEqual(refused.reason, "refused");
-      assert.include(refused.message, "didn't apply provisioner.egress");
-      assert.strictEqual(boxd.state.machines.size, 0);
-      boxd.state.egressFails = Option.none();
-      boxd.state.egressIgnored = true;
-      const ignored = yield* driver.create("pool-bbbbbbbb", tags).pipe(Effect.flip);
-      assert(ignored._tag === "MachineUnavailableError");
-      assert.strictEqual(ignored.reason, "provider");
-      assert.include(ignored.message, "unrestricted egress");
-      assert.strictEqual(boxd.state.machines.size, 0);
-      assert.lengthOf(boxd.state.timers, 0);
-    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
-  });
+  it.effect(
+    "deletes a new machine that boxd reports unrestricted, reading it when the response omits it",
+    () => {
+      const boxd = fakeBoxd();
+      const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
+        boxd.state.egressIgnored = true;
+        for (const [name, inResponse] of [
+          ["pool-aaaaaaaa", true],
+          ["pool-bbbbbbbb", false],
+        ] as const) {
+          boxd.state.createMachine = inResponse;
+          const ignored = yield* driver.create(name, tags).pipe(Effect.flip);
+          assert(ignored._tag === "MachineUnavailableError");
+          assert.strictEqual(ignored.reason, "provider");
+          assert.include(ignored.message, "unrestricted egress");
+          assert.strictEqual(boxd.state.machines.size, 0);
+        }
+        assert.strictEqual(boxd.state.reads, 1, "reads only the machine the response omits");
+        assert.lengthOf(boxd.state.timers, 0);
+        assert.lengthOf(boxd.state.egress, 0);
+
+        boxd.state.egressIgnored = false;
+        const creating = yield* Effect.forkChild(driver.create("pool-cccccccc", tags));
+        while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
+        yield* TestClock.adjust("1 second");
+        const { id } = yield* Fiber.join(creating);
+        assert.strictEqual(boxd.state.reads, 2);
+        assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, ["*.tailscale.com"]);
+      }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+    },
+  );
   it.effect("refuses to reuse a machine whose egress allowlist boxd ignores or refuses", () => {
     const boxd = fakeBoxd();
     const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
@@ -697,7 +709,7 @@ describe("boxd driver", () => {
       while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
       yield* TestClock.adjust("1 second");
       const { id } = yield* Fiber.join(creating);
-      const created = ["create", "egress", "hibernate", "suspend"];
+      const created = ["create", "hibernate", "suspend"];
       assert.deepStrictEqual(boxd.state.operations.get(id), created);
 
       boxd.state.egressIgnored = true;
