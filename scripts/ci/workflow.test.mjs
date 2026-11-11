@@ -89,9 +89,26 @@ test("the server test tools install from a per-image cache before any apt mirror
   assert.ok(restore.uses.startsWith("actions/cache/restore@"));
   assert.ok(steps.indexOf(restore) < setupIndex && setupIndex < saveIndex);
   assert.equal(restore.if, "matrix.leg == 'server'");
-  assert.match(restore.with.key, /\$\{\{ matrix\.container\.image \}\}/u);
-  for (const tool of ["jq", "lsof"])
-    assert.match(restore.with.key, new RegExp(`\\b${tool}\\b`, "u"));
+  // The key names the image tag without its digest, so pinning or updating the
+  // digest keeps the main cache that the tag already seeded.
+  const keyStep = steps.find(({ id }) => id === "server-tools-key");
+  assert.ok(steps.indexOf(keyStep) < steps.indexOf(restore));
+  assert.equal(keyStep.if, "matrix.leg == 'server'");
+  assert.equal(keyStep.env.IMAGE, "${{ matrix.container.image }}");
+  assert.equal(restore.with.key, "${{ steps.server-tools-key.outputs.key }}");
+  const server = workflow.jobs.test.strategy.matrix.include.find(({ leg }) => leg === "server");
+  const keyScratch = mkdtempSync(join(tmpdir(), "server-tools-key-"));
+  try {
+    const output = join(keyScratch, "output");
+    writeFileSync(output, "");
+    execFileSync("sh", ["-c", keyStep.run], {
+      env: { ...process.env, IMAGE: server.container.image, GITHUB_OUTPUT: output },
+    });
+    const tag = server.container.image.split("@")[0];
+    assert.equal(readFileSync(output, "utf8"), `key=server-test-tools-${tag}-jq-lsof\n`);
+  } finally {
+    rmSync(keyScratch, { recursive: true, force: true });
+  }
   assert.equal(setup.env.CACHE_HIT, "${{ steps.server-tools.outputs.cache-hit }}");
   assert.equal(setup.env.DEBS, restore.with.path);
   assert.equal(save.with.path, restore.with.path);

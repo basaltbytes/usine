@@ -101,16 +101,24 @@ jobs:
             turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
       # A cache saved by a pull request run is scoped to that pull request, so the
-      # first main run on a new image misses and downloads from the mirror
+      # first main run on a new image tag misses and downloads from the mirror
       # with the bounded retries below. Running this workflow on main with
       # workflow_dispatch seeds the main cache.
+      # The packages depend on the Ubuntu release that the tag names, so the key
+      # leaves out the digest and a digest update reuses the cached packages.
+      - name: Name the server test tools cache
+        if: matrix.leg == 'server'
+        id: server-tools-key
+        env:
+          IMAGE: ${{ matrix.container.image }}
+        run: echo "key=server-test-tools-${IMAGE%@*}-jq-lsof" >> "$GITHUB_OUTPUT"
       - name: Restore server test tools
         if: matrix.leg == 'server'
         id: server-tools
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /var/cache/server-test-tools
-          key: server-test-tools-${{ matrix.container.image }}-jq-lsof
+          key: ${{ steps.server-tools-key.outputs.key }}
       - name: Install server test tools
         if: matrix.leg == 'server'
         timeout-minutes: 6
