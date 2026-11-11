@@ -1714,6 +1714,22 @@ describe("Claude child backend", () => {
     );
   });
 
+  it.effect.each([
+    { name: "without is_error", flags: {} },
+    { name: "with is_error false", flags: { is_error: false } },
+  ])("returns an answer that describes a provider error $name", ({ flags }) => {
+    const answer = "The run failed with HTTP 529 overloaded_error; I posted the review";
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () => scripted([{ type: "result", subtype: "success", ...flags, result: answer }]),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        assert.strictEqual((yield* session.result).message, answer);
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
+    );
+  });
+
   it.effect("fails the session as infrastructure when the output closes without a result", () => {
     const sdk = Layer.succeed(ClaudeSdk)({
       open: () => scripted([]),
