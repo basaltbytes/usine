@@ -88,6 +88,25 @@ export const sqliteConfigurationLayer = Layer.effect(
       const entities = yield* storedEntities;
       const upgrades = storedLoopUpgrades(entities);
       if (upgrades.length === 0) return;
+      const upgraded = new Map(upgrades.map(({ change }) => [change.key.key, change.after]));
+      const valid = yield* validateConfiguration(
+        parser,
+        entities.map((entity) =>
+          Option.match(upgraded.get(entity.key.key) ?? Option.none(), {
+            onNone: () => entity,
+            onSome: (value) => ConfigurationEntity.make({ key: entity.key, value }),
+          }),
+        ),
+      ).pipe(
+        Effect.as(true),
+        Effect.catchTag("ConfigurationInvalid", ({ problems }) =>
+          Effect.logWarning("Kept stored outcome labels; the upgraded configuration is invalid", {
+            loops: upgrades.map(({ change }) => change.key.identifier),
+            problems: problems.map(({ file, message }) => `${file}: ${message}`),
+          }).pipe(Effect.as(false)),
+        ),
+      );
+      if (!valid) return;
       const revision = ConfigurationRevision.make({
         number: ConfigurationRevisionNumber.make(latest.value + 1),
         actor: Option.none(),

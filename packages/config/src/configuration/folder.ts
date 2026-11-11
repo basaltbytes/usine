@@ -29,7 +29,11 @@ export {
   validateConfigurationForm,
 } from "./forms.ts";
 
-export { formatConfigurationEntity, parseConfigurationEntity } from "./format.ts";
+export {
+  formatConfigurationEntity,
+  formatRevisionEntity,
+  parseConfigurationEntity,
+} from "./format.ts";
 
 /**
  * Imports and exports configuration as instance-folder files (ADR 0031). Import rejects invalid

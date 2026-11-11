@@ -29,6 +29,20 @@ export const formatConfigurationEntity = (
 };
 
 /**
+ * Formats `entity` from a stored revision like `formatConfigurationEntity`. Writes an agent or loop
+ * value that the current rules reject as YAML of its stored JSON.
+ */
+export const formatRevisionEntity = (entity: ConfigurationEntity): Effect.Effect<string> =>
+  formatConfigurationEntity(entity).pipe(
+    Effect.catchTag("ConfigurationInvalid", ({ problems }) =>
+      Effect.logDebug("Stored configuration value no longer decodes; showing its stored JSON", {
+        entity: entity.key.key,
+        problems: problems.map(({ message }) => message),
+      }).pipe(Effect.as(writeYaml(entity.value))),
+    ),
+  );
+
+/**
  * Parses `source` in the export format for `key`, using `parser` for agents. Loop expressions and
  * references require later validation; other kinds decode as YAML JSON. Parsing failures become
  * `ConfigurationInvalid`.

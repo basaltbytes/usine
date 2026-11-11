@@ -97,7 +97,7 @@ The empty default disables verification. The requirement is saved with the event
 
 A schedule loop can't set `outcome_labels` because its runs have no item to label; the loop fails to load with a schema error. Labels that differ only in letter case are rejected. A label that `usine.yaml` doesn't declare under `labels` still loads, but usine logs `Loop outcome label is not a declared GitHub label` at startup and each time it applies a configuration revision, and the loop's page in **Configuration > Loops** shows a warning next to its outcome labels.
 
-Earlier versions accepted outcome labels on a schedule loop and labels that differ only in letter case. When usine opens a stored configuration that contains them, it removes the schedule loop's outcome labels and each repeated label, keeping the first spelling. It records the change as one configuration revision without an actor and logs `Removed stored outcome labels that the loop rules reject` for each loop.
+Earlier versions accepted outcome labels on a schedule loop and labels that differ only in letter case. When usine opens a stored configuration that contains them, it removes the schedule loop's outcome labels and each repeated label, keeping the first spelling. It records the change as one configuration revision without an actor and logs `Removed stored outcome labels that the loop rules reject` for each loop. If the configuration is still invalid after this change, usine leaves the stored loops unchanged and logs `Kept stored outcome labels; the upgraded configuration is invalid` with the problems. In **Configuration > History**, a stored loop value that the current rules reject appears as YAML of its stored fields.
 
 ## Priority
 

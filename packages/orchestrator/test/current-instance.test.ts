@@ -400,25 +400,36 @@ describe("CurrentInstance", () => {
   );
 
   it.live("logs undeclared outcome labels at startup and when it applies a revision", () => {
-    const warnings: Array<unknown> = [];
-    const message = "Loop outcome label is not a declared GitHub label";
-    const logged = () => warnings.filter((warning) => warning === message).length;
+    const logged: Array<unknown> = [];
+    const outcomeLabels = Logger.make<unknown, void>(({ message }) => {
+      if (
+        Array.isArray(message) &&
+        message[0] === "Loop outcome label is not a declared GitHub label"
+      )
+        logged.push(message[1]);
+    });
+    const startDev = (label: string) =>
+      [
+        "loops/start-dev.md",
+        loopFile("developer").replace("step:", `outcome_labels: [${label}]\nstep:`),
+      ] as const;
     return withFolder(
-      () =>
+      (root) =>
         Effect.gen(function* () {
           // The test store reads the folder, which logs once before each install logs again.
-          assert.strictEqual(logged(), 2);
+          assert.deepStrictEqual(logged, [
+            { loop: "start-dev", label: "shipped" },
+            { loop: "start-dev", label: "shipped" },
+          ]);
+          yield* writeInstanceFiles(root, [startDev("shipped-v2")]);
           yield* (yield* CurrentInstance).reload;
-          assert.strictEqual(logged(), 4);
+          assert.deepStrictEqual(logged.slice(2), [
+            { loop: "start-dev", label: "shipped-v2" },
+            { loop: "start-dev", label: "shipped-v2" },
+          ]);
         }),
-      [
-        ...initialFiles.filter(([file]) => file !== "loops/start-dev.md"),
-        [
-          "loops/start-dev.md",
-          loopFile("developer").replace("step:", "outcome_labels: [shipped]\nstep:"),
-        ],
-      ],
-    ).pipe(Effect.withLogger(warningsIn(warnings)));
+      [...initialFiles.filter(([file]) => file !== "loops/start-dev.md"), startDev("shipped")],
+    ).pipe(Effect.withLogger(outcomeLabels));
   });
 
   it.live("keeps the running instance when the configuration store cannot be read", () =>
