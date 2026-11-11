@@ -474,8 +474,8 @@ it.each([
     ]);
     const diagnostic =
       running > 0
-        ? "usine-worker-2 is not in usine.yaml. 2 attempts still running on it. Discard the leftovers after they end"
-        : "usine-worker-2 is not in usine.yaml. Startup does not reconcile the 3 recorded attempts on it. Add the worker back and restart usine up, or discard the leftovers";
+        ? "usine-worker-2 is not in Configuration > Workers. 2 attempts still running on it. Discard the leftovers after they end"
+        : "usine-worker-2 is not in Configuration > Workers. Startup does not reconcile the 3 recorded attempts on it. Add the worker back and restart usine up, or discard the leftovers";
     for (const surface of [needs, tray()]) {
       if (surface !== needs) await bell(1).click();
       const row = surface.getByRole("listitem").filter({ hasText: worker });

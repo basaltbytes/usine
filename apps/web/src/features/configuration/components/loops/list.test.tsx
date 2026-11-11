@@ -19,6 +19,7 @@ import { LoopDetail } from "~/features/configuration/components/loops/detail";
 import { interpolations } from "~/features/configuration/components/prompt";
 import { usePauseLoop } from "~/features/configuration/queries";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
+import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 import { SettingsPage } from "~/features/configuration/settings.page";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
@@ -55,6 +56,7 @@ const text = (markup: string): string =>
     .replace(/<[^>]+>/gu, " ")
     .replace(/&quot;/gu, '"')
     .replace(/&#x27;/gu, "'")
+    .replace(/&gt;/gu, ">")
     .replace(/&amp;/gu, "&")
     .replace(/\s+/gu, " ");
 
@@ -125,7 +127,10 @@ describe("Loops page", () => {
       'if: item.labels.nodes.exists(label, label.name == "ready") && item.assignees.totalCount == 0',
     );
     assert.include(page, "No selector: every registered repository");
-    assert.include(page, "Condition uses an undeclared label: urgent");
+    assert.include(
+      page,
+      "Condition uses an undeclared label: urgent. usine creates only the labels in Configuration > Labels.",
+    );
     assert.include(markup, 'href="/configuration/agents/developer"');
     assert.include(page, "codex · gpt-5.6-sol · high");
     assert.include(markup, 'href="/configuration/repositories/basaltbytes/site"');
@@ -290,8 +295,8 @@ describe("Workers page", () => {
       await render(() => <WorkerDetail name="local" configuration={configuration} />),
     );
     assert.include(detail, "Paused");
-    assert.include(detail, "takes no new attempts while usine.yaml pauses it");
-    assert.include(detail, "Clear Paused in the worker's configuration to resume it.");
+    assert.include(detail, "takes no new attempts while paused");
+    assert.include(detail, "Clear Paused in Configuration > Workers to resume it.");
     const list = text(await render(() => <WorkersList configuration={configuration} />));
     assert.strictEqual(list.split("Paused: takes no new attempts").length, 2, "only local");
     const unpaused = text(
@@ -361,6 +366,14 @@ describe("Workers page", () => {
     assert.include(page, "1.5 CPUs, 6144 MiB, 2048 processes");
   });
 
+  it("says when no Worker has the name", async () => {
+    const page = text(
+      await render(() => <WorkerDetail name="nope" configuration={configurationFixture()} />),
+    );
+    assert.include(page, "Worker not found");
+    assert.include(page, "Configuration > Workers has no worker nope.");
+  });
+
   it("says that no Worker runs Attempts in setup mode", async () => {
     const configuration = configurationFixture();
     const setup = {
@@ -390,6 +403,43 @@ describe("Repositories page", () => {
     assert.include(page, "Usine");
     assert.include(page, "basaltbytes/usine");
     assert.include(page, "Ready ready Review review");
+  });
+
+  it("shows the labels usine creates in a repository, from Configuration > Labels", async () => {
+    const page = text(
+      await render(() => (
+        <RepositoryDetail owner="basaltbytes" name="usine" configuration={configurationFixture()} />
+      )),
+    );
+    assert.include(page, "Labels usine creates");
+    assert.include(page, "From Configuration > Labels");
+  });
+
+  it("says when a repository has no declared labels", async () => {
+    const configuration = configurationFixture();
+    const unlabeled = {
+      ...configuration,
+      repositories: configuration.repositories.map((repository) => ({
+        ...repository,
+        declaredLabels: [],
+      })),
+    };
+    const page = text(
+      await render(() => (
+        <RepositoryDetail owner="basaltbytes" name="usine" configuration={unlabeled} />
+      )),
+    );
+    assert.include(page, "No labels in Configuration > Labels");
+  });
+
+  it("says when no repository has the name", async () => {
+    const page = text(
+      await render(() => (
+        <RepositoryDetail owner="basaltbytes" name="nope" configuration={configurationFixture()} />
+      )),
+    );
+    assert.include(page, "Repository not registered");
+    assert.include(page, "Configuration > Repositories has no repository basaltbytes/nope.");
   });
 
   it("says how to register a repository when there is none", async () => {

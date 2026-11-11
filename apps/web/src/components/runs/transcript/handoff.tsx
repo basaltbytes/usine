@@ -76,7 +76,8 @@ export const SessionHandoff = ({ session, attempt }: SessionHandoffProps) => {
       </p>
       {workerAccess === null && (
         <p className="wrap-anywhere">
-          Worker <span className="font-mono">{worker}</span> is no longer declared in usine.yaml
+          Worker <span className="font-mono">{worker}</span> is no longer in Configuration &gt;
+          Workers
         </p>
       )}
       <CodeBlock code={command} language="bash" wrap>

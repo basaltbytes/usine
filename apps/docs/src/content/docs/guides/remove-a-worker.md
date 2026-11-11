@@ -17,4 +17,4 @@ Instance admin access and another configured worker of the same kind.
 
 ## Check the result
 
-The worker leaves the scheduler after its last attempt ends. If **Worker not configured** reports retained attempts, restore the worker for recovery or use **Discard leftovers** only after checking the consequences. Failed remote deletion remains visible in logs.
+The worker leaves the scheduler after its last attempt ends. If **Worker not configured** reports that the worker is not in **Configuration > Workers** and still has retained attempts, restore the worker for recovery or use **Discard leftovers** only after checking the consequences. Failed remote deletion remains visible in logs.
