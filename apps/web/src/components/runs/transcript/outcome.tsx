@@ -2,6 +2,7 @@ import type { OutOfMemoryKills } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { FailureView } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
+import { useId } from "react";
 import { Markdown } from "~/components/markdown";
 import { StateMark } from "~/components/status-badge";
 import { cn } from "~/lib/utils";
@@ -103,29 +104,32 @@ const End = ({ end }: EndProps) =>
 
 type OutOfMemoryLineProps = { readonly kills: OutOfMemoryKills };
 
-const OutOfMemoryLine = ({ kills }: OutOfMemoryLineProps) => (
-  <div className="space-y-1 text-xs text-warning wrap-anywhere">
-    <p>
-      <span className="sr-only">Warning: </span>
-      {outOfMemoryLine(kills)}
-    </p>
-    {kills.processes.length > 0 && (
-      <div>
-        <p>{memoryProcessesLabel}</p>
-        <ul aria-label={memoryProcessesLabel}>
-          {kills.processes.map(({ command, pid }, index) => (
-            <li key={index}>
-              <code>{command}</code> (host PID {pid})
-            </li>
-          ))}
-        </ul>
-      </div>
-    )}
-    {kills.processes.length < kills.kills && (
-      <p>{missingMemoryProcessesLine(kills.kills - kills.processes.length)}</p>
-    )}
-  </div>
-);
+const OutOfMemoryLine = ({ kills }: OutOfMemoryLineProps) => {
+  const processesLabelId = useId();
+  return (
+    <div className="space-y-1 text-xs text-warning wrap-anywhere">
+      <p>
+        <span className="sr-only">Warning: </span>
+        {outOfMemoryLine(kills)}
+      </p>
+      {kills.processes.length > 0 && (
+        <div>
+          <p id={processesLabelId}>{memoryProcessesLabel}</p>
+          <ul aria-labelledby={processesLabelId}>
+            {kills.processes.map(({ command, pid }, index) => (
+              <li key={index}>
+                <code>{command}</code> (host PID {pid})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {kills.processes.length < kills.kills && (
+        <p>{missingMemoryProcessesLine(kills.kills - kills.processes.length)}</p>
+      )}
+    </div>
+  );
+};
 
 type OutcomeProps = {
   readonly end: AttemptEnd;

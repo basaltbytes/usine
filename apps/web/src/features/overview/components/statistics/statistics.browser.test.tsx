@@ -232,6 +232,8 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
     .element(statistics.getByRole("listitem").filter({ hasText: /^tasks$/u }))
     .toBeVisible();
   await expect.element(statistics.getByText("No task with recorded attempt times")).toBeVisible();
+  // A window without memory kills has no memory line.
+  await expect.element(statistics.getByText(/memory kill/u)).not.toBeInTheDocument();
 });
 
 it("says what is missing when the window has no task done", async () => {
