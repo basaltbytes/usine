@@ -262,6 +262,10 @@ it.each([
   "- Ex:\n\n\t~~~\n\t[usine:question]\n\t~~~\n[usine:blocked]\nNo access.",
   "I wrapped the output in ```text fences.\n[usine:blocked]\nNo access.",
   "Ran ```pnpm test```.[usine:blocked]\nNo access.",
+  "Ran ```pnpm test```[usine:blocked]\nNo access.",
+  "Next I need to run `gh pr view`[usine:blocked]\nNo access.",
+  'The command failed with "permission denied"[usine:blocked]\nNo access.',
+  "I could not reach 'api.github.com'[usine:blocked]\nNo access.",
 ])("recognizes a report header after an indented fence or inline backticks: %j", (answer) => {
   const report = reportedOutcome(Option.none(), answer);
   assert(Option.isSome(report));

@@ -383,11 +383,12 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$
 const reportMarker = `(?:${[BLOCKED_MARKER, QUESTION_MARKER].map(escapeRegExp).join("|")})`;
 
 /**
- * A report marker that starts a line, or that directly follows narration and ends the line. A
- * marker directly after a quote character opens a quoted string, so it is a mention.
+ * A report marker that starts a line, or that directly follows narration and ends the line. A run
+ * of quote characters at the start of a line or after whitespace, `(`, or `=` opens a quoted
+ * string, so a marker directly after it is a mention. Any other quote character closes a string.
  */
 const reportHeader = new RegExp(
-  `^[ \\t]*${reportMarker}|(?<=[^\\s"'\`])${reportMarker}(?=[ \\t]*\\r?$)`,
+  `^[ \\t]*${reportMarker}|(?<=\\S)(?<!(?:^|[\\s(=])["'\`]+)${reportMarker}(?=[ \\t]*\\r?$)`,
   "u",
 );
 
@@ -428,8 +429,9 @@ const reportHeaderOffset = (answer: string): Option.Option<number> => {
 
 /**
  * Returns a blocker or question report from a final answer. A report header starts a line, or
- * directly follows narration without a space or quote character and ends the line. Headers inside
- * fenced code blocks, quoted strings, and inline mentions are ordinary text. Failure and capacity prefixes take precedence.
+ * directly follows narration without a space or opening quote and ends the line. Headers inside
+ * fenced code blocks, quoted strings, and inline mentions are ordinary text. Failure and capacity
+ * prefixes take precedence.
  */
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
