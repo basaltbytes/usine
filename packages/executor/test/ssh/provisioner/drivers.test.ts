@@ -16,7 +16,7 @@ import {
 import { Clock, Effect, Fiber, Option, Redacted, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
-import { fakeMachine } from "../support.ts";
+import { CapturedLog, capturedLogs, fakeMachine } from "../support.ts";
 import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
@@ -861,6 +861,7 @@ describe("boxd driver", () => {
     () => {
       const boxd = fakeBoxd();
       const host = fakeMachine();
+      const logs = capturedLogs();
       return Effect.gen(function* () {
         boxd.state.snapshot.vcpu = 1;
         boxd.state.snapshot.memoryBytes = 32 * 1024 ** 3;
@@ -871,6 +872,15 @@ describe("boxd driver", () => {
           boxdSettings({ size: Option.some(BoxdSize.make("1x32")) }),
         );
         assert.deepStrictEqual((yield* large.verify(WORKER, 1)).warnings, []);
+        const verified = yield* Effect.forEach(
+          logs.infos.filter((line) => line.includes("boxd provisioner verified")),
+          (line) => Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie),
+        );
+        assert.deepStrictEqual(
+          verified.map(([, fields]) => fields["size"]),
+          ["1x32", "1x32"],
+          "preflight logs the snapshot's size with and without provisioner.size",
+        );
         boxd.state.snapshot.memoryBytes = 4 * 1024 ** 3;
         const mismatch = yield* large.verify(WORKER, 1).pipe(Effect.flip);
         assert.strictEqual(mismatch.capability, "provider");
@@ -885,7 +895,7 @@ describe("boxd driver", () => {
         assert.include(vcpuMismatch.message, "provisioner.size is 1x32");
         assert.include(vcpuMismatch.message, "set size to 8x32");
         assert.deepStrictEqual((yield* unsized.verify(WORKER, 1)).warnings, []);
-      }).pipe(Effect.provide([boxd.layer, host.layer]));
+      }).pipe(Effect.provide([boxd.layer, host.layer, logs.layer]));
     },
   );
 });

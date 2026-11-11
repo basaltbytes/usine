@@ -855,6 +855,23 @@ it("suggests the hosted boxd regions and saves another region id", async () => {
   });
 });
 
+it("explains that a boxd machine size is an optional check of the snapshot's size", async () => {
+  await mount();
+  await editText();
+  await page
+    .getByRole("textbox", { name: "Configuration text" })
+    .fill(
+      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
+    );
+  await button("Edit as form").click();
+  const size = page.getByRole("textbox", { name: "Machine size", exact: true });
+  await expect.element(size).toHaveValue("");
+  const help = size.element().getAttribute("aria-describedby");
+  const hint = help === null ? "" : (document.getElementById(help)?.textContent ?? "");
+  expect(hint).toContain("such as 2x8 or 1x32");
+  expect(hint).toContain("Leave empty to accept the snapshot's size.");
+});
+
 it("saves the account endpoint of a boxd cluster without a region", async () => {
   await mount();
   await editText();

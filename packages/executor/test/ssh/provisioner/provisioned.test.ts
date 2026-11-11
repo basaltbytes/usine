@@ -1103,7 +1103,7 @@ describe("Provisioned SSH Worker", () => {
         const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         assert.isTrue(
           logs.warnings.some((line) =>
-            line.includes("sets provisioner.reuse, which usine ignores"),
+            line.includes(`Worker \\"${WORKER}\\" sets provisioner.reuse, which usine ignores`),
           ),
         );
         assert(Option.isSome(report.deferred));

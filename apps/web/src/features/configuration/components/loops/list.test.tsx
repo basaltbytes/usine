@@ -244,6 +244,20 @@ describe("Workers page", () => {
     assert.match(page, /boat-pool .* Deferred 20 Oct/u);
   });
 
+  it("places a boxd Worker without a size by its region alone", async () => {
+    const configuration = Schema.decodeUnknownSync(ConfigurationView)({
+      ...configurationJson,
+      workers: configurationJson.workers.map((worker) =>
+        worker.provisioner?._tag === "boxd"
+          ? { ...worker, provisioner: { ...worker.provisioner, size: null } }
+          : worker,
+      ),
+    });
+    const markup = await render(() => <WorkersList configuration={configuration} />);
+    assert.include(markup, ">boxd fra, one machine per attempt<");
+    assert.notInclude(text(markup), "boxd 2x8");
+  });
+
   it("shows a Hetzner Worker's provisioner by variable names only, and where its harnesses are checked", async () => {
     const page = text(
       await render(() => <WorkerDetail name="hz-pool" configuration={configurationFixture()} />),

@@ -92,6 +92,8 @@ for (const provider of ["boat", "boxd"] as const) {
           assert(view?._tag === "boxd");
           assert.strictEqual(view.endpoint, "https://boxd.example.com:9443");
           assert.strictEqual(view.region, "nyc");
+          const size: string | null = view.size;
+          assert.strictEqual(size, null, "a worker without provisioner.size has no size");
           const viewed: ReadonlyArray<string> | null = view.egress;
           assert.deepStrictEqual(viewed, ["*.tailscale.com", "registry.npmjs.org"]);
         }
