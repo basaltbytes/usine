@@ -20,7 +20,7 @@ Neither adds entities. Operator messages, holds, and releases are attributed tra
 - Additive to [ADR 0006](./0006-executor-prepares-checkouts-runs-children-on-workers.md): inbound envelopes have a target session id, and operator-message and release types join the versioned, transport-agnostic channel. A parent parked on an ask (ADR 0017) doesn't prevent taking over a live child.
 - Revises [ADR 0002](./0002-run-model-event-run-step-attempt.md): retry's steering text becomes the persistent effective context (task text and agent), with the operator-intervened flag. Edit-and-retry uses the existing `failed` → `running` transitions, runaway restarts included.
 - Revises [ADR 0013](./0013-cost-accounting-native-meters-guardrails.md) as ADR 0017 did: the wall-clock pause extends from open asks to open holds; the token ceiling stays armed.
-- In the run drawer of [ADR 0008](./0008-web-ui-projects-kanban-spine.md), the parent transcript and each child's events become chat surfaces with per-child release, and failed runs get the edit-and-retry form (task text, roster agent). UI only: a GitHub 👍 restart (ADR 0017) never includes edits.
+- In the run drawer, the parent transcript and each child's events become chat surfaces with per-child release, and failed runs get the edit-and-retry form (task text, roster agent). UI only: a GitHub 👍 restart (ADR 0017) never includes edits.
 - An agent swap derives persona and brain spec from the new agent, and usage goes to its pool per child (ADR 0013).
 - **Takeover**, **hold**, and **edit-and-retry** join the glossary.
 

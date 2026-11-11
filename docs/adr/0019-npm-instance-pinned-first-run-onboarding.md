@@ -10,11 +10,11 @@ The pin is the point: the engine version is **per-instance, committed, authored 
 
 **Bootstrap is in the first-run web UI.** Without App credentials, `up` starts in needs-setup with idle pollers, and the UI walks through setup:
 
-1. Create the App by manifest flow against the orchestrator's redirect endpoint ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md) permissions; active `hook_attributes` with the `.invalid` URL and events of [ADR 0014](./0014-webhook-delivery-as-hints.md)).
+1. Create the App by manifest flow against the orchestrator's redirect endpoint ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md) permissions; an active webhook, [ADR 0007](./0007-polling-triggers-content-hashed-events.md)).
 2. Save the conversion response (App id, private key, webhook secret) to the 0600 `.usine/` secrets file (environment override).
 3. Prefill the operator's GitHub login into `usine.yaml` ([ADR 0017](./0017-away-intervention-github-native-asks.md)).
 4. Install the App on the managed repos.
-5. Fill the registry with the installation-bound add-repo picker (ADR 0016).
+5. Fill the registry with the installation-bound add-repo picker.
 
 The Workers page under Configuration is the **preflight surface**: it runs the verify-only preflight of [ADR 0006](./0006-executor-prepares-checkouts-runs-children-on-workers.md) on demand and shows each typed capability error with its fix (for example, "run `claude /login` in a terminal"). Logins stay in the operator's terminal. The CLI is two commands: `pnpm create usine` and `usine up`.
 
@@ -24,7 +24,7 @@ The Workers page under Configuration is the **preflight surface**: it runs the v
 - **Standalone binary or Docker first**: rejected for v1. The local worker needs Node for the npm-CLI harnesses anyway, and a containerized orchestrator conflicts with a same-machine local worker (toolchain, worktrees, harness logins). Both can follow, likely Docker first for a cloud orchestrator.
 - **CLI setup wizard** (`init` opens a browser and a temporary localhost server for the manifest redirect): duplicates the orchestrator's HTTP server, and the add-repo picker is in the UI anyway. Rejected.
 - **`usine doctor`**: would repeat the Workers page's preflight errors. Rejected for v1; additive if wanted.
-- **Scaffolded example loop and agent**: friendlier onboarding, but git-committed loops arm at once ([ADR 0016](./0016-config-editing-forms-first-preview-before-arming.md)) and cold start fires on existing state ([ADR 0007](./0007-polling-triggers-content-hashed-events.md)), so a demo would act on real repos. Rejected.
+- **Scaffolded example loop and agent**: friendlier onboarding, but cold start fires on existing state ([ADR 0007](./0007-polling-triggers-content-hashed-events.md)), so a demo would act on real repos. Rejected.
 
 ## Consequences
 

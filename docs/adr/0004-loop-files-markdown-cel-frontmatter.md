@@ -1,30 +1,15 @@
-# Loop files are Markdown with CEL-filtered frontmatter
+# Loops select items with CEL over GitHub's payload
 
-A loop file is `loops/<name>.md` in the instance repo: YAML frontmatter for structured settings (trigger, selector, approval, step, agent slot), and the Markdown body as prompt template. The trigger sets a stream (`on:`). All item selection is a CEL expression (`if:`) over a per-stream GraphQL slice of GitHub's object graph. The body can interpolate `{{ }}` over the same CEL namespace, after an always-prepended preamble with repo and payload.
+A loop's trigger names a stream (`issue`, `pr`, or `schedule`), and a CEL `if:` over that stream's payload slice, which keeps GitHub's shapes, selects the items. The same evaluator renders the prompt's `{{ }}` expressions and evaluates a conditional `approval` and a computed `priority`. An approval condition that fails to evaluate requires approval. The CEL library is pinned exactly behind `ExpressionEngine` in `@usine/expression`.
+
+Loops are edited in forms first, with a text editor in the export format as the fallback. Expression fields complete against the payload and are checked on the server. A preview lists the stored items a draft matches and renders its prompt, without calling GitHub. A new loop starts paused (ADR 0031), and resuming it first shows its match count. An agent's model is free text, with suggestions.
+
+The export format is Markdown with YAML frontmatter, so the prompt, the most edited part, is the body.
 
 ## Considered options
 
-- **TypeScript DSL** (Inngest-style): strongest typing, but the file is code: the UI can't safely rewrite it (read-only or a code editor), and the orchestrator must run operator code. A TypeScript data module needs code generation on every UI edit.
-- **Pure YAML**: one parser, but the prompt, the most-edited part, is a block scalar in indentation-sensitive YAML.
-- **Per-trigger filter keys** (`label: ready`, `no-open-pr: true`): a closed, invented vocabulary. Each new filter is an engine change, failing the "expressible with no engine changes" bar, and it redesigns GitHub's event shapes.
-- **Markdown, frontmatter, and CEL selection** (chosen): schema-validated config, prose prompts, and selection over existing shapes.
-
-## Consequences
-
-- `if:` and `{{ }}` share one evaluator and payload namespace, validated at parse time. The CEL evaluator is exact-pinned behind a usine seam.
-- Payload slices keep GitHub's shapes. The Triggers ticket only picks each stream's graph edges, and widening is additive.
-- The selector stays declarative (names or tags, intersected if both): the engine prunes polling by it, and an expression would hide repo scope until evaluated.
-- UI writes edit the YAML AST in place, keeping comments, key order, and formatting. Nothing rewrites hand-authored files in the background.
-- Validation is strict, and an invalid loop is quarantined alone. An invalid `usine.yaml` (instance-wide `version:`, registry, settings) is an instance-level error.
-- Short defaults: `step: run`, `approval: none`. ([ADR 0016](./0016-config-editing-forms-first-preview-before-arming.md) removed `enabled:`: pause is runtime state, never a file field.)
-
-## Amendment (2026-10-30, #790): conditional approval
-
-`approval` accepts `required`, `none`, or a boolean CEL expression in the trigger's
-environment. Before submitting an event, the orchestrator evaluates the condition
-against that event's payload and repository. A true result or an evaluation error
-requires approval. Errors log a warning. The engine stores the resolved requirement
-and explanation with the event, so configuration edits and retries preserve the
-original decision. Run again evaluates the current condition against the saved
-payload. The loop form replaces the approval toggle with fixed modes and a CEL
-condition field, extending ADR 0016's form.
+- **Filter keys per trigger** (`label: ready`): an invented vocabulary in which each new filter is an engine change.
+- **A visual condition builder**: the same catalog as a UI, with two representations of one expression.
+- **A TypeScript DSL**: the orchestrator would run operator code, and forms couldn't rewrite it.
+- **Pure YAML**: the prompt becomes an indentation-sensitive block scalar.
+- **A curated model list**: a stale list would block new model IDs.

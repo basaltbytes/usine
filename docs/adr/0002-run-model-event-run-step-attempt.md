@@ -12,7 +12,7 @@ usine adapts Inngest's run model, not n8n's or Temporal's ([run-model research](
 
 - Run states: `pending` → `waiting` (per-loop approval gate) → `running` → `succeeded` / `failed` / `canceled`. Retry moves `failed` to `running` (attempt N+1, optional steering text); cancel or supersede moves any open state to `canceled`.
 - An approval is an event the waiting run consumes, deduplicated and auditable like any fact; it's v1's only waiting reason.
-- Step names in the loop are step identity, as filenames are loop identity ([ADR 0001](./0001-loops-live-in-the-instance-repo.md)). Renaming a step retires it; earlier results stay under the old name.
+- Step names in the loop are step identity, as names are loop identity. Renaming a step retires it; earlier results stay under the old name.
 - Automatic retry covers only typed infra errors, capped at 2–3 attempts. Agent failures wait for the operator.
 - Polling cursors only save work; the dedup key is the guarantee.
 - **Revised by [ADR 0007](./0007-polling-triggers-content-hashed-events.md)**: supersede acts only on runs with no started attempt. A running attempt finishes, and the newer state is evaluated when it ends.

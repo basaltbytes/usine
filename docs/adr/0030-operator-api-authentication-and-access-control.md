@@ -8,7 +8,7 @@ Until 2026-10-28 the operator API and the web UI had no authentication. `usine u
 - **Enforcement.** The server checks the permission on every route and filters every list (projects, tasks, runs, needs-you) to what the member may see. The UI hides the actions that the member can't take.
 - **Audit.** Role bindings are configuration, stored in the database with a revision for each change ([ADR 0031](./0031-authored-configuration-in-the-database.md)), so every access change records who granted it. Approvals, interventions, retries, cancellations, and configuration revisions record the member's GitHub login.
 - **Transport.** TLS is required when the API isn't on loopback. Web origins that the instance allows get CORS headers.
-- **Public exposure.** An instance can serve the API over public HTTPS, so this applies from the start: rate limits on the sign-in and token endpoints, security headers, and no route without a token except health, sign-in, and the signature-verified GitHub webhook endpoint ([ADR 0014](./0014-webhook-delivery-as-hints.md)).
+- **Public exposure.** An instance can serve the API over public HTTPS, so this applies from the start: rate limits on the sign-in and token endpoints, security headers, and no route without a token except health, sign-in, and the signature-verified GitHub webhook endpoint ([ADR 0007](./0007-polling-triggers-content-hashed-events.md)).
 - **API contract.** The API has a versioned path and a published schema, so a client built against one version keeps working against a newer server.
 
 Decided on 2026-10-29 ([#632](https://github.com/basaltbytes/usine/issues/632)):
