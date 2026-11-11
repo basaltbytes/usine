@@ -936,16 +936,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const provisioner = provisionerOf(entry);
     if (Option.isNone(provisioner))
       return yield* Effect.die(new Error(`SSH worker "${worker}" isn't provisioned`));
-    const driver = yield* drivers.forEntry(entry).pipe(
-      Effect.catchTag("MachineUnavailableError", (failure) =>
-        WorkerCapabilityError.make({
-          worker,
-          capability: "provider",
-          message: failure.message,
-          cause: failure,
-        }),
-      ),
-    );
+    const driver = yield* drivers.forPreflight(entry);
     const report = yield* driver.verify(worker, maxConcurrentAttempts);
     yield* Effect.forEach(
       report.warnings,

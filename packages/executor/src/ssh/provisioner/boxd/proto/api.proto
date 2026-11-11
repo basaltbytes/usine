@@ -35,6 +35,8 @@ message SnapshotInfo {
   string status = 4;
   uint32 vcpu = 9;
   uint64 memory_bytes = 10;
+  // local, archiving, archived, or unarchiving; boxd creates machines only from a local snapshot.
+  string storage = 16;
   string region = 17;
 }
 message GetSnapshotResponse { SnapshotInfo snapshot = 1; }
