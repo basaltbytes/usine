@@ -117,7 +117,18 @@ import {
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
-import { DateTime, Effect, Layer, Logger, Match, Option, Redacted, Ref, Schema } from "effect";
+import {
+  DateTime,
+  Deferred,
+  Effect,
+  Layer,
+  Logger,
+  Match,
+  Option,
+  Redacted,
+  Ref,
+  Schema,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
@@ -454,7 +465,7 @@ const testLayer = (
   runSnapshot: RunSnapshot = snapshot,
   budgets: Layer.Layer<CycleBudgets> = noCycleBudgets,
   commands: Pick<RunEngine["Service"], "retry" | "intervene" | "runAgain"> &
-    Partial<Pick<RunEngine["Service"], "cancel">> = {
+    Partial<Pick<RunEngine["Service"], "cancel" | "admitCiFixes">> = {
     retry: () => Effect.void,
     intervene: () => Effect.void,
     runAgain: () => Effect.die("unused"),
@@ -516,7 +527,7 @@ const testLayer = (
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.succeed(runSnapshot),
     reconcile: Effect.void,
-    admitCiFixes: Effect.succeed([]),
+    admitCiFixes: commands.admitCiFixes ?? Effect.succeed([]),
     drain: Effect.void,
     waitForUpgrade: () => Effect.void,
     cancelUpgrade: Effect.void,
@@ -3515,6 +3526,33 @@ it.effect("filters cached project lists and refuses actions outside a project bi
         "AccessDenied",
       );
     }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+  }),
+);
+
+it.effect("admits the queued CI fixes after unpausing a Loop", () =>
+  Effect.gen(function* () {
+    const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+    const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+    const reads = yield* Ref.make(0);
+    const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+    const admitted = yield* Deferred.make<void>();
+    yield* Effect.gen(function* () {
+      const operator = yield* Operator;
+
+      const state = yield* operator.unpause(loopName);
+
+      assert.isFalse(state.paused);
+      yield* Deferred.await(admitted).pipe(Effect.timeout("5 seconds"));
+    }).pipe(
+      Effect.provide(
+        testLayer(approved, moved, reads, revision, snapshot, noCycleBudgets, {
+          retry: () => Effect.void,
+          intervene: () => Effect.void,
+          runAgain: () => Effect.die("unused"),
+          admitCiFixes: Deferred.succeed(admitted, undefined).pipe(Effect.as([])),
+        }),
+      ),
+    );
   }),
 );
 
