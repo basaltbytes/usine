@@ -2,7 +2,8 @@ import { ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
-import { type Brand, Context, type Effect, type Option, Schema } from "effect";
+import { StepCompletion } from "@usine/core/step/result";
+import { type Brand, Context, type Duration, type Effect, Option, Schema } from "effect";
 
 import { AttemptReport, StoredRequest } from "../attempt-runtime.ts";
 
@@ -49,6 +50,99 @@ export class Delegation extends Schema.Class<
   number: ChildSessionCount,
   /** The supplemental instruction sent with the rendered task, or `None` for the task alone. */
   assignment: Schema.Option(Schema.NonEmptyString),
+}) {}
+
+/** What a delegation's child saved so far, which a resumed delegation restores. */
+export class ChildProgress extends Schema.Class<
+  ChildProgress,
+  Brand.Brand<"@usine/durable/coordinator/journal/ChildProgress">
+>("@usine/durable/ChildProgress")({
+  /** The child's encoded saved conversation, which may no longer decode. */
+  saved: Schema.Option(Schema.Json),
+  /** Whether the child received its prompt. */
+  prompted: Schema.Boolean,
+  /** The child's report while it waited idle under a Hold. */
+  idle: Schema.Option(Schema.String),
+  /** The times of the continuation turns, in epoch milliseconds. */
+  continuations: Schema.Array(Schema.Finite),
+  /** The child's tool calls that started and did not finish. */
+  inFlight: Schema.Array(Schema.Struct({ callId: Schema.String, tool: Schema.String })),
+  /** The child's retained output. */
+  output: Schema.String,
+}) {
+  static readonly empty = (): ChildProgress =>
+    ChildProgress.make({
+      saved: Option.none(),
+      prompted: true,
+      idle: Option.none(),
+      continuations: [],
+      inFlight: [],
+      output: "",
+    });
+}
+
+/** A delegation with what its child saved and the event that ended it. */
+export class DelegationRecord extends Schema.Class<
+  DelegationRecord,
+  Brand.Brand<"@usine/durable/coordinator/journal/DelegationRecord">
+>("@usine/durable/DelegationRecord")({
+  ...Delegation.fields,
+  /** `None` until a run of the delegation starts its child. */
+  progress: Schema.Option(ChildProgress),
+  /** The event that ended the delegation, recorded before the transition that handles it. */
+  outcome: Schema.Option(EncodedEvent),
+}) {}
+
+/** The child saved its conversation. Before its prompt, the first save marks it unprompted. */
+export const SessionSaved = Schema.TaggedStruct("SessionSaved", {
+  saved: Schema.Json,
+  beforePrompt: Schema.Boolean,
+});
+
+/** The child received its prompt. */
+export const Prompted = Schema.TaggedStruct("Prompted", {});
+
+export const ContinuationsSaved = Schema.TaggedStruct("ContinuationsSaved", {
+  timestamps: Schema.Array(Schema.Finite),
+});
+
+/** The child's cumulative usage, saved with its saved conversation if one is saved. */
+export const UsageSaved = Schema.TaggedStruct("UsageSaved", { usage: Schema.Json });
+
+/** A tool call started, replacing one with the same `callId`. */
+export const ToolStarted = Schema.TaggedStruct("ToolStarted", {
+  callId: Schema.String,
+  tool: Schema.String,
+});
+
+export const ToolFinished = Schema.TaggedStruct("ToolFinished", { callId: Schema.String });
+
+/** The child's report while it waits idle, or `None` when it works or finishes. */
+export const IdleSaved = Schema.TaggedStruct("IdleSaved", { report: Schema.Option(Schema.String) });
+
+export const OutputSaved = Schema.TaggedStruct("OutputSaved", { output: Schema.String });
+
+/** One change to a delegation's `ChildProgress`. */
+export const ProgressChange = Schema.Union([
+  SessionSaved,
+  Prompted,
+  ContinuationsSaved,
+  UsageSaved,
+  ToolStarted,
+  ToolFinished,
+  IdleSaved,
+  OutputSaved,
+]);
+export type ProgressChange = typeof ProgressChange.Type;
+
+/** The progress of a delegation that `startDelegation` started. */
+export class DelegationStarted extends Schema.Class<
+  DelegationStarted,
+  Brand.Brand<"@usine/durable/coordinator/journal/DelegationStarted">
+>("@usine/durable/DelegationStarted")({
+  /** Whether an earlier run started the delegation, as before a restart. */
+  resumed: Schema.Boolean,
+  progress: ChildProgress,
 }) {}
 
 export class Reported extends Schema.TaggedClass<
@@ -145,11 +239,15 @@ export class CoordinatorSnapshot extends Schema.Class<
   /** The decision recorded for the next event before its transition committed. */
   pendingDecision: Schema.Option(EncodedDecision),
   /** Delegations in number order. */
-  delegations: Schema.Array(Delegation),
+  delegations: Schema.Array(DelegationRecord),
   /** Reserved envelopes not yet acknowledged, in sequence order. */
   outbox: Schema.Array(AttemptChannel.OutboundEnvelope),
   /** The sequence of the next envelope to reserve. */
   nextOutbound: AttemptChannel.Sequence,
+  /** The harvested result of a successful Attempt. */
+  result: Schema.Option(StepCompletion),
+  /** The runaway guard's longest recorded unsupervised time. */
+  unsupervised: Schema.Option(Schema.Duration),
 }) {
   get attemptId(): AttemptId {
     return this.request.spec.attemptId;
@@ -193,7 +291,8 @@ export class StaleRevision extends Schema.TaggedError<
  * decided, and an outbox of channel envelopes awaiting the sink.
  *
  * Calling an operation other than `open`, `load`, or `settle` for an Attempt that was never opened
- * is a defect, as is a transition that breaks the ledger's invariants.
+ * is a defect, as is a transition that breaks the ledger's invariants or a progress change to a
+ * delegation that no transition decided or that hasn't started.
  */
 export class AttemptJournal extends Context.Service<
   AttemptJournal,
@@ -226,6 +325,39 @@ export class AttemptJournal extends Context.Service<
     readonly reserve: (
       attemptId: AttemptId,
       envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
+    ) => Effect.Effect<void, JournalError>;
+    /**
+     * Marks delegation `number` started and returns its empty progress, or returns the progress
+     * saved since an earlier run started it.
+     */
+    readonly startDelegation: (
+      attemptId: AttemptId,
+      number: ChildSessionCount,
+    ) => Effect.Effect<DelegationStarted, JournalError>;
+    /** Applies `change` to the progress of started delegation `number`. */
+    readonly saveProgress: (
+      attemptId: AttemptId,
+      number: ChildSessionCount,
+      change: ProgressChange,
+    ) => Effect.Effect<void, JournalError>;
+    /**
+     * Records `outcome` as the event that ended delegation `number` unless one is recorded, and
+     * returns the recorded one.
+     */
+    readonly settleDelegation: (
+      attemptId: AttemptId,
+      number: ChildSessionCount,
+      outcome: EncodedEvent,
+    ) => Effect.Effect<EncodedEvent, JournalError>;
+    /** Stores the harvested result of the Attempt, replacing a stored one. */
+    readonly recordResult: (
+      attemptId: AttemptId,
+      result: StepCompletion,
+    ) => Effect.Effect<void, JournalError>;
+    /** Stores the runaway guard's unsupervised time unless a longer one is stored. */
+    readonly recordUnsupervised: (
+      attemptId: AttemptId,
+      unsupervised: Duration.Duration,
     ) => Effect.Effect<void, JournalError>;
     /** Removes reserved envelopes up to and including `through`. Idempotent. */
     readonly acknowledge: (

@@ -1,16 +1,22 @@
+import type { ChildSessionCount } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, Equal, Match, Option } from "effect";
+import { Duration, Effect, Equal, Match, Option } from "effect";
 
 import type { StoredRequest } from "../attempt-runtime.ts";
 
 import {
+  ChildProgress,
   type CoordinationStatus,
   CoordinatorSnapshot,
+  DelegationRecord,
+  DelegationStarted,
   type EncodedDecision,
+  type EncodedEvent,
   type EventSequence,
   JournalRevision,
   LedgerEntry,
   Open,
+  type ProgressChange,
   Settled,
   StaleRevision,
   Terminal,
@@ -122,7 +128,13 @@ export const transitioned = (
           return yield* invariant(
             `Transition for event ${snapshot.nextEvent} repeats delegation ${intent.delegation.number}`,
           );
-        delegations.push(intent.delegation);
+        delegations.push(
+          DelegationRecord.make({
+            ...intent.delegation,
+            progress: Option.none(),
+            outcome: Option.none(),
+          }),
+        );
       } else {
         if (status._tag !== "Open")
           return yield* invariant(
@@ -179,4 +191,111 @@ export const opened = (request: StoredRequest) =>
     delegations: [],
     outbox: [],
     nextOutbound: AttemptChannel.Sequence.make(1),
+    result: Option.none(),
+    unsupervised: Option.none(),
+  });
+
+/** Returns delegation `number`, or dies if no transition decided it. */
+export const delegationOf = (
+  snapshot: CoordinatorSnapshot,
+  number: ChildSessionCount,
+): Effect.Effect<DelegationRecord> =>
+  Option.match(
+    Option.fromUndefinedOr(snapshot.delegations.find((record) => record.number === number)),
+    {
+      onNone: () => invariant(`Attempt ${snapshot.attemptId} has no delegation ${number}`),
+      onSome: Effect.succeed,
+    },
+  );
+
+/** Returns the snapshot with `record` replacing the delegation of the same number. */
+export const withDelegation = (snapshot: CoordinatorSnapshot, record: DelegationRecord) =>
+  CoordinatorSnapshot.make({
+    ...snapshot,
+    delegations: snapshot.delegations.map((current) =>
+      current.number === record.number ? record : current,
+    ),
+  });
+
+/** Returns how a delegation starts, and the record with its start recorded if it hadn't started. */
+export const startedDelegation = (record: DelegationRecord) =>
+  Option.match(record.progress, {
+    onSome: (progress) => ({
+      started: DelegationStarted.make({ resumed: true, progress }),
+      record,
+    }),
+    onNone: () => {
+      const progress = ChildProgress.empty();
+      return {
+        started: DelegationStarted.make({ resumed: false, progress }),
+        record: DelegationRecord.make({ ...record, progress: Option.some(progress) }),
+      };
+    },
+  });
+
+const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress =>
+  ChildProgress.make({
+    ...progress,
+    ...Match.valueTags(change, {
+      SessionSaved: ({ saved, beforePrompt }) => ({
+        saved: Option.some(saved),
+        prompted: beforePrompt && Option.isNone(progress.saved) ? false : progress.prompted,
+      }),
+      Prompted: () => ({ prompted: true }),
+      ContinuationsSaved: ({ timestamps }) => ({ continuations: timestamps }),
+      UsageSaved: ({ usage }) => ({
+        saved: Option.map(progress.saved, (saved) =>
+          isObject(saved) ? { ...saved, usage } : saved,
+        ),
+      }),
+      ToolStarted: ({ callId, tool }) => ({
+        inFlight: [...progress.inFlight.filter((call) => call.callId !== callId), { callId, tool }],
+      }),
+      ToolFinished: ({ callId }) => ({
+        inFlight: progress.inFlight.filter((call) => call.callId !== callId),
+      }),
+      IdleSaved: ({ report }) => ({ idle: report }),
+      OutputSaved: ({ output }) => ({ output }),
+    }),
+  });
+
+/** Returns the record with `change` applied, or dies if the delegation hasn't started. */
+export const progressed = (
+  record: DelegationRecord,
+  change: ProgressChange,
+): Effect.Effect<DelegationRecord> =>
+  Option.match(record.progress, {
+    onNone: () => invariant(`Progress saved for delegation ${record.number}, which hasn't started`),
+    onSome: (progress) =>
+      Effect.succeed(
+        DelegationRecord.make({ ...record, progress: Option.some(changed(progress, change)) }),
+      ),
+  });
+
+/** Returns the outcome recorded for the delegation, and the record with `outcome` if it had none. */
+export const settledDelegation = (record: DelegationRecord, outcome: EncodedEvent) =>
+  Option.match(record.outcome, {
+    onSome: (recorded) => ({ recorded, record }),
+    onNone: () => ({
+      recorded: outcome,
+      record: DelegationRecord.make({ ...record, outcome: Option.some(outcome) }),
+    }),
+  });
+
+/** Returns the snapshot with the longer of its unsupervised time and `unsupervised`. */
+export const unsupervisedRecorded = (
+  snapshot: CoordinatorSnapshot,
+  unsupervised: Duration.Duration,
+) =>
+  CoordinatorSnapshot.make({
+    ...snapshot,
+    unsupervised: Option.some(
+      Option.match(snapshot.unsupervised, {
+        onNone: () => unsupervised,
+        onSome: (kept) => Duration.max(kept, unsupervised),
+      }),
+    ),
   });
