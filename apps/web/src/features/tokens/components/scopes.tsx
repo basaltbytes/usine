@@ -27,9 +27,31 @@ export const scopeLabel = (grant: PermissionGrant) =>
     ? scopeCopy.instance
     : `${scopeCopy[grant.permission]} · ${grant.scope._tag === "Instance" ? "Instance" : grant.scope.project}`;
 type TokenScopesProps = {
-  readonly token?: { readonly id: string; readonly scopes: ReadonlyArray<PermissionGrant> };
+  readonly token?: {
+    readonly id: string;
+    readonly scopes: ReadonlyArray<PermissionGrant>;
+    readonly operations?: ReadonlyArray<string>;
+  };
   readonly close?: () => void;
 };
+/** The body of `POST /api/tokens`. */
+type TokenCreation = {
+  readonly name: string;
+  readonly scopes: ReadonlyArray<typeof PermissionGrant.Encoded>;
+  operations?: ReadonlyArray<string>;
+  expiresAt?: number;
+};
+/** The body of `PUT /api/tokens/:id/scopes`; null `operations` removes the ceiling. */
+type ScopeEdit = {
+  readonly scopes: ReadonlyArray<typeof PermissionGrant.Encoded>;
+  operations?: ReadonlyArray<string> | null;
+};
+/** Splits the operation field into operation IDs, such as `operator.approve`. */
+const operationList = (text: string) =>
+  text
+    .split(/[\s,]+/u)
+    .map((operation) => operation.trim())
+    .filter((operation) => operation !== "");
 export const TokenScopes = ({ token, close }: TokenScopesProps) => {
   const permissions = usePermissions();
   const configuration = useQuery(configurationQuery());
@@ -38,6 +60,9 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
   const [selected, setSelected] = useState<ReadonlyArray<PermissionGrant>>(
     token?.scopes.filter((grant) => permits(permissions, grant.permission, grant.scope)) ?? [],
   );
+  const initialOperations = token?.operations?.join(", ") ?? "";
+  const [operations, setOperations] = useState(initialOperations);
+  const [expires, setExpires] = useState("");
   const [secret, setSecret] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -59,17 +84,25 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
     setError("");
     try {
       const scopes = Schema.encodeSync(Schema.Array(PermissionGrant))(selected);
+      const ceiling = operationList(operations);
       if (token === undefined) {
+        const body: TokenCreation = { name, scopes };
+        if (ceiling.length > 0) body.operations = ceiling;
+        if (expires !== "") body.expiresAt = new Date(expires).getTime();
         const issued = await authRequest("/api/tokens", Schema.Struct({ token: Schema.String }), {
           method: "POST",
-          body: { name, scopes },
+          body,
         });
         setSecret(issued.token);
-      } else
+      } else {
+        const body: ScopeEdit = { scopes };
+        // An unchanged field keeps the stored ceiling; an emptied field removes it.
+        if (operations !== initialOperations) body.operations = ceiling.length > 0 ? ceiling : null;
         await authRequest(`/api/tokens/${encodeURIComponent(token.id)}/scopes`, Acknowledged, {
           method: "PUT",
-          body: { scopes },
+          body,
         });
+      }
       await Promise.all([
         client.invalidateQueries(tokensQuery()),
         client.invalidateQueries(sessionQuery()),
@@ -118,6 +151,27 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
           </Label>
         ))}
       </fieldset>
+      <Label className="flex flex-col items-start gap-2">
+        {scopeCopy.operations}
+        <Input
+          value={operations}
+          onChange={(event) => setOperations(event.target.value)}
+          placeholder="operator.overview, operator.approve"
+        />
+        <span className="text-xs font-normal text-muted-foreground">
+          {scopeCopy.operationsHint}
+        </span>
+      </Label>
+      {token === undefined && (
+        <Label className="flex flex-col items-start gap-2">
+          {scopeCopy.expires}
+          <Input
+            type="datetime-local"
+            value={expires}
+            onChange={(event) => setExpires(event.target.value)}
+          />
+        </Label>
+      )}
       {error && <ErrorAlert message={error} />}
       {secret && (
         <Label className="flex flex-col items-start gap-2">

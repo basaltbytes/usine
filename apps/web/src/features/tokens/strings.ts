@@ -24,4 +24,8 @@ export const scopeCopy = {
   read: "Read",
   operate: "Operate",
   maintain: "Maintain",
+  operations: "Operations",
+  operationsHint:
+    "Operation IDs from the API reference, separated by commas. Leave empty to allow every operation the scopes permit.",
+  expires: "Expires",
 };
