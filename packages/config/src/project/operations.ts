@@ -61,7 +61,7 @@ export const boardRepositories = (config: UsineConfig): ReadonlyArray<ManagedRep
 
 /**
  * Converts a version 1 `instance` to one project per repository, copying each loop to its selected
- * projects (ADR 0031). Returns version 2 unchanged; a loop matching no registered repo fails with
+ * projects. Returns version 2 unchanged; a loop matching no registered repo fails with
  * `ConfigurationInvalid`.
  */
 export const migrateProjects = (

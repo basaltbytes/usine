@@ -126,6 +126,15 @@ export const repositoryFilterLabel = "Repository";
 export const allRepositoriesLabel = "All repositories";
 export const repositoryCountLabel = (count: number): string => `${count} repositories`;
 
+export const filterCopy = {
+  filter: "Filter",
+  search: "Filter…",
+  empty: "No matches",
+  is: "is",
+  applied: (field: string, value: string) => `${field} is ${value}`,
+  remove: "Remove filter",
+};
+
 export const refreshCopy = {
   disconnected: " Live updates disconnected. Checking every minute.",
   label: "Last updated",

@@ -108,7 +108,7 @@ export class TaskCommentView extends Schema.Class<
 }) {}
 
 /**
- * One Task as its page shows it (ADR 0024). Tasks have no stored identity; `number` is the
+ * One Task as its page shows it (ADR 0008). Tasks have no stored identity; `number` is the
  * originating Item: the earliest issue, or else the earliest pull request.
  */
 export class TaskView extends Schema.Class<

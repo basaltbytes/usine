@@ -76,7 +76,7 @@ An `InterventionApplied` receipt uses the original input sequence and interventi
 
 `HarnessSession.modelProvider` records the native provider ID used for Codex continuation, separately from the credential kind and billing pool. Older records decode it as `None`.
 
-`ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `sessionPool(session)` reads the pool recorded at launch, with historical inference for older sessions. Claude Code and Codex children use `apiKeys` for local or injected API keys; subscription credentials use `claudePlan` and `chatgptPlan`, respectively (ADR 0013, ADR 0021). `GatewayLlmProvider` is `anthropic` (Claude Code) or `openai` (Codex).
+`ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `sessionPool(session)` reads the pool recorded at launch, with historical inference for older sessions. Claude Code and Codex children use `apiKeys` for local or injected API keys; subscription credentials use `claudePlan` and `chatgptPlan`, respectively (ADR 0013). `GatewayLlmProvider` is `anthropic` (Claude Code) or `openai` (Codex).
 
 `PoolRateLimitsUpdated.login` records the provider-reported `PoolLogin` with a rate-window snapshot. Older events and providers that omit the login decode it as `Option.none()`.
 

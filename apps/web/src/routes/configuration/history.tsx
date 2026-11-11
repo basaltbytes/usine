@@ -11,8 +11,7 @@ import { historyCopy } from "~/features/configuration/strings";
 const History = () => {
   const { entity } = Route.useLoaderDeps();
   return (
-    <ConfigurationPage title={historyCopy.title}>
-      <HistoryFilter key={`filter:${entity?.key ?? "all"}`} entity={entity} />
+    <ConfigurationPage title={historyCopy.title} actions={<HistoryFilter entity={entity} />}>
       <ConfigurationHistory key={entity?.key ?? "all"} entity={entity} />
     </ConfigurationPage>
   );

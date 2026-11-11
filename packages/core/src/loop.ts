@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { GitHubLabelName } from "./label.ts";
 
-/** The Loop file name. Renaming the file creates a new Loop and retires the old one (ADR 0001). */
+/** The Loop's identity; a Loop under a new name is a new Loop. */
 export const LoopName = Schema.NonEmptyString.pipe(Schema.brand("LoopName"));
 
 export type LoopName = typeof LoopName.Type;

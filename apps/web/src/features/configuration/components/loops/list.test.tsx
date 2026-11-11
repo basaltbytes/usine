@@ -100,7 +100,7 @@ describe("Loops page", () => {
       [...markup.matchAll(/<button[^>]*>(.*?)<\/button>/gu)].map(([, label]) =>
         text(label ?? "").trim(),
       ),
-      ["New"],
+      ["New loop"],
     );
   });
 
@@ -109,7 +109,7 @@ describe("Loops page", () => {
       await render(() => <LoopsList configuration={emptyConfiguration()} pause={null} />),
     );
     assert.include(page, "No loops");
-    assert.include(page, "Choose New to add a loop");
+    assert.include(page, "A loop starts an agent run for each item in a project");
   });
 
   it("shows a Loop's trigger and selector verbatim, its facts, and its prompt with marked expressions", async () => {
@@ -450,7 +450,7 @@ describe("Repositories page", () => {
     const page = text(
       await render(() => <RepositoriesList configuration={emptyConfiguration()} />),
     );
-    assert.include(page, "No repositories registered");
+    assert.include(page, "No repositories");
   });
 });
 

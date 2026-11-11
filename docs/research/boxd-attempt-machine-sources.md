@@ -158,6 +158,46 @@ system services; the snapshot builder stops `tailscaled`, and no attempt process
 driver's first `exec`. The window matters for any process a snapshot or template keeps running, and
 for the first attempt command when the driver doesn't wait.
 
+### Egress from birth
+
+**Measured** by the operator on 2026-11-11, after
+[#1161](https://github.com/basaltbytes/usine/pull/1161), with a snapshot built by
+`infra/boxd/build-snapshot.mjs`. This probe answers [question 23](#questions-for-boxd): the
+allowlist isn't in force when a restore resumes, even when the snapshot and the restore request both
+carry one ([issue #1196](https://github.com/basaltbytes/usine/issues/1196)).
+
+- Snapshot `usine-attempt-2` was built from a machine whose spec lists the 25-entry egress
+  allowlist. The builder checks that boxd recorded the list in the spec.
+- The probe's source was a machine restored from `usine-attempt-2`, which carries the 25 entries in
+  its spec, running the leak loop of [`fork.mjs`](./boxd-attempt-machine-sources/fork.mjs): every
+  100 ms, an HTTPS request to `example.com` at a fixed address, and an uncached DNS query. That
+  machine was saved as a second snapshot.
+- That snapshot was restored six times with `restore.mjs <suffix> spec`. The script sends its own
+  two-entry allowlist, `*.tailscale.com` and `registry.npmjs.org`, in the spec of the restore
+  request; boxd merges that spec over the snapshot's, and both entries are already among the 25.
+  `example.com` is outside both lists. Times are from the start of the create call.
+
+| Restore | First `exec` | Requests outside the allowlist that got through (ms after start: HTTP code) |
+| --- | --- | --- |
+| 1 | 719 ms | None in 2 attempts |
+| 2 | 678 ms | None in 3 attempts |
+| 3 | 710 ms | +630: 200, +833: 200 |
+| 4 | 841 ms | +728: 200, +925: 200, +1,086: 200 |
+| 5 | 790 ms | +710: 200, +903: 200 |
+| 6 | 960 ms | +861: 200, +1,062: 200, +1,215: 200 |
+
+- In four of six restores, a resumed process reached a host outside the allowlist for up to 1.2 s
+  after the create call started. The requests that got through went to a fixed address with the name
+  as SNI. The loop's DNS query failed in every sample, as in the earlier probes, so it says nothing
+  about DNS filtering.
+- Every create response already reported the 25 entries in `egressAllow`, so boxd reports the list
+  before it enforces it.
+- At the first `exec` through the probe, 0.7 to 1.0 s after the start, `example.com` by name was
+  blocked and `registry.npmjs.org` answered 200 in all six restores.
+- The last request that got through came about 650 ms after the create response. The driver waits
+  one second after that response before it connects, so the wait covered every sample, with a
+  margin of about 350 ms over six samples. The wait stays at one second.
+
 ## Identity and isolation
 
 **Measured** on two restores of `usine-attempt`, the template, and a fork of it.
@@ -281,7 +321,7 @@ from a warm snapshot reaches the same clean state in 0.7 s on a new machine.
 | Attempt image | In the snapshot | In the snapshot | On the template | On the template |
 | Warm pnpm store, Turbo cache, mirror | If baked into the snapshot (measured: carried) | Same | Carried (measured) | Carried (measured) |
 | Freshness of caches | New snapshot version from a builder | Same | Live, including half-done updates | After wake, update, hibernate |
-| Egress before anything runs | No: about 1 s open by design (3 of 3 leaked) | Mostly: 1 of 4 leaked for about 0.15 s after first `exec` | No: 3 of 3 leaked within 0.55 s | Yes in 1 run |
+| Egress before anything runs | No: about 1 s open by design (3 of 3 leaked) | No: 1 of 4 leaked for about 0.15 s after first `exec`; 4 of 6 leaked up to 1.2 s after the start with the list in the snapshot too | No: 3 of 3 leaked within 0.55 s | Yes in 1 run |
 | Tailnet join | Clean if the snapshot never joined | Same | Clean if the template never joins | Same |
 | Isolation | Inherited, one-way | Inherited, one-way, in the spec | Inherited, one-way | Inherited, one-way |
 | State from another attempt | None | None | None if no attempt runs on the template; template drifts | Same |
@@ -307,9 +347,9 @@ No implementation here; these are the changes in terms of the existing ports.
   message with those fields and the `spec` field of `CreateVmFromSnapshotRequest`.
 - **`BoxdDriver.create`** (`provisioner/boxd.ts`) checks the allowlist in the create response
   (`BoxdMachine.egressAllow`, already decoded) instead of calling `restrictEgress`, and deletes the
-  machine as today when it's empty. Whether the one-second wait stays depends on boxd's answer to
-  [question 23](#questions-for-boxd); the probes say it should stay until then, counted from the
-  create response instead of from the `SetVmEgressAllow` answer. The two timer calls stay.
+  machine as today when it's empty. The one-second wait stays, counted from the create response
+  instead of from the `SetVmEgressAllow` answer: [Egress from birth](#egress-from-birth) measured
+  requests outside the list until about 650 ms after that response. The two timer calls stay.
 - **`BoxdDriver.assign`** for a reused machine keeps `SetVmEgressAllow`; a reused machine already
   has the list from its spec, so the call is a check.
 - **`BoxdDriver.verify`** also refuses a snapshot whose `storage` isn't `local`, which boxd refuses
@@ -328,8 +368,10 @@ health-checks, updates, hibernates, and replaces the template in each region.
 ## Risks
 
 - **Egress window on restore.** Even with the allowlist in the spec, a resumed process reached a
-  forbidden address in one of four restores, after the first `exec`. Until boxd answers question 23,
-  the driver can't rely on the spec alone.
+  forbidden address in one of four restores, after the first `exec`, and in four of six restores of
+  a snapshot that carries the list itself, up to 1.2 s after the create call started. Until boxd
+  enforces the list before the machine resumes (question 23), the driver can't rely on the spec
+  alone.
 - **Egress window on fork.** Every fork of a running template leaked. A template keeps its own
   processes running, so the window would apply on every attempt.
 - **Shared identifiers.** Every machine restored from one snapshot has the same `machine-id`,
@@ -345,9 +387,14 @@ health-checks, updates, hibernates, and replaces the template in each region.
 These continue the numbered list in
 [`boxd-exec-transport.md`](./boxd-exec-transport.md#questions-for-boxd), which ended at 22.
 
-23. With `egress` in the spec of `CreateVmFromSnapshot`, is the allowlist in force before the
-    restored guest resumes? In one of four restores, a resumed process reached a forbidden address
-    0.74 and 0.89 s after the create call started, after the first `exec` had answered.
+23. When is the allowlist enforced on a restored machine, and can it be enforced before the machine
+    resumes? Answered by measurement on our side, see [Egress from birth](#egress-from-birth): with
+    an allowlist in the spec of both the snapshot (25 entries) and `CreateVmFromSnapshot` (the
+    probe's two entries), a resumed process
+    reached a host outside the list in four of six restores, up to 1.2 s after the create call
+    started and about 650 ms after the create response, which already reported the list in
+    `egressAllow`. An earlier run saw the same in one of four restores, 0.74 and 0.89 s after the
+    start, after the first `exec` had answered.
 24. A fork inherits its source's allowlist, but in three of three forks of a running machine a
     process reached a forbidden host within 0.55 s. Is the allowlist applied before the fork
     resumes, and can it be?
@@ -381,11 +428,12 @@ Keep snapshot restores as the source of attempt machines, and don't adopt fork-b
   version, while a template drifts, pauses on every fork, needs a machine slot in every state, and
   passes any breakage to every fork. Every fork of a running template leaked egress.
 - The better tool for the egress goal is the machine spec on `CreateVmFromSnapshot`: the allowlist
-  arrives with the create request, the create response confirms it, and the driver's one-second
-  window shrinks to an occasional 0.15 s one, which boxd should close (question 23).
+  arrives with the create request and the create response confirms it. It doesn't close the
+  window: boxd enforces the list up to about 650 ms after the create response, which the driver's
+  one-second wait covers, and boxd should close it (question 23).
 
 Move the allowlist, labels, and isolation into the create request's spec, keep the one-second wait
-until boxd answers question 23, refuse archived snapshots in `verify`, and add an optional cache
+until boxd enforces the allowlist before a restored machine resumes (question 23), refuse archived snapshots in `verify`, and add an optional cache
 step to the snapshot builder as a separate issue. Revisit forks if boxd closes the fork egress
 window and the factory runs enough attempts per hour that a long-lived template's warmth beats a
 nightly snapshot build.

@@ -1,29 +1,18 @@
-# Polling triggers: content-hashed events over payload slices
+# Polling with a content-hash ledger opens every event; webhooks are hints
 
-v1 watches GitHub by polling only: one REST call per managed repo (`GET /repos/{o}/{r}/issues?since=<watermark>&state=all&sort=updated`, covering issues and PRs) with an ETag. Authenticated 304s are free, so idle repos cost nothing; only changed items get a GraphQL slice fetch. An event exists when a changed item's canonical, timestamp-free slice hash is new for (loop, repo, item) _and_ the loop's `if:` matches. The ledger is permanent: a state never fires twice. A schedule trigger creates one event per selected repo per tick (`cron:`, IANA `tz:`), and after downtime only the latest missed tick fires.
+usine polls GitHub. A conditional REST request lists each repository's changed items, so an idle repository costs an uncounted 304, and each changed item gets one GraphQL snapshot of its payload slice.
+
+An event opens when a loop's `if:` matches and the key of loop, repository, item, and a hash of the slice without timestamps is new. The ledger is permanent, so usine never acts twice on one state unless the operator asks; the REST cursor only saves requests. A new loop acts on every item that already matches, with no baseline. A state whose run was canceled acts again after the item leaves it and returns. A schedule opens one event per repository per tick; after downtime, only the latest missed tick fires.
+
+A newer state supersedes, and a failed match revokes, only runs without a started attempt. Label-protocol loops unmatch their own trigger, and derived-state loops change their item as they work, so either would otherwise cancel itself.
+
+Mergeability and checks change without a new `updated_at`, so polling also fetches an open pull request after its base branch moves and while either is unsettled.
+
+Webhook deliveries are hints: requests to fetch sooner, through the same ledger. A hint never opens an event, so a lost one costs only latency. Hints come from the App's delivery log, a signed endpoint, or usine's own board moves. Setup creates the App webhook active, because only the App's settings page can activate it later.
 
 ## Considered options
 
-- **Webhooks in v1**: need a public endpoint (or App delivery polling) and per-org setup, breaking zero-config local-first. A permanent dedup ledger makes polling equally correct; push is a later latency upgrade.
-- **All-GraphQL polling**: one protocol, but no conditional requests (idle polls spend points), and 2025's opaque resource limits can partially fail fan-out queries.
-- **Search API sweep**: O(1) calls for N repos, but a 30 requests/minute cap, a 1,000-result window, and the legacy-vs-advanced OR/AND repo-qualifier trap.
-- **`updated_at` or edge-triggered events**: timestamp keys fire on changes the slice can't see, and edge triggering (fire when `if:` turns true) misses new states of one item, such as each push to review, which acceptance loops need.
-
-## Consequences
-
-- Streams (`issue`, `pr`, `schedule`) are engine-owned. The Triggers ticket records their slices (fixed connection caps, `totalCount` beside every list, `last:` where recency matters), and widening is additive.
-- Timestamps are in the payload, not the hash: to act again, retry in the UI.
-- `if:`, `{{ }}`, and the context preamble read the event's stored snapshot in every attempt; supersede, not refetching, handles freshness.
-- **Revises [ADR 0002](./0002-run-model-event-run-step-attempt.md)**: supersede replaces only runs with no started attempt; newer events wait for a running attempt to end, then are evaluated against current state. Unmatch likewise revokes only pending and waiting runs. Only the operator cancels a running attempt, keeping both authoring styles safe: label-protocol claims (the swap unmatches by design) and derived-state `if:` (incremental work would otherwise supersede itself).
-- Cold start fires on all matching state (no baseline mode), throttled by worker concurrency caps (FIFO, oldest first) and approval gates.
-- One instance-wide `poll_interval` (default 60s) in `usine.yaml`; rate-limit backoff is engine behavior.
-- **Revised by [ADR 0014](./0014-webhook-delivery-as-hints.md)**: v1 has webhook delivery as hints (default off) that only move a fetch earlier; polling remains the correctness source.
-- **Revised 2026-10-18 ([#267](https://github.com/basaltbytes/usine/issues/267))**: a state whose run was canceled (by operator, supersede, or revoke), or whose queued event a revoke dropped, fires again once the loop sees the item leave and return to it. Polling resubmits an unchanged PR every time, so a sighting alone mustn't undo a cancel, but a label removed and re-added keeps the hash and should act again. The engine records each loop's last view of an item and opens the comeback as an event derived from the original, so run ids stay stable. Succeeded or failed states never refire; failed runs await retry.
-- Detection uses each item's own `updated_at`, so cross-item edges (an issue's linked PRs) refresh only when the item changes, an accepted v1 limit.
-- **Open PR refresh (#155)**: mergeability can change (base-branch updates, asynchronous GitHub computation) without an `updated_at` or ETag change, so every poll, even after a 304, also fetches each known open PR through the same projection, evaluation, and dedup. The cursor persists this set, dropping closed PRs; an incompatible cursor rebuilds it. Cost: one snapshot request per open PR per poll, within existing limits. Each unseen open-PR slice state (check rollup, review decision, merge state) is an event for any loop whose `if:` still matches. Label-protocol loops are unaffected, since their claim unmatches the item; a derived-state `pr` loop fires per state, bounded by supersede and hold.
-
-  **Revised 2026-10-24 ([#158](https://github.com/basaltbytes/usine/issues/158))**: a snapshot per open PR per poll grows with the number of open PRs, while mergeability changes only when the base branch moves or GitHub finishes computing it. The cursor now also keeps each open PR's base branch and `mergeable`, and the head of each base branch. Each poll reads every base head with one conditional REST request, and fetches an open PR only when change detection reports it, its base head moved or can't be read, or its `mergeable` is `UNKNOWN`. An idle poll adds one request per base branch to change detection, and a 304 costs no rate limit; snapshots follow base movement, not the number of open PRs. A head read for the first time, including after this upgrade, counts as moved, since nothing shows the branch stood still since the last fetch.
-
-  **Revised 2026-10-27 ([#518](https://github.com/basaltbytes/usine/issues/518))**: finishing checks can change `statusCheckRollup` and `mergeStateStatus` without changing `updated_at` or the base head. The cursor also records whether checks are unsettled. Polling fetches an open PR on every poll, including after a 304, while its rollup state is `PENDING` or `EXPECTED`, or while the rollup is absent and `mergeStateStatus` is `BLOCKED`. The payload has no explicit required-check list, so an absent rollup on a blocked PR conservatively means checks are expected; this can also refresh PRs blocked on reviews. An absent rollup with another merge state does not trigger a check refresh. A terminal rollup (`SUCCESS`, `FAILURE`, or `ERROR`) stops these retries, even if another rule still blocks merging. Each refresh updates the projection and evaluates loops through the existing dedup path. Older cursors refresh each open PR once to learn its check state.
-
-  Cost: one snapshot request per unsettled PR per poll, under the same concurrency and backoff limits as `UNKNOWN` mergeability; a PR that qualifies for multiple refresh reasons is fetched once. Settled PRs retain the conditional base-head cost model. A later check rerun on a settled PR that changes neither `updated_at` nor a base head is still observed at its next update or base move.
+- **Webhooks as the event source**: GitHub never redelivers on its own, so a lost delivery would lose work.
+- **GraphQL change detection**: no conditional requests, so idle polls spend rate limit.
+- **Keys on `updated_at`**: fire on changes the slice can't see.
+- **Firing when `if:` turns true**: misses a new state of an item that still matches, such as a push under review.

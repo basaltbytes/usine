@@ -407,7 +407,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("park run for approval"));
 
   // Runs in the caller's transaction, so Attempt, Run, Step, and outbox writes commit or roll
-  // back together (ADR 0010, ADR 0020).
+  // back together.
   const applyFinish = Effect.fn("RunStore.applyFinish")(function* (
     tx: ReturnType<typeof queriesFor>,
     runId: RunId,
@@ -1320,7 +1320,7 @@ export class RunStore extends Context.Service<
     ) => Effect.Effect<void, RunStoreError>;
     /**
      * Returns the Attempt's window and the overlapping windows of the same Agent's other Attempts
-     * on the Item, oldest first (ADR 0006, #429).
+     * on the Item, oldest first (#429).
      */
     readonly attemptWindows: (attemptId: AttemptId) => Effect.Effect<AttemptWindows, RunStoreError>;
     /** The persisted Attempts that startup reconciliation visits, excluding discarded leftovers. */

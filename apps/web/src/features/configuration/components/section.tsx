@@ -1,4 +1,4 @@
-import { type ReactNode, useId } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { Page, PageHeading } from "~/components/page";
 import { StatusBadge } from "~/components/status-badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
@@ -8,12 +8,20 @@ import type { ConfigurationEntityKey, ConfigurationEntityKind } from "@usine/con
 import { ConfigurationHeader } from "~/features/configuration/components/header";
 import { EntityHistoryLink } from "~/features/configuration/components/editor/history/link";
 import { EntityEditor } from "~/features/configuration/components/editor/entity";
-import { CreateEntity } from "~/features/configuration/components/editor/create";
+import {
+  CreationContext,
+  CreationForm,
+  NewEntityButton,
+} from "~/features/configuration/components/editor/create";
 
 type ConfigurationPageProps = {
   readonly title: string;
   readonly entity?: ConfigurationEntityKey;
   readonly createKind?: ConfigurationEntityKind;
+  /** Opens the creation form with this member's login preselected, for a role binding. */
+  readonly initialMember?: string | undefined;
+  /** Whether the list is empty; its `ListEmpty` then holds the create button instead of the title row. */
+  readonly empty?: boolean;
   readonly leading?: ReactNode;
   readonly counts?: string;
   readonly marks?: ReactNode;
@@ -27,6 +35,8 @@ export const ConfigurationPage = ({
   title,
   entity,
   createKind,
+  initialMember,
+  empty = false,
   leading,
   counts,
   marks,
@@ -36,7 +46,7 @@ export const ConfigurationPage = ({
 }: ConfigurationPageProps) => {
   const heading = (
     <div className="flex min-w-0 flex-col gap-1">
-      <PageHeading title={title} leading={leading} counts={counts}>
+      <PageHeading title={title} leading={leading} counts={empty ? undefined : counts}>
         {marks}
       </PageHeading>
       <div className="flex min-w-0 flex-wrap items-center gap-x-4">
@@ -47,15 +57,40 @@ export const ConfigurationPage = ({
       </div>
     </div>
   );
+  const [creating, setCreating] = useState(initialMember !== undefined);
   return (
     <Page width="full">
       <div data-slot="configuration" className="flex min-w-0 flex-col gap-6">
         {entity === undefined ? (
-          <>
-            <ConfigurationHeader heading={heading} actions={actions} />
-            {createKind !== undefined && <CreateEntity kind={createKind} />}
+          <CreationContext.Provider
+            value={
+              createKind === undefined
+                ? null
+                : { kind: createKind, creating, start: () => setCreating(true) }
+            }
+          >
+            <ConfigurationHeader
+              heading={heading}
+              actions={
+                createKind === undefined || empty ? (
+                  actions
+                ) : (
+                  <>
+                    {actions}
+                    <NewEntityButton />
+                  </>
+                )
+              }
+            />
+            {creating && createKind !== undefined && (
+              <CreationForm
+                kind={createKind}
+                initialMember={initialMember}
+                cancel={() => setCreating(false)}
+              />
+            )}
             {children}
-          </>
+          </CreationContext.Provider>
         ) : (
           <EntityEditor key={entity.key} entity={entity} heading={heading} actions={actions}>
             {children}

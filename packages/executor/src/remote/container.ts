@@ -463,7 +463,7 @@ export const containersFor = (commands: RemoteCommands) => {
       ),
     ];
     // Host networking keeps the machine's nftables rules, which admit only the Gateway, in front
-    // of the container (ADR 0027, amended 2026-10-25).
+    // of the container (ADR 0027).
     const args = [
       "run",
       ...runtimeOptions(spec.settings.runtime),
