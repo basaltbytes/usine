@@ -27,7 +27,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `safeSegment`, `splitRepositoryName`, `canonicalRepositoryName` |
 | `@usine/core/worker`, `/item`, `/loop`, `/instance` | `WorkerName`, `WorkerKind`, `GatewayCredentialKind`, `ContainerId`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory`, `InstanceId` |
 | `@usine/core/cycle-budget` | `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, `CycleBudgetBlock`, `CycleBudgetAsk` |
-| `@usine/core/retry` | `retryTransient`: at most two retries, about 1 and 3 seconds apart with jitter, of the failures that a predicate accepts. GitHub polling reads and harvest reads share it. |
+| `@usine/core/retry` | `retryTransient`: at most two retries, about 1 and 3 seconds apart with jitter, of the failures that a predicate accepts. Given a refinement, `onRetry` receives the failure narrowed to the refined type. GitHub polling reads and harvest reads share it. |
 
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
