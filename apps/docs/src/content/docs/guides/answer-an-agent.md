@@ -23,4 +23,6 @@ An agent ends with `[usine:question]` or `[usine:blocked]` and records the decis
 
 An answer that starts with `[usine:provider-capacity]` or `[usine:failed]` retains that outcome even when a blocker or question marker appears later. Capacity reports use a delayed retry; failure reports require operator attention without suppressing the item.
 
+A Claude Code session that reaches its provider's usage limit ends with a capacity report, not a blocker. The retry waits until the limit resets when Claude Code reports the reset time. If a child reports a capacity refusal, the attempt ends with that refusal even when the parent reports a blocker or question.
+
 Claude Code, Codex, and Pi child sessions log these reports at Info with `kind` set to `question` or `blocked`, along with the report's `message` and `sessionId`. These reports still end the attempt with a question or blocker. Harness and infrastructure failures log at Error.
