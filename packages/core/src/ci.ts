@@ -87,6 +87,17 @@ export class CiTimedOut extends Schema.TaggedClass<
   message: Schema.NonEmptyString,
 }) {}
 
+/**
+ * A workflow run on the recorded head failed or was canceled although none of its jobs failed,
+ * so CI never ran in full. The operator reruns the named workflow runs.
+ */
+export class CiIncomplete extends Schema.TaggedClass<
+  CiIncomplete,
+  Brand.Brand<"@usine/core/ci/CiIncomplete">
+>()("CiIncomplete", {
+  message: Schema.NonEmptyString,
+}) {}
+
 /** Failed CI accepted by a fix run. */
 export class CiHandedOff extends Schema.TaggedClass<
   CiHandedOff,
@@ -109,6 +120,7 @@ export const CiResolution = Schema.Union([
   CiPassed,
   CiFailed,
   CiTimedOut,
+  CiIncomplete,
   CiHandedOff,
   CiSuperseded,
 ]);

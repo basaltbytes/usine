@@ -39,7 +39,10 @@ import {
   CheckFailureEvidence,
   CheckSnapshot,
   GitHubChecks,
+  HeadWorkflowRunState,
+  IncompleteWorkflowRun,
   PendingCheck,
+  RunningWorkflowRun,
 } from "@usine/github/checks";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
@@ -198,7 +201,12 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const pendingFailure = yield* Ref.make(Option.none<GitHubApiError>());
   const pendingStarted = yield* Deferred.make<void>();
   const pendingStalled = yield* Ref.make(false);
+  const workflowRuns = yield* Ref.make<Effect.Effect<HeadWorkflowRunState, GitHubApiError>>(
+    Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [] })),
+  );
+  const failedJobs = yield* Ref.make<ReadonlyArray<string>>(["ci"]);
   const checks = Layer.succeed(GitHubChecks)({
+    workflowRuns: () => Effect.flatten(Ref.get(workflowRuns)),
     pendingDetails: () =>
       Effect.gen(function* () {
         yield* Deferred.succeed(pendingStarted, undefined);
@@ -233,8 +241,13 @@ const scenario = Effect.fn("test.ciScenario")(function* (
         Effect.flatMap(({ state }) =>
           state === "conflict"
             ? Effect.die("A merge conflict has no failed check logs")
-            : Effect.succeed(
-                CheckFailureEvidence.make({ jobs: ["ci"], excerpt: "TypeError: failing CI log" }),
+            : Ref.get(failedJobs).pipe(
+                Effect.map((jobs) =>
+                  CheckFailureEvidence.make({
+                    jobs,
+                    excerpt: jobs.length === 0 ? "" : "TypeError: failing CI log",
+                  }),
+                ),
               ),
         ),
       ),
@@ -333,6 +346,8 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     pendingFailure,
     pendingStarted,
     pendingStalled,
+    workflowRuns,
+    failedJobs,
     mergeable,
     tasks,
     verifiedSubmissions,
@@ -532,6 +547,221 @@ it.live("green CI observed after the deadline applies the recorded labels once",
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
 
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+const partialRun = IncompleteWorkflowRun.make({
+  id: 42672750451,
+  workflow: "CI",
+  conclusion: "failure",
+  url: `https://github.com/${repository}/actions/runs/42672750451`,
+});
+
+it.live.each(["success", "failure"] as const)(
+  "a partially created workflow run under a %s rollup needs the operator and starts no fix",
+  (state) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.workflowRuns,
+            Effect.succeed(HeadWorkflowRunState.make({ incomplete: [partialRun], running: [] })),
+          );
+          yield* Ref.set(setup.failedJobs, []);
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state }));
+
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+          const failed = yield* engine.inspect(runId);
+          assert.strictEqual(failed.run.state._tag, "Failed");
+          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(outcome.failure._tag, "InfraFailure");
+          assert.include(outcome.failure.message, "CI (run 42672750451, failure)");
+          assert.include(outcome.failure.message, partialRun.url);
+          assert.include(outcome.failure.message, "Rerun these workflow runs");
+          const mutations = yield* Ref.get(setup.mutations);
+          assert.deepStrictEqual(mutations, []);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+          assert.strictEqual(runNeedsAttention(runView(failed, new Set(), new Map()), false), true);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+const runningRun = RunningWorkflowRun.make({
+  id: 42672750451,
+  workflow: "CI",
+  status: "in_progress",
+  url: `https://github.com/${repository}/actions/runs/42672750451`,
+});
+
+it.live("a workflow run that has not concluded keeps green CI waiting until the deadline", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(1);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const monitor = yield* CiMonitor;
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
+        );
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+
+        yield* monitor.reconcile(fixtureInstance, Option.none());
+
+        assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+
+        yield* Effect.sleep("1100 millis");
+        yield* monitor.reconcile(fixtureInstance, Option.none());
+
+        const timedOut = yield* engine.inspect(runId);
+        assert.strictEqual(timedOut.run.state._tag, "Failed");
+        const outcome = Option.getOrNull(timedOut.attempts.at(-1)?.outcome ?? Option.none());
+        assert(outcome?._tag === "Failed");
+        assert.include(outcome.failure.message, "CI (run 42672750451, in_progress)");
+        assert.include(outcome.failure.message, runningRun.url);
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("green CI passes once the workflow runs on the head have concluded", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const monitor = yield* CiMonitor;
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
+        );
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+        yield* monitor.reconcile(fixtureInstance, Option.none());
+        assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [] })),
+        );
+        yield* monitor.reconcile(fixtureInstance, Option.none());
+
+        assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Succeeded");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a failed job routes CI to the fix loop even beside a partially created run", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [partialRun], running: [] })),
+        );
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        const source = yield* (yield* RunEngine).inspect(runId);
+        assert(source.run.state._tag === "HandedOff");
+        assert.include(source.run.state.reason, "CI failed: ci.");
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a failed job routes CI to the fix loop while another workflow run is still running", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
+        );
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        const source = yield* (yield* RunEngine).inspect(runId);
+        assert(source.run.state._tag === "HandedOff");
+        assert.include(source.run.state.reason, "CI failed: ci.");
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a red rollup without a failed job waits for workflow runs that have not concluded", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
+        );
+        yield* Ref.set(setup.failedJobs, []);
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "AwaitingCi");
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("unreadable workflow runs leave green CI to the check rollup", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.fail(
+            GitHubApiError.make({
+              operation: "read-ci-checks",
+              status: Option.some(403),
+              message: "Resource not accessible by integration",
+            }),
+          ),
+        );
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+
+        const result = yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        assert.deepStrictEqual(result.failures, []);
+        assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "Succeeded");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),

@@ -144,6 +144,8 @@ Run `pnpm --filter @usine/github check` after building dependencies to check Typ
 
 ## CI failure evidence
 
+`GitHubChecks.workflowRuns(repository, head)` returns a `HeadWorkflowRunState`. Its `incomplete` field holds an `IncompleteWorkflowRun` with the ID, workflow name, conclusion, and link of each workflow run on the head that concluded `failure` or `cancelled` with no failed job. Its `running` field holds a `RunningWorkflowRun` with the ID, workflow name, status, and link of each workflow run on the head that hasn't concluded, which can last after its last created job finished. It considers only the latest run of each workflow and event, so a run that a newer run of the same workflow replaced doesn't count. Reading workflow runs on a private repository requires **Actions: read-only**.
+
 `GitHubChecks.pendingDetails(repository, head)` returns up to ten `PendingCheck` records with names, statuses, start times, elapsed milliseconds, and previous successful duration milliseconds. Times and durations use `Option` when unavailable; the orchestrator formats the records for timeout diagnostics. For Actions jobs, it compares each job with the same name in the latest successful run of its workflow. Duration history requires **Actions: read-only**; unavailable history leaves the current job status and elapsed time in the diagnostic.
 
 `GitHubChecks` reads the pull request head and aggregate check state. For failed Actions jobs, it extracts bounded failed-step logs from the run-attempt archive. If the archive is unavailable or lacks the failed step, it reads the completed job's plain log, including when other matrix jobs are running. Rate limits defer polling; unavailable job logs use the check output.

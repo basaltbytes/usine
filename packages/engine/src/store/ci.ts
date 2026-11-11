@@ -69,6 +69,7 @@ export const ciQueries = (
           CiPassed: () => RunState.Succeeded.make(),
           CiFailed: () => RunState.Failed.make(),
           CiTimedOut: () => RunState.Failed.make(),
+          CiIncomplete: () => RunState.Failed.make(),
           CiHandedOff: ({ reason, fixRunId }) =>
             RunState.HandedOff.make({
               reason,
@@ -85,6 +86,8 @@ export const ciQueries = (
           CiFailed: ({ message }) =>
             AttemptFailed.make({ failure: AgentFailure.make({ message }) }),
           CiTimedOut: ({ message }) =>
+            AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
+          CiIncomplete: ({ message }) =>
             AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
           CiSuperseded: () => AttemptCanceled.make(),
         });

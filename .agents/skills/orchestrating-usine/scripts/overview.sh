@@ -71,12 +71,47 @@ if [ -n "$USINE_REPOS" ]; then
     # App-authored PRs plus any PR carrying a loop label (fast-lane PRs by the operator). The CI
     # summary makes a check completion a visible change for wait-change.sh.
     {
-      gh pr list -R "$repo" "${author[@]}" --state open --json number,title,labels,mergeable,isDraft,statusCheckRollup 2>/dev/null
+      gh pr list -R "$repo" "${author[@]}" --state open --json number,title,labels,mergeable,isDraft,headRefOid,statusCheckRollup 2>/dev/null
       for label in ready-for-review ready-to-merge agent-review-findings; do
-        gh pr list -R "$repo" --label "$label" --state open --json number,title,labels,mergeable,isDraft,statusCheckRollup 2>/dev/null
+        gh pr list -R "$repo" --label "$label" --state open --json number,title,labels,mergeable,isDraft,headRefOid,statusCheckRollup 2>/dev/null
       done
     } | python3 -I -c '
-import json, sys
+import json, subprocess, sys
+repo, gate_workflow, gate_job = sys.argv[1:4]
+FAILED = ("failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale")
+
+def api(path):
+    out = subprocess.run(["gh", "api", path], capture_output=True, text=True)
+    return json.loads(out.stdout) if out.returncode == 0 else None
+
+def incomplete(head):
+    """Names the latest workflow runs on head that failed or were canceled with no failed job,
+    and a completed gate workflow run that lacks its gate job."""
+    runs = api("repos/%s/actions/runs?head_sha=%s&per_page=100" % (repo, head))
+    if runs is None:
+        return []
+    latest = {}
+    for run in runs.get("workflow_runs", []):
+        key = (run["workflow_id"], run["event"])
+        if key not in latest or latest[key]["run_number"] < run["run_number"]:
+            latest[key] = run
+    found = []
+    for run in latest.values():
+        if run["status"] != "completed":
+            continue
+        gate = run["name"] == gate_workflow
+        if run["conclusion"] not in ("failure", "cancelled") and not gate:
+            continue
+        jobs = api("repos/%s/actions/runs/%s/jobs?filter=latest&per_page=100" % (repo, run["id"]))
+        if jobs is None:
+            continue
+        jobs = jobs.get("jobs", [])
+        if run["conclusion"] in ("failure", "cancelled") and not any(j.get("conclusion") in FAILED for j in jobs):
+            found.append("%s run %s %s without a failed job" % (run["name"], run["id"], run["conclusion"]))
+        elif gate and not any(j.get("name") == gate_job for j in jobs):
+            found.append("%s run %s has no %s job" % (run["name"], run["id"], gate_job))
+    return found
+
 seen = {}
 text = sys.stdin.read()
 decoder = json.JSONDecoder()
@@ -102,10 +137,14 @@ for n in sorted(seen):
         ci = "ci=green"
     else:
         ci = "ci=none"
+    if ci in ("ci=green", "ci=failed") and pr.get("headRefOid"):
+        runs = incomplete(pr["headRefOid"])
+        if runs:
+            ci = "ci=incomplete (%s)" % "; ".join(runs)
     labels = ",".join(l["name"] for l in pr.get("labels") or [])
     draft = "draft " if pr.get("isDraft") else ""
     print("- %s#%s %s [%s] %s %s" % (draft, n, (pr.get("title") or "")[:60], labels, pr.get("mergeable"), ci))
-' || echo "- gh failed for $repo"
+' "$repo" "$USINE_GATE_WORKFLOW" "$USINE_GATE_JOB" || echo "- gh failed for $repo"
   done
   echo
   echo "### Failed default-branch workflows"

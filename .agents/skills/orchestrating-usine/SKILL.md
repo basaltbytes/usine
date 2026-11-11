@@ -17,7 +17,7 @@ You run a usine instance for a human who reads this thread rarely, maybe never. 
 
 Repeat until the human says stop. Every pass ends with the ledger updated and, when something changed, a report in the format of [`ledger.md`](ledger.md).
 
-1. **Observe.** Run `scripts/overview.sh` from this skill's folder. It prints Needs attention, running attempts, stalled items, open agent PRs with labels and mergeability, failed default-branch workflows, and recent server errors. For a long unattended stretch, run `scripts/wait-change.sh` with Bash `run_in_background` and run it again after each notification. It polls without printing and exits on the first change that needs a reaction, so an idle factory costs no tokens. Don't use `scripts/watch.sh` with Monitor for this: each event re-reads the whole conversation.
+1. **Observe.** Run `scripts/overview.sh` from this skill's folder. It prints Needs attention, running attempts, stalled items, open agent PRs with labels, mergeability, and CI state, failed default-branch workflows, and recent server errors. For a long unattended stretch, run `scripts/wait-change.sh` with Bash `run_in_background` and run it again after each notification. It polls without printing and exits on the first change that needs a reaction, so an idle factory costs no tokens. Don't use `scripts/watch.sh` with Monitor for this: each event re-reads the whole conversation.
 2. **Act on what you can.** Table of first moves; `api.md` has the calls.
 
    | Signal | Move |
@@ -27,6 +27,7 @@ Repeat until the human says stop. Every pass ends with the ledger updated and, w
    | Question from the agent | Answer from the issue, the ADRs, and the ledger. If the answer is the human's, put the question under Decisions and leave the run on hold. |
    | Cycle budget used | Read why the rounds failed. Reset only with a reason you can state; otherwise Decisions. |
    | PR `ready-to-merge` | Follow **Merge**. |
+   | PR `ci=incomplete`: a workflow run failed or was canceled with no failed job, or the gate workflow run has no gate job | GitHub Actions didn't create every job. Rerun the named runs with `gh run rerun <id>`; neither usine nor the agents can. When a CI wait ended in Needs attention for it, apply the completion labels after the checks pass and mark the run resolved. |
    | PR conflicting, no loop on it | Load `resolving-merge-conflicts`, or relabel so the configured recovery loop takes it. |
    | PR blocked: the loops can't move it (a second budget exhaustion, a fix round that fails the same way twice, a dependency the factory can't produce) | Dispatch a local Opus 5.5 agent at high effort (`Agent` with `model: opus`, `effort: high`) in its own worktree to finish the PR, with the findings and the CI output in its brief. Review and merge it like any agent PR. |
    | Worker silent, provider unreachable, preflight failed | Check the worker over SSH if `env.sh` has a destination. File an issue; put host-level fixes under Actions. |
