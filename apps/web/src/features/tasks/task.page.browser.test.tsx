@@ -620,6 +620,12 @@ it("shows file marks and patch availability on a phone without widening the task
   expect(getComputedStyle(path.element()).whiteSpace).toBe("normal");
   expect(path.element().scrollWidth).toBeLessThanOrEqual(path.element().clientWidth);
   await expect.element(changes.getByRole("combobox", { name: "Compare" })).not.toBeInTheDocument();
+  await expect
+    .element(changes.getByText("No attempt commits recorded for this pull request"))
+    .toBeVisible();
+  await expect
+    .element(changes.getByText("pushed no new commits", { exact: false }))
+    .not.toBeInTheDocument();
   await expect.element(changes.getByText("Whole pull request", { exact: true })).toBeVisible();
   await expect.element(changes.getByText("test", { exact: true })).toBeVisible();
   await expect.element(changes.getByText("generated", { exact: true })).toBeVisible();
