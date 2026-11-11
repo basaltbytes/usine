@@ -260,6 +260,13 @@ sub-processors, and telemetry for this shape are not published.
 11. Does the Internal Use licence cover a cluster that a service provider installs and runs in its
     customer's account, for that customer's own use?
 12. Which country hosts the EU cluster's servers today, given the FAQ and the privacy notice?
+13. When is the allowlist enforced on a restored machine, and can it be enforced before the machine
+    resumes? Measured on 2026-11-11 ([Egress from birth](./boxd-attempt-machine-sources.md#egress-from-birth)):
+    with the allowlist in the spec of both the snapshot and the restore request, a resumed process
+    reached a host outside the list in four of six restores, up to 1.2 s after the create call
+    started and about 650 ms after the create response, which already reported the 25 entries in
+    `egressAllow`. This is question 23 of
+    [`boxd-attempt-machine-sources.md`](./boxd-attempt-machine-sources.md#questions-for-boxd).
 
 ## Issue drafts
 
