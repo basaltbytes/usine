@@ -749,6 +749,58 @@ it.live.each([
 
 it.live.each([
   {
+    outcome: "waits on the other pull request when it is open",
+    pullRequest: pullRequest(BRANCH, OWN),
+    decision: "RunAwaitingCi",
+    warnings: 1,
+  },
+  {
+    outcome: "retries the attempt when the other pull request is closed",
+    pullRequest: pullRequest(BRANCH, OWN, "closed"),
+    decision: "RetryAttempt",
+    warnings: 0,
+  },
+])(
+  "a detached success with one unreadable candidate pull request ref $outcome",
+  ({ pullRequest, decision, warnings }) =>
+    Effect.gen(function* () {
+      const unreadable = "gh api repos/basaltbytes/usine/pulls/816";
+      const finished = yield* finishHarvested("Finished the change.", {
+        branch: "",
+        origin: [PULL_REF, `${HEAD}\trefs/pull/816/head`],
+        github: [
+          [unreadable, [ghFailed]],
+          [PULL_REQUEST, [pullRequest]],
+        ],
+      });
+      assert.strictEqual(finished.decision._tag, decision);
+      assert.strictEqual(tries(finished.commands, unreadable), 3);
+      if (decision === "RunAwaitingCi") {
+        assert(finished.state._tag === "AwaitingCi");
+        assert.strictEqual(finished.state.handoff.pullRequest, 815);
+        assert.strictEqual(finished.state.handoff.head, HEAD);
+      } else {
+        assert(Option.isSome(finished.failure));
+        assert.strictEqual(finished.failure.value._tag, "InfraFailure");
+        assert.strictEqual(
+          finished.failure.value.message,
+          "CI can't wait on the pushed pull request: GitHub couldn't be read: GhFailed: gh: Bad Gateway (HTTP 502)",
+        );
+      }
+      assert.lengthOf(
+        finished.warnings.filter(
+          (logged) =>
+            Array.isArray(logged) &&
+            logged[0] ===
+              "Could not read one candidate's pull requests; CI waits on the other candidates' open pull requests",
+        ),
+        warnings,
+      );
+    }),
+);
+
+it.live.each([
+  {
     origin: [branchAt(OTHER)],
     detail: `is at ${OTHER} on origin, not at the checkout's HEAD ${HEAD}`,
   },

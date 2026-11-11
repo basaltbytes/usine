@@ -153,18 +153,25 @@ export class CiMonitor extends Context.Service<
           return yield* engine.settleCi(runId, head, CiSuperseded.make({ head: observed.head }));
         }
         // GitHub stops updating a closed pull request's head, so its CI wait would last until the
-        // deadline.
-        if (observed.pullRequest !== "open" && observed.state === "pending") {
-          yield* Effect.logInfo("The pull request closed before CI settled; the CI wait ends", {
+        // deadline, and a fix can't land on it. Green CI on a closed head still passes.
+        if (observed.pullRequest !== "open" && observed.state !== "success") {
+          yield* Effect.logInfo("The pull request closed before CI passed; the CI wait ends", {
             runId,
             head,
             pullRequestState: observed.pullRequest,
+            state: observed.state,
           });
+          const when =
+            observed.state === "pending"
+              ? "before CI settled"
+              : observed.state === "conflict"
+                ? "while it conflicted with its base branch"
+                : "after CI failed";
           return yield* engine.settleCi(
             runId,
             head,
             CiFailed.make({
-              message: `Pull request #${pullRequest} was ${observed.pullRequest} before CI settled on head ${head}. usine applied no completion labels and started no fix.`,
+              message: `Pull request #${pullRequest} was ${observed.pullRequest} ${when} on head ${head}. usine applied no completion labels and started no fix.`,
             }),
           );
         }

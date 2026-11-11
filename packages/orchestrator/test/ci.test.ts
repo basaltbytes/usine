@@ -593,6 +593,65 @@ it.live.each(["closed", "merged"] as const)(
     ).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.live.each(["closed", "merged"] as const)(
+  "green CI on a pull request %s after CI settled applies the recorded labels",
+  (pullRequest) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequest, head, state: "success" }),
+          );
+
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "Succeeded");
+          assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each([
+  { pullRequest: "closed", state: "failure", when: "after CI failed" },
+  { pullRequest: "merged", state: "failure", when: "after CI failed" },
+  { pullRequest: "closed", state: "conflict", when: "while it conflicted with its base branch" },
+] as const)(
+  "a pull request $pullRequest with $state CI ends the wait without labels or a fix",
+  ({ pullRequest, state, when }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ pullRequest, head, state }));
+
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+          const failed = yield* engine.inspect(runId);
+          assert.strictEqual(failed.run.state._tag, "Failed");
+          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(
+            outcome.failure.message,
+            `Pull request #815 was ${pullRequest} ${when} on head ${head}. usine applied no completion labels and started no fix.`,
+          );
+          const mutations = yield* Ref.get(setup.mutations);
+          assert.deepStrictEqual(mutations, []);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
 const partialRun = IncompleteWorkflowRun.make({
   id: 42672750451,
   workflow: "CI",
