@@ -1,84 +1,18 @@
 # Operator API authentication: GitHub sign-in, instance tokens, and role bindings
 
-Until 2026-10-28 the operator API and the web UI had no authentication. `usine up` listens on loopback and refuses browser requests whose `Origin` isn't a loopback name or `USINE_ORIGIN`, so the network (loopback, an SSH tunnel, or a tailnet) was the only boundary, and the operator that approvals and interventions record was the `operator:` value of `usine.yaml`. That stops working when clients other than the bundled UI use the API, such as a UI served from another origin, the CLI against a remote instance, or an iOS app, and when several people share one instance. Decided on 2026-10-28 ([#632](https://github.com/basaltbytes/usine/issues/632)): every API request is authenticated and authorized by role.
+Every operator API request is authenticated and authorized, on loopback too, because a reverse proxy such as `tailscale serve` delivers every request from 127.0.0.1. Health, version, readiness, sign-in, the OpenAPI document, and the setup callback are public. GitHub webhook deliveries are checked by signature.
 
-- **Sign-in.** A member signs in with their GitHub login through the instance's GitHub App ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md)): the web flow for browsers, the device flow for the CLI and native apps. The GitHub user token proves the login at sign-in; usine doesn't use it as the API credential.
-- **Instance tokens.** The instance then issues its own token for each device or automation, stores it hashed, and lists it so that it can be revoked. Every client sends it as a bearer token in the `Authorization` header. A token has scopes that can only narrow its member's permissions: a phone's token can be read-only, and an automation's token can be limited to one project.
-- **Role bindings.** Access is denied unless a role binding grants it. A binding is a member, a role, and a scope, where the scope is the instance or one project. An instance admin manages members, role bindings, workers, settings, and tokens. On a project, viewer reads its tasks, runs, loops, and lanes; operator also acts on its runs and tasks, such as approving, retrying, canceling, messaging, and moving cards; maintainer also edits its loops and lanes. A member with no binding on a project doesn't see it.
-- **Enforcement.** The server checks the permission on every route and filters every list (projects, tasks, runs, needs-you) to what the member may see. The UI hides the actions that the member can't take.
-- **Audit.** Role bindings are configuration, stored in the database with a revision for each change ([ADR 0031](./0031-authored-configuration-in-the-database.md)), so every access change records who granted it. Approvals, interventions, retries, cancellations, and configuration revisions record the member's GitHub login.
-- **Transport.** TLS is required when the API isn't on loopback. Web origins that the instance allows get CORS headers.
-- **Public exposure.** An instance can serve the API over public HTTPS, so this applies from the start: rate limits on the sign-in and token endpoints, security headers, and no route without a token except health, sign-in, and the signature-verified GitHub webhook endpoint ([ADR 0014](./0014-webhook-delivery-as-hints.md)).
-- **API contract.** The API has a versioned path and a published schema, so a client built against one version keeps working against a newer server.
-
-Decided on 2026-10-29 ([#632](https://github.com/basaltbytes/usine/issues/632)):
-
-- **Bindings are managed in usine.** An admin grants each role binding, and the member who completes the instance's setup with the GitHub App is its first admin. Bindings derived from GitHub permissions can be added later as defaults; on their own they can't grant less than GitHub does.
-- **Sign-in is always required, on loopback too.** `tailscale serve` and other local reverse proxies deliver every request from 127.0.0.1, so a loopback exemption would admit everyone who can reach the proxy. The CLI on the instance's machine uses an admin token from a file in the instance folder, with mode 0600, instead of a GitHub sign-in.
-- **TLS comes from a reverse proxy.** `usine up` keeps listening on loopback and refuses a non-loopback address without TLS. The deployment guide documents Caddy, `tailscale serve`, and Cloudflare Tunnel. Built-in ACME would make usine bind ports 80 and 443, store keys, and handle renewal failures.
-- **The bundled UI uses an `HttpOnly` cookie.** The session cookie is `SameSite=Strict`, and every write carries a CSRF token. A script can't read the cookie, so a cross-site scripting bug can't take the session. Other clients use bearer tokens.
-
-## First authentication slice
-
-Implemented for [#701](https://github.com/basaltbytes/usine/issues/701): every member is an instance admin until role bindings are implemented. The server owns the authentication model and `AuthStore` port, with in-memory and `SqlClient` adapters. The SQL adapter uses a separate `usine_auth_migrations` ledger in the instance database, following the configuration store pattern. Keeping credential persistence outside the engine prevents the run lifecycle from depending on sign-in. Contract tests exercise both adapters.
-
-GitHub user IDs bind membership to accounts across login changes. Sessions and device tokens persist only hashes; OAuth state, device challenges, setup sessions, and single-use links remain in memory and expire. Restarting the server invalidates those challenges and replaces the local admin token, while enrolled member sessions survive. First enrollment requires a setup session opened through a one-time link. Removing a member revokes their credentials in the same transaction, and the last admin cannot be removed.
+- **Sign-in.** Members sign in with GitHub through the instance's App ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md)): the web flow in browsers, the device flow elsewhere. usine reads the identity, then asks GitHub to revoke the user token. Membership follows the numeric user ID, not the login.
+- **Instance credentials.** usine issues its own secrets and stores only their hashes. The bundled UI keeps a 30-day session in an `HttpOnly`, `SameSite=Strict` cookie and sends a CSRF header with each write. Other clients send a device token, valid until revoked or its optional expiry. Its permission ceiling narrows the member's current bindings; an optional operation ceiling limits its operations. The CLI on the instance's machine reads a mode-0600 admin token file that each start replaces.
+- **Role bindings.** Access is denied unless a binding grants it: instance admin, or viewer, operator, or maintainer on one project. Bindings are configuration with revisions ([ADR 0031](./0031-authored-configuration-in-the-database.md)), so each grant records who made it. Lists show only what the member may read. The person who completes setup through the one-time link is the first admin; later members get no role until an admin grants one.
+- **MCP tools.** `POST /api/mcp` and `usine mcp` serve each operator operation as a tool, generated from the OpenAPI document. Calls go through the router with the caller's credential, so the same checks and audit apply.
+- **Transport.** The server listens only on 127.0.0.1, and a reverse proxy provides TLS. Only listed browser origins are accepted, each on HTTPS except on loopback. Sign-in endpoints are rate limited.
 
 ## Considered options
 
-- **The network as the only boundary** (until 2026-10-28): enough for one operator behind a tailnet, but it has no identity, no per-device revocation, and no protection once the address is public.
-- **Instance-issued tokens only** (`usine token create`, pasted or scanned into a client): no identity provider, but no single sign-in, and no person behind a token, so an approval can't record who approved.
-- **Any OIDC provider**: works with Google, Okta, or Authentik, but every instance needs a provider configured, while every member already has a GitHub login for the managed repositories. Since the API credential is usine's own token, another sign-in method can be added later.
-- **Tailscale identity headers** (`tailscale serve` passes the caller's Tailscale login): no sign-in code, but only clients on the tailnet can connect, and the identity is a Tailscale login, not a GitHub one.
-- **Instance-wide roles only**: simpler bindings, but a contractor on one project would see every project.
-- **An access entry on each loop, run, and worker**: finer control, but many entries to manage and no current need. A binding's scope can gain a resource level later.
-- **GitHub repository permissions as the only source of bindings**: no membership to manage in usine, but no way to grant less than GitHub does or to scope a token. Derived bindings remain possible as defaults on top of managed ones.
-
-## Consequences
-
-- The GitHub App needs user authorization: the device flow turned on, and a callback URL at the instance's address for the web flow. An instance created before this change needs those App settings changed by hand.
-- `operator:` in `usine.yaml` identifies only the approvals and interventions recorded before sign-in exists.
-- Every client signs in, including the bundled UI and a browser on the instance's own machine. Scripts that call the API with `curl` need a token; the CLI on the instance's machine reads the admin token file.
-- The API on a public address is an attack surface that the network used to hide. A deployment guide states what an instance needs before it's public: TLS, the allowed origins, and the rate limits.
-
-## Published API schema
-
-Amended for [#778](https://github.com/basaltbytes/usine/issues/778) on 2026-10-30: keep existing `/api/...` paths. Path versioning is deferred until an external client needs it. This replaces the versioned-path requirement above.
-
-`GET /api/openapi.json` is public, alongside health and sign-in routes. It contains the generated API contract, without instance configuration or credentials. The server combines the shared `OperatorApi` contract with authentication route declarations; authentication handlers use those declarations for registration and request decoding. Static assets and the separate GitHub webhook listener are outside this contract.
-
-The docs build regenerates a committed OpenAPI document and renders the HTTP reference from it. CI validates the document against the OpenAPI 3.1 schema, checks route coverage and anonymous access, and rejects a committed document that differs from generation.
-
-## Browser transport policy
-
-Issue #777 adds `auth.origins` for additional exact browser origins. The canonical `--origin` or `USINE_ORIGIN` remains the address for sign-in links and callbacks and is always allowed; without it, the canonical address is the loopback listener. Authentication configuration changes require a restart, so an accepted runtime snapshot cannot imply that a new origin policy already applies.
-
-One global HTTP middleware checks origins before route handling and uses Effect's pre-response hook for security and CORS headers, including router errors. The policy refuses unknown origins without any CORS headers and validates preflight methods and headers. The built-in Effect CORS middleware emits credential headers for disallowed origins and does not reject those requests, so the server implements this policy at the same boundary as its response headers.
-
-HSTS follows the configured canonical HTTPS origin; forwarded headers cannot enable it. The bundled UI's CSP allows inline styles for component positioning and syntax highlighting, data-URL fonts bundled by dependencies, and HTTPS images for avatars and Markdown. Scripts and connections remain restricted to the instance origin.
-
-
-## Roles, scoped tokens, and the local actor
-
-Amended for [#776](https://github.com/basaltbytes/usine/issues/776) on 2026-11-01:
-
-Role bindings are named configuration entities owned by `@usine/core/access`. They bind a stable numeric GitHub member ID to instance admin or to a project viewer, operator, or maintainer role. Configuration validates project references and scope/role combinations. Bindings can precede membership so imports do not depend on GitHub availability; an unenrolled identity cannot authenticate. Members added through the API receive no implicit role.
-
-A separate SQL migration ledger grants existing members instance admin once. First enrollment records membership and its admin binding in one transaction. Member removal deletes credentials and bindings in one transaction and refuses removal of the last enrolled admin. Configuration edits can deliberately remove all admin bindings; the local actor remains available for recovery.
-
-Every operator endpoint declares its minimum permission. Resource handlers check project scope, and list results are filtered after shared caches. Configuration history exposes only revisions whose changed entities are all readable. Shared agents and non-secret runtime settings are readable to project viewers; workers, bindings, instance attention controls, and administrative configuration entities require admin. Internal services retain trusted instance permissions by default; the HTTP boundary always replaces them with authenticated grants.
-
-A device token stores a permission ceiling. Device sign-in snapshots current grants, and token creation and scope editing reject permissions wider than the caller's. Each device token request intersects the ceiling with current bindings. Legacy device tokens decode with a full-member ceiling for compatibility. Non-admin device tokens cannot manage tokens, while browser sessions can manage their own credentials.
-
-Amended for [#811](https://github.com/basaltbytes/usine/issues/811) on 2026-11-02: browser sessions follow current role bindings on every request, with no scope ceiling. This also applies to existing sessions, whose stored scopes are ignored. Scope edits apply only to device tokens; the server rejects browser-session scope edits, and the Tokens page explains that browser access follows role bindings. Grants, promotions, and removals therefore apply to the same browser session without another sign-in.
-
-The built-in local actor has instance admin access and no GitHub member. Store its attribution as the reserved string `local admin`, which cannot be a valid GitHub login. This preserves existing audit fields and historical logins without inventing a GitHub account. Local API writes and direct configuration CLI revisions use this actor. Filesystem permissions protect the CLI's direct database access. Local one-time links continue to issue member browser sessions and do not expose the local credential to browsers.
-
-## Operator API as MCP tools
-
-Amended for [#879](https://github.com/basaltbytes/usine/issues/879) on 2026-11-11: agents on a laptop and the supervisor use the operator API through MCP tools generated from the published OpenAPI document, one for each operation of the operator group. Sign-in, setup, and documentation operations have no tools.
-
-- **Permission extension.** Every published operation carries `x-usine-permission`, taken from the same permission maps that the route policy and the auth guard enforce. The document then holds what a tool generator needs to filter tools for a caller, including a client that reads only the document of a remote instance, and the docs check fails when an operation has no permission.
-- **Operation ceiling.** A device token can store the operation IDs that it may call. Scopes narrow a token by permission and project, but an agent token often needs `operate` for approving without retrying or canceling. The route policy and the auth guard enforce the ceiling next to the permission check. Reading the session and signing out stay allowed, so a narrowed token can still inspect and revoke itself. The ceiling is stored in the token's JSON value with its scopes, so a token without it decodes with no ceiling and the store needs no schema migration. A scope edit without the key keeps the current ceiling: a client that knows only scopes can't widen a token by omission.
-- **Device token expiry.** A device token can have an expiry, set at creation. The existing expiry column and checks of browser sessions enforce it.
-- **The MCP endpoint reuses the operator handlers.** `POST /api/mcp` sends each tool call back through the same router as an HTTP request with the caller's credential. The auth guard, the route policy, project checks, and audit attribution therefore apply to a tool call exactly as to the HTTP request, with no second implementation of the operations or their checks. Calling the backend directly would need each check reimplemented beside the tool. Listing filters tools by the caller's grants and ceiling only to hide them; the server still checks every call. Effect's `McpServer` keeps one tool list for all its sessions, so the endpoint keeps one server for each set of visible tools, and a session stays on the server of its token's grants.
+- **The network as the only boundary**: no identity, and no protection on a public address.
+- **Instance tokens without sign-in**: an approval can't record who approved.
+- **Any OIDC provider**: every instance would need one, while every member has a GitHub login.
+- **Instance-wide roles only**: a contractor on one project would see every project.
+- **GitHub repository permissions as the only source of bindings**: no way to grant less than GitHub does.
+- **Built-in ACME**: usine would bind ports 80 and 443 and handle keys and renewals.

@@ -86,7 +86,7 @@ Two mistakes in the script's first draft that usine code is likely to repeat:
 - **One Session, one process.** One bad commit from any extension poisons the Session for every running conversation, so the orchestrator needs a reopen supervisor, and extensions need typed boundaries like other code.
 - **No forced termination in-process.** Killing a tool that ignores its abort signal means killing the orchestrator. The parent's only tool delegates to a remote process that the transport can kill.
 - **Two SQLite connections, one file.** usine's rows (items, events, workers, projections) stay under drizzle; runs, attempts, and conversations move to pi-durable storage. A usine row and a pi-durable commit are never one transaction, so ADR 0010's projection-plus-startup-sweep pattern stays for usine's rows.
-- **Web UI rework.** The run drawer, ADR 0025's bookmarks, and the transcript reader use transcript sequences and attempt/session/call ids, and would read conversation entries and `watchEvents()` instead.
+- **Web UI rework.** The run drawer, the reader bookmarks, and the transcript reader use transcript sequences and attempt/session/call ids, and would read conversation entries and `watchEvents()` instead.
 - **Remote child spawn.** The Agent SDK over an SSH wrapper is unverified. If it fails, the exe.dev adapter would drive the Claude CLI's stream-json mode over SSH.
 - **Cloudflare.** The Durable Object adapter suits a one-writer harness, but spawning children on a worker from a Durable Object needs a worker-side agent protocol that doesn't exist yet. The local and exe.dev targets don't need it.
 
@@ -105,7 +105,7 @@ ADRs to amend, each with a dated entry giving the new why: 0003 (run durability 
 
 Steps 1 to 4 merged to main in PRs #188, #194, #202, #206, and #208, with two departures from the plan:
 
-- The pi-durable task is the attempt (`usine.attempt`), not the run: a run task would add a second task type for a dozen lines of state machine whose state is already in usine's tables. The run loop (approval gate, worker reserve, attempt, finish decision, continuation) is an engine fiber over the run tables with a startup reconcile. The Effect workflow, the workflow commands table, and the cluster tables are gone (ADR 0003 amendment).
+- The pi-durable task is the attempt (`usine.attempt`), not the run: a run task would add a second task type for a dozen lines of state machine whose state is already in usine's tables. The run loop (approval gate, worker reserve, attempt, finish decision, continuation) is an engine fiber over the run tables with a startup reconcile. The Effect workflow, the workflow commands table, and the cluster tables are gone ([ADR 0002](../adr/0002-run-model-event-run-step-attempt.md)).
 - The transcript store stays. Claude Code and Codex children run outside the harness, so their events reach storage only through the relay that appends attempt channel envelopes to `usine_attempt_transcripts`; pi-durable's conversation entries contain only the parent. The run drawer still reads the transcript, so `PROTOCOL_VERSION` stays on the envelopes.
 
 Dogfooded on the factory instance: after a SIGKILL mid-attempt and a restart, the same attempt reattaches and the run finishes on it; cancel stops the parent task and its child with no orphan; the approval gate waits and resumes. Follow-ups are on the issues linked from #176.

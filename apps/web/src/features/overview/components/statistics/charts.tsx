@@ -27,7 +27,7 @@ import {
 
 const OUTCOMES = ["succeeded", "failed", "canceled"] as const;
 
-/** The run state tones of ADR 0015, so an outcome has the same colour as its state mark. */
+/** The run state tones of `DESIGN.md`, so an outcome has the same colour as its state mark. */
 const outcomeConfig = {
   succeeded: { label: "Succeeded", color: "var(--run-succeeded)" },
   failed: { label: "Failed", color: "var(--run-failed)" },

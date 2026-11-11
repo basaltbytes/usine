@@ -1009,7 +1009,7 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
   // edited later; those are dropped (#429).
   const posted = written.filter(({ at }) => sincePrepared(at));
   // Attempts that write as the same bot login are distinguished by the Agent's signature
-  // (ADR 0006, #394). Trailing whitespace is ignored.
+  // (#394). Trailing whitespace is ignored.
   const signature = githubSignature(spec.agent.name);
   const signed = posted.filter(
     ({ body }) => body !== undefined && body.trimEnd().endsWith(signature),

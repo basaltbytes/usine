@@ -1,7 +1,7 @@
 import { type Brand, Schema } from "effect";
 import { RepositoryId } from "./installation.ts";
 
-/** GitHub's positive delivery ID as decimal digits. Compare IDs with `BigInt` (ADR 0014). */
+/** GitHub's positive delivery ID as decimal digits. Compare IDs with `BigInt`. */
 export const WebhookDeliveryId = Schema.String.check(Schema.isPattern(/^[1-9][0-9]*$/u)).pipe(
   Schema.brand("WebhookDeliveryId"),
 );

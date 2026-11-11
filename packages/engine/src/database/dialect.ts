@@ -5,7 +5,7 @@ import { sql, type SQLWrapper } from "drizzle-orm";
 
 const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
 
-// Literal paths must match the expressions in SQLite indexes (ADR 0020).
+// Literal paths must match the expressions in SQLite indexes.
 export const jsonExtract = (value: SQLWrapper, path: string) =>
   sql`json_extract(${value}, ${sql.raw(quoted(path))})`;
 

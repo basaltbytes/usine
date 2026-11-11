@@ -1,7 +1,7 @@
 import { UsineMark } from "~/components/usine-mark";
 import { cn } from "~/lib/utils";
 
-/** Returns the tone class for a Run, Attempt, Project, or Loop state (ADR 0015). An unpaused Loop
+/** Returns the tone class for a Run, Attempt, Project, or Loop state (the State Tone Rule in `DESIGN.md`). An unpaused Loop
  * is `live`. Issue and pull request states use `ItemMark`. */
 const stateTone = (state: string): string => {
   switch (state) {

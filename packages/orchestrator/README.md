@@ -52,7 +52,7 @@ First time right counts merged tasks where no loop succeeded twice on the same i
 
 The overview joins the 500 highest-numbered stored items and every stored item with an open run into task cards in each repo's authored lanes. Task detail and board moves use the same selection. Items with open runs do not count against the history limit; linked items join when both projections are in this selection. Same-repo issue-closing links and saved run PR results join an issue to a PR. Repos without lanes get proposals from the label catalog, including unused labels and repos without items. Items matching no source go to a read-only `Unmapped` lane; label matches beat state sources. Each card keeps every saved run on its items, oldest first.
 
-The newest open run sets the current item; between runs, an open PR, then the latest settled PR, replaces the issue. Its labels and state pick the lane, so a task whose PR is in review stays put when the issue loses its trigger label. While the newest open run is `Running` on an open item, the card goes to the first label lane matching the item's current labels; if none matches, to the first label lane matching the labels in that run's event payload (`RunReader.events`), until the run ends; if neither matches, the item's state decides. `Operator.task` places tasks the same way, and `Operator.moveBoardItem` records the lane the card left (ADR 0024).
+The newest open run sets the current item; between runs, an open PR, then the latest settled PR, replaces the issue. Its labels and state pick the lane, so a task whose PR is in review stays put when the issue loses its trigger label. While the newest open run is `Running` on an open item, the card goes to the first label lane matching the item's current labels; if none matches, to the first label lane matching the labels in that run's event payload (`RunReader.events`), until the run ends; if neither matches, the item's state decides. `Operator.task` places tasks the same way, and `Operator.moveBoardItem` records the lane the card left.
 
 A card also has `pullRequest` (the open PR, else the newest merged one) and `usage` from `RunUsageReader`: ended attempt time, working attempts' starts, and tokens and dollars per billing pool over its runs' sessions. A pool's dollars are its priced sessions'; `unpriced` marks a session in a priced pool without a price yet, such as a Claude session before its first result, so the cost is a lower bound. The overview is kept until the revision or instance changes; token reports change neither, so each read re-reads working attempts' reports and re-sums cards whose runs used more.
 
@@ -438,7 +438,7 @@ The overview includes every open run and the latest 50 closed runs across the in
 
 Board polling uses current runs selected in SQL and aggregate history, including links from older run results. Complete prompts, results, and harvested comments are read for detail views.
 
-The operator HTTP contract includes identifier-only change notices, scoped navigation and attention representations, worker reads, and paginated board cards and task runs. See [ADR 0034](../../docs/adr/0034-web-change-notices.md).
+The operator HTTP contract includes identifier-only change notices, scoped navigation and attention representations, worker reads, and paginated board cards and task runs. See [Change notices](../../docs/architecture/operator-surfaces.mdx#change-notices).
 
 ## Schema contracts
 

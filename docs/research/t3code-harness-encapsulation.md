@@ -34,7 +34,7 @@ t3code at `337c585` (base URL `https://github.com/pingdotgg/t3code/blob/337c5858
 
 usine at `f7c670a`:
 
-- **U1:** [Harness adapters](./harness-adapters.md), [ADR 0021](../adr/0021-pi-parent-pool-follows-authentication.md), [ADR 0027](../adr/0027-gateway-credential-proxy.md).
+- **U1:** [Harness adapters](./harness-adapters.md), [ADR 0021](https://github.com/basaltbytes/usine/blob/2557b04fff7602e8c4bce3f5f59bed724f43b3b7/docs/adr/0021-pi-parent-pool-follows-authentication.md), [ADR 0027](../adr/0027-gateway-credential-proxy.md).
 - **U2:** [`packages/agents/src/harness/`](../../packages/agents/src/harness/) (`claude/`, `codex/`, `pi/`, `launch.ts`, `conversation.ts`, `session.ts`, `runtime.ts`, `capability.ts`, `harness.ts`), [`packages/agents/src/runtime.ts`](../../packages/agents/src/runtime.ts), [`packages/agents/src/child-host/child-host.ts`](../../packages/agents/src/child-host/child-host.ts), [`packages/durable/src/attempt/subagent.ts`](../../packages/durable/src/attempt/subagent.ts).
 - **U3:** [`packages/executor/src/ssh/gateway/environment.ts`](../../packages/executor/src/ssh/gateway/environment.ts), [`packages/executor/src/ssh/api-keys.ts`](../../packages/executor/src/ssh/api-keys.ts), [`packages/agents/package.json`](../../packages/agents/package.json), [`packages/agents/test/`](../../packages/agents/test/).
 - **U4:** review threads on [#999](https://github.com/basaltbytes/usine/pull/999) (head `57b109d`), [#1000](https://github.com/basaltbytes/usine/pull/1000) (head `77a441f`), and [#1001](https://github.com/basaltbytes/usine/pull/1001) (head `942cd2a`, closed and parked by the owner).
