@@ -9,10 +9,7 @@ export const redirects = {
   "/reference/configuration/cli": "/reference/cli/",
   "/architecture/execution":
     "https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx",
-  "/architecture/gaps": "https://github.com/basaltbytes/usine/blob/main/docs/architecture/gaps.md",
   "/architecture": "https://github.com/basaltbytes/usine/blob/main/docs/architecture/index.mdx",
-  "/architecture/loops-shipped":
-    "https://github.com/basaltbytes/usine/blob/main/docs/architecture/loops-shipped.md",
   "/architecture/operator-surfaces":
     "https://github.com/basaltbytes/usine/blob/main/docs/architecture/operator-surfaces.mdx",
   "/architecture/run-lifecycle":

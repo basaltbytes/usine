@@ -9,7 +9,7 @@ are marked. This extends the August study of exe.dev's product surface,
 An exe.dev worker is one persistent VM (`ssh <vm>.exe.xyz`) that runs each Claude Code or Codex child
 as one SSH command with a pid file beside the worktree
 (`packages/agents/src/child-host/child-host.ts`). Harness logins are on the VM
-([ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md)), and exe.dev's GitHub
+([ADR 0006](../adr/0006-executor-prepares-checkouts-runs-children-on-workers.md)), and exe.dev's GitHub
 integration attaches a per-repository grant for the attempt window
 ([ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md)). A replacement needs an SSH
 destination, a checkout on a persistent disk, and machine-attached credentials the agent can't read.
@@ -394,7 +394,7 @@ credential proxy (see section 2): the projects that inject credentials (CubeSand
 OpenShell, Gondolin, microsandbox) are under a year old or are libraries. The pieces exist
 separately and are small enough to assemble. No stage changes the executor seam: credentials are
 machine-attached capabilities, and making a worker ready is adapter-specific
-([ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md)).
+([ADR 0006](../adr/0006-executor-prepares-checkouts-runs-children-on-workers.md)).
 
 ### Stage 1: an `ssh` Worker on a rented EU VM
 

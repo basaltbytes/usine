@@ -16,7 +16,7 @@ A loop file is `loops/<name>.md` in the instance repo: YAML frontmatter for stru
 - The selector stays declarative (names or tags, intersected if both): the engine prunes polling by it, and an expression would hide repo scope until evaluated.
 - UI writes edit the YAML AST in place, keeping comments, key order, and formatting. Nothing rewrites hand-authored files in the background.
 - Validation is strict, and an invalid loop is quarantined alone. An invalid `usine.yaml` (instance-wide `version:`, registry, settings) is an instance-level error.
-- Short defaults: `step: run`, `approval: none`. ([ADR 0016](./0016-config-editing-forms-first-preview-before-arming.md) removed `enabled:`: pause is runtime state per [ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md), never a file field.)
+- Short defaults: `step: run`, `approval: none`. ([ADR 0016](./0016-config-editing-forms-first-preview-before-arming.md) removed `enabled:`: pause is runtime state, never a file field.)
 
 ## Amendment (2026-10-30, #790): conditional approval
 
