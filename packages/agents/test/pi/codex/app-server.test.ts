@@ -16,6 +16,7 @@ import {
   PlatformError,
   Predicate,
   Queue,
+  References,
   Result,
   Schema,
   Sink,
@@ -89,6 +90,7 @@ const spawnerFor = (
     readonly exitOnEof?: boolean;
     readonly stdout?: Stream.Stream<Uint8Array>;
     readonly kill?: Effect.Effect<void, PlatformError.PlatformError>;
+    readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>;
   } = {},
 ) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
@@ -123,7 +125,7 @@ const spawnerFor = (
         }
         return ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(4242),
-          exitCode: Deferred.await(process.exit),
+          exitCode: options.exitCode ?? Deferred.await(process.exit),
           isRunning: Deferred.isDone(process.exit).pipe(Effect.map((exited) => !exited)),
           kill: () =>
             Deferred.succeed(process.killed, undefined).pipe(
@@ -156,13 +158,42 @@ const failedKill = Effect.fail(
   }),
 );
 
-const warningsLogger = (warnings: Array<string>) =>
-  Logger.layer([
-    Logger.make<unknown, void>(({ logLevel, message }) => {
-      if (["WARN", "ERROR"].includes(logLevel.toUpperCase()))
-        warnings.push(String(Array.isArray(message) ? message[0] : message));
-    }),
-  ]);
+interface LogRecord {
+  readonly level: string;
+  readonly message: string;
+  readonly exitCode: unknown;
+}
+
+// Records every log at debug level and above with its message and `exitCode` field, if any.
+const recordingLogger = (records: Array<LogRecord>) =>
+  Layer.mergeAll(
+    Logger.layer([
+      Logger.make<unknown, void>(({ logLevel, message }) => {
+        const [text, fields] = Array.isArray(message) ? message : [message];
+        records.push({
+          level: logLevel.toUpperCase(),
+          message: String(text),
+          exitCode: Predicate.hasProperty(fields, "exitCode") ? fields.exitCode : undefined,
+        });
+      }),
+    ]),
+    Layer.succeed(References.MinimumLogLevel)("Debug"),
+  );
+
+const warningsIn = (records: ReadonlyArray<LogRecord>) =>
+  records
+    .filter(({ level }) => level === "WARN" || level === "ERROR")
+    .map(({ message }) => message);
+
+const stopMessages: ReadonlyArray<string> = [
+  "Forcing Codex app-server to stop after graceful shutdown failed",
+  "Stopping Codex app-server after it exited during a failed graceful shutdown",
+  "Could not force Codex app-server to stop",
+  "Codex app-server had already exited before the forced stop",
+];
+
+const stopRecordsIn = (records: ReadonlyArray<LogRecord>) =>
+  records.filter(({ message }) => stopMessages.includes(message));
 
 const awaitStdinLines = (process: FakeProcess, count: number) =>
   Effect.gen(function* () {
@@ -404,7 +435,7 @@ describe("Codex app-server transport", () => {
   it.effect("logs no warning when stopping an app-server that already exited", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
-      const warnings: Array<string> = [];
+      const records: Array<LogRecord> = [];
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* (yield* CodexAppServer).open({
@@ -419,20 +450,32 @@ describe("Codex app-server transport", () => {
         Effect.provide(
           codexAppServerLive.pipe(
             Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
-            Layer.merge(warningsLogger(warnings)),
+            Layer.merge(recordingLogger(records)),
           ),
         ),
       );
       const killed = yield* Deferred.isDone(process.killed);
       assert.isTrue(killed, "the stop still reaps the exited process");
-      assert.deepStrictEqual(warnings, []);
+      assert.deepStrictEqual(warningsIn(records), []);
+      assert.deepStrictEqual(stopRecordsIn(records), [
+        {
+          level: "DEBUG",
+          message: "Stopping Codex app-server after it exited during a failed graceful shutdown",
+          exitCode: 1,
+        },
+        {
+          level: "DEBUG",
+          message: "Codex app-server had already exited before the forced stop",
+          exitCode: 1,
+        },
+      ]);
     }),
   );
 
-  it.effect("warns when the app-server is still alive after the forced stop fails", () =>
+  it.effect("waits for an exit report that trails the failed forced stop", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
-      const warnings: Array<string> = [];
+      const records: Array<LogRecord> = [];
       const released = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* (yield* CodexAppServer).open({
@@ -446,7 +489,50 @@ describe("Codex app-server transport", () => {
         Effect.provide(
           codexAppServerLive.pipe(
             Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
-            Layer.merge(warningsLogger(warnings)),
+            Layer.merge(recordingLogger(records)),
+          ),
+        ),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(process.stdinClosed);
+      yield* TestClock.adjust("15 seconds");
+      yield* Deferred.await(process.killed);
+      yield* TestClock.adjust("500 millis");
+      yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(1));
+      yield* Fiber.join(released);
+      assert.deepStrictEqual(stopRecordsIn(records), [
+        {
+          level: "WARN",
+          message: "Forcing Codex app-server to stop after graceful shutdown failed",
+          exitCode: undefined,
+        },
+        {
+          level: "DEBUG",
+          message: "Codex app-server had already exited before the forced stop",
+          exitCode: 1,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("warns when the app-server is still alive after the forced stop fails", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const records: Array<LogRecord> = [];
+      const released = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+          });
+        }),
+      ).pipe(
+        Effect.provide(
+          codexAppServerLive.pipe(
+            Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
+            Layer.merge(recordingLogger(records)),
           ),
         ),
         Effect.forkChild,
@@ -454,7 +540,49 @@ describe("Codex app-server transport", () => {
       yield* Deferred.await(process.stdinClosed);
       yield* TestClock.adjust("1 minute");
       yield* Fiber.join(released);
-      assert.deepStrictEqual(warnings, [
+      assert.deepStrictEqual(warningsIn(records), [
+        "Forcing Codex app-server to stop after graceful shutdown failed",
+        "Could not force Codex app-server to stop",
+      ]);
+    }),
+  );
+
+  it.effect("warns when the app-server's exit monitor failed before the forced stop", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const records: Array<LogRecord> = [];
+      const monitorFailed = PlatformError.systemError({
+        _tag: "Unknown",
+        module: "ChildProcess",
+        method: "exitCode",
+        description: "Failed to read the exit code",
+      });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+          });
+        }),
+      ).pipe(
+        Effect.provide(
+          codexAppServerLive.pipe(
+            Layer.provide(
+              spawnerFor(process, {
+                exitOnEof: false,
+                kill: failedKill,
+                exitCode: Effect.fail(monitorFailed),
+              }),
+            ),
+            Layer.merge(recordingLogger(records)),
+          ),
+        ),
+      );
+      const killed = yield* Deferred.isDone(process.killed);
+      assert.isTrue(killed);
+      assert.deepStrictEqual(warningsIn(records), [
         "Forcing Codex app-server to stop after graceful shutdown failed",
         "Could not force Codex app-server to stop",
       ]);
