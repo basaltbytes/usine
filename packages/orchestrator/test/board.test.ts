@@ -4,7 +4,7 @@ import { ProjectView } from "../src/operator/overview.ts";
 import { groupProjectViews } from "../src/operator/projects.ts";
 import { boardRepositories } from "@usine/config/project";
 import { assert, describe, it } from "@effect/vitest";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { LabelLaneSource, LaneName } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";

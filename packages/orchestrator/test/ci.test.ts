@@ -24,6 +24,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
+import { GitHubLabelName } from "@usine/core/label";
 import * as RunState from "@usine/core/run/state";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
@@ -1662,7 +1663,7 @@ it.live.each(["added", "removed", "changed"] as const)(
           approval: "required",
           maxCycles: CycleLimit.make(4),
           permissions: "read",
-          outcomeLabels: ["review-passed"],
+          outcomeLabels: [GitHubLabelName.make("review-passed")],
           body: PromptTemplate.make(
             "This edited prompt must not replace the recorded failure task.",
           ),
@@ -1728,7 +1729,7 @@ it.live.each(["added", "removed", "changed"] as const)(
             Effect.timeout("5 seconds"),
           );
           const saved = verified[0] ?? assert.fail("missing completion verification");
-          assert.deepStrictEqual(saved.outcomeLabels, ["review-passed"]);
+          assert.deepStrictEqual(saved.outcomeLabels, [GitHubLabelName.make("review-passed")]);
           assert.deepStrictEqual(saved.cycleLimit, Option.some(CycleLimit.make(4)));
           assert.deepStrictEqual(saved.agent, editedAgent.agent);
           assert.deepStrictEqual(saved.parentModel, editedAgent.parentModel);

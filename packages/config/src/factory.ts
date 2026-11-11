@@ -42,9 +42,9 @@ import {
   WorkerRoot,
 } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema, SchemaGetter } from "effect";
-import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
+import { nonBlankString, uniqueLabelNames, uniqueRepositoryNames } from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
-import { canonicalLabelName, DeclaredLabel } from "./label.ts";
+import { DeclaredLabel } from "./label.ts";
 
 /** A repository tag that loop selectors match. */
 export const RegistryTag = nonBlankString("Expected a non-blank registry tag").pipe(
@@ -60,12 +60,9 @@ const uniqueNames = Schema.makeFilter<ReadonlyArray<{ readonly name: string }>>(
   { message: "Expected unique names" },
 );
 
-const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
-  (values) => new Set(values.map(({ name }) => canonicalLabelName(name))).size === values.length,
-  { message: "Expected unique GitHub label names" },
+const DeclaredLabels = Schema.Array(DeclaredLabel).check(
+  uniqueLabelNames<DeclaredLabel>(({ name }) => name),
 );
-
-const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
 
 /** A registry entry with selector tags and legacy repository lanes (ADR 0031). */
 export class ManagedRepo extends Schema.Class<

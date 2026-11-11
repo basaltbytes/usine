@@ -40,7 +40,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { NodeHttpPlatform, NodeHttpServer, NodeFileSystem, NodePath } from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { LaneName, StateLaneSource } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";

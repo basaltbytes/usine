@@ -2,7 +2,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { InstanceDirectory } from "@usine/core/instance";

@@ -1,5 +1,5 @@
 import { InstanceDirectory } from "@usine/core/instance";
-import { Context, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
+import { Context, Effect, FileSystem, Layer, Match, Option, Path, Result } from "effect";
 import { type AgentFile, InvalidAgent } from "./agent.ts";
 import { ConfigFileError, FactoryConfigError, InstancePath } from "./file.ts";
 import { LoadedInstance } from "./instance/instance.ts";
@@ -198,16 +198,24 @@ export class InstanceFolder extends Context.Service<
               yield* Effect.forEach(
                 warnings,
                 (warning) =>
-                  warning._tag === "UndeclaredLaneLabelWarning"
-                    ? Effect.logWarning("Board Lane references an undeclared GitHub label", {
-                        repository: warning.repository,
-                        lane: warning.lane,
-                        label: warning.label,
-                      })
-                    : Effect.logWarning("Loop trigger references an undeclared GitHub label", {
-                        loop: warning.loop,
-                        label: warning.label,
+                  Match.valueTags(warning, {
+                    UndeclaredLaneLabelWarning: ({ repository, lane, label }) =>
+                      Effect.logWarning("Board Lane references an undeclared GitHub label", {
+                        repository,
+                        lane,
+                        label,
                       }),
+                    UndeclaredTriggerLabelWarning: ({ loop, label }) =>
+                      Effect.logWarning("Loop trigger references an undeclared GitHub label", {
+                        loop,
+                        label,
+                      }),
+                    UndeclaredOutcomeLabelWarning: ({ loop, label }) =>
+                      Effect.logWarning("Loop outcome label is not a declared GitHub label", {
+                        loop,
+                        label,
+                      }),
+                  }),
                 { discard: true },
               );
 

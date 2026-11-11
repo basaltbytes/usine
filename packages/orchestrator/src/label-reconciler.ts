@@ -1,4 +1,5 @@
-import { canonicalLabelName, type DeclaredLabel, GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
+import { type DeclaredLabel } from "@usine/config/label";
 import { RepositoryName } from "@usine/core/repository";
 import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection";
 import { GitHubLabelWriter, NewRepositoryLabel } from "@usine/github/label-writer";

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GitHubLabelName } from "./label.ts";
 
 /** The Loop file name. Renaming the file creates a new Loop and retires the old one (ADR 0001). */
 export const LoopName = Schema.NonEmptyString.pipe(Schema.brand("LoopName"));
@@ -22,7 +23,5 @@ export const LoopPermissions = Schema.Literals(LOOP_PERMISSIONS);
 export type LoopPermissions = typeof LoopPermissions.Type;
 
 /** Labels that can prove a loop completed its task; any one label satisfies the requirement. */
-export const OutcomeLabels = Schema.Array(
-  Schema.String.check(Schema.isPattern(/^\S(?:.*\S)?$/u), Schema.isMaxLength(50)),
-).check(Schema.isUnique());
+export const OutcomeLabels = Schema.Array(GitHubLabelName).check(Schema.isUnique());
 export type OutcomeLabels = typeof OutcomeLabels.Type;

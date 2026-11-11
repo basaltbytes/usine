@@ -3,7 +3,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { InstancePath } from "@usine/config/file";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { DurableHarness } from "@usine/durable/harness";
 import { gatewayModelAccess } from "@usine/durable/gateway";
 import { fauxParent } from "@usine/durable/testing";
