@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { WarningIcon } from "@phosphor-icons/react";
 import type { ConfigurationView, LoopFileView } from "@usine/orchestrator/operator";
 import { RepositoryLink } from "~/features/configuration/components/loops/repository-link";
 import { Fact, Facts, Unset } from "~/features/configuration/components/section";
@@ -62,6 +63,30 @@ export const LoopFacts = ({ loop, configuration }: LoopFactsProps) => {
         <Unset>runs per item before a reset</Unset>
       </Fact>
       <Fact label="Permissions">{permissionsLabel[loop.permissions]}</Fact>
+      <Fact label="Outcome labels">
+        {loop.outcomeLabels.length === 0 ? (
+          <Unset>None; the agent's completion is enough</Unset>
+        ) : (
+          <>
+            <ul className="flex flex-col gap-0.5">
+              {loop.outcomeLabels.map((label) => (
+                <li key={label}>
+                  <code className="font-mono text-xs">{label}</code>
+                </li>
+              ))}
+            </ul>
+            {loop.undeclaredOutcomeLabels.length > 0 && (
+              <p className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+                <WarningIcon weight="fill" className="mt-0.5 size-3 shrink-0 text-warning" />
+                <span>
+                  Not declared in Configuration &gt; Labels:{" "}
+                  {loop.undeclaredOutcomeLabels.join(", ")}
+                </span>
+              </p>
+            )}
+          </>
+        )}
+      </Fact>
       <Fact label="Priority">
         {loop.priority === null ? (
           <Unset>0; ties use lane order</Unset>

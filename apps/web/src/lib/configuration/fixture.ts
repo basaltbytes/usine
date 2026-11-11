@@ -89,6 +89,8 @@ export const configurationJson = {
       prompt: startDevPrompt,
       paused: false,
       undeclaredLabels: ["urgent"],
+      outcomeLabels: [],
+      undeclaredOutcomeLabels: [],
     },
     {
       name: "review-pr",
@@ -108,6 +110,8 @@ export const configurationJson = {
       prompt: "Review the pull request.",
       paused: true,
       undeclaredLabels: [],
+      outcomeLabels: ["ready-to-merge", "agent-review-findings", "review-pased"],
+      undeclaredOutcomeLabels: ["review-pased"],
     },
   ],
   quarantinedLoops: [
