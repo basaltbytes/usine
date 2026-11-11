@@ -61,7 +61,7 @@ import {
   ResultRecorded,
 } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
-import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as attemptRuntimeLayer } from "../src/testing.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
 import {
   DurableHarness,

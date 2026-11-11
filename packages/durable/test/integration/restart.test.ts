@@ -27,9 +27,14 @@ import {
   Schema,
 } from "effect";
 import { AttemptRequest, AttemptRuntime } from "../../src/attempt-runtime.ts";
-import { layer as runtimeLayer } from "../../src/attempt/runtime.ts";
 import { durableError, layer as harnessLayer } from "../../src/harness.ts";
-import { answer, delegate, fauxParent, type ParentStep } from "../../src/testing.ts";
+import {
+  answer,
+  delegate,
+  fauxParent,
+  type ParentStep,
+  routedRuntimeLayer as runtimeLayer,
+} from "../../src/testing.ts";
 import { attemptRequest, recordingSink } from "../support.ts";
 
 for (const harness of ["claude", "codex", "pi"] as const) {

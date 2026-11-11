@@ -30,7 +30,7 @@ import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Result } f
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc } from "../src/attempt/documents.ts";
-import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as runtimeLayer } from "../src/testing.ts";
 import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
 import {
   answer,

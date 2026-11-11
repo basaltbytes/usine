@@ -12,7 +12,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Queue } from "effect";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
-import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as runtimeLayer } from "../src/testing.ts";
 import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
 import { answer, delegate, fauxParent } from "../src/testing.ts";
 import { assertAdmitted, attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";
