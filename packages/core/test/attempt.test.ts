@@ -9,6 +9,7 @@ import {
   FailureResolution,
   AttemptNumber,
   AttemptWindow,
+  pendingProviderRetry,
   shouldAutoRetry,
   windowsOverlap,
 } from "../src/attempt/attempt.ts";
@@ -22,7 +23,9 @@ import {
   isAutoRetryableFailure,
   RunawayFailure,
 } from "../src/attempt/failure.ts";
+import { AttemptFailed } from "../src/attempt/outcome.ts";
 import { SalvageRetained } from "../src/attempt/salvage.ts";
+import { Running } from "../src/run/state.ts";
 import { RepositoryName } from "../src/repository.ts";
 import { Event, DedupKey, EventId } from "../src/event.ts";
 
@@ -69,6 +72,44 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
       false,
     );
   });
+});
+
+describe("provider retry deadline", () => {
+  const endedAt = DateTime.makeUnsafe("2026-11-11T03:00:00Z");
+  const retryAt = (number: number, resetsAt: Option.Option<DateTime.Utc>) =>
+    pendingProviderRetry(Running.make(), [
+      {
+        number: n(number),
+        outcome: Option.some(
+          AttemptFailed.make({
+            failure: ProviderCapacityFailure.make({ message: "Usage limit reached", resetsAt }),
+          }),
+        ),
+        endedAt: Option.some(endedAt),
+      },
+    ]).pipe(Option.map(({ retryAt }) => DateTime.formatIso(retryAt)));
+
+  it.each([
+    [1, Option.none(), "2026-11-11T03:02:00.000Z"],
+    [2, Option.none(), "2026-11-11T03:05:00.000Z"],
+    [1, Option.some(DateTime.makeUnsafe("2026-11-11T05:00:00Z")), "2026-11-11T05:00:00.000Z"],
+    [2, Option.some(DateTime.makeUnsafe("2026-11-11T03:01:00Z")), "2026-11-11T03:05:00.000Z"],
+  ] as const)(
+    "retries attempt %i no earlier than the backoff or the reported reset time",
+    (number, resetsAt, expected) => {
+      expect(retryAt(number, resetsAt)).toStrictEqual(Option.some(expected));
+    },
+  );
+
+  it.effect("decodes a stored capacity failure without a reset time", () =>
+    Effect.gen(function* () {
+      const failure = yield* Schema.decodeEffect(ProviderCapacityFailure)({
+        _tag: "ProviderCapacityFailure",
+        message: "At capacity",
+      });
+      expect(Option.isNone(failure.resetsAt)).toBe(true);
+    }),
+  );
 });
 
 describe("construction is the only door", () => {
