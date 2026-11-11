@@ -309,6 +309,11 @@ const handlers = HttpApiBuilder.group(
                 Effect.mapError((error) => {
                   if (error._tag === "PullRequestFilesChangedError")
                     return OperatorHttpError.make({ error: error._tag, message: error.message });
+                  if (error._tag === "ProjectNotInstalledError")
+                    return OperatorHttpError.make({
+                      error: error._tag,
+                      message: `The GitHub App has lost access to ${error.repository}. Grant the App installation access to the repository, then retry.`,
+                    });
                   if (
                     error._tag === "GitHubApiError" &&
                     Option.exists(error.status, (status) => status === 404 || status === 422)

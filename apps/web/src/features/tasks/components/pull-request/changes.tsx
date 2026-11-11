@@ -1,16 +1,18 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ItemNumber } from "@usine/core/item";
 import type { ProjectId } from "@usine/core/project";
-import type { RepositoryName } from "@usine/core/repository";
 import { CommitRangeFilesQuery, PullRequestFilesQuery } from "@usine/github/file-changes";
 import type { TaskItemView, TaskView } from "@usine/orchestrator/operator";
+import { OperatorHttpError } from "@usine/orchestrator/operator/http";
+import { Schema } from "effect";
 import { lazy, Suspense, useId, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
 import { Button } from "~/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
 import { Skeleton } from "~/components/ui/skeleton";
 import { pullRequestFilesQuery } from "~/features/tasks/queries";
+import { taskQuery } from "~/lib/tasks/queries";
 import {
   attemptChangesLabel,
   changesFailed,
@@ -20,6 +22,7 @@ import {
   compareChanges,
   loadingChanges,
   noChangedFiles,
+  noNewAttemptCommits,
   noRecordedAttempts,
   noRecordedHead,
   retryChanges,
@@ -41,32 +44,41 @@ const LoadingChanges = () => (
 
 type PullRequestFilesProps = {
   readonly project: ProjectId;
-  readonly repository: RepositoryName;
+  readonly task: TaskView;
   readonly number: ItemNumber;
   readonly state: NonNullable<TaskItemView["pullRequest"]>;
   readonly attempts: TaskView["attemptChanges"];
 };
 
-const PullRequestFiles = ({
-  project,
-  repository,
-  number,
-  state,
-  attempts,
-}: PullRequestFilesProps) => {
+const PullRequestFiles = ({ project, task, number, state, attempts }: PullRequestFilesProps) => {
+  const { repository } = task;
   const selectId = useId();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState("whole");
-  const attempt = attempts.find(({ attemptId }) => attemptId === selected);
+  const ranges = attempts.filter(({ base, head }) => base !== head);
+  const attempt = ranges.find(({ attemptId }) => attemptId === selected);
   const selection =
     attempt === undefined
       ? PullRequestFilesQuery.make({ base: state.base, head: state.head })
       : CommitRangeFilesQuery.make({ base: attempt.base, head: attempt.head });
   const files = useQuery(pullRequestFilesQuery(project, repository, number, selection));
+  // A changed PR answers 409 until the task supplies its new base and head.
+  const retry = async () => {
+    if (
+      Schema.is(OperatorHttpError)(files.error) &&
+      files.error.error === "PullRequestFilesChangedError"
+    )
+      await queryClient.invalidateQueries({
+        queryKey: taskQuery(task.repository, task.number).queryKey,
+        exact: true,
+      });
+    await files.refetch();
+  };
   return (
     <div className="min-w-0 space-y-3 pb-3">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
         <div className="flex min-w-0 items-center gap-2">
-          {attempts.length === 0 ? (
+          {ranges.length === 0 ? (
             <>
               <span>{compareChanges}</span>
               <span className="text-foreground">{wholePullRequest}</span>
@@ -81,7 +93,7 @@ const PullRequestFiles = ({
                 className="min-w-0 max-w-full"
               >
                 <NativeSelectOption value="whole">{wholePullRequest}</NativeSelectOption>
-                {attempts.map((attempt) => (
+                {ranges.map((attempt) => (
                   <NativeSelectOption key={attempt.attemptId} value={attempt.attemptId}>
                     {attemptChangesLabel(attempt.loop, attempt.number, attempt.head)}
                   </NativeSelectOption>
@@ -104,15 +116,17 @@ const PullRequestFiles = ({
           </>
         )}
       </div>
-      {attempts.length === 0 && (
-        <p className="text-xs text-muted-foreground">{noRecordedAttempts}</p>
+      {ranges.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          {attempts.length === 0 ? noRecordedAttempts : noNewAttemptCommits}
+        </p>
       )}
       {files.isPending ? (
         <LoadingChanges />
       ) : files.isError ? (
         <div className="space-y-2">
           <ErrorAlert title={changesFailed} message={files.error.message} />
-          <Button variant="outline" size="sm" onClick={() => void files.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void retry()}>
             {retryChanges}
           </Button>
         </div>
@@ -167,7 +181,7 @@ export const PullRequestChanges = ({ project, task, pullRequest }: PullRequestCh
           ) : (
             <PullRequestFiles
               project={project}
-              repository={task.repository}
+              task={task}
               number={pullRequest.number}
               state={pullRequest.pullRequest}
               attempts={task.attemptChanges.filter(

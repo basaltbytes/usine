@@ -20,8 +20,13 @@
   min-width: 0;
 }
 
+/*
+ * @balade/viewer 0.19 has no option to wrap file paths, so this rule depends on two of its class
+ * names: `file-head` on each file header and `font-mono` on the path. The phone test in
+ * task.page.browser.test.tsx fails if a viewer release renames either one.
+ */
 @media (width < 40rem) {
-  .task-diff .file-head > button .font-mono {
+  .task-diff .file-head .font-mono {
     min-width: 0;
     overflow: visible;
     overflow-wrap: anywhere;
