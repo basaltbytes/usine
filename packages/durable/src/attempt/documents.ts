@@ -40,7 +40,12 @@ type QueuedInput =
 export type AttemptRecord = {
   /** Written in the same commit as the task. */
   taskId: TaskId<AttemptResult> | null;
-  /** The parent model resolved at start. */
+  /**
+   * Whether the Attempt's task started, written in a commit that also changes the task's state, so
+   * the relay wakes and sends `Started`. Absent on older records; read it with `hasStarted`.
+   */
+  started?: boolean;
+  /** The parent model resolved at start, or `null` for an Attempt without a parent session. */
   parentModel: string | null;
   /** The pool and endpoint resolved at launch; absent on older records. */
   parentPool?: BillingPool;
@@ -91,6 +96,10 @@ export type AttemptRecord = {
   unsupervisedMillis?: number;
 };
 
+/** Returns whether the Attempt's task started. An older record started once it has a parent model. */
+export const hasStarted = (record: Readonly<AttemptRecord>): boolean =>
+  record.started === true || record.parentModel !== null;
+
 export const ATTEMPT_RECORD_KIND = "usine.attempt";
 
 export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
@@ -101,6 +110,7 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
   checkpointWhen: () => false,
   initial: () => ({
     taskId: null,
+    started: false,
     parentModel: null,
     parentConversation: null,
     children: 0,

@@ -91,8 +91,11 @@ export class Started extends Schema.TaggedClass<
   Started,
   Brand.Brand<"@usine/core/attempt/channel/Started">
 >("AttemptChannel/Started")("Started", {
-  /** The Pi parent model actually selected when the attempt launched. */
-  parentModel: ModelId,
+  /** The Pi parent model selected when the attempt launched, or `None` if the attempt has no parent session. */
+  parentModel: Schema.OptionFromNullOr(ModelId).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(Option.none<ModelId>())),
+  ),
   /** The previous salvage that could not be rebased onto the prepared revision, or `None`. */
   conflictingSalvage: Schema.OptionFromNullOr(SalvagePushed).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),

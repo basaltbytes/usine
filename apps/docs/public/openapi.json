@@ -50605,8 +50605,15 @@
             ]
           },
           "parentModel": {
-            "type": "string",
-            "pattern": "\\S"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "conflictingSalvage": {
             "anyOf": [
@@ -50642,8 +50649,7 @@
           }
         },
         "required": [
-          "_tag",
-          "parentModel"
+          "_tag"
         ],
         "additionalProperties": false
       },

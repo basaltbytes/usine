@@ -216,6 +216,7 @@ export const attemptTask = (
       }
       await tx.doc(HoldDoc, task.id);
       const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
+      record.started = true;
       record.parentModel = model;
       record.parentPool = pool;
       record.parentEndpoint = Option.getOrNull(endpoint);

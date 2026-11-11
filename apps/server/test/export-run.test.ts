@@ -94,7 +94,9 @@ const executor = Layer.succeed(StepExecutor)({
             sentAt: now,
             payload:
               sequence === 1
-                ? AttemptChannel.Started.make({ parentModel: ModelId.make("selected-parent") })
+                ? AttemptChannel.Started.make({
+                    parentModel: Option.some(ModelId.make("selected-parent")),
+                  })
                 : AttemptChannel.SessionEvent.make({
                     event: TextOutput.make({ session: parent, text: `row ${sequence}` }),
                   }),

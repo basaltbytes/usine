@@ -74,6 +74,7 @@ import {
   delegate,
   fauxParent,
   layer,
+  PARENT_MODEL,
   type ParentStep,
   stubChildBackendLayer,
   StubChildren,
@@ -244,7 +245,7 @@ describe("durable AttemptRuntime", () => {
         });
         const live = yield* runtime.isLive(request.spec.attemptId);
         assert.isFalse(live);
-        // Sent before `execute` starts, so the notice is buffered until the parent starts.
+        // Sent before `execute` starts, so the notice is buffered until the Attempt starts.
         yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* children.next;
@@ -308,6 +309,9 @@ describe("durable AttemptRuntime", () => {
           "parent.SessionStarted",
           "WorkerUnresponsive",
         ]);
+        const started = outbound[0]?.payload;
+        assert(started?._tag === "Started");
+        assert.deepStrictEqual(started.parentModel, Option.some(PARENT_MODEL));
         assert.deepStrictEqual(
           trace(outbound).filter((tag) => !tag.startsWith("Worker")),
           [
@@ -472,7 +476,7 @@ describe("durable AttemptRuntime", () => {
         assertAdmitted(request.spec.attemptId, outbound);
         assert.deepStrictEqual(trace(outbound), ["Failed"]);
         assert.lengthOf(
-          logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
+          logs.matching(/Dropped the Worker notices kept for an Attempt that never started/u),
           1,
         );
       }).pipe(Effect.provide(layer({ database, parent: [] }).pipe(Layer.provideMerge(logs.layer))));
@@ -526,6 +530,10 @@ describe("durable AttemptRuntime", () => {
                   const record = await tx.doc(AttemptRecordDoc, request.spec.attemptId, null);
                   assert.deepStrictEqual(record.pendingOutbound, []);
                   delete record.pendingOutbound;
+                  // A record written before the `started` marker started once it has a model.
+                  assert.isTrue(record.started);
+                  assert.isNotNull(record.parentModel);
+                  delete record.started;
                 }, context),
             );
             return { child, found };

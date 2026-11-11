@@ -180,6 +180,9 @@ export const messageDeliveryLabel = (delivery: MessageDelivery): string => {
   }
 };
 
+/** The attempt detail shown instead of a parent model when an attempt has no parent session. */
+export const NO_PARENT_SESSION = "No parent session";
+
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
 

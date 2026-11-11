@@ -7,7 +7,7 @@ import { Value } from "~/components/runs/transcript/value";
 import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import type { Chapter } from "~/lib/runs/transcript/document/model";
-import { childPromptLabel } from "~/lib/runs/strings";
+import { childPromptLabel, NO_PARENT_SESSION } from "~/lib/runs/strings";
 import { dayLabel, poolLabel, windowLabel } from "~/lib/strings";
 
 type AttemptMetaProps = {
@@ -19,9 +19,10 @@ export const AttemptMeta = ({ chapter, runTask }: AttemptMetaProps) => {
   const harnessLabel = useHarnessLabel();
   const attempt = Option.getOrUndefined(chapter.attempt);
   const parent = chapter.sessions.find(({ session }) => session._tag === "ParentSession");
-  const parentModel = Option.orElse(chapter.parentModel, () =>
-    Option.fromNullishOr(parent?.session.brain.model),
-  );
+  const parentModel =
+    chapter.parent._tag === "Model"
+      ? Option.some(chapter.parent.model)
+      : Option.fromNullishOr(parent?.session.brain.model);
   const children = [
     ...new Map(
       chapter.sessions
@@ -41,6 +42,7 @@ export const AttemptMeta = ({ chapter, runTask }: AttemptMetaProps) => {
     <div className="space-y-1">
       <p className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
         {attempt !== undefined && <Meta label="Worker" value={<Value>{attempt.worker}</Value>} />}
+        {chapter.parent._tag === "NoSession" && <Meta label={NO_PARENT_SESSION} />}
         {Option.match(parentModel, {
           onNone: () => null,
           onSome: (model) => (

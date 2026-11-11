@@ -443,7 +443,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           if (stored === undefined) {
             yield* emit(
               AttemptChannel.Started.make({
-                parentModel: Option.getOrElse(request.spec.parentModel, () =>
+                parentModel: Option.orElseSome(request.spec.parentModel, () =>
                   ModelId.make("stub/parent"),
                 ),
               }),

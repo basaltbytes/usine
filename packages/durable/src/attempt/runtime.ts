@@ -664,7 +664,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
       const routed = yield* hubs.notice(attemptId, notice);
       if (routed._tag === "Kept")
         yield* Effect.logDebug(
-          "Kept a Worker notice for an Attempt not tracked here yet; it is relayed after the parent starts",
+          "Kept a Worker notice for an Attempt not tracked here yet; it is relayed after the Attempt starts",
           {
             notice: notice._tag,
             worker: notice.worker,

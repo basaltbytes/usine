@@ -225,7 +225,7 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
               sequence: AttemptChannel.Sequence.make(1),
               sentAt: lifecycleSubmission.event.receivedAt,
               payload: AttemptChannel.Started.make({
-                parentModel: ModelId.make("concurrent-model"),
+                parentModel: Option.some(ModelId.make("concurrent-model")),
               }),
             });
             yield* Effect.all(

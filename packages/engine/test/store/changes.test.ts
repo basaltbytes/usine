@@ -120,7 +120,7 @@ it.effect(
           attemptId: attempt.id,
           sequence: Sequence.make(1),
           sentAt: yield* DateTime.now,
-          payload: Started.make({ parentModel: ModelId.make("actual-model") }),
+          payload: Started.make({ parentModel: Option.some(ModelId.make("actual-model")) }),
         });
         yield* expectWrite(store.appendTranscript("outbound", envelope), [
           { kind: "attempt", id: attempt.id },
