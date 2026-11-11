@@ -291,6 +291,49 @@ it.effect(
     }),
 );
 
+it.effect(
+  "does not release an answered request held behind an unanswered one when it is cancelled",
+  () =>
+    Effect.gen(function* () {
+      const logs: Array<readonly [string, unknown]> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        logs.push([logLevel, message]);
+      });
+      const layer = Layer.merge(
+        Logger.layer([logger]),
+        Layer.succeed(References.MinimumLogLevel)("Debug"),
+      );
+      const hook = yield* hookRequest;
+      const response = yield* hookResponse;
+      const behind = yield* jsonLine({
+        type: "control_request",
+        request_id: "behind",
+        request: { subtype: "hook_callback" },
+      });
+      const behindResponse = yield* jsonLine({
+        type: "control_response",
+        response: { request_id: "behind", subtype: "success" },
+      });
+      const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "behind" });
+      const checkpoint = yield* claudeOutputCheckpoint();
+      const pending = yield* checkpoint.read(Buffer.concat([hook, behind]));
+      assert.strictEqual(pending, 0);
+      const answered = yield* checkpoint.inputAcknowledged(behindResponse);
+      assert.strictEqual(answered, 0);
+      const cancelled = yield* checkpoint.read(cancel).pipe(Effect.provide(layer));
+      assert.strictEqual(cancelled, 0);
+      assert.deepStrictEqual(logs, [
+        ["Debug", ["Claude cancelled a control request", { requestId: "behind" }]],
+      ]);
+      const reused = yield* checkpoint.read(behind);
+      assert.strictEqual(reused, 0);
+      const own = yield* checkpoint.inputAcknowledged(behindResponse);
+      assert.strictEqual(own, 0);
+      const released = yield* checkpoint.inputAcknowledged(response);
+      assert.strictEqual(released, hook.length + behind.length + cancel.length + behind.length);
+    }),
+);
+
 it.effect("logs an unanswered control request at the first turn result only", () =>
   Effect.gen(function* () {
     const { logs, layer } = logsAt("Info");
