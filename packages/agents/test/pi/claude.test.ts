@@ -20,6 +20,7 @@ import {
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
+  DateTime,
   Deferred,
   Effect,
   Exit,
@@ -1559,6 +1560,95 @@ describe("Claude child backend", () => {
       );
     },
   );
+
+  // Claude Code ends a turn on an API error with a `success` result that has `is_error` (#1147).
+  const LIMIT_TEXT = "You've hit your limit · resets 5am (UTC)";
+  const rejected = {
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status: "rejected",
+      rateLimitType: "five_hour",
+      utilization: 1,
+      resetsAt: 1_794_373_200,
+    },
+  };
+  const limitError = {
+    type: "assistant",
+    error: "rate_limit",
+    message: { content: [{ type: "text", text: LIMIT_TEXT }] },
+  };
+  const limitResult = {
+    type: "result",
+    subtype: "success",
+    is_error: true,
+    api_error_status: 429,
+    result: LIMIT_TEXT,
+  };
+  it.effect.each([
+    {
+      name: "a rejected usage limit",
+      messages: [rejected, limitError, limitResult],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "an HTTP 429 result",
+      messages: [rejected, limitResult],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rate limit without a reported reset time",
+      messages: [limitError, limitResult],
+      resetsAt: Option.none(),
+    },
+    {
+      name: "an overload that ends the turn",
+      messages: [
+        {
+          type: "assistant",
+          error: "overloaded",
+          message: { content: [{ type: "text", text: LIMIT_TEXT }] },
+        },
+        { ...limitResult, api_error_status: 529 },
+      ],
+      resetsAt: Option.none(),
+    },
+  ])("fails the session with a capacity refusal after $name", ({ messages, resetsAt }) => {
+    const sdk = Layer.succeed(ClaudeSdk)({ open: () => scripted(messages) });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        const error = yield* Effect.flip(session.result);
+        const matchesError = Schema.is(AgentCapacityError)(error);
+        assert(matchesError);
+        assert.strictEqual(error.message, LIMIT_TEXT);
+        assert.deepStrictEqual(error.resetsAt.pipe(Option.map(DateTime.formatIso)), resetsAt);
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
+    );
+  });
+
+  it.effect("returns the text of an API error that is not a provider refusal", () => {
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () =>
+        scripted([
+          {
+            type: "rate_limit_event",
+            rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.2 },
+          },
+          {
+            type: "assistant",
+            error: "invalid_request",
+            message: { content: [{ type: "text", text: "Prompt is too long" }] },
+          },
+          { ...limitResult, api_error_status: 400, result: "Prompt is too long" },
+        ]),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        assert.strictEqual((yield* session.result).message, "Prompt is too long");
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
+    );
+  });
 
   it.effect("fails the session as infrastructure when the output closes without a result", () => {
     const sdk = Layer.succeed(ClaudeSdk)({
