@@ -13,6 +13,7 @@ import {
   Layer,
   Logger,
   Option,
+  PlatformError,
   Predicate,
   Queue,
   Result,
@@ -84,7 +85,11 @@ const fakeProcess = Effect.gen(function* () {
 
 const spawnerFor = (
   process: FakeProcess,
-  options: { readonly exitOnEof?: boolean; readonly stdout?: Stream.Stream<Uint8Array> } = {},
+  options: {
+    readonly exitOnEof?: boolean;
+    readonly stdout?: Stream.Stream<Uint8Array>;
+    readonly kill?: Effect.Effect<void, PlatformError.PlatformError>;
+  } = {},
 ) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
     ChildProcessSpawner.make((command) =>
@@ -122,8 +127,12 @@ const spawnerFor = (
           isRunning: Deferred.isDone(process.exit).pipe(Effect.map((exited) => !exited)),
           kill: () =>
             Deferred.succeed(process.killed, undefined).pipe(
-              Effect.andThen(Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(137))),
-              Effect.asVoid,
+              Effect.andThen(
+                options.kill ??
+                  Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(137)).pipe(
+                    Effect.asVoid,
+                  ),
+              ),
             ),
           stdin: Sink.drain,
           stdout: options.stdout ?? Stream.fromQueue(process.stdout),
@@ -136,6 +145,24 @@ const spawnerFor = (
       }),
     ),
   );
+
+// Effect's spawner fails a kill this way when the process can no longer be signalled.
+const failedKill = Effect.fail(
+  PlatformError.systemError({
+    _tag: "Unknown",
+    module: "ChildProcess",
+    method: "kill",
+    description: "Failed to kill child process",
+  }),
+);
+
+const warningsLogger = (warnings: Array<string>) =>
+  Logger.layer([
+    Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (["WARN", "ERROR"].includes(logLevel.toUpperCase()))
+        warnings.push(String(Array.isArray(message) ? message[0] : message));
+    }),
+  ]);
 
 const awaitStdinLines = (process: FakeProcess, count: number) =>
   Effect.gen(function* () {
@@ -371,6 +398,66 @@ describe("Codex app-server transport", () => {
       assert.strictEqual(killedDone, true);
       const exitDone = yield* Deferred.isDone(process.exit);
       assert.strictEqual(exitDone, true);
+    }),
+  );
+
+  it.effect("logs no warning when stopping an app-server that already exited", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const warnings: Array<string> = [];
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+          });
+          yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(1));
+        }),
+      ).pipe(
+        Effect.provide(
+          codexAppServerLive.pipe(
+            Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
+            Layer.merge(warningsLogger(warnings)),
+          ),
+        ),
+      );
+      const killed = yield* Deferred.isDone(process.killed);
+      assert.isTrue(killed, "the stop still reaps the exited process");
+      assert.deepStrictEqual(warnings, []);
+    }),
+  );
+
+  it.effect("warns when the app-server is still alive after the forced stop fails", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const warnings: Array<string> = [];
+      const released = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* (yield* CodexAppServer).open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+            environment: request.environment,
+            host: request.host,
+          });
+        }),
+      ).pipe(
+        Effect.provide(
+          codexAppServerLive.pipe(
+            Layer.provide(spawnerFor(process, { exitOnEof: false, kill: failedKill })),
+            Layer.merge(warningsLogger(warnings)),
+          ),
+        ),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(process.stdinClosed);
+      yield* TestClock.adjust("1 minute");
+      yield* Fiber.join(released);
+      assert.deepStrictEqual(warnings, [
+        "Forcing Codex app-server to stop after graceful shutdown failed",
+        "Could not force Codex app-server to stop",
+      ]);
     }),
   );
 
