@@ -347,6 +347,98 @@ it.effect(
 );
 
 it.effect(
+  "sends the session on Exec once a region refuses the key that the account endpoint took",
+  () =>
+    Effect.gen(function* () {
+      const key = "bxd_mixed_key";
+      const calls: Array<RoutedCall> = [];
+      const bearers: Array<string> = [];
+      const transport = (({ baseUrl }) =>
+        createRouterTransport((router) => {
+          const record = (method: string, context: { requestHeader: Headers }) => {
+            calls.push({ method, baseUrl });
+            const bearer = context.requestHeader.get("authorization") ?? "";
+            bearers.push(bearer);
+            return bearer;
+          };
+          router.service(BoxdService, {
+            whoami: (_request, context) => {
+              record("whoami", context);
+              return { userId: "member" };
+            },
+            listRegions: (_request, context) => {
+              record("listRegions", context);
+              return {
+                regions: [
+                  { id: "acct", apiEndpoint: "https://account.example.test:9443" },
+                  { id: "lb", apiEndpoint: "https://lb.example.test:9443" },
+                ],
+                thisRegion: "acct",
+              };
+            },
+            getSnapshot: (_request, context) => {
+              // A load balancer in front of the region terminates TLS, so boxd sees plain text.
+              if (record("getSnapshot", context) === `Bearer ${key}`)
+                throw new ConnectError("API keys are accepted over TLS only", Code.Unauthenticated);
+              return {
+                snapshot: {
+                  status: "ready",
+                  region: "lb",
+                  vcpu: 2,
+                  memoryBytes: 8n * 1024n ** 3n,
+                  storage: "local",
+                },
+              };
+            },
+          });
+        })) satisfies Parameters<typeof boxdApiLayer>[2];
+      const http = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis;
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(jsonKey({ token: "mixed-jwt", expires_at: now / 1000 + 3600 })),
+            );
+          }),
+        ),
+      );
+      const execBearer = yield* Effect.gen(function* () {
+        const api = yield* BoxdApi;
+        assert.strictEqual(api.endpoint, "https://lb.example.test:9443");
+        yield* api.whoami;
+        yield* api.snapshot("base");
+        const bearer = yield* api.execBearer;
+        return Redacted.value(bearer);
+      }).pipe(
+        Effect.provide(
+          boxdApiLayer(
+            Redacted.make(key),
+            {
+              endpoint: "https://account.example.test:9443",
+              region: Option.some(BoxdRegion.make("lb")),
+            },
+            transport,
+          ).pipe(Layer.provide(http)),
+        ),
+      );
+      assert.strictEqual(execBearer, "mixed-jwt", "Exec carries the session the region takes");
+      assert.deepStrictEqual(calls, [
+        { method: "listRegions", baseUrl: "https://account.example.test:9443" },
+        { method: "whoami", baseUrl: "https://account.example.test:9443" },
+        { method: "getSnapshot", baseUrl: "https://lb.example.test:9443" },
+        { method: "getSnapshot", baseUrl: "https://lb.example.test:9443" },
+      ]);
+      assert.deepStrictEqual(
+        bearers,
+        [`Bearer ${key}`, `Bearer ${key}`, `Bearer ${key}`, "Bearer mixed-jwt"],
+        "the Exec bearer needs no extra call",
+      );
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
   "fails preflight with the key advice and no exchange when boxd refuses the key for another reason",
   () =>
     Effect.gen(function* () {
