@@ -1,4 +1,5 @@
-import { Harnesses, harnessesLayer, ProbeTarget } from "../src/harness/node.ts";
+import { Harnesses, harnessesLayer, hostPlacement, ProbeTarget } from "../src/harness/node.ts";
+import type { CredentialRoute, Placement } from "../src/harness/capability.ts";
 import { claudeSdkLive } from "../src/harness/claude/sdk.ts";
 import { HostLoginLock } from "../src/runtime.ts";
 import { WorkerName } from "@usine/core/worker";
@@ -30,7 +31,8 @@ const verifyHarness = (
   brain: BrainSpec,
   host: typeof local | typeof remote,
   environment: Readonly<Record<string, string>>,
-  credential: ProbeTarget["credential"] = "host-login",
+  credential: CredentialRoute = "host-login",
+  placement: Placement = hostPlacement(host),
 ) =>
   Effect.gen(function* () {
     const harnesses = yield* Harnesses;
@@ -40,6 +42,7 @@ const verifyHarness = (
       ProbeTarget.make({
         host,
         environment,
+        placement,
         credential,
         worker: WorkerName.make("test-worker"),
         machine: Option.none(),
@@ -494,19 +497,26 @@ describe("worker harness readiness", () => {
     ),
   );
 
-  for (const credential of ["host-login", "gateway", "api-key", "sandbox-api-key"] as const) {
-    it.effect(`reports the Claude Code installation for the ${credential} route`, () =>
+  for (const [credential, sandbox] of [
+    ["host-login", false],
+    ["gateway", false],
+    ["api-key", false],
+    ["api-key", true],
+  ] as const) {
+    const route = sandbox ? "sandbox api-key" : credential;
+    it.effect(`reports the Claude Code installation for the ${route} route`, () =>
       Effect.gen(function* () {
         const error = yield* verifyHarness(
           brain(Harness.make("claude")),
           local,
           workerEnvironment,
           credential,
+          sandbox ? "sandbox" : "local",
         ).pipe(Effect.flip);
         assert.strictEqual(error._tag, "HarnessUnavailableError");
         assert.strictEqual(
           error.message,
-          credential === "sandbox-api-key"
+          sandbox
             ? "claude --version failed in the sandbox image. Check the Claude Code installation in the sandbox image."
             : `claude --version failed. Check the Claude Code installation${credential === "host-login" ? " and login" : ""} on the worker.`,
         );
@@ -520,13 +530,19 @@ describe("worker harness readiness", () => {
       ),
     );
     if (credential === "host-login") continue;
-    it.effect(`reports the Node.js requirement for the ${credential} route`, () =>
+    it.effect(`reports the Node.js requirement for the ${route} route`, () =>
       Effect.gen(function* () {
-        const error = yield* verifyHarness(coder, remote, {}, credential).pipe(Effect.flip);
+        const error = yield* verifyHarness(
+          coder,
+          remote,
+          {},
+          credential,
+          sandbox ? "sandbox" : "ssh",
+        ).pipe(Effect.flip);
         assert.strictEqual(error._tag, "HarnessUnavailableError");
         assert.strictEqual(
           error.message,
-          credential === "sandbox-api-key"
+          sandbox
             ? "node --version failed in the sandbox image. Check the Codex installation in the sandbox image."
             : "Remote Codex children require Node.js on the worker's command path.",
         );

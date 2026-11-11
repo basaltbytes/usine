@@ -11,7 +11,7 @@ import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
 import type { HarnessCatalog } from "./harness.ts";
-import { hostPlacement } from "./launch.ts";
+import { CredentialRoute, Placement } from "./capability.ts";
 import { ChildHost } from "../child-host/child-host.ts";
 import { type ChildBackendService, SessionOperationError } from "../runtime.ts";
 
@@ -22,7 +22,10 @@ export class ProbeTarget extends Schema.Class<
 >("@usine/agents/ProbeTarget")({
   host: ChildHost,
   environment: Schema.Record(Schema.String, Schema.String),
-  credential: Schema.Literals(["host-login", "gateway", "api-key", "sandbox-api-key"]),
+  /** Where `host` runs sessions; a sandbox shell is `sandbox`, not `ssh`. */
+  placement: Placement,
+  /** The route that supplies the model credential, as admission names it. */
+  credential: CredentialRoute,
   worker: WorkerName,
   machine: Schema.Option(MachineId),
 }) {}
@@ -66,10 +69,7 @@ export const admitPreflight = Effect.fn("HarnessAdmission.preflight")(function* 
       catalog,
       "coding-agent",
       brain,
-      AdmissionContext.make({
-        placement: target.credential === "sandbox-api-key" ? "sandbox" : hostPlacement(target.host),
-        credential: target.credential === "sandbox-api-key" ? "api-key" : target.credential,
-      }),
+      AdmissionContext.make({ placement: target.placement, credential: target.credential }),
     ),
   ).pipe(
     Effect.tapError((error) =>
@@ -104,6 +104,7 @@ export const checkedPreflight = <R>(
         model: brain.model,
         worker: target.worker,
         host: target.host._tag,
+        placement: target.placement,
         credential: target.credential,
         ...Option.match(target.machine, { onNone: () => ({}), onSome: (machine) => ({ machine }) }),
       });

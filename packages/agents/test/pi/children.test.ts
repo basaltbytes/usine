@@ -194,6 +194,7 @@ describe("harness runtime registration", () => {
                 environment: child.environment,
                 worker: child.worker,
                 machine: child.machine,
+                placement: "local",
                 credential: "host-login",
               }),
             );
@@ -246,6 +247,7 @@ describe("harness runtime registration", () => {
               environment: child.environment,
               worker: child.worker,
               machine: child.machine,
+              placement: "local",
               credential,
             }),
           );
