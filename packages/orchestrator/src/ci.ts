@@ -29,6 +29,7 @@ import {
   HeadWorkflowRunState,
   type IncompleteWorkflowRun,
   type PendingCheck,
+  type PendingCheckReport,
   type RunningWorkflowRun,
 } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
@@ -47,25 +48,29 @@ import { observeItem } from "./polling/repository-sync.ts";
 
 const durationMinutes = (milliseconds: number) => `${Math.ceil(milliseconds / 60000)} min`;
 
-const pendingCheckDetails = (checks: ReadonlyArray<PendingCheck>) =>
+const pendingCheckDetail = (check: PendingCheck) => {
+  if (check.status !== "in_progress")
+    return `${check.name} is ${check.status.replaceAll("_", " ")}.`;
+  const running = Option.match(check.elapsedMilliseconds, {
+    onNone: () => `${check.name} is running with no recorded start time`,
+    onSome: (milliseconds) => `${check.name} has been running for ${durationMinutes(milliseconds)}`,
+  });
+  const previous = Option.match(check.previousDurationMilliseconds, {
+    onNone: () => "no previous successful duration is available",
+    onSome: (milliseconds) => `its last successful run took ${durationMinutes(milliseconds)}`,
+  });
+  return `${running}; ${previous}.`;
+};
+
+const pendingCheckDetails = ({ checks, omitted }: PendingCheckReport) =>
   checks.length === 0
-    ? "No pending check jobs were reported for this head."
-    : checks
-        .map((check) => {
-          const elapsed = Option.match(check.elapsedMilliseconds, {
-            onNone: () => "unknown duration",
-            onSome: durationMinutes,
-          });
-          const current = `${check.name} is ${check.status}${check.status === "in_progress" ? ` and has run for ${elapsed}` : ""}`;
-          if (check.status !== "in_progress") return `${current}.`;
-          const previous = Option.match(check.previousDurationMilliseconds, {
-            onNone: () => "unavailable",
-            onSome: (milliseconds) =>
-              `${durationMinutes(milliseconds)} in the last successful workflow run`,
-          });
-          return `${current}; previous successful duration: ${previous}.`;
-        })
-        .join(" ");
+    ? "No pending check runs or commit statuses were reported for this head."
+    : [
+        ...checks.map(pendingCheckDetail),
+        ...(omitted === 0
+          ? []
+          : [`${omitted} more pending ${omitted === 1 ? "check is" : "checks are"} not listed.`]),
+      ].join(" ");
 
 const incompleteRunDetails = (runs: ReadonlyArray<IncompleteWorkflowRun>) =>
   runs
@@ -76,6 +81,9 @@ const runningRunDetails = (runs: ReadonlyArray<RunningWorkflowRun>) =>
   runs
     .map(({ workflow, id, status, url }) => `${workflow} (run ${id}, ${status}): ${url}`)
     .join("; ");
+
+const PENDING_DIAGNOSTICS_LIMIT = "10 seconds";
+const PENDING_HISTORY_LIMIT = { seconds: 7 };
 
 const noWorkflowRuns = HeadWorkflowRunState.make({ incomplete: [], running: [] });
 
@@ -212,17 +220,23 @@ export class CiMonitor extends Context.Service<
           DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000;
         if (observed.state === "pending") {
           if (timedOut) {
-            const details = yield* checks.pendingDetails(wait.repository, head).pipe(
-              Effect.timeout("10 seconds"),
-              Effect.map(pendingCheckDetails),
-              Effect.catch((error) =>
-                Effect.logWarning("Pending CI diagnostics unavailable", {
-                  runId,
-                  head,
-                  errorTag: error._tag,
-                }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
-              ),
-            );
+            // History reads stop early, so the job list survives a slow history read.
+            const historyDeadline = DateTime.add(now, PENDING_HISTORY_LIMIT);
+            const details = yield* checks
+              .pendingDetails(wait.repository, head, historyDeadline)
+              .pipe(
+                Effect.timeout(PENDING_DIAGNOSTICS_LIMIT),
+                Effect.map(pendingCheckDetails),
+                Effect.catch((error) =>
+                  Effect.logWarning("Pending CI diagnostics unavailable", {
+                    runId,
+                    head,
+                    ...(error._tag === "TimeoutError"
+                      ? { errorTag: error._tag, message: error.message }
+                      : repositoryFailureLogFields(error)),
+                  }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
+                ),
+              );
             yield* Effect.logWarning("CI wait timed out; operator attention is required", {
               runId,
               head,

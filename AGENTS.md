@@ -4,6 +4,23 @@ usine runs loops against many repositories from one headless orchestrator. A loo
 
 Before you name a concept, read the glossary in `CONTEXT.md`.
 
+## Any provider, any harness
+
+usine must work with whichever model provider and login the operator has. It maintains three harnesses, and together they cover every case:
+
+- **Pi** is provider-agnostic. It reaches API keys and subscriptions across providers.
+- **Claude Code** is required for a Claude subscription, which works only inside it.
+- **Codex** is the client for a ChatGPT subscription and stays a supported harness.
+
+Rules that follow:
+
+- Write every role (coordinator, orchestrator agent, attempt agent, and roles added later) against the harness and model seam in `@usine/agents`, never against one harness or provider. A role states the capabilities it needs; a harness descriptor states what it provides for a credential route.
+- A role works on all three harnesses. When one can't provide a capability, its descriptor refuses the role with a reason.
+- Don't name a provider or harness in a role's interface, in an issue title for a generic feature, or in a prerequisite.
+- Don't require a second credential for a feature when the one the attempt already uses can serve it.
+
+[ADR 0005](docs/adr/0005-pi-parent-agent-layer-team-roster.md) records the reasons.
+
 ## Agent skills
 
 ### Issue tracker
