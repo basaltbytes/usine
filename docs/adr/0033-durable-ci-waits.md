@@ -17,3 +17,7 @@ The run page and board show **Waiting for CI** with a link to the PR checks. Rev
 ## Amendment — 2026-11-08: pending CI deadlines
 
 A pending CI deadline records an infrastructure failure because a queued or stalled CI job is outside the agent's execution. The run still requires operator attention, without automatically starting another agent. Timeout diagnostics include pending job names and elapsed times, with the matching job's last successful workflow duration when available. Diagnostics have a ten-second limit so GitHub reads cannot stall settlement.
+
+## Amendment — 2026-11-11: partial pending diagnostics (#1052)
+
+The ten-second limit discarded the job list whenever one duration history read was slow, which is when GitHub degrades and the diagnostic matters most. History reads now stop after seven seconds or at the first rate limit, and the diagnostic keeps the job names, elapsed times, and durations read before then. The ten-second limit still bounds the whole read. Running jobs come first and the diagnostic counts the pending jobs after the first ten, so a stalled running job isn't hidden behind queued ones. A head pending only on legacy commit statuses lists those statuses. The baseline run must share the pending run's workflow and event, because `push` and `workflow_dispatch` runs can have a different job set; it isn't filtered by branch, because a new pull request branch has no successful run of its own.

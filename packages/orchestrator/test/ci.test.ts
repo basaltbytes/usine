@@ -44,6 +44,7 @@ import {
   HeadWorkflowRunState,
   IncompleteWorkflowRun,
   PendingCheck,
+  PendingCheckReport,
   RunningWorkflowRun,
 } from "@usine/github/checks";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
@@ -217,22 +218,32 @@ const scenario = Effect.fn("test.ciScenario")(function* (
         if (yield* Ref.get(pendingStalled)) return yield* Effect.never;
         const failure = yield* Ref.get(pendingFailure);
         if (Option.isSome(failure)) return yield* failure.value;
-        return [
-          PendingCheck.make({
-            name: "test (web)",
-            status: "in_progress",
-            startedAt: Option.some(DateTime.makeUnsafe("2026-11-05T19:54:00Z")),
-            elapsedMilliseconds: Option.some(31 * 60000),
-            previousDurationMilliseconds: Option.some(6 * 60000),
-          }),
-          PendingCheck.make({
-            name: "test (server)",
-            status: "queued",
-            startedAt: Option.none(),
-            elapsedMilliseconds: Option.none(),
-            previousDurationMilliseconds: Option.none(),
-          }),
-        ];
+        return PendingCheckReport.make({
+          checks: [
+            PendingCheck.make({
+              name: "test (web)",
+              status: "in_progress",
+              startedAt: Option.some(DateTime.makeUnsafe("2026-11-05T19:54:00Z")),
+              elapsedMilliseconds: Option.some(31 * 60000),
+              previousDurationMilliseconds: Option.some(6 * 60000),
+            }),
+            PendingCheck.make({
+              name: "test (lint)",
+              status: "in_progress",
+              startedAt: Option.none(),
+              elapsedMilliseconds: Option.none(),
+              previousDurationMilliseconds: Option.none(),
+            }),
+            PendingCheck.make({
+              name: "test (server)",
+              status: "queued",
+              startedAt: Option.none(),
+              elapsedMilliseconds: Option.none(),
+              previousDurationMilliseconds: Option.none(),
+            }),
+          ],
+          omitted: 2,
+        });
       }),
     snapshot: () =>
       Effect.gen(function* () {
@@ -1175,22 +1186,15 @@ it.live.each(["available", "unavailable"])(
           assert(outcome?._tag === "Failed");
           assert.strictEqual(outcome.failure._tag, "InfraFailure");
           if (diagnostics === "available") {
-            assert.include(outcome.failure.message, "test (web) is in_progress");
-            assert.include(outcome.failure.message, "test (server) is queued");
-            assert.include(outcome.failure.message, "31 min");
-            assert.include(outcome.failure.message, "6 min");
+            assert.include(
+              outcome.failure.message,
+              "test (web) has been running for 31 min; its last successful run took 6 min. test (lint) is running with no recorded start time; no previous successful duration is available. test (server) is queued. 2 more pending checks are not listed.",
+            );
           } else {
             assert.include(outcome.failure.message, "Pending job diagnostics are unavailable.");
           }
           const mutations = yield* Ref.get(setup.mutations);
           assert.deepStrictEqual(mutations, []);
-          assert.strictEqual(
-            failed.attempts
-              .at(-1)
-              ?.outcome.pipe(Option.map(({ _tag }) => _tag))
-              .pipe(Option.getOrNull),
-            "Failed",
-          );
 
           assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
         }).pipe(Effect.provide(setup.runtime));
