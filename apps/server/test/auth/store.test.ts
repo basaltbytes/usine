@@ -16,6 +16,7 @@ import {
   GitHubIdentity,
   Member,
   InstanceToken,
+  OperationId,
   TokenId,
   TokenName,
 } from "../../src/auth/model.ts";
@@ -81,13 +82,20 @@ for (const [name, layer] of [
           }),
         ];
         assert.equal(
-          (yield* store.setScopes(bob.id, token.id, scopes).pipe(Effect.flip)).status,
+          (yield* store.setScopes(bob.id, token.id, scopes, Option.none()).pipe(Effect.flip))
+            .status,
           403,
         );
-        yield* store.setScopes(alice.id, token.id, scopes);
+        const operations = [OperationId.make("operator.approve")];
+        yield* store.setScopes(alice.id, token.id, scopes, Option.some(operations));
         const access = yield* store.authenticate(token.hash, 61000);
         assert.deepEqual(Option.getOrNull(access)?.token.scopes, scopes);
         assert.deepEqual((yield* store.tokens(alice.id))[0]?.scopes, scopes);
+        assert.deepEqual(Option.getOrNull(access)?.token.operations, Option.some(operations));
+        yield* store.setScopes(alice.id, token.id, scopes, Option.none());
+        assert.isTrue(
+          Option.isNone((yield* store.tokens(alice.id))[0]?.operations ?? Option.some([])),
+        );
       }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
     );
     it.live("revokes every credential when a member is removed", () =>

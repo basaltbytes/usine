@@ -2,7 +2,7 @@ import { Migrator, SqlClient } from "effect/sql";
 import { PermissionGrant } from "@usine/core/access";
 import { Clock, Effect, Layer, Option, Schema } from "effect";
 
-import { AuthError, authFailure, InstanceToken, Member } from "./model.ts";
+import { AuthError, authFailure, InstanceToken, Member, OperationId } from "./model.ts";
 import { AuthStore } from "./store.ts";
 
 const MemberJson = Schema.fromJsonString(Member);
@@ -168,15 +168,28 @@ export const sqliteAuthLayer = Layer.effect(
           );
         }).pipe(Effect.catch(failure("list tokens"))),
       ),
-      setScopes: Effect.fn("AuthStore.setScopes")((member, id, scopes) =>
+      setScopes: Effect.fn("AuthStore.setScopes")((member, id, scopes, operations) =>
         Effect.gen(function* () {
           const encoded = yield* Schema.encodeEffect(
             Schema.fromJsonString(Schema.Array(PermissionGrant)),
           )(scopes);
-          const rows =
-            yield* sql`UPDATE usine_instance_tokens SET value = json_set(value, '$.scopes', json(${encoded})) WHERE id = ${id} AND member_id = ${member} RETURNING id`;
+          const rows = yield* Option.match(operations, {
+            onNone: () =>
+              sql`UPDATE usine_instance_tokens SET value = json_remove(json_set(value, '$.scopes', json(${encoded})), '$.operations') WHERE id = ${id} AND member_id = ${member} RETURNING id`,
+            onSome: (allowed) =>
+              Schema.encodeEffect(Schema.fromJsonString(Schema.Array(OperationId)))(allowed).pipe(
+                Effect.flatMap(
+                  (ceiling) =>
+                    sql`UPDATE usine_instance_tokens SET value = json_set(value, '$.scopes', json(${encoded}), '$.operations', json(${ceiling})) WHERE id = ${id} AND member_id = ${member} RETURNING id`,
+                ),
+              ),
+          });
           if (rows.length === 0) return yield* authFailure("Token not found.", 403);
-          yield* Effect.logInfo("Token scopes changed", { memberId: member, tokenId: id });
+          yield* Effect.logInfo("Token scopes changed", {
+            memberId: member,
+            tokenId: id,
+            operationCeiling: Option.isSome(operations),
+          });
         }).pipe(
           Effect.catchIf(
             (error) => !Schema.is(AuthError)(error),

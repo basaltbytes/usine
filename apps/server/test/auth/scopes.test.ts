@@ -10,8 +10,32 @@ import {
 } from "@usine/core/access";
 import { ProjectId } from "@usine/core/project";
 import { alice, authFixture, localSecret } from "./fixture.ts";
-import { InstanceToken, TokenId, TokenName } from "../../src/auth/model.ts";
+import {
+  InstanceToken,
+  OperationCeilingChange,
+  OperationId,
+  TokenId,
+  TokenName,
+} from "../../src/auth/model.ts";
 import { secretHash } from "../../src/auth/crypto.ts";
+
+const deviceToken = (
+  name: string,
+  scopes: ReadonlyArray<PermissionGrant>,
+  operations: Option.Option<ReadonlyArray<OperationId>> = Option.none(),
+  expiresAt: Option.Option<number> = Option.none(),
+) => ({ name: TokenName.make(name), scopes, operations, expiresAt });
+
+const browserSession = Effect.fn(function* (
+  auth: Effect.Success<ReturnType<typeof authFixture>>["authentication"],
+) {
+  const current = yield* auth.link;
+  const link = new URL(current);
+  const session = yield* auth.consumeLink(
+    new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
+  );
+  return Redacted.value(session.secret);
+});
 
 it.live(
   "keeps local attribution separate from members and limits issued tokens to current grants",
@@ -36,12 +60,13 @@ it.live(
       );
       const secret = Redacted.value(session.secret);
       const refused = yield* auth
-        .createToken(secret, TokenName.make("Too wide"), administratorPermissions)
+        .createToken(secret, deviceToken("Too wide", administratorPermissions))
         .pipe(Effect.flip);
       assert.equal(refused.status, 403);
-      const issued = yield* auth.createToken(secret, TokenName.make("Read alpha"), [
-        PermissionGrant.make({ permission: "read", scope: alpha }),
-      ]);
+      const issued = yield* auth.createToken(
+        secret,
+        deviceToken("Read alpha", [PermissionGrant.make({ permission: "read", scope: alpha })]),
+      );
       const access = yield* auth.authenticate(Redacted.value(issued.secret));
       assert.isTrue(permits(access.permissions, "read", alpha));
       assert.isFalse(permits(access.permissions, "read", beta));
@@ -50,7 +75,7 @@ it.live(
       const device = tokens.find(({ kind }) => kind === "device");
       assert.isDefined(device);
       if (device === undefined) return;
-      yield* auth.setScopes(secret, device.id, grants);
+      yield* auth.setScopes(secret, device.id, grants, OperationCeilingChange.Keep());
       assert.isTrue(
         permits(
           (yield* auth.authenticate(Redacted.value(issued.secret))).permissions,
@@ -86,7 +111,7 @@ for (const initialRole of ["none", "viewer"] as const)
         assert.isFalse(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
         grants = binding.permissions;
         assert.isTrue(permits((yield* auth.authenticate(secret)).permissions, "operate", alpha));
-        const device = yield* auth.createToken(secret, TokenName.make("Operator"), grants);
+        const device = yield* auth.createToken(secret, deviceToken("Operator", grants));
         assert.isTrue(
           permits(
             (yield* auth.authenticate(Redacted.value(device.secret))).permissions,
@@ -105,7 +130,12 @@ for (const initialRole of ["none", "viewer"] as const)
         const browser = (yield* store.tokens(alice.id)).find(({ kind }) => kind === "session");
         assert.isDefined(browser);
         if (browser === undefined) return;
-        assert.equal((yield* auth.setScopes(secret, browser.id, []).pipe(Effect.flip)).status, 400);
+        assert.equal(
+          (yield* auth
+            .setScopes(secret, browser.id, [], OperationCeilingChange.Keep())
+            .pipe(Effect.flip)).status,
+          400,
+        );
       }).pipe(Effect.scoped),
   );
 
@@ -188,5 +218,89 @@ it.live("keeps device sign-in scopes at the current binding snapshot after a pro
     assert.isFalse(permits(access.permissions, "operate", alpha));
     grants = [];
     assert.deepEqual((yield* auth.authenticate(secret)).permissions, []);
+  }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
+);
+
+it.live("keeps, replaces, and removes a device token's operation ceiling", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const auth = services.authentication;
+    const secret = yield* browserSession(auth);
+    const approve = [OperationId.make("operator.approve")];
+    const issued = yield* auth.createToken(
+      secret,
+      deviceToken("Approver", administratorPermissions, Option.some(approve)),
+    );
+    const device = Redacted.value(issued.secret);
+    assert.deepEqual((yield* auth.authenticate(device)).operations, Option.some(approve));
+    assert.isTrue(Option.isNone((yield* auth.authenticate(secret)).operations));
+    const token = (yield* services.store.tokens(alice.id)).find(({ kind }) => kind === "device");
+    assert.isDefined(token);
+    if (token === undefined) return;
+    yield* auth.setScopes(
+      secret,
+      token.id,
+      administratorPermissions,
+      OperationCeilingChange.Keep(),
+    );
+    assert.deepEqual((yield* auth.authenticate(device)).operations, Option.some(approve));
+    const overview = OperationId.make("operator.overview");
+    const read = [overview, OperationId.make("operator.detail")];
+    yield* auth.setScopes(
+      secret,
+      token.id,
+      administratorPermissions,
+      OperationCeilingChange.Replace({ operations: read }),
+    );
+    assert.deepEqual((yield* auth.authenticate(device)).operations, Option.some(read));
+    const narrower = yield* auth.createToken(
+      device,
+      deviceToken("Narrower", administratorPermissions, Option.some([overview])),
+    );
+    assert.deepEqual(
+      (yield* auth.authenticate(Redacted.value(narrower.secret))).operations,
+      Option.some([overview]),
+    );
+    const wider = yield* auth
+      .createToken(device, deviceToken("Wider", administratorPermissions, Option.some(approve)))
+      .pipe(Effect.flip);
+    assert.equal(wider.status, 403);
+    const unbounded = yield* auth
+      .createToken(device, deviceToken("Unbounded", administratorPermissions))
+      .pipe(Effect.flip);
+    assert.equal(unbounded.status, 403);
+    yield* auth.setScopes(
+      secret,
+      token.id,
+      administratorPermissions,
+      OperationCeilingChange.Remove(),
+    );
+    assert.isTrue(Option.isNone((yield* auth.authenticate(device)).operations));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("expires a device token at the expiry set at creation", () =>
+  Effect.gen(function* () {
+    const services = yield* authFixture();
+    const auth = services.authentication;
+    const secret = yield* browserSession(auth);
+    const now = yield* Clock.currentTimeMillis;
+    const past = yield* auth
+      .createToken(
+        secret,
+        deviceToken("Past", administratorPermissions, Option.none(), Option.some(now)),
+      )
+      .pipe(Effect.flip);
+    assert.equal(past.status, 400);
+    const issued = yield* auth.createToken(
+      secret,
+      deviceToken("Hour", administratorPermissions, Option.none(), Option.some(now + 3_600_000)),
+    );
+    const device = Redacted.value(issued.secret);
+    const token = (yield* services.store.tokens(alice.id)).find(({ kind }) => kind === "device");
+    assert.equal(token?.expiresAt, now + 3_600_000);
+    assert.isTrue(Option.isSome((yield* auth.authenticate(device)).member));
+    yield* TestClock.adjust("1 hour");
+    assert.equal((yield* auth.authenticate(device).pipe(Effect.flip)).status, 401);
   }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
 );

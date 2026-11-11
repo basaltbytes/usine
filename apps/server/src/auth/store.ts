@@ -6,6 +6,7 @@ import {
   GitHubUserId,
   InstanceToken,
   Member,
+  type OperationId,
   TokenHash,
   TokenId,
 } from "./model.ts";
@@ -30,6 +31,7 @@ export class AuthStore extends Context.Service<
       member: GitHubUserId,
       token: TokenId,
       scopes: ReadonlyArray<PermissionGrant>,
+      operations: Option.Option<ReadonlyArray<OperationId>>,
     ) => Effect.Effect<void, AuthError>;
     readonly revoke: (member: GitHubUserId, token: TokenId) => Effect.Effect<void, AuthError>;
   }

@@ -6,6 +6,9 @@ export const confirmRevoke = "Confirm revocation";
 export const keepToken = "Keep token";
 export const lastUsed = "Last used";
 export const created = "Created";
+export const expires = "Expires";
+export const operationsLabel = "Operations";
+export const noOperations = "No operations";
 
 export const scopeCopy = {
   title: "Scopes",

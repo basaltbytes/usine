@@ -80,11 +80,11 @@ export const memoryAuthLayer = Layer.sync(AuthStore, () => {
       if (expired > 0) yield* Effect.logInfo("Expired instance tokens deleted", { count: expired });
       return [...tokens.values()].filter((token) => token.memberId === id);
     }),
-    setScopes: Effect.fn("AuthStore.setScopes")(function* (member, id, scopes) {
+    setScopes: Effect.fn("AuthStore.setScopes")(function* (member, id, scopes, operations) {
       const token = tokens.get(id);
       if (token === undefined || token.memberId !== member)
         return yield* authFailure("Token not found.", 403);
-      tokens.set(id, InstanceToken.make({ ...token, scopes }));
+      tokens.set(id, InstanceToken.make({ ...token, scopes, operations }));
       yield* Effect.logInfo("Token scopes changed", { memberId: member, tokenId: id });
     }),
     revoke: Effect.fn("AuthStore.revoke")(function* (member, id) {

@@ -32538,6 +32538,14 @@
                         "$ref": "#/components/schemas/PermissionGrantEncoded"
                       }
                     },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z]+\\.[A-Za-z]+$"
+                      },
+                      "description": "Operation IDs from this document, such as operator.approve, that the token may call. Requests also need the token's scopes."
+                    },
                     "csrf": {
                       "type": "string"
                     }
@@ -32791,7 +32799,7 @@
             }
           }
         },
-        "description": "Returns the signed-in member and CSRF token. Setup sessions have a null member.",
+        "description": "Returns the signed-in member, effective permissions, the device token's operation ceiling, and the CSRF token. Setup sessions have a null member.",
         "summary": "Read the current session",
         "x-usine-permission": "session"
       }
@@ -35659,6 +35667,25 @@
                           "session",
                           "device"
                         ]
+                      },
+                      "operations": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z]+\\.[A-Za-z]+$"
+                        },
+                        "description": "Operation IDs from this document, such as operator.approve, that the token may call. Requests also need the token's scopes."
+                      },
+                      "expiresAt": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Epoch milliseconds of expiry, or null for a device token without one."
                       }
                     },
                     "required": [
@@ -35666,7 +35693,8 @@
                       "name",
                       "createdAt",
                       "lastUsedAt",
-                      "kind"
+                      "kind",
+                      "expiresAt"
                     ],
                     "additionalProperties": false
                   }
@@ -36213,7 +36241,7 @@
             }
           }
         },
-        "description": "Creates a token whose scopes are a subset of the caller's effective permissions. The secret is returned once.",
+        "description": "Creates a device token whose scopes are a subset of the caller's effective permissions, with an optional operation ceiling and expiry. The secret is returned once.",
         "summary": "Create a scoped token",
         "requestBody": {
           "content": {
@@ -36231,6 +36259,18 @@
                     "items": {
                       "$ref": "#/components/schemas/PermissionGrantEncoded"
                     }
+                  },
+                  "operations": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z]+\\.[A-Za-z]+$"
+                    },
+                    "description": "Operation IDs from this document, such as operator.approve, that the token may call. Requests also need the token's scopes."
+                  },
+                  "expiresAt": {
+                    "type": "number",
+                    "description": "Epoch milliseconds after which the token stops authenticating."
                   }
                 },
                 "required": [
@@ -36557,7 +36597,7 @@
             }
           }
         },
-        "description": "Sets the scope ceiling for one of the member's device tokens. Requests also check current role bindings. Browser sessions follow role bindings and reject scope edits.",
+        "description": "Sets the scope ceiling and operation ceiling for one of the member's device tokens. Requests also check current role bindings. Browser sessions follow role bindings and reject scope edits.",
         "summary": "Set token scopes",
         "requestBody": {
           "content": {
@@ -36570,6 +36610,22 @@
                     "items": {
                       "$ref": "#/components/schemas/PermissionGrantEncoded"
                     }
+                  },
+                  "operations": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z]+\\.[A-Za-z]+$"
+                        },
+                        "description": "Operation IDs from this document, such as operator.approve, that the token may call. Requests also need the token's scopes."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Replaces the operation ceiling. Null removes it; an absent key keeps the current ceiling."
                   }
                 },
                 "required": [
