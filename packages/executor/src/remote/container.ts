@@ -665,13 +665,14 @@ export const containersFor = (commands: RemoteCommands) => {
         const started = yield* Ref.get(starts);
         if (kills === 0 && started === 0)
           return yield* Effect.logDebug("The kernel killed no process in the container", fields);
-        const processes = yield* readKilledProcesses(
+        const read = yield* readKilledProcesses(
           commands,
           shell,
           spec.settings.runtime,
           spec.name,
           container,
         );
+        const processes = Option.getOrElse(read, () => []);
         if (processes.length < kills)
           yield* Effect.logWarning("Kernel OOM details are incomplete", {
             ...fields,
@@ -681,8 +682,10 @@ export const containersFor = (commands: RemoteCommands) => {
           });
         const recorded = Math.max(kills, processes.length);
         if (recorded === 0)
-          return yield* Effect.logDebug(
-            "The kernel logs name no process killed in the container before its starts",
+          return yield* Effect.logInfo(
+            Option.isNone(read)
+              ? "The kernel logs are unreadable, so no process killed in the container before its starts is recorded"
+              : "The kernel logs name no process killed in the container before its starts",
             { ...fields, container, starts: started },
           );
         if (processes.length > MAX_KILLED_PROCESSES)

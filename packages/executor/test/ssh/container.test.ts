@@ -1235,6 +1235,50 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
+  it.effect.each(["no-kills", "unreadable"] as const)(
+    "records nothing and says why when the kernel logs name no kill before a start: %s",
+    (kernelMemory) => {
+      const machine = dockerMachine();
+      machine.state.kernelMemory = kernelMemory;
+      // A test signals the container's init; the kernel killed nothing.
+      const stops: StubParent = (context) =>
+        Effect.sync(() => {
+          const container = machine.state.containers.get(CONTAINER);
+          assert(container !== undefined, "the Attempt's container runs");
+          container.running = false;
+          container.initKilledForMemory = false;
+        }).pipe(Effect.andThen(fails(context)));
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.salvage = "dirty";
+        const prepared = yield* executor.prepare(request);
+        const kills: Array<ContainerOutOfMemoryKills> = [];
+        yield* prepared
+          .launch({
+            ...sink,
+            outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+          })
+          .pipe(Effect.flip);
+        assert.deepStrictEqual(kills, []);
+        assert(linesOf(machine).some((line) => line.includes("journalctl -k")));
+        const skip =
+          kernelMemory === "unreadable"
+            ? "The kernel logs are unreadable, so no process killed in the container before its starts is recorded"
+            : "The kernel logs name no process killed in the container before its starts";
+        assert.lengthOf(
+          logs.infos.filter((line) => line.includes(skip)),
+          1,
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          runtime(machine, mintingProvider(), stops).pipe(Layer.provideMerge(logs.layer)),
+        ),
+      );
+    },
+  );
+
   it.effect("reads no kernel log when the container ran on and the kernel killed nothing", () => {
     const machine = dockerMachine();
     machine.state.kernelMemory = "readable";

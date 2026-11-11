@@ -224,7 +224,8 @@ interface FakeMachineState {
   limitsEnforced: boolean;
   runtimeExitCode: number;
   memoryEvents: "counted" | "unreadable" | "empty";
-  kernelMemory: "readable" | "unreadable";
+  /** With `no-kills`, the kernel logs are readable and name no process killed for memory. */
+  kernelMemory: "readable" | "no-kills" | "unreadable";
   hostGroupId: string;
   imageGroupId: string;
   docker: "absent" | "running" | "unusable" | "socket-only";
@@ -546,14 +547,14 @@ export const fakeMachine = () => {
       );
     }
     if (line.includes("journalctl -k -b")) {
-      return oneShotHandle("", state.kernelMemory === "readable" ? 0 : 1);
+      return oneShotHandle("", state.kernelMemory === "unreadable" ? 1 : 0);
     }
     if (line.includes("journalctl -k")) {
       if (state.kernelMemory === "unreadable")
         return oneShotHandle("", 1, "dmesg: read kernel buffer failed: Operation not permitted");
       const container = state.containers.get(words.at(-1) ?? "");
       return oneShotHandle(
-        container === undefined
+        container === undefined || state.kernelMemory === "no-kills"
           ? "source dmesg\n"
           : `source journal\noom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=1234,uid=1000\n`,
         0,

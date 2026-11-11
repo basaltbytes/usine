@@ -14,7 +14,7 @@ export const KERNEL_MEMORY_SCRIPT = String.raw`
 set -eu
 created=$("$1" container inspect --format '{{json .Created}}' "$2")
 created=$(printf '%s' "$created" | cut -d '"' -f 2)
-if logs=$(journalctl -k --since "$created" --no-pager -o cat --grep 'oom-kill:' 2>/dev/null) && [ -n "$logs" ]; then
+if logs=$(journalctl -k --since "$created" --no-pager -o cat -q --grep 'oom-kill:' 2>/dev/null) && [ -n "$logs" ]; then
   printf 'source journal\n%s\n' "$logs"
 else
   logs=$(dmesg --color=never)
@@ -24,7 +24,7 @@ fi
 `.trim();
 
 /** A script that succeeds if the user can read the host kernel's journal or ring buffer. */
-const KERNEL_LOG_READABLE_SCRIPT = String.raw`
+export const KERNEL_LOG_READABLE_SCRIPT = String.raw`
 [ -n "$(journalctl -k -b -n 1 --no-pager -o cat -q 2>/dev/null)" ] || dmesg --color=never >/dev/null 2>&1
 `.trim();
 
@@ -60,7 +60,7 @@ export const killedProcessesFromKernel = (
 
 /**
  * Returns the processes that the kernel killed for memory in `container`, named `name`, from the
- * host's kernel logs; empty if they are unreadable.
+ * host's kernel logs, or `None` if they are unreadable.
  */
 export const readKilledProcesses = Effect.fn("RemoteExecutor.readMemoryKilledProcesses")(
   function* (
@@ -85,7 +85,7 @@ export const readKilledProcesses = Effect.fn("RemoteExecutor.readMemoryKilledPro
         exitCode: result.exitCode,
         stderr: result.stderr,
       });
-      return [];
+      return Option.none<ReadonlyArray<MemoryKilledProcess>>();
     }
     const processes = killedProcessesFromKernel(result.stdout, container);
     yield* Effect.logInfo("Read the kernel OOM process details on the worker", {
@@ -93,7 +93,7 @@ export const readKilledProcesses = Effect.fn("RemoteExecutor.readMemoryKilledPro
       source: SOURCE_LINE.exec(result.stdout)?.[1] ?? "unknown",
       identified: processes.length,
     });
-    return processes;
+    return Option.some(processes);
   },
   (effect, _commands, shell, _runtime, _name, container) =>
     effect.pipe(
@@ -102,7 +102,7 @@ export const readKilledProcesses = Effect.fn("RemoteExecutor.readMemoryKilledPro
           container,
           host: shell.destination,
           message: error.message,
-        }).pipe(Effect.as([])),
+        }).pipe(Effect.as(Option.none<ReadonlyArray<MemoryKilledProcess>>())),
       ),
     ),
 );

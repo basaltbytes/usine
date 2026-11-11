@@ -145,7 +145,13 @@ describe("Worker preflight record", () => {
   });
 
   it("fails an unavailable harness, passes the ones checked before it, and keeps the rest", () => {
-    const started = recordPreflight(unchecked(worker), [pi], at(8), Result.succeed(fullPreflight));
+    const finding = "The SSH user can't read the kernel journal";
+    const started = recordPreflight(
+      unchecked(worker),
+      [pi],
+      at(8),
+      Result.succeed({ ...fullPreflight, findings: [finding] }),
+    );
     const record = recordPreflight(
       started,
       [codex, claude, pi],
@@ -164,6 +170,7 @@ describe("Worker preflight record", () => {
     assert(failed?._tag === "Failed", "claude failed");
     assert.deepStrictEqual(failed.capability, Option.some("harness-login"));
     assert.strictEqual(failed.message, "claude is not logged in");
+    assert.deepStrictEqual(record.findings, [finding]);
   });
 
   it("fails the Worker's prerequisites on any other failure and leaves its harnesses", () => {
