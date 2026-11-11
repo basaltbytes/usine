@@ -52,10 +52,22 @@ export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProv
   ...boatSettings(),
   provider: "boxd",
   token: Redacted.make("bxd_test_key"),
-  region: BoxdRegion.make("fra"),
+  endpoint: Option.none(),
+  region: Option.some(BoxdRegion.make("fra")),
   size: "2x8",
   snapshot: BoxdSnapshotName.make("usine-attempt"),
   isolated: true,
   egress: Option.none(),
   ...overrides,
 });
+
+/**
+ * An account endpoint over plain HTTP, where every call carries a session, without a region, so
+ * that building the layer calls nothing; the tests fail before any gRPC call.
+ */
+export const UNUSED_CLUSTER = {
+  endpoint: "http://boxd.invalid:1",
+  region: Option.none<BoxdRegion>(),
+};
+/** The token exchange URL that `UNUSED_CLUSTER` derives. */
+export const UNUSED_EXCHANGE = "https://app.boxd.invalid/api/v1/auth/token";

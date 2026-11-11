@@ -4,14 +4,20 @@ import {
   MachineId,
   type WorkerName,
 } from "@usine/core/worker";
-import { type Brand, DateTime, Effect, Option, type Redacted, Schema } from "effect";
+import { type Brand, DateTime, Effect, Option, Schema } from "effect";
 import {
   MachineUnavailableError,
   WorkerCapabilityError,
   type MachineUnavailableReason,
 } from "../../executor.ts";
 import type { BoxdProvisioner } from "../model.ts";
-import { BoxdApi, BoxdCallError, type BoxdMachine, type BoxdUnknownRegion } from "./boxd/client.ts";
+import {
+  BoxdApi,
+  BoxdCallError,
+  type BoxdMachine,
+  type BoxdPlainTextEndpoint,
+  type BoxdUnknownRegion,
+} from "./boxd/client.ts";
 import { BoxdExec, boxdTransport } from "./boxd/exec.ts";
 import {
   attemptTag,
@@ -73,7 +79,11 @@ const assignment = (tags: MachineTags) => ({
 });
 
 const transientMessage = (worker: WorkerName, failure: BoxdCallError): string =>
-  `boxd didn't answer ${failure.operation} for worker "${worker}": ${failure.code}: ${failure.message}. Check that this host reaches app.boxd.sh, boxd.sh:9443, and the API endpoint of the region, or wait for the boxd rate limit to reset.`;
+  `boxd didn't answer ${failure.operation} for worker "${worker}" at ${failure.url}: ${failure.code}: ${failure.message}. Check that this host reaches ${failure.url}, or wait for the boxd rate limit to reset.`;
+
+/** Returns where boxd keeps `region`, which is `""` when boxd runs in one place. */
+const placeOf = (region: string): string =>
+  region === "" ? "the only location of the boxd cluster" : `region ${region}`;
 
 /** Returns the configuration fault of `worker`'s boxd provisioner that `message` explains. */
 const providerFault = (worker: WorkerName, message: string): WorkerCapabilityError =>
@@ -84,20 +94,27 @@ const providerFault = (worker: WorkerName, message: string): WorkerCapabilityErr
     cause: new Error(message),
   });
 
+/** A failure while connecting a boxd Worker to its region. */
+export type BoxdConnectFailure = BoxdCallError | BoxdUnknownRegion | BoxdPlainTextEndpoint;
+
 /** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
 export const boxdPreflightError = (
   worker: WorkerName,
-  failure: BoxdCallError | BoxdUnknownRegion,
+  failure: BoxdConnectFailure,
 ): WorkerCapabilityError =>
   providerFault(
     worker,
-    failure._tag === "BoxdUnknownRegion"
-      ? `boxd has no region "${failure.region}" with an API endpoint. Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ") || "none"}.`
-      : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
-        ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
-        : isTransient(failure.code)
-          ? transientMessage(worker, failure)
-          : `boxd preflight couldn't ${failure.operation}: ${failure.code}: ${failure.message}.${failure.operation === "snapshot" ? " Check the snapshot; build it with boxd snapshots save." : ""}`,
+    failure._tag === "BoxdPlainTextEndpoint"
+      ? `boxd serves the machines of worker "${worker}" at ${failure.endpoint} without TLS, and usine sends the API key over plain HTTP only to a loopback address. Serve that endpoint over TLS, or set provisioner.endpoint and provisioner.region to a cluster and region that use https://.`
+      : failure._tag === "BoxdUnknownRegion"
+        ? failure.available.length === 0
+          ? `boxd lists no regions, so it runs in one place, but worker "${worker}" sets provisioner.region ${failure.region}. Remove provisioner.region from the worker.`
+          : `boxd has no region "${failure.region}" with an API endpoint. Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ")}.`
+        : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
+          ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
+          : isTransient(failure.code)
+            ? transientMessage(worker, failure)
+            : `boxd preflight couldn't ${failure.operation}: ${failure.code}: ${failure.message}.${failure.operation === "snapshot" ? " Check the snapshot; build it with boxd snapshots save." : ""}`,
   );
 
 /**
@@ -107,7 +124,7 @@ export const boxdPreflightError = (
  */
 export const boxdConnectError = (
   worker: WorkerName,
-  failure: BoxdCallError | BoxdUnknownRegion,
+  failure: BoxdConnectFailure,
 ): MachineUnavailableError | WorkerCapabilityError =>
   failure._tag === "BoxdCallError" && isTransient(failure.code)
     ? MachineUnavailableError.make({
@@ -119,16 +136,8 @@ export const boxdConnectError = (
     : boxdPreflightError(worker, failure);
 
 /**
- * Returns the bearer of the `Exec` calls: the API key itself. boxd accepts it as a bearer without
- * documenting it (question 3 of `docs/research/boxd-byoc.md`). A session token file that the
- * orchestrator renews can replace it here.
- */
-export const execCredential = (settings: BoxdProvisioner): Redacted.Redacted<string> =>
-  settings.token;
-
-/**
  * Returns the boxd driver for `worker`. Its machines' endpoints are `Exec` endpoints, which run
- * commands through `BoxdExec` with the API key, so no SSH key is involved: preflight warns that
+ * commands through `BoxdExec` with `BoxdApi.execBearer`, so no SSH key is involved: preflight warns that
  * `identityFile`, the worker's `identity_file`, is ignored. A driver retains the create response
  * only until endpoint discovery consumes it.
  */
@@ -153,26 +162,23 @@ export const boxdDriverFor = (
     const capability = (message: string) => providerFault(worker, message);
     const verify = Effect.fn("BoxdDriver.verify")(
       function* (_worker: WorkerName, maxConcurrentAttempts: number) {
-        yield* Effect.annotateCurrentSpan({ worker, region: settings.region });
+        const region = Option.getOrElse(settings.region, () => "");
+        yield* Effect.annotateCurrentSpan({ worker, region });
         yield* api.whoami;
         const snapshot = yield* api.snapshot(settings.snapshot);
         if (snapshot.status !== "ready")
           return yield* capability(
             `boxd snapshot "${settings.snapshot}" is ${snapshot.status}; wait for it to be ready or rebuild it with boxd snapshots save.`,
           );
-        if (snapshot.region !== settings.region)
+        const served = yield* api.servedRegion;
+        if (snapshot.region !== served)
           return yield* capability(
-            `boxd snapshot "${settings.snapshot}" is in ${snapshot.region}; set provisioner.region to that region or rebuild it in ${settings.region}.`,
+            `boxd snapshot "${settings.snapshot}" is in ${placeOf(snapshot.region)}, but worker "${worker}" creates machines in ${placeOf(served)}. Set provisioner.region to the region of the snapshot, or rebuild the snapshot where the worker creates machines.`,
           );
         const vcpu = Number(settings.size.split("x")[0]);
         if (snapshot.vcpu !== vcpu || snapshot.memoryBytes !== vcpu * 4 * 1024 ** 3)
           return yield* capability(
             `boxd snapshot "${settings.snapshot}" captured ${snapshot.vcpu} vCPU and ${snapshot.memoryBytes / 1024 ** 3} GiB, but provisioner.size is ${settings.size}. Rebuild the snapshot at ${settings.size} or change size to match the captured size.`,
-          );
-        const served = yield* api.servedRegion;
-        if (served !== settings.region)
-          return yield* capability(
-            `boxd endpoint ${api.endpoint}, set by providerEndpoints.boxd, serves region ${served}, but provisioner.region of worker "${worker}" is ${settings.region}. Set providerEndpoints.boxd to the API endpoint of ${settings.region}, or remove it so usine finds the endpoint in boxd's region list.`,
           );
         const limit = yield* api.orgMachineLimit;
         const addresses = Option.isSome(settings.tailnet)
@@ -203,7 +209,8 @@ export const boxdDriverFor = (
         ];
         yield* Effect.logInfo("boxd provisioner verified", {
           worker,
-          region: settings.region,
+          region: served,
+          endpoint: api.endpoint,
           egress: Option.match(settings.egress, {
             onNone: () => "unrestricted",
             onSome: (entries) => `${entries.length} entries`,

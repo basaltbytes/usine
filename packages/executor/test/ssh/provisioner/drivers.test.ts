@@ -822,12 +822,28 @@ describe("boxd driver", () => {
         assert.include(memoryMismatch.message, "2 vCPU and 16 GiB");
         boxd.state.snapshot.memoryBytes = 8 * 1024 ** 3;
         boxd.state.snapshot.region = "nyc";
-        assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, "is in nyc");
+        assert.include(
+          (yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message,
+          "is in region nyc, but worker",
+        );
         boxd.state.snapshot.region = "fra";
         boxd.state.region = "nyc";
         assert.include(
           (yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message,
-          "serves region nyc, but provisioner.region",
+          "creates machines in region nyc",
+          "compares the snapshot with the region that boxd serves",
+        );
+        boxd.state.region = "";
+        boxd.state.snapshot.region = "";
+        assert.deepStrictEqual(
+          (yield* driver.verify(WORKER, 1)).warnings,
+          [],
+          "a cluster that runs in one place reports no region for either",
+        );
+        boxd.state.snapshot.region = "fra";
+        assert.include(
+          (yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message,
+          "creates machines in the only location of the boxd cluster",
         );
         boxd.state.region = "fra";
         for (const storage of ["archived", "unarchiving"]) {

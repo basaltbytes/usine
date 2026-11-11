@@ -7,7 +7,9 @@ Add an SSH worker that restores a boxd machine for each attempt. usine runs comm
 
 ## Prerequisites
 
-Instance admin access, a boxd account with a payment method and available machine slots, and the boxd CLI. The snapshot and machines must be in the same region. A region is the id of a region that boxd enables for your org. `boxd manage regions` lists the org's regions and whether each is enabled, and `boxd manage regions --json` prints them as JSON. `fra` (Frankfurt) and `nyc` (New York) are the hosted regions, and a boxd deployment in your own cloud account has its own id. Your org's home region is always enabled; to use another region, ask boxd to enable it with `boxd manage regions request <id>`.
+Instance admin access, a boxd account with a payment method and available machine slots, and the boxd CLI. The snapshot and machines must be in the same region. A region is the id of a region that boxd enables for your org. `boxd manage regions` lists the org's regions and whether each is enabled, and `boxd manage regions --json` prints them as JSON. `fra` (Frankfurt) and `nyc` (New York) are the hosted regions. Your org's home region is always enabled; to use another region, ask boxd to enable it with `boxd manage regions request <id>`.
+
+A self-hosted or bring-your-own-cloud cluster has its own endpoint: see [Connect to another boxd cluster](#connect-to-another-boxd-cluster).
 
 Use a gateway for subscription credentials. Without a gateway, configure API keys for the rostered harnesses.
 
@@ -31,13 +33,33 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 ## Create the worker
 
-1. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, and the desired concurrency. Leave the identity file empty: a boxd worker runs its commands through boxd's `Exec` API with the API key. A boxd worker that sets one loads and ignores it, and its preflight logs a warning that names the file. Select provisioner `boxd`, token variable `BOXD_API_KEY`, region `fra` or the id of the snapshot's region, size `2x8`, and snapshot `usine-attempt`. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
+1. Open **Configuration > Workers > New**. Choose `ssh`, root `/home/boxd/.usine`, and the desired concurrency. Leave the identity file empty: a boxd worker runs its commands through boxd's `Exec` API with the API key. A boxd worker that sets one loads and ignores it, and its preflight logs a warning that names the file. Select provisioner `boxd`, token variable `BOXD_API_KEY`, size `2x8`, and snapshot `usine-attempt`. Set the region to the id of the snapshot's region, or leave it empty for a snapshot in `fra` on the hosted service. Leave the endpoint empty for the hosted service. Leave **Isolated** checked to exclude the in-machine boxd CLI, integrations, agent logins, and default private network.
 
 2. For subscription credentials, select gateway `usine-gateway` and enable the provisioner's tailnet settings. Enter the gateway's Tailscale address and OAuth client variable names. The client needs `auth_keys` write access for `tag:usine-attempt`. The [Boat gateway guide](/guides/connect-boat-to-a-gateway/) describes the shared tailnet policy and gateway setup. Each machine joins with an ephemeral single-use key and leaves during cleanup. Package downloads use the machine's direct internet connection.
 
    Without a gateway, set the Anthropic or OpenAI API-key variable names needed by the roster.
 
 3. Optionally, restrict each machine's egress; see [Restrict egress](#restrict-egress). Save the worker.
+
+## Connect to another boxd cluster
+
+A self-hosted boxd cluster, or one that boxd runs in your own cloud account, serves its API at its own endpoint, such as `https://boxd.example.com:9443`. Create the worker's API key on that cluster: a key from the hosted service has no account there. Build the snapshot with the cluster's CLI, which `https://app.<zone>/downloads/install.sh` installs.
+
+Set the worker's endpoint to the cluster's account endpoint:
+
+```yaml
+provisioner:
+  provider: boxd
+  token_env: BOXD_API_KEY
+  endpoint: https://boxd.example.com:9443
+  snapshot: usine-attempt
+```
+
+Without a region, usine sends every call to the endpoint and creates machines where the cluster runs them. A cluster that runs in one place lists no regions, so leave the region empty: preflight fails when a worker sets a region that such a cluster can't list. Set a region only when `boxd manage regions` lists regions on the cluster.
+
+usine sends the API key itself as the bearer over TLS. If the cluster refuses the key as a bearer, as releases from before raw keys do, usine exchanges it for a session at `https://app.<host>/api/v1/auth/token`, where `<host>` is the endpoint's host without the port. For `https://boxd.example.com:9443`, that is `https://app.boxd.example.com/api/v1/auth/token`. Commands through `Exec` carry the session too, so a cluster behind a load balancer that terminates TLS works. The endpoint must use `https://`, except for a cluster on the same host as usine at `localhost`, `127.0.0.0/8`, or `[::1]`.
+
+If the cluster's certificate comes from your own certificate authority, for example with private ingress on AWS, give Node.js the authority. Set `NODE_EXTRA_CA_CERTS` to the authority's PEM file in the environment that starts usine, then restart usine. Both the gRPC calls and the token exchange use it.
 
 ## Restrict egress
 
@@ -66,9 +88,9 @@ Preflight logs the number of entries in `boxd provisioner verified`. If a restri
 
 ## Check the result
 
-Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. usine finds the region's API endpoint in the regions that boxd lists. If boxd lists no region with the configured id and an API endpoint for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists. If boxd reports the snapshot's storage as `archiving`, `archived`, or `unarchiving` rather than `local`, preflight logs a warning that names the state: boxd creates machines only from a local snapshot.
+Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. With a region, usine finds the region's API endpoint in the regions that boxd lists at the endpoint. If boxd lists no region with the configured id and an API endpoint for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists. Preflight also checks that the snapshot is in the region where the worker creates machines. If boxd reports the snapshot's storage as `archiving`, `archived`, or `unarchiving` rather than `local`, preflight logs a warning that names the state: boxd creates machines only from a local snapshot.
 
-usine reaches each machine through boxd's `Exec` API at the region's API endpoint, with the worker's API key as the bearer. Nothing on the machine or the boxd account needs an SSH key, and the snapshot needs none. usine sends gateway tokens and API keys over standard input. Gateway setup configures the host entries and the HTTP socket units.
+usine reaches each machine through boxd's `Exec` API at the region's API endpoint, or at the worker's endpoint without a region, with the worker's API key or its session as the bearer. Nothing on the machine or the boxd account needs an SSH key, and the snapshot needs none. usine sends gateway tokens and API keys over standard input. Gateway setup configures the host entries and the HTTP socket units.
 
 `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 
@@ -76,7 +98,7 @@ Start a test run. usine disables auto-hibernate and auto-suspend, then runs each
 
 If boxd refuses to create the machine as invalid, for example because it reserves the machine name `usine-<worker name>-<8 hex digits>`, worker preflight fails with boxd's message, which names the machine. Rename the worker or correct the provisioner settings; retrying the same request fails the same way.
 
-Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication, each with its own 30 seconds. usine exchanges the API key for a new session 5 minutes before the session expires. When boxd refuses a session before then, usine exchanges the key again and retries the call once.
+Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchange reports an unreachable provider and allows waiting calls to retry authentication, each with its own 30 seconds. Once a worker uses a session, usine exchanges the API key for a new session 5 minutes before the session expires. When boxd refuses a session before then, usine exchanges the key again and retries the call once. When boxd doesn't answer or rate-limits, the error names the URL that usine called.
 
 A token exchange that answers HTTP 429 counts as a rate limit, and HTTP 502, 503, or 504 counts as an unreachable provider: usine retries the attempt's launch later. Any other error status fails preflight with the status.
 

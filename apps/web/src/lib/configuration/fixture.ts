@@ -376,6 +376,7 @@ export const configurationJson = {
       provisioner: {
         _tag: "boxd",
         tokenEnv: "BOXD_API_KEY",
+        endpoint: null,
         region: "fra",
         size: "2x8",
         snapshot: "usine-attempt",
