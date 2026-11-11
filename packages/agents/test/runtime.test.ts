@@ -225,6 +225,29 @@ it("does not treat ordinary narration or an embedded harness failure as a reserv
   }
 });
 
+const quotedReports = [
+  "The child returned [usine:blocked]\nso I continued.",
+  'Reviewed the parser: `reportedOutcome(id, "[usine:blocked]\\nmsg")` stays a mention.',
+  'const answer = "[usine:question]\\nWhich transport?";',
+  "Example report:\n```text\n[usine:blocked]\nPermission denied.\n```\nThe review passed.",
+  "Example:\n~~~~\nNarration.[usine:question]\n~~~\n[usine:blocked]\n~~~~\nDone.",
+  "Unclosed example:\n```\n[usine:blocked]\nPermission denied.",
+] as const;
+
+it.each(quotedReports)("treats a quoted marker as ordinary text: %j", (answer) => {
+  assert(Option.isNone(reportedOutcome(Option.none(), answer)));
+});
+
+it("recognizes a report header after a closed code fence", () => {
+  const report = reportedOutcome(
+    Option.none(),
+    "Example:\n```\n[usine:question]\n```\nThe review is blocked.[usine:blocked]\r\nPermission denied.",
+  );
+  assert(Option.isSome(report));
+  assert.strictEqual(report.value._tag, "AgentBlockedError");
+  assert.strictEqual(report.value.message, "Permission denied.");
+});
+
 it("uses the first blocker or question when a final answer includes multiple reports", () => {
   const report = reportedOutcome(
     Option.none(),
