@@ -43,3 +43,13 @@ Each snapshot uses a version such as `0.4.1-next.312.g1a2b3c4.1.2`: workflow run
 After an upload succeeds, the job checks every snapshot version on the public registry for up to ten minutes. It waits 10 seconds after the first check and 5 seconds longer after each later check, up to 30 seconds. The job never republishes a successful upload. If versions are still unavailable after ten minutes, npm has accepted them but does not serve them yet: the job logs `next_publish_slow` with the pending versions, adds a warning annotation and a step summary that name them, and succeeds. Check them later with `pnpm view <package>@<version> version`. Registry errors, unrelated publish errors, and build errors fail the job immediately. Logs report the snapshot versions, retry reason, delay, and final outcome.
 
 Retries use fresh versions because a staged version is occupied but absent from public registry metadata. npm requires interactive authentication to approve or reject it; the job's OIDC credentials cannot perform those operations. Failed attempts can leave partial or staged snapshots. An npm maintainer can inspect and reject abandoned stage IDs with the commands above. This retry policy applies to `next`; stable releases keep the approval procedure above.
+
+## Prereleases
+
+The `next` job of the release workflow publishes `main` under the `next` dist-tag. It runs only when someone starts the workflow, so a prerelease collects several merged changes:
+
+```sh
+gh workflow run release.yml --ref main
+```
+
+The dogfood instance upgrades from `next`. Start the workflow before an instance upgrade, not after each merge.
