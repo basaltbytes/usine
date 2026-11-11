@@ -422,16 +422,21 @@ it.live("preserves GitHub rate-limit errors instead of reporting a missing compa
   }).pipe(Effect.scoped),
 );
 
-it.live("returns oversized diffs without retaining them in the shared cache", () =>
+it.live("retains a diff larger than 512 KiB and shares one GitHub read between concurrent requests", () =>
   Effect.gen(function* () {
     const app = yield* fixture(() =>
       json({ files: [{ ...file, patch: "+" + "é".repeat(300_000) }] }),
     );
     const query = CommitRangeFilesQuery.make({ base, head });
-    const first = yield* app.read(query).pipe(Effect.flatMap(decode));
+    const [first, second] = yield* Effect.all(
+      [app.read(query).pipe(Effect.flatMap(decode)), app.read(query).pipe(Effect.flatMap(decode))],
+      { concurrency: "unbounded" },
+    );
+    assert.deepStrictEqual(second, first);
     assert.strictEqual(first.files.length, 1);
+    assert.strictEqual(app.requests.length, 1);
     const again = yield* app.read(query).pipe(Effect.flatMap(decode));
     assert.deepStrictEqual(again, first);
-    assert.strictEqual(app.requests.length, 2);
+    assert.strictEqual(app.requests.length, 1);
   }).pipe(Effect.scoped),
 );

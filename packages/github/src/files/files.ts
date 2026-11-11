@@ -1,7 +1,6 @@
-import { jsonKey } from "@usine/core/json-key";
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha, RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
-import { Cache, Clock, Context, Effect, Exit, Layer, Schema } from "effect";
+import { Cache, Clock, Context, Effect, Layer, Match, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../github-app.ts";
 import type { GitHubAppError } from "../error.ts";
@@ -16,9 +15,9 @@ import {
   GitHubFile,
   type FileChangesQuery,
 } from "./model.ts";
+import { RetainedFiles } from "./retained.ts";
 
-const MAX_CACHED_RESPONSE_BYTES = 512 * 1024;
-const encoder = new TextEncoder();
+const RETAINED_BYTES = 64 * 1024 * 1024;
 
 const PullRequest = Schema.Struct({
   head: Schema.Struct({ sha: CommitSha }),
@@ -140,14 +139,13 @@ export class GitHubFiles extends Context.Service<
         });
         return changes;
       });
-      const cache = yield* Cache.makeWith(load, {
-        capacity: 128,
-        timeToLive: (exit) =>
-          Exit.isSuccess(exit) &&
-          encoder.encode(jsonKey(exit.value)).byteLength <= MAX_CACHED_RESPONSE_BYTES
-            ? Infinity
-            : 0,
+      // A zero time-to-live shares a lookup between concurrent reads without keeping its result;
+      // `retained` keeps successful results within its byte budget.
+      const pending = yield* Cache.makeWith(load, {
+        capacity: Number.POSITIVE_INFINITY,
+        timeToLive: () => 0,
       });
+      const retained = new RetainedFiles(RETAINED_BYTES);
       return {
         read: Effect.fn("GitHubFiles.read")(function* (
           repository: RepositoryName,
@@ -160,14 +158,38 @@ export class GitHubFiles extends Context.Service<
             base: selection.base,
             head: selection.head,
           });
-          return yield* Cache.get(
-            cache,
-            FileRead.make({
-              repository: RepositoryName.make(canonicalRepositoryName(repository)),
-              item,
-              selection,
-            }),
-          );
+          const read = FileRead.make({
+            repository: RepositoryName.make(canonicalRepositoryName(repository)),
+            item,
+            selection,
+          });
+          const hit = retained.get(read);
+          if (Option.isSome(hit)) {
+            yield* Effect.logDebug("Read file changes from the shared cache", { repository, item });
+            return hit.value;
+          }
+          const changes = yield* Cache.get(pending, read);
+          const retention = retained.retain(read, changes);
+          yield* Match.valueTags(retention, {
+            Retained: ({ bytes, evicted }) =>
+              evicted === 0
+                ? Effect.void
+                : Effect.logDebug("Evicted older file changes to retain a new response", {
+                    repository,
+                    item,
+                    bytes,
+                    evicted,
+                    retainedBytes: retained.used,
+                  }),
+            Oversized: ({ bytes }) =>
+              Effect.logInfo("File changes exceed the shared cache budget and were not retained", {
+                repository,
+                item,
+                bytes,
+                budget: retained.budget,
+              }),
+          });
+          return changes;
         }),
       };
     }),
