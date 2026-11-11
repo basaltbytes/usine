@@ -30,7 +30,7 @@ Issues and PRs share one number space. For `#42`, run `gh pr view 42`, and if it
 
 ## Wayfinding operations
 
-For `/wayfinder`. The **map** is one issue; its **child** issues are the tickets. Active map: [#1](https://github.com/basaltbytes/usine/issues/1).
+For `/wayfinder`. The **map** is one issue; its **child** issues are the tickets.
 
 - **Map**: an issue labeled `wayfinder:map` (`gh issue create --label wayfinder:map`) with a Notes / Decisions-so-far / Fog body.
 - **Child ticket**: a GitHub sub-issue of the map (`gh api` on the sub-issues endpoint), labeled `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). A claimed ticket is assigned to the driving dev.
