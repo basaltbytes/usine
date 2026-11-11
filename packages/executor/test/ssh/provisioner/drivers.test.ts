@@ -624,6 +624,54 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
     },
   );
+  it.live(
+    "replaces a snapshot's allowlist that boxd merges into a new machine's and waits for the edit",
+    () => {
+      const boxd = fakeBoxd();
+      boxd.state.snapshotEgress = ["*.tailscale.com", "api.anthropic.com"];
+      boxd.state.egressLatencyMillis = 500;
+      const entries = ["*.tailscale.com", "registry.npmjs.org"].map((entry) =>
+        BoxdEgressEntry.make(entry),
+      );
+      return Effect.gen(function* () {
+        const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress: Option.some(entries) }));
+        const started = yield* Clock.currentTimeMillis;
+        const { id } = yield* driver.create("pool-aaaaaaaa", tags);
+        const returned = yield* Clock.currentTimeMillis;
+        assert.isAtLeast(returned - started, 1500, "waits a second after the replacing edit");
+        assert.deepStrictEqual(boxd.state.creates[0]?.egress, entries);
+        assert.deepStrictEqual(
+          boxd.state.egress.map((call) => [call.id, call.entries]),
+          [[id, entries]],
+        );
+        assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, entries);
+
+        const unset = yield* boxdDriverFor(WORKER, boxdSettings());
+        const other = yield* unset.create("pool-bbbbbbbb", tags);
+        assert.lengthOf(boxd.state.egress, 1, "an unset egress keeps the snapshot's allowlist");
+        assert.deepStrictEqual(boxd.state.machines.get(other.id)?.egressAllow, [
+          "*.tailscale.com",
+          "api.anthropic.com",
+        ]);
+      }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+    },
+  );
+  it.effect("deletes a new machine when boxd keeps entries that its allowlist doesn't list", () => {
+    const boxd = fakeBoxd();
+    boxd.state.snapshotEgress = ["*.tailscale.com", "api.anthropic.com"];
+    boxd.state.egressKeepsSnapshot = true;
+    const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
+    return Effect.gen(function* () {
+      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
+      const wider = yield* driver.create("pool-aaaaaaaa", tags).pipe(Effect.flip);
+      assert(wider._tag === "MachineUnavailableError");
+      assert.strictEqual(wider.reason, "provider");
+      assert.include(wider.message, "doesn't list on the new machine, which usine deleted");
+      assert.include(wider.message, "api.anthropic.com");
+      assert.lengthOf(boxd.state.egress, 1);
+      assert.strictEqual(boxd.state.machines.size, 0);
+    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
+  });
   it.effect(
     "deletes a new machine when its creation is interrupted while egress comes into force",
     () => {

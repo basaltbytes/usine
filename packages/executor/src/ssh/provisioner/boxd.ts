@@ -71,6 +71,29 @@ class BoxdEgressNotApplied extends Schema.TaggedError<
   requested: Schema.Int,
 }) {}
 
+/**
+ * The error when boxd reports egress entries on a machine that its configured allowlist doesn't
+ * list, such as the allowlist of the snapshot that it restores.
+ */
+class BoxdEgressWider extends Schema.TaggedError<
+  BoxdEgressWider,
+  Brand.Brand<"@usine/executor/boxd/BoxdEgressWider">
+>()("BoxdEgressWider", {
+  machine: MachineId,
+  unlisted: Schema.Array(Schema.String),
+}) {}
+
+/** The entries of `inEffect` that `entries` doesn't list. */
+const unlistedEntries = (inEffect: ReadonlyArray<string>, entries: ReadonlyArray<string>) => {
+  const listed = new Set(entries);
+  return [...new Set(inEffect)].filter((entry) => !listed.has(entry));
+};
+
+/** Whether `inEffect` lists exactly the entries of `entries`, in any order. */
+const sameEntries = (inEffect: ReadonlyArray<string>, entries: ReadonlyArray<string>) =>
+  unlistedEntries(inEffect, entries).length === 0 &&
+  unlistedEntries(entries, inEffect).length === 0;
+
 const assignment = (tags: MachineTags) => ({
   "usine.run": tagValue(tags.run),
   "usine.process": tagValue(tags.process),
@@ -246,7 +269,10 @@ export const boxdDriverFor = (
     });
     /**
      * Fails when boxd reports new machine `id`, created with `entries` in its spec, unrestricted.
-     * Reads the machine when the create response, `machine`, omits it.
+     * Reads the machine when the create response, `machine`, omits it. boxd merges the spec of a
+     * restore over the snapshot's, so a snapshot with its own allowlist can leave the machine with
+     * entries that `entries` doesn't list. Then this replaces the machine's allowlist with `entries`,
+     * fails when boxd still reports another list, and waits until the edit is in force.
      */
     const checkEgress = Effect.fn("BoxdDriver.checkEgress")(function* (
       id: MachineId,
@@ -259,6 +285,24 @@ export const boxdDriverFor = (
         : (yield* api.vm(id)).egressAllow;
       if (inEffect.length === 0)
         return yield* BoxdEgressNotApplied.make({ machine: id, requested: entries.length });
+      if (!sameEntries(inEffect, entries)) {
+        const replaced = yield* api.setEgressAllow(id, entries);
+        if (replaced.length === 0)
+          return yield* BoxdEgressNotApplied.make({ machine: id, requested: entries.length });
+        if (!sameEntries(replaced, entries))
+          return yield* BoxdEgressWider.make({
+            machine: id,
+            unlisted: unlistedEntries(replaced, entries),
+          });
+        yield* Effect.logInfo("Replaced the snapshot's egress allowlist on new boxd machine", {
+          worker,
+          machine: id,
+          unlisted: unlistedEntries(inEffect, entries).length,
+          entries: replaced.length,
+        });
+        yield* Effect.sleep(EGRESS_IN_FORCE);
+        return;
+      }
       yield* Effect.logInfo("Created boxd machine with restricted egress", {
         worker,
         machine: id,
@@ -296,7 +340,8 @@ export const boxdDriverFor = (
           yield* api.setAutoHibernateTimeout(result.id, 0);
           yield* api.setAutoSuspendTimeout(result.id, 0);
         });
-        // Nothing connects to a restricted machine before its allowlist is fully in force.
+        // Nothing connects to a restricted machine before its allowlist is fully in force. When
+        // `checkEgress` replaces the list, it waits again after the edit.
         yield* Effect.all(
           [setup, Option.isSome(settings.egress) ? Effect.sleep(EGRESS_IN_FORCE) : Effect.void],
           { concurrency: "unbounded", discard: true },
@@ -334,6 +379,15 @@ export const boxdDriverFor = (
                   provider: "boxd",
                   reason: "provider",
                   message: `boxd reported unrestricted egress on the new machine created with ${failure.requested} provisioner.egress entries, which usine deleted`,
+                }),
+              ),
+            BoxdEgressWider: (failure) =>
+              Effect.fail(
+                MachineUnavailableError.make({
+                  worker,
+                  provider: "boxd",
+                  reason: "provider",
+                  message: `boxd kept egress entries that provisioner.egress doesn't list on the new machine, which usine deleted: ${failure.unlisted.join(", ")}`,
                 }),
               ),
             BoxdCallError: (failure) => Effect.fail(creationError(name, failure)),
