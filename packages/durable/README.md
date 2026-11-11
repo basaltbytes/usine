@@ -94,9 +94,9 @@ pi-durable has no cross-process locking: tasks and documents from a second write
 
 - `ruleFor(event, context)` returns the rule's `Decision` for a `CoordinatorEvent`.
 - `clamp(decision, context)` checks a decision from a rule or a model against the event and resolves its defaults.
-- `apply(state, decision)` returns the next `CoordinatorState` and the effect intents: `Delegate` starts a child and `Finish` ends the Attempt.
+- `apply(state, decision)` returns the next `CoordinatorState` and the effect intents: `Delegate` starts a child, `Finish` ends the Attempt, and `Ignored` gives the reason a decision changed nothing.
 
-`Decision` is the contract that a model handler answers with. `Schema.toJsonSchemaDocument(Decision)` has one branch per tag, and its free-text fields are optional wherever the event supplies the text.
+`ModelDecision` is the contract that a model handler answers with. `Schema.toJsonSchemaDocument(ModelDecision)` has one branch per tag, and its free-text fields are optional wherever the event supplies the text. A rule's `Decision` adds two tags that a model can't choose: `StartChild` and `OverBudget`.
 
 The rules handle each lifecycle event as follows:
 
@@ -105,7 +105,7 @@ The rules handle each lifecycle event as follows:
 - `ChildInterrupted` delegates one replacement in the next child-session budget slot, with a context that tells the child to inspect the checkout and continue. With no slot left, the Attempt fails with `InfraFailure`.
 - `ChildAtCapacity` fails the Attempt with `ProviderCapacityFailure`, `ChildFailed` with `InfraFailure`, and `BudgetExceeded` with `ChildSessionBudgetFailure`.
 
-A model may answer only a report without a marker or an interruption. For every other event, `clamp` applies the rule, so a reserved marker always wins. `clamp` turns a `RetryChild` past the budget into `Failed`. `apply` ignores a decision about a child other than the latest one, a repeated start, and anything after the Attempt settles, so an interruption gets at most one replacement.
+A model may answer only a report without a marker or an interruption. For every other event, `clamp` applies the rule, so a reserved marker always wins. `clamp` also applies the event's rule when it gets `StartChild` or `OverBudget` for a child event, and it turns a `RetryChild` past the budget into `Failed`. `apply` ignores a decision about a child other than the latest one, a decision about a child before the first child starts, a repeated start, and anything after the Attempt settles, so an interruption gets at most one replacement. For each of these, it returns one `Ignored` intent whose `reason` is `StaleChild`, `NotStarted`, `AlreadyStarted`, or `AttemptSettled`, so the coordinator can log why nothing happened.
 
 ## Testing
 

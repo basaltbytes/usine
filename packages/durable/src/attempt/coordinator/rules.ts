@@ -148,11 +148,10 @@ export const AtCapacity = Schema.TaggedStruct("AtCapacity", { message: Schema.No
 const OverBudget = Schema.TaggedStruct("OverBudget", { attempted: ChildSessionCount });
 
 /**
- * A handler's answer to one event, from a rule or a model. `clamp` checks it against the event,
- * so free text is optional wherever the event supplies it.
+ * A model handler's answer to one event. `clamp` checks it against the event, so free text is
+ * optional wherever the event supplies it.
  */
-export const Decision = Schema.Union([
-  StartChild,
+export const ModelDecision = Schema.Union([
   Complete,
   RetryChild,
   Blocked,
@@ -160,8 +159,11 @@ export const Decision = Schema.Union([
   Failed,
   InfraFailed,
   AtCapacity,
-  OverBudget,
 ]);
+export type ModelDecision = typeof ModelDecision.Type;
+
+/** A rule's answer to one event: a `ModelDecision`, or a start or budget refusal only a rule makes. */
+export const Decision = Schema.Union([StartChild, ...ModelDecision.members, OverBudget]);
 export type Decision = typeof Decision.Type;
 
 const AttemptCompleted = Schema.TaggedStruct("AttemptCompleted", {
@@ -199,8 +201,33 @@ const Delegate = Schema.TaggedStruct("Delegate", {
 
 const Finish = Schema.TaggedStruct("Finish", { outcome: TerminalOutcome });
 
-/** An effect that runs after its transition commits: start a child or finish the Attempt. */
-export const EffectIntent = Schema.Union([Delegate, Finish]);
+/** The decision came after the Attempt settled. */
+const AttemptSettled = Schema.TaggedStruct("AttemptSettled", {});
+
+/** A `Start` came after the first child started. */
+const AlreadyStarted = Schema.TaggedStruct("AlreadyStarted", {});
+
+/** A decision about child `answering` came before the first child started. */
+const NotStarted = Schema.TaggedStruct("NotStarted", { answering: ChildSessionCount });
+
+/** A decision about child `answering` came after child `latest` replaced it. */
+const StaleChild = Schema.TaggedStruct("StaleChild", {
+  answering: ChildSessionCount,
+  latest: ChildSessionCount,
+});
+
+/** Why `apply` left the state unchanged. */
+const IgnoredReason = Schema.Union([AttemptSettled, AlreadyStarted, NotStarted, StaleChild]);
+type IgnoredReason = typeof IgnoredReason.Type;
+
+/** `apply` ignored the decision; the coordinator logs `reason` at Info. */
+const Ignored = Schema.TaggedStruct("Ignored", { reason: IgnoredReason });
+
+/**
+ * An effect that runs after its transition commits: start a child, finish the Attempt, or log why
+ * the decision changed nothing.
+ */
+export const EffectIntent = Schema.Union([Delegate, Finish, Ignored]);
 export type EffectIntent = typeof EffectIntent.Type;
 
 /** The Attempt hasn't started its first child. */
@@ -313,7 +340,8 @@ const resolve = (
 
 /**
  * Checks `decision` against `context.event`. A reserved marker and the other typed facts keep their
- * rule over any decision, and a replacement past the child-session budget becomes `Failed`.
+ * rule over any decision, a rule-only tag about a child takes the event's rule, and a replacement
+ * past the child-session budget becomes `Failed`.
  */
 export const clamp = (decision: Decision, context: AttemptContext): ClampedDecision => {
   const { event } = context;
@@ -323,20 +351,27 @@ export const clamp = (decision: Decision, context: AttemptContext): ClampedDecis
 
 type Transition = readonly [CoordinatorState, ReadonlyArray<EffectIntent>];
 
+const ignore = (state: CoordinatorState, reason: IgnoredReason): Transition => [
+  state,
+  [Ignored.make({ reason })],
+];
+
 /**
  * Returns the next state and the effect intents for `decision`. A decision about a child other
- * than the latest one, a repeated start, and anything after the Attempt settled change nothing,
- * so each interruption gets at most one replacement.
+ * than the latest one, a repeated start, and anything after the Attempt settled leave the state
+ * unchanged and return one `Ignored` intent, so each interruption gets at most one replacement.
  */
 export const apply = (state: CoordinatorState, decision: ClampedDecision): Transition => {
-  if (state._tag === "Settled") return [state, []];
+  if (state._tag === "Settled") return ignore(state, AttemptSettled.make({}));
   if (decision._tag === "Start") {
-    if (state._tag !== "AwaitingStart") return [state, []];
+    if (state._tag !== "AwaitingStart") return ignore(state, AlreadyStarted.make({}));
     const child = ChildSessionCount.make(1);
     return [Delegating.make({ child }), [Delegate.make({ child, assignment: FIRST_ASSIGNMENT })]];
   }
-  const answered = decision._tag === "Replace" ? decision.replaces : decision.answering;
-  if (state._tag !== "Delegating" || state.child !== answered) return [state, []];
+  const answering = decision._tag === "Replace" ? decision.replaces : decision.answering;
+  if (state._tag === "AwaitingStart") return ignore(state, NotStarted.make({ answering }));
+  if (state.child !== answering)
+    return ignore(state, StaleChild.make({ answering, latest: state.child }));
   if (decision._tag === "Replace") {
     const child = ChildSessionCount.make(decision.replaces + 1);
     return [

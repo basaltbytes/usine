@@ -1,7 +1,7 @@
 import { assert, describe, expect, it } from "@effect/vitest";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptFailure } from "@usine/core/attempt/failure";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Exit, Option, Schema } from "effect";
 import {
   apply,
   AtCapacity,
@@ -20,10 +20,11 @@ import {
   type CoordinatorEvent,
   CoordinatorState,
   Decision,
-  type EffectIntent,
+  EffectIntent,
   Failed,
   FIRST_ASSIGNMENT,
   InfraFailed,
+  ModelDecision,
   Question,
   REPLACEMENT_ASSIGNMENT,
   type ReservedKind,
@@ -61,6 +62,7 @@ const reservedReport = (kind: ReservedKind, message: string) =>
   });
 
 const encodeFailure = Schema.encodeEffect(AttemptFailure);
+const encodeIntent = Schema.encodeEffect(EffectIntent);
 type EncodedFailure = typeof AttemptFailure.Encoded;
 
 const failureMessage = (intent: { readonly failed?: EncodedFailure }) =>
@@ -73,6 +75,11 @@ const intentOf = Effect.fn("intentOf")(function* (intents: ReadonlyArray<EffectI
   if (intent === undefined) return assert.fail("expected one intent");
   if (intent._tag === "Delegate")
     return { delegate: Number(intent.child), assignment: intent.assignment };
+  if (intent._tag === "Ignored") {
+    const encoded = yield* encodeIntent(intent);
+    if (encoded._tag !== "Ignored") return assert.fail("expected an Ignored intent");
+    return { ignored: encoded.reason };
+  }
   if (intent.outcome._tag === "AttemptCompleted") return { completed: intent.outcome };
   const failure = yield* encodeFailure(intent.outcome.failure);
   return { failed: failure };
@@ -223,6 +230,73 @@ describe("coordinator rules", () => {
     }),
   );
 
+  it.effect("clamp honors a model's decision about an interruption", () =>
+    Effect.gen(function* () {
+      const event = ChildInterrupted.make({ child: child(1), reason: "worker gone" });
+      const cases: ReadonlyArray<readonly [Decision, object]> = [
+        [
+          Failed.make({ message: "The checkout is gone" }),
+          { failed: { _tag: "AgentFailure", message: "The checkout is gone" } },
+        ],
+        [
+          Complete.make({ message: "The pull request already merged" }),
+          {
+            completed: {
+              _tag: "AttemptCompleted",
+              message: "The pull request already merged",
+              answeredOperator: false,
+            },
+          },
+        ],
+        [
+          Blocked.make({}),
+          { failed: { _tag: "BlockedFailure", message: "Child 1 was interrupted: worker gone" } },
+        ],
+        [
+          RetryChild.make({ assignment: "Rebuild the checkout first." }),
+          { delegate: 2, assignment: "Rebuild the checkout first." },
+        ],
+      ];
+      for (const [decision, expected] of cases) {
+        const [, intents] = handle(startedState(), event, { decision });
+        const intent = yield* intentOf(intents);
+        assert.deepStrictEqual(intent, expected, decision._tag);
+      }
+    }),
+  );
+
+  it("clamp applies the event's rule to a rule-only tag about a child", () => {
+    const ruleOnly = [
+      ruleFor(AttemptStarted.make({}), contextFor(AttemptStarted.make({}))),
+      ruleFor(
+        BudgetExceeded.make({ child: child(1), attempted: child(7) }),
+        contextFor(AttemptStarted.make({})),
+      ),
+    ];
+    assert.deepStrictEqual(
+      ruleOnly.map((decision) => decision._tag),
+      ["StartChild", "OverBudget"],
+    );
+    const events = [
+      reported("Opened #12"),
+      ChildInterrupted.make({ child: child(1), reason: "restart" }),
+    ];
+    for (const event of events) {
+      const context = contextFor(event);
+      for (const decision of ruleOnly)
+        assert.deepStrictEqual(
+          clamp(decision, context),
+          clamp(ruleFor(event, context), context),
+          `${event._tag} ${decision._tag}`,
+        );
+    }
+  });
+
+  it("ModelDecision rejects the tags only a rule makes", () => {
+    for (const answer of [{ _tag: "StartChild" }, { _tag: "OverBudget", attempted: 7 }])
+      assert.isTrue(Exit.isFailure(Schema.decodeUnknownExit(ModelDecision)(answer)), answer._tag);
+  });
+
   it.effect("clamp turns RetryChild past the budget into Failed", () =>
     Effect.gen(function* () {
       const [, intents] = handle(startedState(), reported("Half done"), {
@@ -235,19 +309,24 @@ describe("coordinator rules", () => {
     }),
   );
 
-  it("allows at most one replacement per interruption", () => {
-    const interrupted = ChildInterrupted.make({ child: child(1), reason: "restart" });
-    const context = contextFor(interrupted);
-    const decision = clamp(ruleFor(interrupted, context), context);
-    const [replaced, first] = apply(startedState(), decision);
-    const [again, second] = apply(replaced, decision);
-    assert.strictEqual(first.length, 1);
-    assert.deepStrictEqual(second, []);
-    assert.strictEqual(again, replaced);
-    const [late, stale] = handle(replaced, reported("Stale"));
-    assert.deepStrictEqual(stale, []);
-    assert.strictEqual(late, replaced);
-  });
+  it.effect("allows at most one replacement per interruption", () =>
+    Effect.gen(function* () {
+      const interrupted = ChildInterrupted.make({ child: child(1), reason: "restart" });
+      const context = contextFor(interrupted);
+      const decision = clamp(ruleFor(interrupted, context), context);
+      const [replaced, first] = apply(startedState(), decision);
+      const [again, second] = apply(replaced, decision);
+      assert.strictEqual(first.length, 1);
+      const stale = { ignored: { _tag: "StaleChild", answering: 1, latest: 2 } } as const;
+      const repeated = yield* intentOf(second);
+      assert.deepStrictEqual(repeated, stale);
+      assert.strictEqual(again, replaced);
+      const [late, staleReport] = handle(replaced, reported("Stale"));
+      const lateIntent = yield* intentOf(staleReport);
+      assert.deepStrictEqual(lateIntent, stale);
+      assert.strictEqual(late, replaced);
+    }),
+  );
 
   it("never delegates past the budget however often children are interrupted", () => {
     for (let maxChildren = 1; maxChildren <= 4; maxChildren += 1) {
@@ -266,17 +345,46 @@ describe("coordinator rules", () => {
     }
   });
 
-  it("ignores a repeated start and every decision after the Attempt settles", () => {
-    const started = startedState();
-    assert.deepStrictEqual(handle(started, AttemptStarted.make({})), [started, []]);
-    const [settled] = handle(started, reported("Done"));
-    for (const event of [AttemptStarted.make({}), reported("Again")])
-      assert.deepStrictEqual(handle(settled, event), [settled, []]);
-  });
-
-  it.effect("describes Decision as a JSON Schema with one branch per tag", () =>
+  it.effect("ignores a repeated start and every decision after the Attempt settles", () =>
     Effect.gen(function* () {
-      const document = Schema.toJsonSchemaDocument(Decision);
+      const started = startedState();
+      const [restarted, repeated] = handle(started, AttemptStarted.make({}));
+      assert.strictEqual(restarted, started);
+      const repeatedIntent = yield* intentOf(repeated);
+      assert.deepStrictEqual(repeatedIntent, { ignored: { _tag: "AlreadyStarted" } });
+      const [settled] = handle(started, reported("Done"));
+      for (const event of [AttemptStarted.make({}), reported("Again")]) {
+        const [next, intents] = handle(settled, event);
+        assert.strictEqual(next, settled, event._tag);
+        const intent = yield* intentOf(intents);
+        assert.deepStrictEqual(intent, { ignored: { _tag: "AttemptSettled" } }, event._tag);
+      }
+    }),
+  );
+
+  it.effect("ignores a decision about a child before the first child starts", () =>
+    Effect.gen(function* () {
+      const events = [
+        reported("Done"),
+        ChildInterrupted.make({ child: child(1), reason: "restart" }),
+      ];
+      for (const event of events) {
+        const awaiting = AwaitingStart.make({});
+        const [next, intents] = handle(awaiting, event);
+        assert.strictEqual(next, awaiting, event._tag);
+        const intent = yield* intentOf(intents);
+        assert.deepStrictEqual(
+          intent,
+          { ignored: { _tag: "NotStarted", answering: 1 } },
+          event._tag,
+        );
+      }
+    }),
+  );
+
+  it.effect("describes ModelDecision as a JSON Schema with one branch per tag", () =>
+    Effect.gen(function* () {
+      const document = Schema.toJsonSchemaDocument(ModelDecision);
       const { anyOf } = yield* Schema.decodeUnknownEffect(
         Schema.Struct({
           anyOf: Schema.Array(
@@ -290,7 +398,7 @@ describe("coordinator rules", () => {
       )(document.schema);
       assert.deepStrictEqual(
         anyOf.map((branch) => branch.properties._tag.enum),
-        Decision.members.map((member) => [member.fields._tag.schema.literal]),
+        ModelDecision.members.map((member) => [member.fields._tag.schema.literal]),
       );
       expect(document).toMatchInlineSnapshot(`
         {
@@ -298,21 +406,6 @@ describe("coordinator rules", () => {
           "dialect": "draft-2020-12",
           "schema": {
             "anyOf": [
-              {
-                "additionalProperties": true,
-                "properties": {
-                  "_tag": {
-                    "enum": [
-                      "StartChild",
-                    ],
-                    "type": "string",
-                  },
-                },
-                "required": [
-                  "_tag",
-                ],
-                "type": "object",
-              },
               {
                 "additionalProperties": true,
                 "properties": {
@@ -447,27 +540,6 @@ describe("coordinator rules", () => {
                 "required": [
                   "_tag",
                   "message",
-                ],
-                "type": "object",
-              },
-              {
-                "additionalProperties": true,
-                "properties": {
-                  "_tag": {
-                    "enum": [
-                      "OverBudget",
-                    ],
-                    "type": "string",
-                  },
-                  "attempted": {
-                    "maximum": 9007199254740991,
-                    "minimum": 1,
-                    "type": "integer",
-                  },
-                },
-                "required": [
-                  "_tag",
-                  "attempted",
                 ],
                 "type": "object",
               },
