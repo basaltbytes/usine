@@ -411,7 +411,9 @@ export const authenticatedRoutes = (services: AuthServices) => {
             .authenticate(secretOf(request))
             .pipe(
               Effect.flatMap((current) =>
-                jsonKey(current.permissions) === jsonKey(access.permissions)
+                jsonKey(current.permissions) === jsonKey(access.permissions) &&
+                jsonKey(Option.getOrNull(current.operations)) ===
+                  jsonKey(Option.getOrNull(access.operations))
                   ? Effect.void
                   : Effect.fail(authFailure("Permissions changed. Reconnect to continue.", 403)),
               ),

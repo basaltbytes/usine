@@ -7,7 +7,7 @@ import {
   type PermissionGrant as Grant,
 } from "@usine/core/access";
 import { jsonKey } from "@usine/core/json-key";
-import { ActingMember } from "@usine/core/operator";
+import { ActingMember, localActor } from "@usine/core/operator";
 import { ProjectId } from "@usine/core/project";
 import { type RunId } from "@usine/core/run";
 import { OperatorApi, operatorPermissions, UpgradeView } from "@usine/orchestrator/operator/http";
@@ -18,6 +18,7 @@ import { webRequest } from "../../../../tooling/test/http.mts";
 import {
   type Cause,
   Context,
+  DateTime,
   Effect,
   Fiber,
   FileSystem,
@@ -41,7 +42,14 @@ import { MCP_PATH, mcpRoutes } from "../../src/mcp/http.ts";
 import { stdioServer } from "../../src/mcp/stdio.ts";
 import { MAX_RESULT_BYTES } from "../../src/mcp/tools.ts";
 import { ServerUpgrades } from "../../src/upgrade/control.ts";
-import { authFixture } from "../auth/fixture.ts";
+import {
+  InstanceLaunch,
+  InstanceRecord,
+  instanceFiles,
+  ProcessId,
+  writeRecord,
+} from "../../src/instance/record.ts";
+import { authFixture, localSecret } from "../auth/fixture.ts";
 
 const cli = fileURLToPath(new URL("../../dist/main.js", import.meta.url));
 // Tests that wait for a request timeout or start the built CLI.
@@ -140,7 +148,16 @@ const fixture = Effect.gen(function* () {
   ).pipe(HttpRouter.provideRequest(Layer.merge(backend, upgrades)));
   const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
   yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
-  return { app, routes, device, approvals, services, backend, upgrades };
+  return {
+    app,
+    routes,
+    device,
+    approvals,
+    services,
+    backend,
+    upgrades,
+    browser: { session, csrf: browser.csrf },
+  };
 });
 
 /** Serves `routes` on a loopback port and returns its origin. */
@@ -194,12 +211,15 @@ const memoryStdio = Effect.gen(function* () {
 });
 
 /**
- * Runs the built `usine mcp --origin` with `USINE_TOKEN`, writes `messages` to its standard input,
- * and closes the input after the reply to `lastId`. Returns the standard output up to that reply.
+ * Runs the built `usine mcp` with `args` in `cwd`, writes `messages` to its standard input, and
+ * closes the input after the reply to `lastId`. Returns the standard output up to that reply.
  */
 const runMcpCommand = Effect.fn("test.runMcpCommand")(function* (
-  origin: string,
-  token: string,
+  command: {
+    readonly args: ReadonlyArray<string>;
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string>>;
+  },
   messages: ReadonlyArray<JsonObject>,
   lastId: number,
 ) {
@@ -209,9 +229,9 @@ const runMcpCommand = Effect.fn("test.runMcpCommand")(function* (
   for (const message of messages)
     yield* Queue.offer(input, encoder.encode(`${jsonKey(message)}\n`));
   const child = yield* spawner.spawn(
-    ChildProcess.make(process.execPath, [cli, "mcp", "--origin", origin], {
-      cwd: tmpdir(),
-      env: { USINE_TOKEN: token },
+    ChildProcess.make(process.execPath, [cli, "mcp", ...command.args], {
+      cwd: command.cwd,
+      env: command.env,
       extendEnv: true,
       stdin: Stream.fromQueue(input),
     }),
@@ -232,18 +252,24 @@ const inProcess =
   (app: { readonly handler: (request: Request) => Promise<Response> }) => (request: Request) =>
     Effect.promise(() => app.handler(request));
 
-/** A JSON-RPC client of `POST /api/mcp` that keeps the session the server assigns. */
+/**
+ * A JSON-RPC client of `POST /api/mcp` that keeps the session the server assigns. A string
+ * `credential` is a bearer token; an object holds the credential headers to send.
+ */
 const mcpClient = <E, R>(
   send: (request: Request) => Effect.Effect<Response, E, R>,
-  token: string,
+  credential: string | Readonly<Record<string, string>>,
   origin = "https://usine.example",
 ) => {
   let session: string | undefined;
   let id = 0;
+  const credentialHeaders = Schema.is(Schema.String)(credential)
+    ? { authorization: `Bearer ${credential}` }
+    : credential;
   const post = (body: JsonObject) =>
     Effect.suspend(() => {
       const headers = new Headers({
-        authorization: `Bearer ${token}`,
+        ...credentialHeaders,
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
       });
@@ -346,6 +372,39 @@ describe("operator MCP endpoint", () => {
         .pipe(Effect.flatMap(Schema.decodeUnknownEffect(ToolCall)));
       assert.isNotTrue(approved.result.isError);
       assert.deepEqual(approvals[1], { runId: "run-2", actor: Option.some("alice") });
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("serves a browser session that sends its CSRF header", () =>
+    Effect.gen(function* () {
+      const { app, approvals, browser } = yield* fixture;
+      const cookie = { cookie: `usine_session=${browser.session}` };
+      const withoutCsrf = yield* Effect.promise(() =>
+        app.handler(
+          new Request(`https://usine.example${MCP_PATH}`, {
+            method: "POST",
+            headers: {
+              ...cookie,
+              "content-type": "application/json",
+              accept: "application/json, text/event-stream",
+            },
+            body: jsonKey({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "initialize",
+              params: initializeParams,
+            }),
+          }),
+        ),
+      );
+      assert.equal(withoutCsrf.status, 403);
+      const client = mcpClient(inProcess(app), { ...cookie, "x-usine-csrf": browser.csrf });
+      assert.equal((yield* client.initialize).status, 200);
+      const result = yield* client
+        .call("approve", { runId: "run-1" })
+        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(ToolCall)));
+      assert.isNotTrue(result.result.isError);
+      assert.deepEqual(approvals, [{ runId: "run-1", actor: Option.some("alice") }]);
     }).pipe(Effect.scoped),
   );
 
@@ -526,8 +585,7 @@ describe("operator MCP endpoint", () => {
         );
         const origin = yield* serveOnLoopback(routes);
         const { stdout, stderr } = yield* runMcpCommand(
-          origin,
-          token,
+          { args: ["--origin", origin], cwd: tmpdir(), env: { USINE_TOKEN: token } },
           [
             { jsonrpc: "2.0", id: 1, method: "initialize", params: initializeParams },
             { jsonrpc: "2.0", method: "notifications/initialized" },
@@ -552,6 +610,80 @@ describe("operator MCP endpoint", () => {
           listed.result.tools.map(({ name }) => name),
           ["detail", "approve"],
         );
+      }).pipe(Effect.timeout("25 seconds"), Effect.provide(NodeServices.layer), Effect.scoped),
+    slowCall,
+  );
+
+  it.live(
+    "serves the instance of the current folder from the built usine mcp with the admin token",
+    () =>
+      Effect.gen(function* () {
+        const { app, routes, approvals } = yield* fixture;
+        const overHttp = mcpClient(inProcess(app), localSecret);
+        yield* overHttp.initialize;
+        const httpTools = yield* overHttp.listTools;
+        const origin = yield* serveOnLoopback(routes);
+        const fileSystem = yield* FileSystem.FileSystem;
+        const folder = yield* fileSystem.makeTempDirectoryScoped();
+        const files = instanceFiles(folder);
+        yield* fileSystem.makeDirectory(files.folder);
+        yield* fileSystem.writeFileString(`${files.folder}/admin-token`, localSecret, {
+          mode: 0o600,
+        });
+        yield* writeRecord(
+          files,
+          InstanceRecord.make({
+            pid: ProcessId.make(process.pid),
+            version: "1.0.0",
+            startedAt: DateTime.nowUnsafe(),
+            launch: InstanceLaunch.make({
+              node: process.execPath,
+              nodeOptions: [],
+              script: cli,
+              port: Port.make(Number(new URL(origin).port)),
+              logLevel: "Info",
+              allowVolatileInstance: false,
+            }),
+          }),
+        );
+        const { stdout } = yield* runMcpCommand(
+          { args: [], cwd: folder, env: {} },
+          [
+            { jsonrpc: "2.0", id: 1, method: "initialize", params: initializeParams },
+            { jsonrpc: "2.0", method: "notifications/initialized" },
+            { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+            {
+              jsonrpc: "2.0",
+              id: 3,
+              method: "tools/call",
+              params: { name: "approve", arguments: { runId: "run-1" } },
+            },
+          ],
+          3,
+        );
+        const messages = yield* Effect.forEach(stdout, (line) =>
+          Schema.decodeEffect(JsonRpcLine)(line).pipe(
+            Effect.orElseSucceed(() =>
+              assert.fail(`stdout holds a line that isn't JSON-RPC: ${line}`),
+            ),
+          ),
+        );
+        // The server may send notifications, which have no ID, between the replies.
+        const reply = (id: number) => stdout[messages.findIndex((message) => message.id === id)];
+        assert.deepEqual(
+          messages.flatMap(({ id }) => (id === undefined ? [] : [id])),
+          [1, 2, 3],
+        );
+        const listed = yield* Schema.decodeEffect(Schema.fromJsonString(ToolList))(reply(2) ?? "");
+        assert.sameMembers(
+          listed.result.tools.map(({ name }) => name),
+          httpTools,
+        );
+        const approved = yield* Schema.decodeEffect(Schema.fromJsonString(ToolCall))(
+          reply(3) ?? "",
+        );
+        assert.isNotTrue(approved.result.isError);
+        assert.deepEqual(approvals, [{ runId: "run-1", actor: Option.some<string>(localActor) }]);
       }).pipe(Effect.timeout("25 seconds"), Effect.provide(NodeServices.layer), Effect.scoped),
     slowCall,
   );

@@ -22,6 +22,6 @@ An enrolled GitHub identity with the required role bindings, GitHub Device Flow 
 
 ## Check the result
 
-An authenticated `GET /api/auth/session` returns the token’s effective permissions and its operations. Requests require both its permission ceiling and the member’s current bindings. A token with operations can call only those operations, and can always read its session and sign out. Revoke the device entry under **Tokens** to end access.
+An authenticated `GET /api/auth/session` returns the token’s effective permissions and its operations. Requests require both its permission ceiling and the member’s current bindings. A token with operations can call only those operations and public ones, which need no token, and can always read its session and sign out. Revoke the device entry under **Tokens** to end access.
 
 A device token remains valid until revoked, or until the expiry set when it was created on **Tokens**. Adding a role does not expand an existing device ceiling; use a browser session to edit scopes or sign in on the device again. [Operator API](/reference/operator-api/) documents token issuance and scope updates.
