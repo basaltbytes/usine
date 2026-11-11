@@ -393,12 +393,21 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
                 cause,
               }),
             ),
-            Effect.andThen(
+            Effect.flatMap((recorded) =>
               Effect.logWarning("Child infrastructure failure requires an automatic retry", {
                 attemptId: spec.attemptId,
                 sessionId,
                 message: error.message,
-              }),
+              }).pipe(
+                Effect.andThen(
+                  recorded
+                    ? Effect.void
+                    : Effect.logInfo(
+                        "Kept the Attempt's first child infrastructure failure ahead of this one",
+                        { attemptId: spec.attemptId, sessionId },
+                      ),
+                ),
+              ),
             ),
           )
       : Effect.void;

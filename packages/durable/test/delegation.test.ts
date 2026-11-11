@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import type { TaskId } from "@earendil-works/pi-durable";
 import { ChildBackend } from "@usine/agents/runtime";
 import { AgentSessionId, ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { delegate } from "../src/attempt/delegation/delegation.ts";
 import { attemptHubs } from "../src/attempt/hubs.ts";
@@ -12,11 +13,21 @@ import { attemptRequest } from "./support.ts";
 // SAFETY: the hub uses the task ID only as a lookup key; no durable task backs these tests.
 const ATTEMPT_TASK = 1 as TaskId;
 
-/** Starts one delegation with an attached `execute` call and returns its fiber. */
-const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>, maxChildren = 3) =>
+/**
+ * Starts one delegation with an attached `execute` call and returns its fiber. With `hubs`, the
+ * delegation joins the Attempt's existing hub, as a parallel delegation of the same Attempt does.
+ */
+const start = (
+  attemptId: string,
+  memory: ReturnType<typeof memoryJournal>,
+  options: {
+    readonly maxChildren?: number;
+    readonly hubs?: Effect.Success<typeof attemptHubs>;
+  } = {},
+) =>
   Effect.gen(function* () {
-    const request = attemptRequest(attemptId, maxChildren);
-    const hubs = yield* attemptHubs;
+    const request = attemptRequest(attemptId, options.maxChildren ?? 3);
+    const hubs = options.hubs ?? (yield* attemptHubs);
     const hub = yield* hubs.hub(request.spec.attemptId, ATTEMPT_TASK);
     yield* Deferred.succeed(hub.attached, request);
     const backend = yield* ChildBackend;
@@ -26,7 +37,7 @@ const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>, maxC
         { spec: request.spec, hub, journal: memory.journal, assignment: "Finish the task" },
       ),
     );
-    return { fiber, hub };
+    return { fiber, hub, hubs };
   });
 
 describe("delegate", () => {
@@ -99,6 +110,59 @@ describe("delegate", () => {
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 
+  it.live("keeps the child's report from the parent until the operator's Hold ends", () =>
+    Effect.gen(function* () {
+      const sessionId = AgentSessionId.make("parent:delegation/held:child:1");
+      const memory = memoryJournal();
+      memory.attempt.held = [sessionId];
+      const { fiber, hub } = yield* start("delegation/held", memory);
+      const child = yield* (yield* StubChildren).next;
+      assert.strictEqual(child.request.session.id, sessionId);
+      yield* child.reply("Finished.");
+      // Release the child alone: its result resolves while the journal still records the Hold.
+      const running = hub.children.get(sessionId);
+      assert.isDefined(running);
+      if (running === undefined) return;
+      yield* running.intervene(AttemptChannel.Release.make(), () => Effect.void);
+      const early = yield* Fiber.join(fiber).pipe(Effect.timeoutOption("300 millis"));
+      assert.isTrue(Option.isNone(early));
+
+      yield* memory.release(sessionId);
+      const outcome = yield* Fiber.join(fiber);
+      assert.deepStrictEqual(outcome, { _tag: "Reported", sessionId, report: "Finished." });
+    }).pipe(Effect.provide(stubChildBackendLayer), Effect.timeout("10 seconds")),
+  );
+
+  it.effect(
+    "keeps the Attempt's first infrastructure failure when a parallel child also crashes",
+    () =>
+      Effect.gen(function* () {
+        const first = memoryJournal();
+        const second = memoryJournal(first.attempt);
+        const children = yield* StubChildren;
+        const one = yield* start("delegation/two-crashes", first);
+        const firstChild = yield* children.next;
+        const two = yield* start("delegation/two-crashes", second, { hubs: one.hubs });
+        const secondChild = yield* children.next;
+
+        yield* firstChild.crash("first transport lost");
+        yield* Fiber.join(one.fiber).pipe(Effect.flip);
+        yield* secondChild.crash("second transport lost");
+        const error = yield* Fiber.join(two.fiber).pipe(Effect.flip);
+
+        assert.strictEqual(error._tag, "SessionOperationError");
+        assert.strictEqual(first.attempt.children, 2);
+        assert.deepStrictEqual(
+          first.attempt.blocker,
+          Option.some({
+            sessionId: firstChild.request.session.id,
+            message: "first transport lost",
+            kind: "infra" as const,
+          }),
+        );
+      }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
   it.effect("returns Interrupted for a resumed delegation without a saved conversation", () =>
     Effect.gen(function* () {
       const sessionId = AgentSessionId.make("parent:delegation/interrupted:child:1");
@@ -126,7 +190,7 @@ describe("delegate", () => {
     Effect.gen(function* () {
       const memory = memoryJournal();
       memory.attempt.children = 1;
-      const { fiber, hub } = yield* start("delegation/budget", memory, 1);
+      const { fiber, hub } = yield* start("delegation/budget", memory, { maxChildren: 1 });
       const outcome = yield* Fiber.join(fiber);
 
       assert.deepStrictEqual(outcome, {
