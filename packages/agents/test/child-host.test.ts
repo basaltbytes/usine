@@ -273,6 +273,7 @@ describe("remote shell commands", () => {
       container: { runtime: "docker", name: "usine-attempt" },
     });
     const [, , , , line] = sshArguments(contained, {
+      cwd: "/workspace/repository",
       command: "node",
       args: [
         "-e",
@@ -284,12 +285,25 @@ describe("remote shell commands", () => {
         "claude",
         "--output-format",
         "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+        "--model",
+        "claude-opus-4-1",
+        "--permission-mode",
+        "bypassPermissions",
+        "--setting-sources",
+        "user",
+        "--resume",
+        "6f1c2a9e-3d4b-4c8a-9e2f-1b7d5a0c3e84",
       ],
       environment: {},
     });
     assert(line !== undefined);
-    // Linux MAX_ARG_STRLEN: the remote shell receives this line as one exec argument.
-    assert.isBelow(Buffer.byteLength(line), 128 * 1024);
+    // A size guard, not a minification check. Linux MAX_ARG_STRLEN (128 KiB) applies because the
+    // remote shell receives this line as one exec argument; half of it stays free for longer
+    // harness arguments than these, such as an MCP server configuration.
+    assert.isBelow(Buffer.byteLength(line), 64 * 1024);
   });
 
   it("refuses a variable name the shell would not read as one", () => {
