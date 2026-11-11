@@ -160,9 +160,7 @@ export const detachAfterHookResponse = (
         scriptedTarget,
         scriptedCommand,
         Stream.fromQueue(input),
-        undefined,
-        "handled",
-        checkpoint.inputAcknowledged,
+        { acknowledgement: "handled", onInputAcknowledged: checkpoint.inputAcknowledged },
       );
       yield* owner.stdout.pipe(
         Stream.runForEach((bytes) =>

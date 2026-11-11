@@ -3,5 +3,6 @@ export {
   ChildProcessLost,
   stopChildProcess,
   type ProcessCommand,
+  type ProcessOptions,
   type ProcessTarget,
 } from "./process.ts";

@@ -290,9 +290,11 @@ const makeClaudeChild = Effect.gen(function* () {
           sessionId: Option.some(request.session.id),
           environment: request.environment,
         },
-        transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
-        checkpoint.read,
-        checkpoint.inputAcknowledged,
+        {
+          transport: transport ?? (Option.isSome(request.resume) ? "resume" : undefined),
+          readOutput: checkpoint.read,
+          onInputAcknowledged: checkpoint.inputAcknowledged,
+        },
       ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
       const query = sdk.open(input, { ...options, spawnClaudeCodeProcess: owner.spawn });
       const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
