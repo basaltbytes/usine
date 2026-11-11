@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
-import { Boxd, Machine, NotFoundError } from "@boxd-sh/sdk";
+import { Boxd, Machine } from "@boxd-sh/sdk";
 import { boxdEgress } from "./egress.mjs";
 
 const USAGE =
@@ -17,6 +17,12 @@ const IMAGE = /^[A-Za-z0-9./:@_-]+$/u;
 const READY_TIMEOUT_MS = 180_000;
 const SNAPSHOT_TIMEOUT_MS = 600_000;
 const POLL_MS = 1_000;
+const EGRESS_TIMEOUT_MS = 30_000;
+/**
+ * How long after boxd reports an egress edit the edit may still be on its way to the machine. The
+ * SDK documents that an edit takes effect within a second, and the boxd provisioner waits as long.
+ */
+const EGRESS_IN_FORCE_MS = 1_000;
 
 /**
  * The most stdin bytes in one `Exec` message. boxd closes the command's stdin without an error at
@@ -130,6 +136,26 @@ const throwIfAborted = (signal) => {
   if (signal.aborted) throw new Error("Interrupted");
 };
 
+const describeEgress = (entries) => (entries.length === 0 ? "unrestricted" : entries.join(", "));
+
+/**
+ * Reads `machine` until boxd reports `entries` as its egress allowlist in effect, polling every
+ * `pollMs` for at most `timeoutMs`, and returns the last read.
+ */
+const waitForEgress = async (boxd, machine, entries, { signal, pollMs, timeoutMs }) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    throwIfAborted(signal);
+    const read = await boxd.machines.get(machine);
+    if (sameEntries(read.egressAllow, entries)) return read;
+    if (Date.now() > deadline)
+      throw new Error(
+        `boxd didn't report the temporary machine's egress as ${describeEgress(entries)} within ${timeoutMs / 1000} seconds`,
+      );
+    await sleep(pollMs);
+  }
+};
+
 /** Runs the setup on `machine` and relays its output to `output`. Returns the exit code. */
 const runSetup = async (boxd, machine, { runtime, image }, { output, signal }) => {
   const stream = boxd.machines.streamExec(machine, {
@@ -150,26 +176,28 @@ const runSetup = async (boxd, machine, { runtime, image }, { output, signal }) =
 };
 
 /**
- * Saves `machine` as snapshot `name` and waits until boxd reports the new version ready, polling
- * every `pollMs` for at most `timeoutMs`.
+ * Saves `machine` as snapshot `name` and waits until boxd reports the version that the save
+ * captures ready, polling every `pollMs` for at most `timeoutMs`. A snapshot's `version` is its
+ * latest ready one, and its status is `failed` only while it has no ready version, so a failed
+ * save of a snapshot that has one only shows as the deadline. A `failed` read counts as the save's
+ * failure only after a read showed the save `pending`; an earlier one can be the record of a
+ * previous save.
  */
 const saveSnapshot = async (boxd, machine, name, { signal, pollMs, timeoutMs }) => {
-  const previous = await boxd.snapshots.get(name).then(
-    (snapshot) => snapshot.version ?? 0,
-    (error) => {
-      if (error instanceof NotFoundError) return 0;
-      throw error;
-    },
-  );
-  await boxd.snapshots.create(machine, name);
+  const { version } = await boxd.snapshots.create(machine, name);
   const deadline = Date.now() + timeoutMs;
+  let started = false;
   for (;;) {
     throwIfAborted(signal);
     const snapshot = await boxd.snapshots.get(name);
-    if (snapshot.status === "failed") throw new Error(`boxd reports snapshot ${name} failed`);
-    if (snapshot.status === "ready" && (snapshot.version ?? 0) > previous) return snapshot;
+    if (snapshot.status === "ready" && (snapshot.version ?? 0) >= version) return snapshot;
+    if (snapshot.status === "pending") started = true;
+    else if (snapshot.status === "failed" && started)
+      throw new Error(`boxd reports that version ${version} of snapshot ${name} failed`);
     if (Date.now() > deadline)
-      throw new Error(`Snapshot ${name} is still ${snapshot.status} after 10 minutes`);
+      throw new Error(
+        `Version ${version} of snapshot ${name} didn't become ready within ${timeoutMs / 1000} seconds`,
+      );
     await sleep(pollMs);
   }
 };
@@ -179,13 +207,23 @@ const saveSnapshot = async (boxd, machine, name, { signal, pollMs, timeoutMs }) 
  * shared with the API key's org, isolated, at `options.size`, with the egress allowlist of
  * `egress.mjs` in its spec, which the snapshot keeps. The setup runs with egress unrestricted,
  * because it downloads from hosts outside the allowlist. The machine is deleted when the build
- * ends, fails, or `signal` aborts; `log` names it if its deletion fails. `pollMs` and
- * `snapshotTimeoutMs` set how often and how long the script waits for the snapshot.
+ * ends, fails, or `signal` aborts; `log` names it if its deletion fails. `pollMs` sets how often
+ * the script reads the machine and the snapshot. `egressTimeoutMs` and `snapshotTimeoutMs` set how
+ * long it waits for an egress edit and the snapshot, and `egressInForceMs` how long it waits after
+ * boxd reports an egress edit before it relies on the edit.
  */
 export const build = async (
   boxd,
   options,
-  { log, output, signal, pollMs = POLL_MS, snapshotTimeoutMs = SNAPSHOT_TIMEOUT_MS },
+  {
+    log,
+    output,
+    signal,
+    pollMs = POLL_MS,
+    egressTimeoutMs = EGRESS_TIMEOUT_MS,
+    egressInForceMs = EGRESS_IN_FORCE_MS,
+    snapshotTimeoutMs = SNAPSHOT_TIMEOUT_MS,
+  },
 ) => {
   const egress = boxdEgress();
   const stamp = new Date().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
@@ -208,17 +246,17 @@ export const build = async (
     await boxd.machines.waitUntilReady(machine.id, { timeout: READY_TIMEOUT_MS });
     await boxd.machines.setAutoHibernateTimeout(machine.id, 0);
     await boxd.machines.setAutoSuspendTimeout(machine.id, 0);
+    const polling = { signal, pollMs, timeoutMs: egressTimeoutMs };
     await boxd.machines.setEgressAllow(machine.id, []);
+    await waitForEgress(boxd, machine.id, [], polling);
+    await sleep(egressInForceMs);
     throwIfAborted(signal);
     const code = await runSetup(boxd, machine.id, options, { output, signal });
     throwIfAborted(signal);
     if (code !== 0) throw new Error(`The setup exited with code ${code}`);
     await boxd.machines.setEgressAllow(machine.id, egress);
-    const restricted = await boxd.machines.get(machine.id);
-    if (
-      !sameEntries(restricted.egressAllow, egress) ||
-      !sameEntries(restricted.spec?.egress ?? [], egress)
-    )
+    const restricted = await waitForEgress(boxd, machine.id, egress, polling);
+    if (!sameEntries(restricted.spec?.egress ?? [], egress))
       throw new Error(
         "boxd didn't record the egress allowlist in the temporary machine's spec, so the snapshot would start unrestricted",
       );

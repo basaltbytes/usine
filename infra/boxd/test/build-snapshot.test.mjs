@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { NotFoundError } from "@boxd-sh/sdk";
 import {
   build,
   clientOptions,
@@ -58,10 +57,13 @@ const fakeStream = (exit, onEnd) => {
 
 /**
  * A boxd API in the shape of the SDK client. An egress edit updates the spec as boxd documents,
- * unless `specKeepsEgress` is false, when the edit drops the spec's allowlist; `previous` is the
- * version of an existing snapshot. After a save, the first read returns the previous version, and
- * the next ones the new version, or `pending` for good when `neverReady` is set. `onSetupEnd`
- * runs when the setup's stdin closes; a null `setupExit` means the setup never exits.
+ * unless `specKeepsEgress` is false, when the edit drops the spec's allowlist. The nth edit comes
+ * into effect after `egressLags[n]` machine reads, or never when it is `Infinity`; the default is
+ * at once. `previous` is the latest ready version of an existing snapshot. A save captures the
+ * next version. After it, the snapshot reads `reads` in order and then repeats the last one; by
+ * default, the first read returns the previous version, and the next ones the new version, or
+ * `pending` for good when `neverReady` is set. `onSetupEnd` runs when the setup's stdin closes; a
+ * null `setupExit` means the setup never exits.
  */
 const fakeBoxd = ({
   setupExit = 0,
@@ -69,12 +71,24 @@ const fakeBoxd = ({
   failDelete = false,
   neverReady = false,
   specKeepsEgress = true,
+  egressLags = [],
   previous,
+  reads,
   onSetupEnd,
 } = {}) => {
   const events = [];
-  const state = { egress: [], specEgress: [], snapshot: undefined, stream: undefined };
-  if (previous !== undefined) state.snapshot = { reads: [{ status: "ready", version: previous }] };
+  const state = {
+    egress: [],
+    requested: [],
+    lag: 0,
+    edits: 0,
+    specEgress: [],
+    liftedAt: undefined,
+    setupDelay: undefined,
+    snapshot: undefined,
+    stream: undefined,
+  };
+  if (previous !== undefined) state.snapshot = [{ status: "ready", version: previous }];
   return {
     events,
     state,
@@ -83,6 +97,7 @@ const fakeBoxd = ({
         events.push(["create", params]);
         const spec = params.spec.resolve();
         state.egress = spec.egress;
+        state.requested = spec.egress;
         state.specEgress = spec.egress;
         return { id: "vm-1", name: params.name };
       },
@@ -91,13 +106,22 @@ const fakeBoxd = ({
       setAutoSuspendTimeout: async (id, seconds) => events.push(["suspend", seconds]),
       setEgressAllow: async (id, entries) => {
         events.push(["egress", entries]);
-        state.egress = entries;
+        state.requested = entries;
+        state.lag = egressLags[state.edits++] ?? 0;
+        if (state.lag === 0) state.egress = entries;
         state.specEgress = specKeepsEgress ? entries : [];
         return entries;
       },
-      get: async (id) => ({ id, egressAllow: state.egress, spec: { egress: state.specEgress } }),
+      get: async (id) => {
+        if (state.lag > 0) state.lag -= 1;
+        else state.egress = state.requested;
+        if (state.egress.length === 0) state.liftedAt ??= Date.now();
+        events.push(["machine", state.egress]);
+        return { id, egressAllow: state.egress, spec: { egress: state.specEgress } };
+      },
       streamExec: (id, params) => {
         events.push(["exec", params.command, state.egress]);
+        state.setupDelay = Date.now() - state.liftedAt;
         state.stream = fakeStream(setupExit, onSetupEnd);
         return state.stream;
       },
@@ -107,21 +131,21 @@ const fakeBoxd = ({
       },
     },
     snapshots: {
-      get: async (name) => {
-        const reads = state.snapshot?.reads ?? [];
-        const current = reads.length > 1 ? reads.shift() : reads[0];
-        events.push(["snapshot", current?.status, current?.version]);
-        if (current === undefined) throw new NotFoundError(`snapshot not found: ${name}`);
+      get: async () => {
+        const current = state.snapshot.length > 1 ? state.snapshot.shift() : state.snapshot[0];
+        events.push(["snapshot", current.status, current.version]);
         return { ...current };
       },
       create: async (machine, name) => {
         events.push(["save", machine, name, state.egress, state.specEgress]);
         if (failSave) throw new Error("save failed");
-        const stale = state.snapshot?.reads.at(-1);
-        const version = (stale?.version ?? 0) + 1;
-        const next = neverReady ? { status: "pending", version } : { status: "ready", version };
-        state.snapshot = { reads: stale === undefined ? [next] : [stale, next] };
-        return { name, status: "pending" };
+        const stale = state.snapshot?.at(-1);
+        const version = (previous ?? 0) + 1;
+        const next = neverReady
+          ? { status: "pending", version: null }
+          : { status: "ready", version };
+        state.snapshot = reads ?? (stale === undefined ? [next] : [stale, next]);
+        return { name, version, status: "pending" };
       },
     },
   };
@@ -135,6 +159,9 @@ const run = (boxd, options, signal = new AbortController().signal, timing = {}) 
     output: { write: (chunk) => relayed.push(Buffer.from(chunk).toString()) },
     signal,
     pollMs: 0,
+    egressInForceMs: 0,
+    egressTimeoutMs: 2_000,
+    snapshotTimeoutMs: 2_000,
     ...timing,
   });
   return { result, logged, relayed };
@@ -157,9 +184,10 @@ test("builds on an isolated, shared machine from a spec with the allowlist, over
     "hibernate",
     "suspend",
     "egress",
+    "machine",
     "exec",
     "egress",
-    "snapshot",
+    "machine",
     "save",
     "snapshot",
     "delete",
@@ -186,7 +214,7 @@ test("passes each size to the spec", async () => {
   }
 });
 
-test("waits for a version newer than the snapshot's previous one", async () => {
+test("waits for the version that the save captures", async () => {
   const boxd = fakeBoxd({ previous: 3 });
   await run(boxd, parseOptions(["usine-attempt"], env)).result;
   const saved = names(boxd).indexOf("save");
@@ -201,16 +229,84 @@ test("waits for a version newer than the snapshot's previous one", async () => {
 });
 
 test(
-  "gives up on a snapshot that stays pending and deletes the machine",
+  "gives up on a version that doesn't become ready and deletes the machine",
   { timeout: 10_000 },
   async () => {
-    const boxd = fakeBoxd({ neverReady: true });
+    // A failed save of a snapshot that has a ready version leaves the snapshot ready at that one.
+    for (const settings of [
+      { neverReady: true },
+      { previous: 3, reads: [{ status: "ready", version: 3 }] },
+    ]) {
+      const boxd = fakeBoxd(settings);
+      const { result } = run(boxd, parseOptions(["usine-attempt"], env), undefined, {
+        snapshotTimeoutMs: 20,
+      });
+      const version = (settings.previous ?? 0) + 1;
+      await assert.rejects(
+        result,
+        new RegExp(
+          `^Error: Version ${version} of snapshot usine-attempt didn't become ready within 0\\.02 seconds$`,
+          "u",
+        ),
+      );
+      assert.equal(names(boxd).at(-1), "delete");
+      assert.ok(names(boxd).filter((name) => name === "snapshot").length > 2);
+    }
+  },
+);
+
+test("fails when boxd reports the save failed, after it showed the save pending", async () => {
+  const boxd = fakeBoxd({
+    reads: [
+      { status: "failed", version: null },
+      { status: "pending", version: null },
+      { status: "failed", version: null },
+    ],
+  });
+  const { result } = run(boxd, parseOptions(["usine-attempt"], env));
+  await assert.rejects(
+    result,
+    /^Error: boxd reports that version 1 of snapshot usine-attempt failed$/u,
+  );
+  assert.equal(names(boxd).filter((name) => name === "snapshot").length, 3);
+  assert.equal(names(boxd).at(-1), "delete");
+});
+
+test("a failed read before the save shows pending is a previous save's record", async () => {
+  const boxd = fakeBoxd({
+    reads: [
+      { status: "failed", version: null },
+      { status: "pending", version: null },
+      { status: "ready", version: 1 },
+    ],
+  });
+  assert.equal(await run(boxd, parseOptions(["usine-attempt"], env)).result, "usine-attempt");
+  assert.equal(names(boxd).filter((name) => name === "snapshot").length, 3);
+});
+
+test(
+  "starts the setup a second after boxd reports the allowlist lifted",
+  { timeout: 10_000 },
+  async () => {
+    const boxd = fakeBoxd({ egressLags: [2, 2] });
+    const egress = boxdEgress();
     const { result } = run(boxd, parseOptions(["usine-attempt"], env), undefined, {
-      snapshotTimeoutMs: 20,
+      egressInForceMs: 50,
     });
-    await assert.rejects(result, /Snapshot usine-attempt is still pending/u);
-    assert.equal(names(boxd).at(-1), "delete");
-    assert.ok(names(boxd).filter((name) => name === "snapshot").length > 2);
+    assert.equal(await result, "usine-attempt");
+    const machine = names(boxd).indexOf("machine");
+    assert.deepEqual(boxd.events.slice(machine, machine + 4), [
+      ["machine", egress],
+      ["machine", egress],
+      ["machine", []],
+      ["exec", "sh -s -- 'docker' 'ghcr.io/example/attempt:test'", []],
+    ]);
+    assert.ok(
+      boxd.state.setupDelay >= 45,
+      `the setup started ${boxd.state.setupDelay} ms after the lift`,
+    );
+    const save = boxd.events.find(([name]) => name === "save");
+    assert.deepEqual(save, ["save", "vm-1", "usine-attempt", egress, egress]);
   },
 );
 
@@ -222,16 +318,22 @@ test("names the machine when its deletion fails", async () => {
   assert.doesNotMatch(logged.join("\n"), /Deleted temporary machine/u);
 });
 
-test("deletes the machine when the setup fails, the save fails, or the spec loses the allowlist", async () => {
+test("deletes the machine when the setup or the save fails, or boxd doesn't apply or record an egress edit", async () => {
   for (const [settings, message, saved] of [
     [{ setupExit: 1 }, /The setup exited with code 1/u, false],
     [{ failSave: true }, /save failed/u, true],
     [{ specKeepsEgress: false }, /didn't record the egress allowlist/u, false],
+    [{ egressLags: [Infinity] }, /egress as unrestricted within 0\.02 seconds/u, false],
+    // The spec has the allowlist, but boxd never reports it in effect.
+    [{ egressLags: [0, Infinity] }, /egress as (?!unrestricted).+ within 0\.02 seconds/u, false],
   ]) {
     const boxd = fakeBoxd(settings);
-    const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env));
+    const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), undefined, {
+      egressTimeoutMs: 20,
+    });
     await assert.rejects(result, message);
     assert.equal(names(boxd).includes("save"), saved);
+    assert.equal(names(boxd).includes("exec"), settings.egressLags?.[0] !== Infinity);
     assert.equal(names(boxd).at(-1), "delete");
     assert.doesNotMatch(logged.join("\n"), /Delete temporary machine/u);
   }
@@ -250,12 +352,13 @@ test("an interrupt ends the setup and deletes the machine", { timeout: 10_000 },
 });
 
 test("sends stdin in chunks of at most 64 KiB, byte-exact", () => {
-  const bytes = new Uint8Array(3 * STDIN_CHUNK_BYTES + 100).map((_, index) => index % 251);
+  assert.equal(STDIN_CHUNK_BYTES, 65_536);
+  const bytes = new Uint8Array(3 * 65_536 + 100).map((_, index) => index % 251);
   const stream = fakeStream(0);
   sendStdin(stream, bytes);
   assert.deepEqual(
     stream.stdin.map((chunk) => chunk.length),
-    [STDIN_CHUNK_BYTES, STDIN_CHUNK_BYTES, STDIN_CHUNK_BYTES, 100],
+    [65_536, 65_536, 65_536, 100],
   );
   assert.deepEqual(Buffer.concat(stream.stdin), Buffer.from(bytes));
   assert.equal(stream.ended, true);
