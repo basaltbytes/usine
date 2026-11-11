@@ -26,6 +26,12 @@ declare module "vitest/browser" {
 }
 
 const button = (name: string) => page.getByRole("button", { name, exact: true });
+const revision = (number: number) =>
+  page
+    .getByRole("listitem")
+    .filter({ hasText: `Revision ${number}` })
+    .getByRole("button")
+    .first();
 const select = (name: string) => page.getByRole("combobox", { name, exact: true });
 const assertForm = async () => {
   await expect.element(select("Member")).toBeVisible();
@@ -156,7 +162,7 @@ it.each([1440, 390])(
       await page
         .getByRole("link", { name: "View history for binding:olivia-project", exact: true })
         .click();
-      await expect.element(button("Revision 5")).toBeVisible();
+      await expect.element(revision(5)).toBeVisible();
       const actors = page
         .getByRole("region", { name: "History" })
         .getByText("alice-admin", { exact: true });

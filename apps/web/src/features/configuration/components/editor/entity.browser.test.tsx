@@ -108,6 +108,12 @@ const mount = async (
   return router;
 };
 const button = (name: string) => page.getByRole("button", { name, exact: true });
+const revision = (number: number) =>
+  page
+    .getByRole("listitem")
+    .filter({ hasText: `Revision ${number}` })
+    .getByRole("button")
+    .first();
 const editText = async () => {
   await button("Edit").click();
   if (
@@ -120,7 +126,6 @@ it("shows entity history as export-format diffs, reverts with a message, and loa
   const router = await mount();
   await page.getByRole("link", { name: "View history for worker:local", exact: true }).click();
   expect(router.state.location.search).toMatchObject({ kind: "worker", identifier: "local" });
-  await button("Revision 2").click();
   await expect
     .element(page.getByText("-max_concurrent_attempts: 1", { exact: false }))
     .toBeVisible();
@@ -137,7 +142,7 @@ it("shows entity history as export-format diffs, reverts with a message, and loa
     payload: { expected: 2, message: "Restore slots" },
   });
   await button("Older revisions").click();
-  await expect.element(button("Revision 1")).toBeVisible();
+  await expect.element(revision(1)).toBeVisible();
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
 });
 
@@ -154,17 +159,14 @@ it("refreshes the head after a stale revert and after a successful write", async
     },
   ]);
   await page.getByRole("link", { name: "View history for worker:local", exact: true }).click();
-  await button("Revision 2").click();
   await button("Revert").click();
   await button("Confirm revert").click();
-  await expect.element(button("Revision 3")).toBeVisible();
-  await button("Revision 3").click();
+  await expect.element(revision(3)).toBeVisible();
   await button("Revert").click();
   await button("Confirm revert").click();
   await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(2);
   expect((await commands.configurationEditorRequests())[1]?.payload).toMatchObject({ expected: 3 });
-  await expect.element(button("Revision 4")).toBeVisible();
-  await button("Revision 4").click();
+  await expect.element(revision(4)).toBeVisible();
   await button("Revert").click();
   await button("Confirm revert").click();
   await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(3);
