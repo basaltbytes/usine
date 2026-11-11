@@ -1,5 +1,5 @@
 import { MachineId } from "@usine/core/worker";
-import { Clock, Effect, Layer, Option, Stream } from "effect";
+import { Clock, Effect, Layer, Option, Redacted, Stream } from "effect";
 import {
   BoxdApi,
   BoxdCallError,
@@ -87,6 +87,7 @@ export const fakeBoxd = () => {
     );
   const api = BoxdApi.of({
     endpoint: BOXD_ENDPOINT,
+    execBearer: Effect.sync(() => Redacted.make(state.token)),
     whoami: call("whoami", () => Effect.succeed({ userId: "test-user" })),
     orgMachineLimit: call("orgMachineLimit", () =>
       Effect.succeed({ maxVms: state.maxVms, vmCount: state.vmCount }),

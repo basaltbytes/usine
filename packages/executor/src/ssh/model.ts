@@ -220,12 +220,12 @@ export interface SshExecutorOptions {
   /** Builds the boxd transport. Defaults to the gRPC adapter. */
   readonly boxdClient?: BoxdApiLayer;
   /**
-   * Builds the `BoxdExec` of a boxd Worker from its region's API endpoint and credential. Defaults
-   * to the gRPC adapter, with one HTTP/2 connection per Worker.
+   * Builds the `BoxdExec` of a boxd Worker from its region's API endpoint and the effect that
+   * returns the bearer of each call. Defaults to the gRPC adapter, with one HTTP/2 connection per
+   * Worker.
    */
   readonly boxdExec?: (
-    endpoint: string,
-    credential: Redacted.Redacted<string>,
+    ...args: Parameters<typeof boxdExecLayer>
   ) => ReturnType<typeof boxdExecLayer>;
   /**
    * The provider API endpoints, which tests replace. Defaults to the providers' own. A boxd

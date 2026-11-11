@@ -57,7 +57,7 @@ provisioner:
 
 Without a region, usine sends every call to the endpoint and creates machines where the cluster runs them. A cluster that runs in one place lists no regions, so leave the region empty: preflight fails when a worker sets a region that such a cluster can't list. Set a region only when `boxd manage regions` lists regions on the cluster.
 
-usine sends the API key itself as the bearer over TLS. If the cluster refuses the key as a bearer, as releases from before raw keys do, usine exchanges it for a session at `https://app.<host>/api/v1/auth/token`, where `<host>` is the endpoint's host without the port. For `https://boxd.example.com:9443`, that is `https://app.boxd.example.com/api/v1/auth/token`. Commands through `Exec` always carry the API key itself, so usine can't run commands on the machines of a cluster that refuses the key as a bearer.
+usine sends the API key itself as the bearer over TLS. If the cluster refuses the key as a bearer, as releases from before raw keys do, usine exchanges it for a session at `https://app.<host>/api/v1/auth/token`, where `<host>` is the endpoint's host without the port. For `https://boxd.example.com:9443`, that is `https://app.boxd.example.com/api/v1/auth/token`. Commands through `Exec` carry the session too, so a cluster behind a load balancer that terminates TLS works. The endpoint must use `https://`, except for a cluster on the same host as usine at `localhost`, `127.0.0.0/8`, or `[::1]`.
 
 If the cluster's certificate comes from your own certificate authority, for example with private ingress on AWS, give Node.js the authority. Set `NODE_EXTRA_CA_CERTS` to the authority's PEM file in the environment that starts usine, then restart usine. Both the gRPC calls and the token exchange use it.
 
@@ -90,7 +90,7 @@ Preflight logs the number of entries in `boxd provisioner verified`. If a restri
 
 Worker preflight validates the API key, snapshot readiness, captured size, region, and available machine slots without creating a machine. With a region, usine finds the region's API endpoint in the regions that boxd lists at the endpoint. If boxd lists no region with the configured id and an API endpoint for your org, including a region that boxd hasn't enabled for it, preflight fails and names the ids that boxd lists. Preflight also checks that the snapshot is in the region where the worker creates machines. If boxd reports the snapshot's storage as `archiving`, `archived`, or `unarchiving` rather than `local`, preflight logs a warning that names the state: boxd creates machines only from a local snapshot.
 
-usine reaches each machine through boxd's `Exec` API at the region's API endpoint, or at the worker's endpoint without a region, with the worker's API key as the bearer. Nothing on the machine or the boxd account needs an SSH key, and the snapshot needs none. usine sends gateway tokens and API keys over standard input. Gateway setup configures the host entries and the HTTP socket units.
+usine reaches each machine through boxd's `Exec` API at the region's API endpoint, or at the worker's endpoint without a region, with the worker's API key or its session as the bearer. Nothing on the machine or the boxd account needs an SSH key, and the snapshot needs none. usine sends gateway tokens and API keys over standard input. Gateway setup configures the host entries and the HTTP socket units.
 
 `size` asserts the snapshot's captured size: a mismatch requires rebuilding the snapshot at that size or changing the setting. Restores retain the captured CPU and memory.
 

@@ -33,6 +33,17 @@ export class BoxdUnknownRegion extends Schema.TaggedError<
   available: Schema.Array(Schema.String),
 }) {}
 
+/**
+ * The error when the API endpoint of the machines' region uses neither TLS nor a loopback address,
+ * so that its `Exec` calls would carry the credential in clear text.
+ */
+export class BoxdPlainTextEndpoint extends Schema.TaggedError<
+  BoxdPlainTextEndpoint,
+  Brand.Brand<"@usine/executor/boxd/BoxdPlainTextEndpoint">
+>()("BoxdPlainTextEndpoint", {
+  endpoint: Schema.String,
+}) {}
+
 export const BoxdMachine = Schema.Struct({
   id: MachineId,
   status: Schema.NonEmptyString,
@@ -85,6 +96,12 @@ export class BoxdApi extends Context.Service<
      * account endpoint.
      */
     readonly endpoint: string;
+    /**
+     * The bearer of an `Exec` call to `endpoint`: the API key, or a session once boxd refused the
+     * key as a bearer. When no call has shown yet which one boxd takes, it calls `whoami` first,
+     * as the boxd SDK does before a stream. Fails when the token exchange fails.
+     */
+    readonly execBearer: Effect.Effect<Redacted.Redacted<string>, BoxdCallError>;
     readonly whoami: Effect.Effect<typeof BoxdIdentity.Type, BoxdCallError>;
     readonly orgMachineLimit: Effect.Effect<typeof BoxdLimit.Type, BoxdCallError>;
     readonly snapshot: (name: string) => Effect.Effect<BoxdSnapshot, BoxdCallError>;

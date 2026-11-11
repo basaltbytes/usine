@@ -517,7 +517,14 @@ workers:
         const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
         assert.deepStrictEqual(decoded, config);
       }
-      for (const endpoint of ["http://127.0.0.1:9443", "https://[::1]:9443", "https://boxd.sh"]) {
+      for (const endpoint of [
+        "http://127.0.0.1:9443",
+        "http://localhost:9443",
+        "http://[::1]:9443",
+        "https://[::1]:9443",
+        "https://boxd.sh",
+        "https://boxd.example.com:65535",
+      ]) {
         const accepted = yield* parser.parseUsineYaml(
           InstancePath.make("usine.yaml"),
           yaml + `      endpoint: ${endpoint}\n`,
@@ -538,6 +545,12 @@ workers:
         yaml + "      endpoint: HTTPS://boxd.example.com:9443\n",
         yaml + "      endpoint: https://Boxd.example.com:9443\n",
         yaml + "      endpoint: https://user@boxd.example.com\n",
+        // Plain HTTP would carry the API key in clear text off the host.
+        yaml + "      endpoint: http://boxd.example.com:9443\n",
+        yaml + "      endpoint: http://10.0.0.5:9443\n",
+        yaml + "      endpoint: https://boxd.example.com:99999\n",
+        yaml + "      endpoint: https://boxd.example.com:0\n",
+        yaml + "      endpoint: https://[:::]:9443\n",
         yaml.replace("snapshot: usine-attempt", "snapshot: Bad_Name"),
         yaml.replace("      snapshot: usine-attempt\n", ""),
         yaml +

@@ -65,7 +65,8 @@ const machineValue = (value: GetVmResponse) => ({
  * Over TLS or to a loopback address, a call carries the API key as the bearer. Once boxd refuses
  * the key as a bearer, the layer exchanges it for a session at the URL that `exchangeUrl` derives
  * from the account endpoint, and every later call carries a session. A call that boxd refuses with
- * `UNAUTHENTICATED` on a session drops the session and runs once more with a new one.
+ * `UNAUTHENTICATED` on a session drops the session and runs once more with a new one. `Exec`
+ * calls carry the bearer that the other calls settled on.
  */
 export const boxdApiLayer = (
   token: Redacted.Redacted<string>,
@@ -100,6 +101,8 @@ export const boxdApiLayer = (
       let session: Option.Option<typeof Session.Type> = Option.none();
       /** Whether boxd refused the API key as a bearer, so that every call carries a session. */
       let rawKeyRefused = false;
+      /** Whether boxd answered a call that carried the API key as the bearer. */
+      let rawKeyAccepted = false;
       const exclusive = yield* Semaphore.make(1);
       const authenticateError = (code: string, message: string) =>
         BoxdCallError.make({ operation: "authenticate", url: exchange, code, message });
@@ -201,6 +204,11 @@ export const boxdApiLayer = (
         Effect.suspend(() =>
           client.rawKey && !rawKeyRefused
             ? invokeWith(client, operation, invoke, Redacted.value(token)).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    rawKeyAccepted = true;
+                  }),
+                ),
                 Effect.catchIf(
                   (failure) => failure.code === "UNAUTHENTICATED" && refusesRawKey(failure.message),
                   () =>
@@ -262,12 +270,25 @@ export const boxdApiLayer = (
           ),
         onSome: regional,
       });
+      const whoami = call(account, "whoami", (opts) => account.rpc.whoami({}, opts));
+      const settled = Effect.suspend(() =>
+        machines.rawKey && rawKeyAccepted && !rawKeyRefused
+          ? Effect.succeed(token)
+          : bearer.pipe(Effect.map((jwt) => Redacted.make(jwt))),
+      );
+      // `Exec` streams stdin, so a refused stream can't run once more with a session as `call` does.
+      const execBearer = Effect.suspend(() =>
+        machines.rawKey && !rawKeyAccepted && !rawKeyRefused
+          ? whoami.pipe(Effect.andThen(settled))
+          : settled,
+      ).pipe(Effect.withSpan("BoxdApi.execBearer"));
       const client = machines.rpc;
       const list = (selector: ReadonlyArray<string>) =>
         call(machines, "listVms", (opts) => client.listVms({ labelSelector: [...selector] }, opts));
       return BoxdApi.of({
         endpoint: machines.url,
-        whoami: call(account, "whoami", (opts) => account.rpc.whoami({}, opts)).pipe(
+        execBearer,
+        whoami: whoami.pipe(
           Effect.flatMap((value) =>
             decode(account, BoxdIdentity, "whoami")({ userId: value.userId }),
           ),

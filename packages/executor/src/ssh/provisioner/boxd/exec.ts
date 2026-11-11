@@ -126,13 +126,13 @@ const stdinPieces = (bytes: Uint8Array): Array<Uint8Array> =>
   );
 
 /**
- * Returns the `BoxdExec` that calls `endpoint`, a region's API endpoint URL, with `credential` as
- * the bearer. Each layer owns one HTTP/2 connection, opened at the first call and closed with the
- * layer.
+ * Returns the `BoxdExec` that calls `endpoint`, a region's API endpoint URL, with the bearer that
+ * `credential` returns at the start of each call. A call whose `credential` fails ends with that
+ * error. Each layer owns one HTTP/2 connection, opened at the first call and closed with the layer.
  */
 export const boxdExecLayer = (
   endpoint: string,
-  credential: Redacted.Redacted<string>,
+  credential: Effect.Effect<Redacted.Redacted<string>, BoxdCallError>,
   options: ExecTransportOptions = {},
 ) =>
   Layer.effect(
@@ -156,9 +156,8 @@ export const boxdExecLayer = (
         BoxdService,
         createGrpcTransport({ baseUrl: endpoint, sessionManager }),
       );
-      const secret = Redacted.value(credential);
 
-      const failureOf = (machine: MachineId, cause: unknown): BoxdExecError => {
+      const failureOf = (machine: MachineId, secret: string, cause: unknown): BoxdExecError => {
         const failure = ConnectError.from(cause);
         const code = failureCode(failure);
         const message = failure.rawMessage.replaceAll(secret, "[redacted]");
@@ -200,6 +199,8 @@ export const boxdExecLayer = (
           ),
         );
         const call = Effect.gen(function* () {
+          const bearer = yield* credential;
+          const secret = Redacted.value(bearer);
           const controller = yield* Effect.acquireRelease(
             Effect.sync(() => new AbortController()),
             (controller) => Effect.sync(() => controller.abort()),
@@ -215,7 +216,9 @@ export const boxdExecLayer = (
             { signal: controller.signal, headers: { authorization: `Bearer ${secret}` } },
           );
           let exited: number | undefined;
-          yield* Stream.fromAsyncIterable(responses, (cause) => failureOf(machine, cause)).pipe(
+          yield* Stream.fromAsyncIterable(responses, (cause) =>
+            failureOf(machine, secret, cause),
+          ).pipe(
             Stream.runForEach((chunk) =>
               chunk.data.length === 0
                 ? Effect.sync(() => {

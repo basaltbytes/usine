@@ -7,7 +7,7 @@ import { ExecShell } from "@usine/agents/child-host";
 import { Redacted, Clock, Config, Effect, Layer, Option, Random, Schedule } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { remoteCommandsFor, sendingShell } from "../../../src/remote/commands.ts";
-import { boxdDriverFor, execCredential } from "../../../src/ssh/provisioner/boxd.ts";
+import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { BoxdApi } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { BOXD_API } from "../../../src/ssh/provisioner/boxd/endpoint.ts";
 import { boxdExecLayer } from "../../../src/ssh/provisioner/boxd/exec.ts";
@@ -41,7 +41,7 @@ it.live.skipIf(
       yield* Effect.gen(function* () {
         const api = yield* BoxdApi;
         const driver = yield* boxdDriverFor(WorkerName.make("boxd-live"), settings).pipe(
-          Effect.provide(boxdExecLayer(api.endpoint, execCredential(settings))),
+          Effect.provide(boxdExecLayer(api.endpoint, api.execBearer)),
         );
         yield* driver.verify(WorkerName.make("boxd-live"), 1);
         yield* Effect.acquireUseRelease(

@@ -4,14 +4,20 @@ import {
   MachineId,
   type WorkerName,
 } from "@usine/core/worker";
-import { type Brand, DateTime, Effect, Option, type Redacted, Schema } from "effect";
+import { type Brand, DateTime, Effect, Option, Schema } from "effect";
 import {
   MachineUnavailableError,
   WorkerCapabilityError,
   type MachineUnavailableReason,
 } from "../../executor.ts";
 import type { BoxdProvisioner } from "../model.ts";
-import { BoxdApi, BoxdCallError, type BoxdMachine, type BoxdUnknownRegion } from "./boxd/client.ts";
+import {
+  BoxdApi,
+  BoxdCallError,
+  type BoxdMachine,
+  type BoxdPlainTextEndpoint,
+  type BoxdUnknownRegion,
+} from "./boxd/client.ts";
 import { BoxdExec, boxdTransport } from "./boxd/exec.ts";
 import {
   attemptTag,
@@ -85,22 +91,27 @@ const providerFault = (worker: WorkerName, message: string): WorkerCapabilityErr
     cause: new Error(message),
   });
 
+/** A failure while connecting a boxd Worker to its region. */
+export type BoxdConnectFailure = BoxdCallError | BoxdUnknownRegion | BoxdPlainTextEndpoint;
+
 /** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
 export const boxdPreflightError = (
   worker: WorkerName,
-  failure: BoxdCallError | BoxdUnknownRegion,
+  failure: BoxdConnectFailure,
 ): WorkerCapabilityError =>
   providerFault(
     worker,
-    failure._tag === "BoxdUnknownRegion"
-      ? failure.available.length === 0
-        ? `boxd lists no regions, so it runs in one place, but worker "${worker}" sets provisioner.region ${failure.region}. Remove provisioner.region from the worker.`
-        : `boxd has no region "${failure.region}" with an API endpoint. Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ")}.`
-      : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
-        ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
-        : isTransient(failure.code)
-          ? transientMessage(worker, failure)
-          : `boxd preflight couldn't ${failure.operation}: ${failure.code}: ${failure.message}.${failure.operation === "snapshot" ? " Check the snapshot; build it with boxd snapshots save." : ""}`,
+    failure._tag === "BoxdPlainTextEndpoint"
+      ? `boxd serves the machines of worker "${worker}" at ${failure.endpoint} without TLS, and usine sends the API key over plain HTTP only to a loopback address. Serve that endpoint over TLS, or set provisioner.endpoint and provisioner.region to a cluster and region that use https://.`
+      : failure._tag === "BoxdUnknownRegion"
+        ? failure.available.length === 0
+          ? `boxd lists no regions, so it runs in one place, but worker "${worker}" sets provisioner.region ${failure.region}. Remove provisioner.region from the worker.`
+          : `boxd has no region "${failure.region}" with an API endpoint. Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ")}.`
+        : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
+          ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
+          : isTransient(failure.code)
+            ? transientMessage(worker, failure)
+            : `boxd preflight couldn't ${failure.operation}: ${failure.code}: ${failure.message}.${failure.operation === "snapshot" ? " Check the snapshot; build it with boxd snapshots save." : ""}`,
   );
 
 /**
@@ -110,7 +121,7 @@ export const boxdPreflightError = (
  */
 export const boxdConnectError = (
   worker: WorkerName,
-  failure: BoxdCallError | BoxdUnknownRegion,
+  failure: BoxdConnectFailure,
 ): MachineUnavailableError | WorkerCapabilityError =>
   failure._tag === "BoxdCallError" && isTransient(failure.code)
     ? MachineUnavailableError.make({
@@ -122,16 +133,8 @@ export const boxdConnectError = (
     : boxdPreflightError(worker, failure);
 
 /**
- * Returns the bearer of the `Exec` calls: the API key itself. boxd accepts it as a bearer without
- * documenting it (question 3 of `docs/research/boxd-byoc.md`). A session token file that the
- * orchestrator renews can replace it here.
- */
-export const execCredential = (settings: BoxdProvisioner): Redacted.Redacted<string> =>
-  settings.token;
-
-/**
  * Returns the boxd driver for `worker`. Its machines' endpoints are `Exec` endpoints, which run
- * commands through `BoxdExec` with the API key, so no SSH key is involved: preflight warns that
+ * commands through `BoxdExec` with `BoxdApi.execBearer`, so no SSH key is involved: preflight warns that
  * `identityFile`, the worker's `identity_file`, is ignored. A driver retains the create response
  * only until endpoint discovery consumes it.
  */

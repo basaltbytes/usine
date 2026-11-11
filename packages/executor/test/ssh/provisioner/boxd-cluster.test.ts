@@ -5,7 +5,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { Clock, Effect, Layer, Option, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { BoxdApi as BoxdService } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
-import { BoxdApi } from "../../../src/ssh/provisioner/boxd/client.ts";
+import { BoxdApi, type BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
 import {
   BOXD_API,
   exchangeUrl,
@@ -15,6 +15,7 @@ import {
 import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
 import { machineDriversFor } from "../../../src/ssh/provisioner/drivers.ts";
 import { fakeMachine, WORKER } from "../support.ts";
+import { fakeBoxd } from "./fake-boxd.ts";
 import { boxdAddress } from "./fixtures.ts";
 import { boxdSettings, UNUSED_CLUSTER, UNUSED_EXCHANGE } from "./support.ts";
 
@@ -220,10 +221,15 @@ it.effect("exchanges a refused key at the derived URL and sends every call to th
         }),
       ),
     );
+    const execBearers: Array<Effect.Effect<Redacted.Redacted<string>, BoxdCallError>> = [];
     const drivers = yield* machineDriversFor({
       instance: "endpoint-test",
       settings: {
         providerEndpoints: { boxd: UNUSED_CLUSTER.endpoint },
+        boxdExec: (_endpoint, credential) => {
+          execBearers.push(credential);
+          return fakeBoxd().execLayer;
+        },
         boxdClient: (token, cluster) => {
           assert.deepStrictEqual(cluster, {
             endpoint: "https://boxd.example.com:9443",
@@ -266,7 +272,78 @@ it.effect("exchanges a refused key at the derived URL and sends every call to th
       "Bearer custom-jwt",
       "Bearer custom-jwt",
     ]);
+    const [execBearer] = execBearers;
+    assert(execBearer !== undefined);
+    const execSession = yield* execBearer;
+    assert.strictEqual(
+      Redacted.value(execSession),
+      "custom-jwt",
+      "Exec calls carry the session too",
+    );
+    assert.lengthOf(calls, 5, "the bearer of Exec calls needs no probe");
   }).pipe(Effect.scoped, Effect.provide(fakeMachine().layer)),
+);
+
+it.effect(
+  "probes with whoami before the first Exec bearer and keeps the bearer it settles on",
+  () =>
+    Effect.gen(function* () {
+      const key = "bxd_probe_key";
+      for (const refuses of [false, true]) {
+        const calls: Array<RoutedCall> = [];
+        const bearers: Array<string> = [];
+        const transport = (({ baseUrl }) =>
+          createRouterTransport((router) => {
+            router.service(BoxdService, {
+              whoami: (_request, context) => {
+                calls.push({ method: "whoami", baseUrl });
+                const bearer = context.requestHeader.get("authorization") ?? "";
+                bearers.push(bearer);
+                // A load balancer that terminates TLS makes boxd see a plain-text call.
+                if (refuses && bearer === `Bearer ${key}`)
+                  throw new ConnectError(
+                    "API keys are accepted over TLS only",
+                    Code.Unauthenticated,
+                  );
+                return { userId: "member" };
+              },
+            });
+          })) satisfies Parameters<typeof boxdApiLayer>[2];
+        const http = Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              return HttpClientResponse.fromWeb(
+                request,
+                new Response(jsonKey({ token: "probe-jwt", expires_at: now / 1000 + 3600 })),
+              );
+            }),
+          ),
+        );
+        const execBearers = yield* Effect.gen(function* () {
+          const api = yield* BoxdApi;
+          const first = yield* api.execBearer;
+          const second = yield* api.execBearer;
+          return [first, second].map(Redacted.value);
+        }).pipe(
+          Effect.provide(
+            boxdApiLayer(
+              Redacted.make(key),
+              { endpoint: "https://boxd.example.com:9443", region: Option.none() },
+              transport,
+            ).pipe(Layer.provide(refuses ? http : noExchange)),
+          ),
+        );
+        const expected = refuses ? "probe-jwt" : key;
+        assert.deepStrictEqual(execBearers, [expected, expected], `refuses: ${refuses}`);
+        assert.deepStrictEqual(
+          bearers,
+          refuses ? [`Bearer ${key}`, "Bearer probe-jwt"] : [`Bearer ${key}`],
+          "one probe, then no more calls",
+        );
+      }
+    }).pipe(Effect.scoped),
 );
 
 it.effect("sends every call to the account endpoint without a region", () =>
@@ -412,3 +489,36 @@ for (const [status, reason] of [
       ),
   );
 }
+
+it.effect("refuses to build Exec for a region that boxd lists at a plain-text API endpoint", () =>
+  Effect.gen(function* () {
+    let execBuilds = 0;
+    const drivers = yield* machineDriversFor({
+      instance: "regions-test",
+      settings: {
+        boxdClient: (token, cluster) =>
+          boxdApiLayer(
+            token,
+            cluster,
+            routedTransport(
+              [],
+              [...listedRegions, { id: "lan", apiEndpoint: "http://boxd.lan.example.test:9443" }],
+            ),
+          ),
+        boxdExec: () => {
+          execBuilds++;
+          return fakeBoxd().execLayer;
+        },
+      },
+    });
+    for (const failure of [
+      yield* drivers.forEntry(boxdIn("lan")).pipe(Effect.flip),
+      yield* drivers.forPreflight(boxdIn("lan")).pipe(Effect.flip),
+    ]) {
+      assert.strictEqual(failure._tag, "WorkerCapabilityError");
+      assert.include(failure.message, "http://boxd.lan.example.test:9443 without TLS");
+      assert.notInclude(failure.message, "bxd_test_key");
+    }
+    assert.strictEqual(execBuilds, 0, "no Exec call can carry the key in clear text");
+  }).pipe(Effect.scoped, Effect.provide([noExchange, fakeMachine().layer])),
+);
