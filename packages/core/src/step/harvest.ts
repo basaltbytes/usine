@@ -1,4 +1,13 @@
-import { type Brand, DateTime, Duration, Effect, Option, Result, Schema } from "effect";
+import {
+  type Brand,
+  DateTime,
+  Duration,
+  Effect,
+  Option,
+  type Predicate,
+  Result,
+  Schema,
+} from "effect";
 import { githubSignature } from "../agent/agent.ts";
 import { type AttemptWindow, AttemptWindows, windowHolds } from "../attempt/attempt.ts";
 import type { RunSpec } from "../attempt/channel.ts";
@@ -74,38 +83,27 @@ export class HarvestError extends Schema.TaggedError<
   cause: Schema.Defect(),
 }) {}
 
+// GitHub follows a renamed repository's redirect, so repositories are compared by ID.
 const PullRequestResponse = Schema.Struct({
   number: PullRequest.fields.number,
   url: Schema.URLFromString,
-  head: Schema.Struct({ sha: CommitSha }),
-}).pipe(Schema.encodeKeys({ url: "html_url" }));
-const decodePullRequestPages = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Array(Schema.Array(PullRequestResponse))),
-);
-const decodeBranchPullRequests = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    Schema.Array(
-      Schema.Struct({ number: PullRequest.fields.number, url: Schema.URLFromString }).pipe(
-        Schema.encodeKeys({ url: "html_url" }),
-      ),
-    ),
-  ),
-);
-// GitHub follows a renamed repository's redirect, so repositories are compared by ID.
-const PullRequestDetail = Schema.Struct({
-  number: PullRequest.fields.number,
-  url: Schema.URLFromString,
-  state: Schema.NonEmptyString,
+  state: Schema.Literals(["open", "closed"]),
+  /** When the pull request was merged; `null` if it is open or was closed without merging. */
+  mergedAt: Schema.NullOr(Schema.String),
   head: Schema.Struct({
     sha: CommitSha,
     ref: Schema.NonEmptyString,
     repo: Schema.NullOr(Schema.Struct({ id: Schema.Int, full_name: RepositoryName })),
   }),
   base: Schema.Struct({ repo: Schema.Struct({ id: Schema.Int }) }),
-}).pipe(Schema.encodeKeys({ url: "html_url" }));
-type PullRequestDetail = typeof PullRequestDetail.Type;
-const decodePullRequestDetail = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(PullRequestDetail),
+}).pipe(Schema.encodeKeys({ url: "html_url", mergedAt: "merged_at" }));
+type PullRequestResponse = typeof PullRequestResponse.Type;
+const decodePullRequest = Schema.decodeUnknownEffect(Schema.fromJsonString(PullRequestResponse));
+const decodePullRequests = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(PullRequestResponse)),
+);
+const decodePullRequestPages = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(Schema.Array(PullRequestResponse))),
 );
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
@@ -253,7 +251,12 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
     ),
   );
 
-/** Returns the checkout's final commit and its branch, which is empty if HEAD is detached. */
+/** The checkout's final commit, on a named branch or detached. */
+type CheckoutHead =
+  | { readonly _tag: "Named"; readonly head: CommitSha; readonly branch: string }
+  | { readonly _tag: "Detached"; readonly head: CommitSha };
+
+/** Returns the checkout's final commit and, unless HEAD is detached, its branch. */
 const checkoutHead = Effect.fn("StepResult.checkoutHead")(function* <E>(run: HarvestCommand<E>) {
   const head = yield* decodeCommit((yield* run("git", ["rev-parse", "HEAD"])).join("")).pipe(
     Effect.mapError((cause) =>
@@ -261,8 +264,18 @@ const checkoutHead = Effect.fn("StepResult.checkoutHead")(function* <E>(run: Har
     ),
   );
   const branch = (yield* run("git", ["branch", "--show-current"])).join("");
-  return { head, branch };
+  const checkout: CheckoutHead =
+    branch === "" ? { _tag: "Detached", head } : { _tag: "Named", head, branch };
+  return checkout;
 });
+
+/**
+ * Returns whether a detached checkout at `head` has no pull request candidate. Checkouts start
+ * detached at the base commit, so an unchanged one has nothing to push, unless its revision is
+ * that fixed commit.
+ */
+const unchangedDetached = (spec: HarvestSpec, head: CommitSha): boolean =>
+  head === spec.baseCommit && spec.revision !== RepositoryRevision.make(spec.baseCommit);
 
 /** Returns the commit of each branch and pull request head ref on origin, by ref name. */
 const originRefs = Effect.fn("StepResult.originRefs")(function* <E>(run: HarvestCommand<E>) {
@@ -287,6 +300,18 @@ const branchHeadOn = (refs: ReadonlyMap<string, CommitSha>, branch: string) =>
 const pullRequestAt = (spec: HarvestSpec, number: number, url: URL, head: CommitSha) =>
   PullRequest.make({ number, url, base: Option.some(spec.baseCommit), head: Option.some(head) });
 
+const fromRunRepository = (pr: PullRequestResponse): boolean =>
+  pr.head.repo !== null && pr.head.repo.id === pr.base.repo.id;
+
+const headRepositoryOf = (pr: PullRequestResponse) =>
+  Option.fromNullOr(pr.head.repo).pipe(Option.map(({ full_name }) => full_name));
+
+/** Returns `open`, `closed`, or `merged`; GitHub reports a merged pull request as `closed`. */
+const lifecycleOf = (pr: PullRequestResponse) => (pr.mergedAt === null ? pr.state : "merged");
+
+const openFromRunRepository = (pr: PullRequestResponse): boolean =>
+  lifecycleOf(pr) === "open" && fromRunRepository(pr);
+
 /**
  * Returns the pull requests whose head is `head` in GitHub's commit-to-pull-request index,
  * without duplicates.
@@ -303,7 +328,7 @@ const indexedPullRequests = Effect.fn("StepResult.indexedPullRequests")(function
     "pull request results",
   );
   // The response also has pull requests that contain the commit as an ancestor.
-  const atHead = new Map<number, typeof PullRequestResponse.Type>();
+  const atHead = new Map<number, PullRequestResponse>();
   for (const pr of pages.flat()) {
     if (pr.head.sha === head) atHead.set(pr.number, pr);
   }
@@ -316,20 +341,17 @@ const indexedPullRequests = Effect.fn("StepResult.indexedPullRequests")(function
   return [...atHead.values()];
 });
 
-/** Returns the pull requests whose head is the checkout's pushed final commit, from GitHub's index. */
+/**
+ * Returns the pull requests whose head is the checkout's pushed final commit, from GitHub's
+ * index. Harvesting uses it when it has no CI handoff and the Loop doesn't require CI.
+ */
 const findPullRequests = Effect.fn("StepResult.findPullRequests")(function* <E>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
-  const { head, branch } = yield* checkoutHead(run);
-  // Checkouts start detached. There's no candidate if HEAD is unchanged, no branch was created,
-  // and the revision isn't a fixed commit.
-  if (
-    head === spec.baseCommit &&
-    spec.revision !== RepositoryRevision.make(spec.baseCommit) &&
-    branch === ""
-  ) {
+  const { _tag, head } = yield* checkoutHead(run);
+  if (_tag === "Detached" && unchangedDetached(spec, head)) {
     yield* Effect.logDebug("No pull request candidate in the Attempt checkout", {
       attemptId: spec.attemptId,
     });
@@ -359,9 +381,15 @@ const describeReadError = (error: ReadError) => `${error._tag}: ${error.message}
 const gitReadFailed = (error: ReadError) =>
   GitReadFailed.make({ message: describeReadError(error), cause: error });
 
+/** Accepts every failed read or invalid output for a retry. */
+const everyFailure: Predicate.Predicate<unknown> = () => true;
+
+/** Accepts no failure for a retry. */
+const noFailure: Predicate.Predicate<unknown> = () => false;
+
 /**
- * Runs a `gh` read and decodes its output. While `retryable` is true, retries a failed read or
- * invalid output on the polling reads' schedule and logs each retry. Fails with
+ * Runs a `gh` read and decodes its output. Retries a failed read or invalid output that
+ * `retryable` accepts on the polling reads' schedule and logs each retry. Fails with
  * `GitHubReadFailed` after the last try.
  */
 const readGitHub = <A, E extends ReadError, D>(
@@ -370,20 +398,18 @@ const readGitHub = <A, E extends ReadError, D>(
   args: ReadonlyArray<string>,
   decode: (output: string) => Effect.Effect<A, D>,
   what: string,
-  retryable = true,
+  retryable: Predicate.Predicate<E | HarvestError>,
 ) =>
   askGitHub(run, args, decode, what).pipe(
-    retryTransient<E | HarvestError>(
-      () => retryable,
-      ({ error, retry, delay }) =>
-        Effect.logWarning(`Could not read ${what} on GitHub; retrying`, {
-          attemptId: spec.attemptId,
-          repository: spec.repository,
-          errorTag: error._tag,
-          message: error.message,
-          retry,
-          delayMs: Duration.toMillis(delay),
-        }),
+    retryTransient(retryable, ({ error, retry, delay }) =>
+      Effect.logWarning(`Could not read ${what} on GitHub; retrying`, {
+        attemptId: spec.attemptId,
+        repository: spec.repository,
+        errorTag: error._tag,
+        message: error.message,
+        retry,
+        delayMs: Duration.toMillis(delay),
+      }),
     ),
     Effect.mapError((error) =>
       GitHubReadFailed.make({ message: describeReadError(error), cause: error }),
@@ -391,21 +417,21 @@ const readGitHub = <A, E extends ReadError, D>(
   );
 
 /**
- * Reads pull request `number`, then logs its branch's commit on origin against its head on
- * GitHub.
+ * Reads pull request `number`, retrying the failures that `retryable` accepts, then logs its
+ * branch's commit on origin against its head on GitHub.
  */
 const readPullRequest = <E extends ReadError>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
   number: ItemNumber,
   refs: ReadonlyMap<string, CommitSha>,
-  retryable = true,
+  retryable: Predicate.Predicate<E | HarvestError>,
 ) =>
   readGitHub(
     spec,
     run,
     ["api", `repos/${spec.repository}/pulls/${number}`],
-    decodePullRequestDetail,
+    decodePullRequest,
     `pull request #${number}`,
     retryable,
   ).pipe(
@@ -413,19 +439,13 @@ const readPullRequest = <E extends ReadError>(
       Effect.logInfo("Read the pull request that CI would wait on", {
         attemptId: spec.attemptId,
         pullRequest: number,
-        state: pr.state,
+        state: lifecycleOf(pr),
         branch: pr.head.ref,
         branchHead: Option.getOrNull(branchHeadOn(refs, pr.head.ref)),
         pullRequestHead: pr.head.sha,
       }),
     ),
   );
-
-const fromRunRepository = (pr: PullRequestDetail): boolean =>
-  pr.head.repo !== null && pr.head.repo.id === pr.base.repo.id;
-
-const headRepositoryOf = (pr: PullRequestDetail) =>
-  Option.fromNullOr(pr.head.repo).pipe(Option.map(({ full_name }) => full_name));
 
 /**
  * Reads the handoff's pull request. Retries a failed read while origin has the pull request's
@@ -438,7 +458,7 @@ const readHandoffPullRequest = <E extends ReadError>(
   refs: ReadonlyMap<string, CommitSha>,
 ) => {
   const onOrigin = refs.has(`refs/pull/${pullRequest}/head`);
-  return readPullRequest(spec, run, pullRequest, refs, onOrigin).pipe(
+  return readPullRequest(spec, run, pullRequest, refs, onOrigin ? everyFailure : noFailure).pipe(
     Effect.mapError((error) =>
       onOrigin
         ? error
@@ -473,8 +493,9 @@ const verifyHandoff = Effect.fn("StepResult.verifyHandoff")(function* <E extends
   }
   const refs = yield* originRefs(run).pipe(Effect.mapError(gitReadFailed));
   const pr = yield* readHandoffPullRequest(spec, run, handoff, refs);
-  if (pr.state !== "open") {
-    return yield* Effect.fail(PullRequestNotOpen.make({ pullRequest, state: pr.state }));
+  const lifecycle = lifecycleOf(pr);
+  if (lifecycle !== "open") {
+    return yield* Effect.fail(PullRequestNotOpen.make({ pullRequest, state: lifecycle }));
   }
   if (!fromRunRepository(pr)) {
     return yield* Effect.fail(
@@ -561,8 +582,9 @@ const branchPullRequests = Effect.fn("StepResult.branchPullRequests")(function* 
         "api",
         `repos/${spec.repository}/pulls?head=${owner}:${encodeURIComponent(candidate)}&state=open&per_page=100`,
       ],
-      decodeBranchPullRequests,
+      decodePullRequests,
       `the pull requests of branch ${candidate}`,
+      everyFailure,
     ),
   );
   const open = [...new Map(succeeded.flat().map((pr) => [pr.number, pr])).values()];
@@ -578,10 +600,10 @@ const branchPullRequests = Effect.fn("StepResult.branchPullRequests")(function* 
 });
 
 /**
- * Returns the open pull requests among `numbers` whose head repository is the Run's. A pull
- * request whose read fails is skipped if another verifies. Fails with the first read failure if
- * none verifies and a read failed, with `RepositoryMismatch` for the first open pull request if
- * all come from other repositories, or with `PullRequestNotFound`.
+ * Returns the open pull requests among `numbers` whose head is `head` on GitHub and whose head
+ * repository is the Run's. A pull request whose read fails is skipped if another verifies. Fails
+ * with the first read failure if none verifies and a read failed, with `RepositoryMismatch` for
+ * the first open pull request from another repository, or with `PullRequestNotFound`.
  */
 const numberedPullRequests = Effect.fn("StepResult.numberedPullRequests")(function* <
   E extends ReadError,
@@ -598,17 +620,17 @@ const numberedPullRequests = Effect.fn("StepResult.numberedPullRequests")(functi
     pullRequests: numbers,
   });
   const { succeeded, failed } = yield* readCandidates(numbers, (number) =>
-    readPullRequest(spec, run, number, refs),
+    readPullRequest(spec, run, number, refs, everyFailure),
   );
-  const open = succeeded.filter(({ state }) => state === "open");
-  const own = open.filter(fromRunRepository);
+  const open = succeeded.filter((pr) => lifecycleOf(pr) === "open");
+  const own = succeeded.filter((pr) => openFromRunRepository(pr) && pr.head.sha === head);
   if (own.length > 0) {
     yield* logUnreadCandidates(spec, failed);
     return own.map(({ number, url }) => pullRequestAt(spec, number, url, head));
   }
   const [unread] = failed;
   if (unread !== undefined) return yield* Effect.fail(unread.failure);
-  const [foreign] = open;
+  const foreign = open.find((pr) => !fromRunRepository(pr));
   if (foreign !== undefined) {
     return yield* Effect.fail(
       RepositoryMismatch.make({
@@ -626,15 +648,22 @@ const decodePullRef = Schema.decodeUnknownOption(ItemNumber);
 
 /**
  * Returns the open pull requests at a detached checkout's HEAD: those of the origin branches at
- * HEAD, or else those whose `refs/pull/<n>/head` is HEAD, read by number. Fails with the reason
+ * HEAD, or else those whose `refs/pull/<n>/head` is HEAD, read by number. Fails with
+ * `PullRequestNotFound` without reading origin if the checkout is unchanged, and with the reason
  * otherwise.
  */
 const verifyDetached = Effect.fn("StepResult.verifyDetached")(function* <E extends ReadError>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
   head: CommitSha,
-  refs: ReadonlyMap<string, CommitSha>,
 ) {
+  const notFound = PullRequestNotFound.make({
+    pullRequest: Option.none(),
+    branch: Option.none(),
+    head,
+  });
+  if (unchangedDetached(spec, head)) return yield* Effect.fail(notFound);
+  const refs = yield* originRefs(run).pipe(Effect.mapError(gitReadFailed));
   const atHead = [...refs].flatMap(([ref, commit]) => (commit === head ? [ref] : []));
   const branches = atHead.flatMap((ref) =>
     ref.startsWith("refs/heads/") ? [ref.slice("refs/heads/".length)] : [],
@@ -646,36 +675,21 @@ const verifyDetached = Effect.fn("StepResult.verifyDetached")(function* <E exten
     const number = /^refs\/pull\/(\d+)\/head$/u.exec(ref)?.[1];
     return number === undefined ? [] : Option.toArray(decodePullRef(Number(number)));
   });
-  if (numbers.length === 0) {
-    return yield* Effect.fail(
-      PullRequestNotFound.make({ pullRequest: Option.none(), branch: Option.none(), head }),
-    );
-  }
+  if (numbers.length === 0) return yield* Effect.fail(notFound);
   return yield* numberedPullRequests(spec, run, head, numbers, refs);
 });
 
 /**
- * Returns the open pull requests whose head is the checkout's branch, if that branch is at the
- * checkout's HEAD on origin, or those of a detached HEAD as `verifyDetached` finds them. Fails
- * with the reason otherwise.
+ * Returns the open pull requests whose head is the checkout's `branch`, if that branch is at
+ * `head` on origin. Fails with the reason otherwise.
  */
-const verifyBranch = Effect.fn("StepResult.verifyBranch")(function* <E extends ReadError>(
+const verifyNamed = Effect.fn("StepResult.verifyNamed")(function* <E extends ReadError>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
+  head: CommitSha,
+  branch: string,
 ) {
-  yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
-  const { head, branch } = yield* checkoutHead(run).pipe(Effect.mapError(gitReadFailed));
-  if (
-    head === spec.baseCommit &&
-    spec.revision !== RepositoryRevision.make(spec.baseCommit) &&
-    branch === ""
-  ) {
-    return yield* Effect.fail(
-      PullRequestNotFound.make({ pullRequest: Option.none(), branch: Option.none(), head }),
-    );
-  }
   const refs = yield* originRefs(run).pipe(Effect.mapError(gitReadFailed));
-  if (branch === "") return yield* verifyDetached(spec, run, head, refs);
   const branchHead = branchHeadOn(refs, branch);
   if (!Option.contains(branchHead, head)) {
     return yield* Effect.fail(
@@ -683,6 +697,21 @@ const verifyBranch = Effect.fn("StepResult.verifyBranch")(function* <E extends R
     );
   }
   return yield* branchPullRequests(spec, run, head, [branch], Option.some(branch));
+});
+
+/**
+ * Returns the open pull requests at the checkout's HEAD, as `verifyNamed` finds them for a
+ * checkout on a branch and `verifyDetached` for a detached one. Fails with the reason otherwise.
+ */
+const verifyBranch = Effect.fn("StepResult.verifyBranch")(function* <E extends ReadError>(
+  spec: HarvestSpec,
+  run: HarvestCommand<E>,
+) {
+  yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
+  const checkout = yield* checkoutHead(run).pipe(Effect.mapError(gitReadFailed));
+  return yield* checkout._tag === "Named"
+    ? verifyNamed(spec, run, checkout.head, checkout.branch)
+    : verifyDetached(spec, run, checkout.head);
 });
 
 /** The pull requests at the checkout's final commit, or why the one that CI waits on isn't verified. */
@@ -729,8 +758,9 @@ const verificationOutcome = Effect.fn("StepResult.verificationOutcome")(function
 });
 
 /**
- * Returns `verified` followed by the other pull requests at `head` in GitHub's
- * commit-to-pull-request index. If the index read fails or times out, returns `verified`.
+ * Returns `verified` followed by the other open pull requests from the Run's repository at `head`
+ * in GitHub's commit-to-pull-request index. If the index read fails or times out, returns
+ * `verified`.
  */
 const withIndexedAtHead = <E extends ReadError>(
   spec: HarvestSpec,
@@ -745,23 +775,38 @@ const withIndexedAtHead = <E extends ReadError>(
     [],
     "keeping only the CI handoff's pull request",
   ).pipe(
-    Effect.map((indexed) => {
+    Effect.flatMap((indexed) => {
       const known = new Set(verified.map(({ number }) => number));
-      return [
-        ...verified,
-        ...indexed.flatMap(({ number, url }) =>
-          known.has(number) ? [] : [pullRequestAt(spec, number, url, head)],
-        ),
-      ];
+      const others = indexed.filter(({ number }) => !known.has(number));
+      const left = others.filter((pr) => !openFromRunRepository(pr));
+      return (
+        left.length === 0
+          ? Effect.void
+          : Effect.logInfo(
+              "Left out the indexed pull requests at the handoff's head that aren't open or come from another repository",
+              {
+                attemptId: spec.attemptId,
+                repository: spec.repository,
+                pullRequests: left.map(({ number }) => number),
+              },
+            )
+      ).pipe(
+        Effect.as([
+          ...verified,
+          ...others
+            .filter(openFromRunRepository)
+            .map(({ number, url }) => pullRequestAt(spec, number, url, head)),
+        ]),
+      );
     }),
   );
 
 /**
  * Returns the pull requests at the checkout's final commit, or why the one that CI waits on isn't
- * verified. With a CI handoff, verifies the pull request it names and adds the other pull
- * requests at its head from GitHub's commit-to-pull-request index. If the Loop requires CI,
- * verifies the pull request of the checkout's branch. Otherwise asks the index, and a failure or
- * timeout leaves no pull request.
+ * verified. With a CI handoff, verifies the pull request it names and adds the other open pull
+ * requests from the Run's repository at its head in GitHub's commit-to-pull-request index. If the
+ * Loop requires CI, verifies the pull request of the checkout's branch. Otherwise asks the index,
+ * and a failure or timeout leaves no pull request.
  */
 const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function* <
   E extends ReadError,
