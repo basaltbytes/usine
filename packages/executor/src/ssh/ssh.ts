@@ -26,7 +26,7 @@ import { sshContainersFor } from "./container.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
-import { provisionedApiKey, withApiKeys } from "./api-keys.ts";
+import { machineCredentialRoute, provisionedApiKey, withApiKeys } from "./api-keys.ts";
 import {
   gatewayCredentialFor,
   gatewayHarnessProbe,
@@ -333,6 +333,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           onNone: () => Effect.succeed(Option.none<GatewayCredentialKind>()),
           onSome: (gateway) => gatewayCredentialFor(catalog, gateway, harness),
         }),
+      credentialRoute: (machine, harness) => machineCredentialRoute(catalog, machine, harness),
       grantFor,
       readOnlyAccessGap: Option.none(),
       reclaim,

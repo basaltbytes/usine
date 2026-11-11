@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, HostUnreachable, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { HarnessReady } from "@usine/core/agent/capability";
 import {
   AttemptId,
   MemoryKilledProcess,
@@ -11,8 +12,15 @@ import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
-import { Deferred, Effect, Fiber, Layer, Option, References, Schema } from "effect";
+import {
+  AnthropicApiKey,
+  AnthropicProvider,
+  ChatGptLogin,
+  HostFilePath,
+  OpenAiProvider,
+  UpstreamBase,
+} from "@usine/gateway";
+import { Deferred, Effect, Fiber, Layer, Option, Redacted, References, Schema } from "effect";
 // This Node boundary needs synchronous filesystem operations that FileSystem does not expose.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
@@ -77,6 +85,56 @@ const runOf = (machine: ReturnType<typeof fakeMachine>, name: string) => {
   );
   assert(call !== undefined, `no docker run started ${name}`);
   return { words: wordsOf(call.line), input: call.input };
+};
+
+/** Returns the arguments of the `docker run` that started the preflight's container. */
+const preflightRunOf = (machine: ReturnType<typeof fakeMachine>) => {
+  const call = machine.state.calls.find(
+    ({ line }) => line.startsWith("exec 'docker' 'run' ") && line.includes("'usine-preflight-"),
+  );
+  assert(call !== undefined, "no docker run started the preflight's container");
+  return wordsOf(call.line);
+};
+
+/** Each harness with a login on the machine, the Gateway protocol of its provider, and its files. */
+const LOGINS = [
+  {
+    harness: "claude",
+    brain: TEST_AGENT.brain,
+    protocol: "anthropic-messages",
+    mounted: ".claude/.credentials.json",
+    seeded: ".claude.json",
+  },
+  {
+    harness: "codex",
+    brain: BrainSpec.make({
+      harness: Harness.make("codex"),
+      model: ModelId.make("gpt-5.6-sol"),
+      effort: "low",
+    }),
+    protocol: "openai-responses",
+    mounted: ".codex/auth.json",
+    seeded: ".codex/config.toml",
+  },
+] as const;
+
+/** A Gateway that holds an Anthropic API key and a ChatGPT login. */
+const BOTH_PROVIDERS = {
+  "anthropic-messages": Option.some(
+    AnthropicProvider.make({
+      upstream: UpstreamBase.make("https://api.anthropic.com"),
+      credential: AnthropicApiKey.make({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
+    }),
+  ),
+  "openai-responses": Option.some(
+    OpenAiProvider.make({
+      upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
+      credential: ChatGptLogin.make({
+        authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
+        tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
+      }),
+    }),
+  ),
 };
 
 const optionOf = (words: ReadonlyArray<string>, option: string) => words[words.indexOf(option) + 1];
@@ -1220,4 +1278,76 @@ describe("SSH Worker with Docker", () => {
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
     },
   );
+
+  describe.each(LOGINS)("$harness login files", ({ harness, brain, protocol, mounted, seeded }) => {
+    const loginMounts = [
+      `type=bind,"source=/home/usine/${mounted}","destination=/home/usine/${mounted}"`,
+      `type=bind,"source=/home/usine/${seeded}","destination=/usr/local/share/usine/seed/${seeded}",readonly`,
+    ];
+    const ready = () => (spec: BrainSpec) =>
+      Effect.succeed(HarnessReady.make({ harness: spec.harness }));
+    const loginLog = (lines: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const line = lines.find(
+          (line) =>
+            line.includes("Chose the login files that the Worker's containers mount") &&
+            line.includes(`"harness":"${harness}"`),
+        );
+        assert(line !== undefined, "preflight logs the login files");
+        return (yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie))[1];
+      });
+
+    it.effect.each([
+      { route: "gateway", llmProviders: [protocol] },
+      { route: "host-login", llmProviders: [] },
+    ] as const)("on the $route route", ({ route, llmProviders }) => {
+      const machine = dockerMachine();
+      machine.state.homeFiles.add(mounted).add(seeded);
+      const gateway = fakeGateway(machine, BOTH_PROVIDERS);
+      const logs = capturedLogs();
+      const harnessRequest = CheckoutRequest.make({
+        ...request,
+        agent: Agent.make({ ...TEST_AGENT, brain }),
+      });
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [brain], 1);
+        const prepared = yield* executor.prepare(harnessRequest);
+        yield* prepared.launch(sink);
+
+        const preflightMounts = mountsOf(preflightRunOf(machine));
+        const attemptMounts = mountsOf(runOf(machine, CONTAINER).words);
+        if (route === "host-login") {
+          assert.includeMembers(preflightMounts, loginMounts);
+          assert.includeMembers(attemptMounts, loginMounts);
+        } else
+          for (const mount of loginMounts) {
+            assert.notInclude(preflightMounts, mount);
+            assert.notInclude(attemptMounts, mount);
+          }
+        const fields = yield* loginLog(logs.infos);
+        assert.strictEqual(fields.credentialRoute, route);
+        if (route === "host-login") {
+          assert.strictEqual(fields.mounted, mounted);
+          assert.strictEqual(fields.seeded, seeded);
+          assert.strictEqual(fields.reason, "The harness uses the SSH user's login on the machine");
+        } else {
+          assert.strictEqual(fields.mounted, "");
+          assert.strictEqual(fields.seeded, "");
+          assert.strictEqual(
+            fields.reason,
+            "The Gateway holds the credential of the harness's provider",
+          );
+        }
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders }),
+            probes: { harnessReadiness: ready },
+          }).pipe(Layer.provideMerge(logs.layer)),
+        ),
+      );
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import type { RemoteHost } from "@usine/agents/child-host";
+import type { CredentialRoute } from "@usine/agents/harness";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
@@ -33,6 +34,9 @@ export interface RemoteMachine {
   /** The provider's ID of a machine created for one Attempt, or `None` for a long-lived machine. */
   readonly provisioned: Option.Option<MachineId>;
 }
+
+/** How an Attempt's harness authenticates on a Worker's machine. */
+export type MachineCredentialRoute = Extract<CredentialRoute, "host-login" | "gateway" | "api-key">;
 
 export interface RemoteAccess {
   /** The harnesses whose model API keys were installed with this access. */
@@ -132,6 +136,11 @@ export interface RemoteWorker<M extends RemoteMachine> {
     machine: M,
     harness: Harness,
   ) => Effect.Effect<Option.Option<GatewayCredentialKind>>;
+  /**
+   * Returns how each Attempt's `harness` authenticates on `machine`. An Attempt's container
+   * mounts the harness's login files from the machine only for `host-login`.
+   */
+  readonly credentialRoute: (machine: M, harness: Harness) => MachineCredentialRoute;
   /** Returns the access grant for `repository`. Fails if none is configured. */
   readonly grantFor: (
     repository: RepositoryName,
