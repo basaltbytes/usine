@@ -50,23 +50,26 @@ const summaries = Effect.fn("AttemptContext.delegations")(function* (
 ) {
   const ended = yield* Effect.forEach(delegations, (record) =>
     Option.match(record.outcome, {
-      onNone: () => Effect.succeedNone,
+      onNone: () =>
+        Effect.succeed({ record, end: Option.none<readonly [DelegationEnd, string]>() }),
       // The coordinator encoded every outcome it recorded.
-      onSome: (outcome) => decodeEvent(outcome).pipe(Effect.orDie, Effect.map(endOf)),
+      onSome: (outcome) =>
+        decodeEvent(outcome).pipe(
+          Effect.orDie,
+          Effect.map((decoded) => ({ record, end: endOf(decoded) })),
+        ),
     }),
   );
   const handled = childOf(event);
   // The event carries its child's report, so it counts as one of the two full reports.
-  const fullReports = Option.isSome(handled) ? 1 : 2;
-  const reported = delegations.flatMap((record, index) =>
-    Option.isSome(ended[index] ?? Option.none()) && !Option.contains(handled, record.number)
-      ? [record.number]
-      : [],
+  const full = new Set(
+    ended
+      .filter(({ record, end }) => Option.isSome(end) && !Option.contains(handled, record.number))
+      .map(({ record }) => record.number)
+      .slice(Option.isSome(handled) ? -1 : -2),
   );
-  const full = new Set(reported.slice(-fullReports));
-  return delegations.map((record, index) => {
-    const end = ended[index] ?? Option.none();
-    return DelegationSummary.make({
+  return ended.map(({ record, end }) =>
+    DelegationSummary.make({
       child: record.number,
       status: Option.isSome(record.outcome)
         ? "ended"
@@ -79,8 +82,8 @@ const summaries = Effect.fn("AttemptContext.delegations")(function* (
         : Option.map(end, ([, text]) =>
             full.has(record.number) ? text.slice(0, REPORT_CHARACTERS) : line(text),
           ),
-    });
-  });
+    }),
+  );
 });
 
 const characters = (context: AttemptContext) =>
@@ -90,33 +93,35 @@ const characters = (context: AttemptContext) =>
     Effect.map((encoded) => encoded.length),
   );
 
-/** Shortens the task, then the output, then the full reports, until the context fits the cap. */
+/** Each shortens one field by about `excess` characters, in the order `fitted` applies them. */
+const shortenings: ReadonlyArray<(context: AttemptContext, excess: number) => AttemptContext> = [
+  (context, excess) =>
+    AttemptContext.make({
+      ...context,
+      task: context.task.slice(0, Math.max(0, context.task.length - excess)),
+    }),
+  (context, excess) => AttemptContext.make({ ...context, output: context.output.slice(excess) }),
+  (context, excess) =>
+    AttemptContext.make({
+      ...context,
+      delegations: context.delegations.map((summary) =>
+        DelegationSummary.make({
+          ...summary,
+          report: Option.map(summary.report, (report) =>
+            report.slice(0, Math.max(LINE_CHARACTERS, report.length - excess)),
+          ),
+        }),
+      ),
+    }),
+];
+
+/** Shortens the task, then the output, then the reports, until the context fits the cap. */
 const fitted = Effect.fn("AttemptContext.fit")(function* (context: AttemptContext) {
   let current = context;
-  const shorten = [
-    (excess: number) =>
-      AttemptContext.make({
-        ...current,
-        task: current.task.slice(0, Math.max(0, current.task.length - excess)),
-      }),
-    (excess: number) => AttemptContext.make({ ...current, output: current.output.slice(excess) }),
-    (excess: number) =>
-      AttemptContext.make({
-        ...current,
-        delegations: current.delegations.map((summary) =>
-          DelegationSummary.make({
-            ...summary,
-            report: Option.map(summary.report, (report) =>
-              report.slice(0, Math.max(LINE_CHARACTERS, report.length - excess)),
-            ),
-          }),
-        ),
-      }),
-  ];
-  for (const step of shorten) {
+  for (const shorten of shortenings) {
     const excess = (yield* characters(current)) - CONTEXT_CHARACTERS;
     if (excess <= 0) return current;
-    current = step(excess);
+    current = shorten(current, excess);
   }
   const excess = (yield* characters(current)) - CONTEXT_CHARACTERS;
   if (excess > 0)

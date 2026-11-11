@@ -7,8 +7,7 @@ import {
 } from "../attempt/coordinator/rules.ts";
 
 /** What answered an event: the event's rule, a model over an API endpoint, or a harness session. */
-export const DecisionHandler = Schema.Literals(["rule", "endpoint", "harness"]);
-export type DecisionHandler = typeof DecisionHandler.Type;
+const DecisionHandler = Schema.Literals(["rule", "endpoint", "harness"]);
 
 /** The decision recorded for one event, with the handler that made it. */
 export class RecordedDecision extends Schema.Class<

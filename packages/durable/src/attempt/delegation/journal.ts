@@ -60,7 +60,7 @@ export interface DelegationProgress {
 }
 
 /** A delegation that its owner numbered and admitted within the child-session budget. */
-export interface Admitted {
+interface Admitted {
   readonly _tag: "Admitted";
   /** The delegation's number among the Attempt's delegations, which names its child session. */
   readonly count: ChildSessionCount;
@@ -70,7 +70,7 @@ export interface Admitted {
 }
 
 /** A delegation that its owner refused because the Attempt spent its child-session budget. */
-export interface Refused {
+interface Refused {
   readonly _tag: "Refused";
   /** The child count including the refused delegation. */
   readonly attempted: ChildSessionCount;

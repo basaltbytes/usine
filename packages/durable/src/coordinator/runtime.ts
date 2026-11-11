@@ -137,7 +137,7 @@ const reservedEvent = (
   });
 
 /** Returns the terminal envelope payload and the journal outcome of a rules outcome. */
-const finished = (
+const terminalOf = (
   outcome: Extract<EffectIntent, { readonly _tag: "Finish" }>["outcome"],
 ): readonly [AttemptChannel.OutboundPayload, CoordinatorOutcome] =>
   outcome._tag === "AttemptCompleted"
@@ -365,7 +365,7 @@ const make = Effect.gen(function* () {
           }),
         );
       else {
-        const [terminal, outcome] = finished(effect.outcome);
+        const [terminal, outcome] = terminalOf(effect.outcome);
         payloads.push(terminal);
         intents.push(Finish.make({ outcome }));
       }
@@ -418,23 +418,29 @@ const make = Effect.gen(function* () {
     Effect.scoped(
       Effect.gen(function* () {
         const snapshot = yield* loaded(hub.attemptId);
-        const attached = yield* hub.outbox.attach(io, snapshot);
-        if (!attached) {
+        let attachedHere = false;
+        // Registered before the outbox attaches, so it runs after the outbox detaches: a call
+        // waiting for `detached` then finds the outbox free.
+        yield* Effect.addFinalizer(() =>
+          attachedHere
+            ? Effect.gen(function* () {
+                const detached = hub.detached;
+                hub.attached = yield* Deferred.make<AttemptRequest>();
+                hub.detached = yield* Deferred.make<void>();
+                hub.canceled = yield* Deferred.make<void>();
+                yield* Deferred.succeed(detached, undefined);
+              })
+            : Effect.void,
+        );
+        if (!(yield* hub.outbox.attach(io, snapshot))) {
           yield* Effect.logWarning(
             "Another execute call is relaying this Attempt; waiting for it to detach",
           );
           yield* Deferred.await(hub.detached);
           return yield* relay(hub, request, io);
         }
-        yield* Effect.acquireRelease(Deferred.succeed(hub.attached, request), () =>
-          Effect.gen(function* () {
-            const detached = hub.detached;
-            hub.attached = yield* Deferred.make<AttemptRequest>();
-            hub.detached = yield* Deferred.make<void>();
-            hub.canceled = yield* Deferred.make<void>();
-            yield* Deferred.succeed(detached, undefined);
-          }),
-        );
+        attachedHere = true;
+        yield* Deferred.succeed(hub.attached, request);
         yield* Effect.logInfo("Relaying the Attempt's channel", {
           nextSequence: snapshot.nextOutbound,
           status: snapshot.status._tag,

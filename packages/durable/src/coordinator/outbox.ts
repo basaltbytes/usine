@@ -18,7 +18,7 @@ interface Channel {
 }
 
 /** The result of `Outbox.notice`. */
-export type NoticeRouting =
+type NoticeRouting =
   | { readonly _tag: "Relayed" }
   | { readonly _tag: "Kept"; readonly kept: ReadonlyArray<AttemptChannel.WorkerNotice> }
   | { readonly _tag: "Dropped" };
