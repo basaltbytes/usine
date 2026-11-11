@@ -60,8 +60,8 @@ const outbox = getTableName(outboxTable);
 
 /**
  * Provides the attempt journal on the application's `SqlClient`. Applies its embedded migrations
- * with their own `usine_attempt_journal_migrations` ledger, and runs each write in one `BEGIN
- * IMMEDIATE` transaction.
+ * with their own `usine_attempt_journal_migrations` ledger, and runs each load and write in one
+ * `BEGIN IMMEDIATE` transaction.
  */
 export const sqliteAttemptJournalLayer = Layer.effect(
   AttemptJournal,
@@ -192,7 +192,9 @@ export const sqliteAttemptJournalLayer = Layer.effect(
       }),
       load: Effect.fn("AttemptJournal.load")(function* (attemptId) {
         yield* Effect.annotateCurrentSpan({ attemptId });
+        // One transaction, so the four reads can't straddle a commit.
         return yield* load(attemptId).pipe(
+          transaction,
           Effect.catchTag(
             ["SqlError", "SchemaError"],
             failure("load the attempt journal", attemptId),

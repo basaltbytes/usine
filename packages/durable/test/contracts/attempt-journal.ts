@@ -433,13 +433,15 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
       }).pipe(Effect.scoped),
     );
 
-    it.effect("dies on a transition after the Attempt finished", () =>
+    it.effect("dies on a transition after the Attempt finished or one that finishes it twice", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
         const request = storedRequest("attempt-after-finish");
         const attemptId = request.spec.attemptId;
+        const twiceRequest = storedRequest("attempt-finish-twice");
+        const twiceId = twiceRequest.spec.attemptId;
         const outcome = Reported.make({ report: AttemptReport.make({ message: "Opened #1." }) });
-        const { finished, late } = yield* using(
+        const { finished, late, twiceOpened, twice } = yield* using(
           fixture,
           Effect.gen(function* () {
             const store = yield* journal;
@@ -452,16 +454,32 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
             const late = yield* store
               .transition(attemptId, revision(1), step("ChildReported"))
               .pipe(Effect.exit);
-            return { finished, late };
+            const twiceOpened = yield* store.open(twiceRequest);
+            const twice = yield* store
+              .transition(
+                twiceId,
+                revision(0),
+                step("ChildReported", {
+                  decision: "Complete",
+                  intents: [Finish.make({ outcome }), Finish.make({ outcome })],
+                }),
+              )
+              .pipe(Effect.exit);
+            return { finished, late, twiceOpened, twice };
           }),
         );
-        const after = yield* using(
+        const { after, twiceAfter } = yield* using(
           fixture,
-          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+          Effect.gen(function* () {
+            const store = yield* journal;
+            return { after: yield* store.load(attemptId), twiceAfter: yield* store.load(twiceId) };
+          }),
         );
 
         assert.isTrue(Exit.hasDies(late));
         assert.deepStrictEqual(after, Option.some(finished));
+        assert.isTrue(Exit.hasDies(twice));
+        assert.deepStrictEqual(twiceAfter, Option.some(twiceOpened));
       }).pipe(Effect.scoped),
     );
 
@@ -670,6 +688,56 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
             nextOutbound,
           })),
           Option.some({ revision: revision(1), events: 1, outbox: 1, nextOutbound: 2 }),
+        );
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("loads one consistent snapshot while transitions commit", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-load-snapshot");
+        const attemptId = request.spec.attemptId;
+        const loads = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(request);
+            return yield* Effect.forEach(
+              Array.from({ length: 12 }, (_, index) => index),
+              (index) =>
+                Effect.all(
+                  [
+                    store.load(attemptId),
+                    store.transition(
+                      attemptId,
+                      revision(index),
+                      step(`Event${index + 1}`, { outbound: [envelope(attemptId, index + 1)] }),
+                    ),
+                  ],
+                  { concurrency: "unbounded" },
+                ).pipe(Effect.map(([loaded]) => loaded)),
+            );
+          }).pipe(
+            // Yield after every operation so reads outside a transaction would interleave.
+            Effect.provideService(References.MaxOpsBeforeYield, 8),
+          ),
+        );
+
+        // Each transition appends one event and one envelope, so a consistent snapshot has as many
+        // events as its revision and as many envelopes as it has reserved.
+        assert.deepStrictEqual(
+          loads.flatMap((loaded) =>
+            Option.match(loaded, {
+              onNone: () => ["missing"],
+              onSome: ({ revision, events, outbox, nextOutbound }) =>
+                events.length === revision && outbox.length === nextOutbound - 1
+                  ? []
+                  : [
+                      `revision ${revision}, events ${events.length}, outbox ${outbox.length}, nextOutbound ${nextOutbound}`,
+                    ],
+            }),
+          ),
+          [],
         );
       }).pipe(Effect.scoped),
     );
