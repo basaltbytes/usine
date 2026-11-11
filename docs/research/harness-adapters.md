@@ -2,7 +2,7 @@
 
 This report maps how usine handles coding-agent harnesses and proposes one abstraction, so that adding or switching a harness (Claude Code, Codex, Pi, and later OpenCode) is a new module and one registration line. Read on 2026-11-04 against usine commit `9132a5b09a30e4d41f04f8042cbb39c7b1e3be6b`, with `@anthropic-ai/claude-agent-sdk` 0.3.311, `@pwrdrvr/codex-app-server-protocol` 0.164.0, and Pi and pi-durable 1.4.0 as pinned in `packages/*/package.json`.
 
-It builds on [Model access for parents and children](./model-access.md), which compares parent harnesses and proposes the `ModelAccess` port ([ADR 0032](../adr/0032-model-access.md), proposed). That report covers credential admission. This one covers everything else a harness brings: launch, recovery, interventions, events, preflight, installation, credential wiring, usage, and placement.
+It builds on [Model access for parents and children](./model-access.md), which compares parent harnesses and proposes the `ModelAccess` port. That report covers credential admission. This one covers everything else a harness brings: launch, recovery, interventions, events, preflight, installation, credential wiring, usage, and placement.
 
 Two terms are used throughout:
 
@@ -91,7 +91,7 @@ A brain keeps its authored shape (`harness`, `model`, `effort`), but resolving i
 
 Gateway slots become keyed by **wire protocol** (`anthropic-messages`, `openai-responses`, later `openai-chat`) instead of by a provider name that stands for one harness. Two harnesses can then share a slot: Codex and OpenCode both speak `openai-responses`, but each needs its own wiring on the worker (Codex reads `CODEX_HOME/config.toml`; OpenCode reads `OPENCODE_CONFIG_CONTENT`).
 
-[ADR 0032](../adr/0032-model-access.md)'s `ModelAccess` fits on top: the adapter lists the routes a model can take, and `ModelAccess` chooses and admits one. Until `ModelAccess` exists, the choice is today's rule: the worker's gateway slot, then its provisioned key, then the host login.
+The proposed `ModelAccess` port fits on top: the adapter lists the routes a model can take, and `ModelAccess` chooses and admits one. Until `ModelAccess` exists, the choice is today's rule: the worker's gateway slot, then its provisioned key, then the host login.
 
 ### Modules
 
@@ -350,7 +350,7 @@ ADRs record why. Where this design departs from one, the amendment states the ne
 - **[ADR 0021](https://github.com/basaltbytes/usine/blob/2557b04fff7602e8c4bce3f5f59bed724f43b3b7/docs/adr/0021-pi-parent-pool-follows-authentication.md)** kept Pi children API-key-only. The design has no harness-specific pool restriction; it refuses only routes whose billing usine can't represent. Reason: the restriction has no recorded reason (#941).
 - **[ADR 0027](../adr/0027-gateway-credential-proxy.md)** serves "only the routes Claude Code and Codex call" and keys slots by provider. The design keys slots by wire protocol and takes routes from registered adapters. Reason: two harnesses can use one provider with different wiring, and the route allowlist must follow what the registered harnesses call. The amendment of 2026-10-26 on provider terms stays binding; it becomes a route that only the Claude Code descriptor offers.
 
-[ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md) and [ADR 0029](../adr/0029-worker-kinds-and-adapter-set.md) need no change: the attempt environment stays the only environment, and login mounts come from descriptors instead of a table. [ADR 0032](../adr/0032-model-access.md) (proposed) is complementary: descriptors supply the candidate routes that `ModelAccess` chooses from.
+[ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md) and [ADR 0029](../adr/0029-worker-kinds-and-adapter-set.md) need no change: the attempt environment stays the only environment, and login mounts come from descriptors instead of a table. The `ModelAccess` proposal in [Model access](./model-access.md) is complementary: descriptors supply the candidate routes that `ModelAccess` chooses from.
 
 ## Migration plan
 

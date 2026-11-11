@@ -11,7 +11,7 @@ The UI centers work, not machinery. Home lists the projects (managed repos as th
 
 ## Consequences
 
-- v1 interventions: **Approve**, **Retry**, **Steer** (message the Pi parent), **Interrupt** (pause at the next tool boundary for a steer), **Cancel**, **Pause a loop** (no new runs; runtime state per [ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md)), **Child takeover** (davis-style attach to a harness child), and **Edit-and-retry** (amend context before the next attempt). Takeover and edit-and-retry get their own ticket: the attempt channel ([ADR 0006](./0006-executor-contract-run-host-attempt-channel.md)) addresses only the parent.
+- v1 interventions: **Approve**, **Retry**, **Steer** (message the Pi parent), **Interrupt** (pause at the next tool boundary for a steer), **Cancel**, **Pause a loop** (no new runs; runtime state), **Child takeover** (davis-style attach to a harness child), and **Edit-and-retry** (amend context before the next attempt). Takeover and edit-and-retry get their own ticket: the attempt channel ([ADR 0006](./0006-executor-contract-run-host-attempt-channel.md)) addresses only the parent.
 - Diffs: the drawer links the run's PR. v1 has no diff view, and the stored transcript allows one later.
 - Needs-you (approvals, agent failures, steerable runs) is global: a strip on home and badges on project and board cards, so you don't need to know which project to check.
 - Lane maps are per-repo configuration in the instance repo, proposed from a fresh repo's labels. Board sync projects polled trigger state ([ADR 0007](./0007-polling-triggers-content-hashed-events.md)); no new data source.
