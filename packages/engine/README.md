@@ -113,7 +113,7 @@ The sink also reads back the attempt's current-protocol envelopes in append orde
 
 ### Lifecycle decisions
 
-The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, interrupted-attempt recovery, cancellation, operator retry, and whether a new event can replace a run. `RunStore` applies each decision and its step result in one transaction. Completion and restart recovery share the three-attempt cap, and a late executor result can't settle a replacement attempt. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. [ADR 0003](../../docs/adr/0003-durable-execution-on-effect-workflow.md) records why the engine drives runs itself.
+The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, interrupted-attempt recovery, cancellation, operator retry, and whether a new event can replace a run. `RunStore` applies each decision and its step result in one transaction. Completion and restart recovery share the three-attempt cap, and a late executor result can't settle a replacement attempt. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. [ADR 0002](../../docs/adr/0002-run-model-event-run-step-attempt.md) records why the engine drives runs itself.
 
 ## Cycle budgets
 
@@ -127,7 +127,7 @@ A reset records a fresh polling request. Trigger adapters read `CycleBudgets.gen
 
 ## Drain and shutdown
 
-`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Pending reservations release their slots; approval gates and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md)).
+`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Pending reservations release their slots; approval gates and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([Drain](../../docs/architecture/run-lifecycle.mdx#drain)).
 
 `RunEngine.waitForUpgrade(target)` defers new reservations and waits for admitted attempts to persist their outcomes. `upgradeDrain` reports the target version, start time, and deferred run IDs. `cancelUpgrade` resumes these runs without a restart; it does not reopen admission after process shutdown. Cancel the caller's wait before canceling the upgrade. Repeated waits join the pending drain.
 
@@ -251,7 +251,7 @@ Polling run summaries omit task prompts, step results, attempt prompts, harveste
 
 ## Persistence contracts
 
-The domain services are the persistence boundary. `RunDatabase` is the current SQLite composition service; another SQL dialect supplies the same domain ports through Effect layers. [ADR 0020](../../docs/adr/0020-drizzle-portable-sqlite-projection.md#amendment-2026-11-03-896-sqlite-and-postgres-adapters) defines SQLite for self-hosted instances and Postgres as the next hosted backend, with schemas and migrations owned by each adapter.
+The domain services are the persistence boundary. `RunDatabase` is the current SQLite composition service; another SQL dialect supplies the same domain ports through Effect layers. [ADR 0010](../../docs/adr/0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md) records SQLite for self-hosted instances and Postgres for hosted instances, with schemas and migrations owned by each adapter.
 
 `src/database/dialect.ts` centralizes SQLite query expressions, including JSON access and aggregation. Keep JSON paths literal where they match expression indexes. The [persistence inventory](../../docs/persistence.md) lists every store and its dialect dependencies.
 
