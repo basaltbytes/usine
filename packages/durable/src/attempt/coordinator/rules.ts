@@ -77,6 +77,8 @@ export class ChildAtCapacity extends Schema.TaggedClass<
 >("@usine/durable/coordinator/ChildAtCapacity")("ChildAtCapacity", {
   child: ChildSessionCount,
   message: Schema.NonEmptyString,
+  /** The time the provider's usage limit resets, or `None` if the provider didn't report one. */
+  resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}
 
 /** Child `child` failed to launch or lost its transport. */
@@ -154,8 +156,14 @@ export const Failed = Schema.TaggedStruct("Failed", { message: Schema.NonEmptySt
 /** Fails the Attempt with an infrastructure failure, which the engine retries from salvage. */
 export const InfraFailed = Schema.TaggedStruct("InfraFailed", { message: Schema.NonEmptyString });
 
-/** Fails the Attempt with a provider capacity refusal, which the engine retries after a delay. */
-export const AtCapacity = Schema.TaggedStruct("AtCapacity", { message: Schema.NonEmptyString });
+/**
+ * Fails the Attempt with a provider capacity refusal, which the engine retries after a delay, or at
+ * `resetsAt` if the provider reported when its usage limit resets.
+ */
+export const AtCapacity = Schema.TaggedStruct("AtCapacity", {
+  message: Schema.NonEmptyString,
+  resetsAt: Schema.optionalKey(Schema.DateTimeUtcFromString),
+});
 
 /** Fails the Attempt because admission refused a child over the budget. */
 const OverBudget = Schema.TaggedStruct("OverBudget", { attempted: ChildSessionCount });
@@ -287,7 +295,13 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
         : InfraFailed.make({
             message: `Child ${child} was interrupted and couldn't resume, and the ${context.maxChildren}-child budget has no room for a replacement: ${reason}`,
           }),
-    ChildAtCapacity: ({ message }): Decision => AtCapacity.make({ message }),
+    ChildAtCapacity: ({ message, resetsAt }): Decision =>
+      AtCapacity.make(
+        Option.match(resetsAt, {
+          onNone: () => ({ message }),
+          onSome: (value) => ({ message, resetsAt: value }),
+        }),
+      ),
     ChildFailed: ({ message }): Decision => InfraFailed.make({ message }),
     BudgetExceeded: ({ attempted }): Decision => OverBudget.make({ attempted }),
   });
@@ -361,7 +375,8 @@ const resolve = (
     Question: ({ question }) => fail(QuestionFailure.make({ question })),
     Failed: ({ message }) => fail(AgentFailure.make({ message })),
     InfraFailed: ({ message }) => fail(InfraFailure.make({ message, cause: message })),
-    AtCapacity: ({ message }) => fail(ProviderCapacityFailure.make({ message })),
+    AtCapacity: ({ message, resetsAt }) =>
+      fail(ProviderCapacityFailure.make({ message, resetsAt: Option.fromUndefinedOr(resetsAt) })),
   });
 };
 
