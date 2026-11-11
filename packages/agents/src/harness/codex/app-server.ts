@@ -13,6 +13,7 @@ import {
   Stream,
 } from "effect";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
+import type { HostInput } from "../../child-host/child-host.ts";
 import { startChildProcess, childProcessCommand } from "../../child-host/node.ts";
 import { processError, stopChildProcess } from "../../child-host/process.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
@@ -89,10 +90,12 @@ const appServerArgs = (cwd: string) => [
 /**
  * Returns the app-server command for `client` on its host. The process starts in `/`,
  * not the worktree, so startup cannot read repository config before thread trust is set.
+ * Throws if `client`'s host is an `ExecShell`, which has no local command, or a remote host with
+ * a non-empty environment.
  */
 export const codexAppServerCommand = (
   client: CodexClient,
-  stdin?: ChildProcess.CommandOptions["stdin"],
+  stdin?: HostInput,
 ): ChildProcess.Command =>
   childProcessCommand(
     client,

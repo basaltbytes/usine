@@ -1,20 +1,9 @@
-import {
-  type Cause,
-  Deferred,
-  Effect,
-  Exit,
-  Option,
-  PlatformError,
-  Predicate,
-  Queue,
-  Schema,
-  Scope,
-  Sink,
-  Stream,
-} from "effect";
-import { type ChildProcess, ChildProcessSpawner } from "effect/process";
+import { Deferred, Effect, Exit, Option, PlatformError, Schema, Scope, Sink, Stream } from "effect";
+import { ChildProcessSpawner } from "effect/process";
 import {
   type ExecShell,
+  type HostCommandOptions,
+  type HostInput,
   type HostInvocation,
   HostUnreachable,
   remoteCommandLine,
@@ -50,45 +39,21 @@ export const unreachableCause = (
   Schema.is(HostUnreachable)(error.reason.cause) ? Option.some(error.reason.cause) : Option.none();
 
 /**
- * Returns the command's stdin from `options`: a stream, a queue that the handle's `stdin` sink
- * fills when the command input is `"pipe"`, or no input when the options set none, so a command
- * that reads stdin doesn't wait for a writer that doesn't exist.
+ * Returns the command's stdin: `input`'s stream, which closes stdin with a warning if it fails, or
+ * end of file without input.
  */
-const stdinOf = Effect.fnUntraced(function* (
-  host: ExecShell,
-  input: ChildProcess.CommandOptions["stdin"],
-) {
-  const config: ChildProcess.StdinConfig | undefined =
-    input === undefined || Predicate.isString(input) || Stream.isStream(input)
-      ? input === undefined
-        ? undefined
-        : { stream: input }
-      : input;
-  const stream = config?.stream;
-  if (Stream.isStream(stream)) {
-    const relayed = stream.pipe(
-      Stream.catch((error) =>
-        Effect.logWarning("The input of a command on an exec shell failed; closing its stdin", {
-          host: host.destination,
-          message: error.message,
-        }).pipe(Stream.fromEffectDrain),
-      ),
-    );
-    return {
-      stream: config?.endOnDone === false ? Stream.concat(relayed, Stream.never) : relayed,
-      sink: Sink.drain,
-    };
-  }
-  if (stream === undefined || stream === "ignore" || stream === "inherit")
-    return { stream: Stream.empty, sink: Sink.drain };
-  const queue = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-  return {
-    stream: Stream.fromQueue(queue).pipe(Stream.catch(() => Stream.empty)),
-    sink: Sink.forEach((bytes: Uint8Array) => Queue.offer(queue, bytes)).pipe(
-      Sink.ensuring(Queue.end(queue)),
+const stdinOf = (host: ExecShell, input: HostInput | undefined): Stream.Stream<Uint8Array> => {
+  if (input === undefined) return Stream.empty;
+  const relayed = input.stream.pipe(
+    Stream.catch((error) =>
+      Effect.logWarning("The input of a command on an exec shell failed; closing its stdin", {
+        host: host.destination,
+        message: error.message,
+      }).pipe(Stream.fromEffectDrain),
     ),
-  };
-});
+  );
+  return input.endOnDone === false ? Stream.concat(relayed, Stream.never) : relayed;
+};
 
 /**
  * Starts `invocation` on `host` through its transport and returns a handle that behaves as a
@@ -100,7 +65,7 @@ const stdinOf = Effect.fnUntraced(function* (
 export const execHandle: (
   host: ExecShell,
   invocation: HostInvocation & { readonly environment: Readonly<Record<string, string>> },
-  options: ChildProcess.CommandOptions,
+  options: HostCommandOptions,
 ) => Effect.Effect<ChildProcessSpawner.ChildProcessHandle, never, Scope.Scope> = Effect.fnUntraced(
   function* (host, invocation, options) {
     const names = Object.keys(invocation.environment);
@@ -112,9 +77,8 @@ export const execHandle: (
       return yield* Effect.die(new Error("An exec shell has no file descriptors beyond stdio"));
     const scope = yield* Scope.Scope;
     const call = yield* Scope.fork(scope);
-    const stdin = yield* stdinOf(host, options.stdin);
     const process = yield* host.transport
-      .run(remoteCommandLine(host, invocation), remoteInput(host, stdin.stream))
+      .run(remoteCommandLine(host, invocation), remoteInput(host, stdinOf(host, options.stdin)))
       .pipe(Scope.provide(call));
     const exited = yield* Deferred.make<
       ChildProcessSpawner.ExitCode,
@@ -137,7 +101,7 @@ export const execHandle: (
       });
     return ChildProcessSpawner.makeHandle({
       pid: ChildProcessSpawner.ProcessId(0),
-      stdin: stdin.sink,
+      stdin: Sink.drain,
       stdout: process.stdout,
       stderr: process.stderr,
       all: Stream.merge(process.stdout, process.stderr),

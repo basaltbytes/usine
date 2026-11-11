@@ -1,5 +1,15 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { type Brand, type Effect, Predicate, Redacted, Schema, type Scope, Stream } from "effect";
+import {
+  type Brand,
+  type Effect,
+  type PlatformError,
+  Predicate,
+  Redacted,
+  Schema,
+  type Scope,
+  Stream,
+} from "effect";
+import type { ChildProcess } from "effect/process";
 import { Base64 } from "effect/encoding";
 
 /** A host that runs children as local processes. */
@@ -26,11 +36,14 @@ export const ShellContainer = Schema.Struct({
 });
 export type ShellContainer = typeof ShellContainer.Type;
 
+/** A shell variable name. */
+const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
 /** Secret variables that a remote command line reads from its first stdin line. */
 const StdinEnvironment = Schema.optionalKey(
   Schema.Record(Schema.String, Schema.Redacted(Schema.String)).check(
     Schema.makeFilter(
-      (variables) => Object.keys(variables).every((name) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)),
+      (variables) => Object.keys(variables).every((name) => VARIABLE_NAME.test(name)),
       { message: "Expected shell environment variable names" },
     ),
   ),
@@ -44,10 +57,9 @@ export class RemoteShell extends Schema.TaggedClass<
   /** The local SSH client and connection options used to reach the remote machine. */
   ssh: SshCommand,
   /**
-   * The SSH client's process environment: what SSH needs to connect, never the orchestrator's
-   * secrets (ADR 0011), plus the variables that `-o SendEnv=` options in `ssh` forward to the
-   * child. Use it for values that must not appear on the command line, such as a gateway caller
-   * token. Never log this field.
+   * The SSH client's own process environment, such as `SSH_AUTH_SOCK`: only what the client needs
+   * to connect, never a secret (ADR 0011). The remote command doesn't receive it; send secrets in
+   * `stdinEnvironment`.
    */
   sshEnvironment: Schema.Record(Schema.String, Schema.String),
   /** Secrets read from the first stdin line before the command starts. Never log this field. */
@@ -75,7 +87,8 @@ export class HostUnreachable extends Schema.TaggedError<
 export interface ExecProcess {
   /**
    * The command's stdout. It ends when the command exits or the transport loses it, after every
-   * byte the transport received.
+   * byte the transport received. A transport may end it when the command's leader process exits,
+   * so output that a background process writes after that is lost.
    */
   readonly stdout: Stream.Stream<Uint8Array>;
   /** The command's stderr, which ends as `stdout` does. */
@@ -104,6 +117,10 @@ export interface ExecTransport {
  * A host that runs each child on another machine as one command line through an `ExecTransport`
  * in this process, with no local process per command. Transport failures are `HostUnreachable`
  * errors instead of an exit code.
+ *
+ * Its stdin differs from a `RemoteShell`'s: a command without input reads end of file at once,
+ * where an SSH client keeps an open pipe, and a failing input stream closes the command's stdin
+ * and logs a warning instead of failing the command.
  */
 export class ExecShell extends Schema.TaggedClass<
   ExecShell,
@@ -153,7 +170,20 @@ export interface HostInvocation {
   readonly args: ReadonlyArray<string>;
 }
 
-const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+/** The bytes that a command on a host reads from its stdin. */
+export interface HostInput {
+  readonly stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>;
+  /** Whether stdin closes when `stream` ends; defaults to `true`. */
+  readonly endOnDone?: boolean | undefined;
+}
+
+/**
+ * The process options of a command on a host, with its input as a stream. Without `stdin`, a local
+ * process or an SSH client gets an open pipe, and an `ExecShell` command reads end of file.
+ */
+export type HostCommandOptions = Omit<ChildProcess.CommandOptions, "stdin"> & {
+  readonly stdin?: HostInput | undefined;
+};
 
 const quote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
 
@@ -182,15 +212,20 @@ const remoteShellCommand = (invocation: HostInvocation): string => {
 };
 
 /**
+ * The start of a remote command line that reads the secret environment block from the first stdin
+ * line, decodes it with `base64`, and evaluates its exports before the command runs.
+ */
+export const STDIN_ENVIRONMENT_PREFIX =
+  'set +x; IFS= read -r usine_environment && usine_environment=$(printf %s "$usine_environment" | base64 -d) && eval "unset usine_environment; $usine_environment" && ';
+
+/**
  * Returns the command line that runs `invocation` on `host`. In a container, the line runs `sh -c`
  * with `invocation`'s command line through `<runtime> exec -i`, so its standard streams pass
  * through.
  */
 export const remoteCommandLine = (host: RemoteHost, invocation: HostInvocation): string => {
   const line =
-    (host.stdinEnvironment === undefined
-      ? ""
-      : 'set +x; IFS= read -r usine_environment && usine_environment=$(printf %s "$usine_environment" | base64 -d) && eval "unset usine_environment; $usine_environment" && ') +
+    (host.stdinEnvironment === undefined ? "" : STDIN_ENVIRONMENT_PREFIX) +
     remoteShellCommand(invocation);
   return host.container === undefined
     ? line

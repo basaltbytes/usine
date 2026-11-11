@@ -1,8 +1,9 @@
-import { Effect, Option, type PlatformError, Predicate, type Scope, Stream } from "effect";
+import { Effect, Option, type PlatformError, type Scope, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { homedir } from "node:os";
 import {
   type ChildHost,
+  type HostCommandOptions,
   type HostInvocation,
   HostUnreachable,
   remoteInput,
@@ -20,7 +21,7 @@ import { execHandle, unreachableCause } from "./exec.ts";
 export const hostCommand = (
   host: ChildHost,
   invocation: HostInvocation & { readonly environment: Readonly<Record<string, string>> },
-  options: ChildProcess.CommandOptions,
+  options: HostCommandOptions,
 ): ChildProcess.Command => {
   switch (host._tag) {
     case "LocalProcess":
@@ -34,22 +35,16 @@ export const hostCommand = (
       const names = Object.keys(invocation.environment);
       if (names.length > 0)
         throw new Error(`Cannot pass ${names.join(", ")} to a remote command on its command line`);
-      let remoteOptions = options;
-      if (host.stdinEnvironment !== undefined) {
-        const stdin = options.stdin;
-        const config =
-          stdin === undefined
-            ? { stream: Stream.empty }
-            : Stream.isStream(stdin) || Predicate.isString(stdin)
-              ? { stream: stdin }
-              : stdin;
-        if (!Stream.isStream(config.stream))
-          throw new Error("A stdin environment requires streamed command input");
-        remoteOptions = {
-          ...options,
-          stdin: { ...config, stream: remoteInput(host, config.stream) },
-        };
-      }
+      const remoteOptions =
+        host.stdinEnvironment === undefined
+          ? options
+          : {
+              ...options,
+              stdin: {
+                ...options.stdin,
+                stream: remoteInput(host, options.stdin?.stream ?? Stream.empty),
+              },
+            };
       return ChildProcess.make(host.ssh.command, sshArguments(host, invocation), {
         ...remoteOptions,
         env: { ...host.sshEnvironment },
@@ -71,7 +66,7 @@ export const hostCommand = (
 export const hostSpawn = (
   host: ChildHost,
   invocation: HostInvocation & { readonly environment: Readonly<Record<string, string>> },
-  options: ChildProcess.CommandOptions,
+  options: HostCommandOptions,
 ): Effect.Effect<
   ChildProcessSpawner.ChildProcessHandle,
   PlatformError.PlatformError,
