@@ -18,12 +18,12 @@ Do not adopt `pi-claude-bridge` as an operational stopgap yet. Its standalone Pi
 | --- | --- | --- |
 | Pi parent | `@usine/durable` creates `ModelRuntime`, selects a model, and gives `Models` to pi-durable | `resolveParent` calls `checkAuth`; `resolvePiPool` accepts API keys or subscription OAuth for `openai-codex` |
 | Claude or Codex child | `ChildBackend` starts the vendor harness through `ChildHost`; gateway workers send caller tokens | Credential-kind metadata and harness events determine the pool; provider response and harness usage are separate observations |
-| Pi child | Pi SDK model runtime | API-key-only under ADR 0021 |
+| Pi child | Pi SDK model runtime | API-key-only under [ADR 0021](https://github.com/basaltbytes/usine/blob/2557b04fff7602e8c4bce3f5f59bed724f43b3b7/docs/adr/0021-pi-parent-pool-follows-authentication.md) |
 | Supervisor proposal | #799 requires the agents' model-access path | Must retain member authority separately from the credential that pays for inference |
 
 Sources: [`live.ts`](../../packages/durable/src/live.ts), [`parent.ts`](../../packages/durable/src/attempt/parent.ts), [`authentication.ts`](../../packages/agents/src/pi/authentication.ts), [`AttemptRuntime`](../../packages/durable/src/attempt-runtime.ts), [`gateway preflight`](../../packages/executor/src/ssh/gateway/preflight.ts), and [`gateway provider metadata`](../../packages/gateway/src/admin/api.ts).
 
-The parent uses pi-durable conversations, not a `pi-coding-agent` interactive session. The accepted durability contract commits tool intent and partial output; after restart, a non-replay-safe child call ends as interrupted and the parent can decide whether to delegate again. That differs from resuming a vendor conversation by session ID. Holds, intervention routing, and release are usine behavior layered on this storage contract ([ADR 0005](../adr/0005-pi-parent-agent-layer-team-roster.md), [ADR 0018](../adr/0018-takeover-and-edit-and-retry.md), [`attempt/task.ts`](../../packages/durable/src/attempt/task.ts)).
+The parent uses pi-durable conversations, not a `pi-coding-agent` interactive session. The accepted durability contract commits tool intent and partial output; after restart, a non-replay-safe child call ends as interrupted and the parent can decide whether to delegate again. That differs from resuming a vendor conversation by session ID. Holds, intervention routing, and release are usine behavior layered on this storage contract ([ADR 0005](https://github.com/basaltbytes/usine/blob/2557b04fff7602e8c4bce3f5f59bed724f43b3b7/docs/adr/0005-pi-parent-agent-layer-team-roster.md), [ADR 0018](../adr/0018-takeover-and-edit-and-retry.md), [`attempt/task.ts`](../../packages/durable/src/attempt/task.ts)).
 
 Read ADR amendments in date order. ADR 0027 now includes gateway-held subscription logins, per-attempt containers, and durable attachment snapshots; its original in-memory-only attachment description is obsolete. ADR 0013 now includes estimated ChatGPT cost. Neither estimate is a subscription invoice or a remaining balance.
 
@@ -205,9 +205,9 @@ Use deterministic tests for policy and durable state, real gateway transport tes
 
 | ADR | Proposed amendment on implementation |
 | --- | --- |
-| [0005](../adr/0005-pi-parent-agent-layer-team-roster.md) | Keep Pi and pi-durable initially; model access becomes an injected capability. A native parent requires a separate amendment after protocol parity |
+| [0005](https://github.com/basaltbytes/usine/blob/2557b04fff7602e8c4bce3f5f59bed724f43b3b7/docs/adr/0005-pi-parent-agent-layer-team-roster.md) | Keep Pi and pi-durable initially; model access becomes an injected capability. A native parent requires a separate amendment after protocol parity |
 | [0013](../adr/0013-cost-accounting-native-meters-guardrails.md) | Bind pool and credential revision before a call; reconcile usage observations; replace display-only handling for fresh known exhaustion with request admission refusal |
-| [0021](../adr/0021-pi-parent-pool-follows-authentication.md) | Replace provider-name/auth heuristics with a verified route binding. Claude-plan parents require a tested vendor-client adapter; this proposal does not enable them |
+| [0021](https://github.com/basaltbytes/usine/blob/2557b04fff7602e8c4bce3f5f59bed724f43b3b7/docs/adr/0021-pi-parent-pool-follows-authentication.md) | Replace provider-name/auth heuristics with a verified route binding. Claude-plan parents require a tested vendor-client adapter; this proposal does not enable them |
 | [0027](../adr/0027-gateway-credential-proxy.md) | Add parent/member model-call scopes, one credential authority, per-request admission, revision binding, and restart persistence; preserve credential secrecy, attachment checks, and vendor protocol semantics |
 
 The proposal is conditional. The unresolved live-test and legal-source limits above prevent treating this report as approval to deploy the bridge or expand subscription use.
