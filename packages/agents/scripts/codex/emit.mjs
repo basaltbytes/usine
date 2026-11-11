@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { Schema } from "effect";
 
 const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json));
+const isStringArray = Schema.is(Schema.Array(Schema.String));
+const ANNOTATIONS = ["$schema", "title", "description", "default"];
 
 /**
  * Returns Effect Schema expressions by export name for `roots` and every definition they reference.
- * Throws an assertion error for a schema shape that the generator can't translate faithfully.
+ * Throws an assertion error for a schema shape that the generator doesn't support, such as union
+ * variants that a decoder couldn't tell apart.
  */
 export function emitDeclarations(definitions, roots) {
   const declarations = new Map();
@@ -39,52 +42,123 @@ export function emitDeclarations(definitions, roots) {
     return name;
   }
 
-  function assertVariantTag(schema, seen = new Set()) {
-    assert(!seen.has(schema), "Recursive variant wrapper needs explicit support");
-    seen.add(schema);
-    if (schema.$ref) return assertVariantTag(definition(schema.$ref).schema, seen);
-    if (schema.allOf) {
-      assert.equal(schema.allOf.length, 1, "Only reference wrappers are supported");
-      return assertVariantTag(schema.allOf[0], seen);
+  /** Returns the schema that a `$ref` or single-`allOf` wrapper stands for, or `undefined`. */
+  function unwrap(schema) {
+    if (schema.$ref) {
+      assertSiblings(schema, ["$ref"], "Wrapper sibling constraints need explicit support");
+      return definition(schema.$ref).schema;
     }
-    const tag = schema.properties?.type;
-    if (tag !== undefined) {
-      assert(
-        Array.isArray(tag.enum) && tag.enum.length === 1,
-        `Variant ${schema.title ?? "without a title"} needs an inline single-value type tag`,
-      );
+    if (schema.allOf) {
+      assertSiblings(schema, ["allOf"], "Wrapper sibling constraints need explicit support");
+      assert.equal(schema.allOf.length, 1, "Only reference wrappers are supported");
+      return schema.allOf[0];
     }
   }
 
-  function emit(schema, propertyName) {
+  /** Returns the schema behind any chain of wrappers around `schema`. */
+  function resolve(schema) {
+    const seen = new Set();
+    let target = schema;
+    for (let inner = unwrap(target); inner !== undefined; inner = unwrap(target)) {
+      assert(!seen.has(inner), "Recursive variant wrapper needs explicit support");
+      seen.add(inner);
+      target = inner;
+    }
+    return target;
+  }
+
+  /** Returns the string members of `schema` and of its enum alternatives, or `undefined`. */
+  function enumValues(schema) {
+    if (schema.enum) return schema.enum;
+    const alternatives = schema.oneOf ?? schema.anyOf;
+    if (!alternatives) return;
+    const values = alternatives.flatMap((alternative) => {
+      const target = resolve(alternative);
+      return isObjectSchema(target) ? [] : (enumValues(target) ?? []);
+    });
+    return values.length > 0 ? [...new Set(values)] : undefined;
+  }
+
+  /**
+   * Rejects variants that `Schema.Union` would not tell apart. Decoding keeps the first matching
+   * member and drops the keys it doesn't declare, so a variant must not accept a later one's values.
+   */
+  function assertDistinguishable(members) {
+    const variants = members
+      .filter((member) => !isNull(member))
+      .map((member) => {
+        const target = resolve(member);
+        return { name: target.title ?? member.title ?? "without a title", target };
+      });
+    if (variants.length < 2) return;
+    const objects = variants.filter(({ target }) => isObjectSchema(target));
+    const tagKeys = new Set(
+      objects.flatMap(({ target }) =>
+        Object.entries(target.properties ?? {})
+          .filter(([, property]) => isTag(property))
+          .map(([key]) => key),
+      ),
+    );
+    for (const { name, target } of objects) {
+      for (const key of tagKeys) {
+        const property = target.properties?.[key];
+        if (property === undefined) continue;
+        assert(isTag(property), `Variant ${name} needs an inline single-value ${key} tag`);
+        assert(target.required?.includes(key), `Variant ${name} needs a required ${key} tag`);
+      }
+    }
+    for (const [index, earlier] of objects.entries()) {
+      for (const later of objects.slice(index + 1)) {
+        const tagged = [...tagKeys].some((key) => {
+          const [first, second] = [earlier, later].map(({ target }) => target.properties?.[key]);
+          return isTag(first) && isTag(second) && first.enum[0] !== second.enum[0];
+        });
+        const covered = (earlier.target.required ?? []).every(
+          (key) => key in (later.target.properties ?? {}),
+        );
+        assert(
+          tagged || !covered,
+          `Variant ${earlier.name} accepts the values of variant ${later.name}; they need distinct tags`,
+        );
+      }
+    }
+  }
+
+  function emit(schema) {
     if (schema === true) return "Schema.Json";
     if (schema === false) return "Schema.Never";
     assert(isJsonObject(schema), "Expected a JSON schema object");
     assert(!("const" in schema), "const schemas need explicit support");
-    if (schema.$ref) {
-      assertWrapperSiblings(schema, "$ref");
-      return reference(schema.$ref);
-    }
-    if (schema.allOf) {
-      assertWrapperSiblings(schema, "allOf");
-      assert.equal(schema.allOf.length, 1, "Only reference wrappers are supported");
-      return emit(schema.allOf[0]);
-    }
+    const inner = unwrap(schema);
+    if (schema.$ref) return reference(schema.$ref);
+    if (inner !== undefined) return emit(inner);
     if (schema.oneOf || schema.anyOf) {
       assert(!(schema.oneOf && schema.anyOf), "Simultaneous oneOf and anyOf need explicit support");
-      const alternatives = schema.oneOf ?? schema.anyOf;
-      const nullable =
-        alternatives.length === 2 && alternatives.some((branch) => branch.type === "null");
+      const keyword = schema.oneOf ? "oneOf" : "anyOf";
+      assertSiblings(
+        schema,
+        schema.properties ? [keyword, "properties", "required", "type"] : [keyword],
+        "Union sibling constraints need explicit support",
+      );
+      assert(
+        schema.type === undefined || schema.type === "object",
+        "Union sibling constraints need explicit support",
+      );
+      const members = schema[keyword].map((branch) => {
+        if (!schema.properties) return branch;
+        assert(
+          !isNull(branch),
+          "A null alternative beside common properties needs explicit support",
+        );
+        return {
+          ...branch,
+          properties: { ...schema.properties, ...branch.properties },
+          required: [...(schema.required ?? []), ...(branch.required ?? [])],
+        };
+      });
+      assertDistinguishable(members);
       return union(
-        alternatives.map((branch) => {
-          const member = schema.properties
-            ? {
-                ...branch,
-                properties: { ...schema.properties, ...branch.properties },
-                required: [...(schema.required ?? []), ...(branch.required ?? [])],
-              }
-            : branch;
-          if (!nullable) assertVariantTag(member);
+        members.map((member) => {
           if (member.title && member.type === "object") {
             declare(member.title, emit(member));
             return member.title;
@@ -94,15 +168,13 @@ export function emitDeclarations(definitions, roots) {
       );
     }
     if (schema.enum) {
-      assert(Schema.is(Schema.Array(Schema.String))(schema.enum), "Expected a string enum");
+      assert(isStringArray(schema.enum), "Expected a string enum");
       assert(
         schema.type === undefined || schema.type === "string",
         `Enums of type ${JSON.stringify(schema.type)} need explicit support`,
       );
-      // Discriminants stay literal; values such as statuses and phases accept new upstream members.
-      return propertyName === "type" && schema.enum.length === 1
-        ? `Schema.Literal(${JSON.stringify(schema.enum[0])})`
-        : "Schema.String";
+      // String enums are open, so values such as statuses and phases accept new upstream members.
+      return "Schema.String";
     }
     if (Array.isArray(schema.type)) {
       return union(schema.type.map((type) => emit({ ...schema, type })));
@@ -121,7 +193,10 @@ export function emitDeclarations(definitions, roots) {
         return `Schema.Array(${emit(schema.items)})`;
       case "object": {
         const fields = Object.entries(schema.properties ?? {}).map(([key, value]) => {
-          const expression = emit(value, key);
+          // Single-value enums are tags, which stay literal.
+          const expression = isTag(value)
+            ? `Schema.Literal(${JSON.stringify(value.enum[0])})`
+            : emit(value);
           return `${JSON.stringify(key)}: ${schema.required?.includes(key) ? expression : `Schema.optionalKey(${expression})`}`;
         });
         const struct = `Schema.Struct({${fields.join(",\n")}})`;
@@ -137,7 +212,7 @@ export function emitDeclarations(definitions, roots) {
       }
       default:
         assert.deepEqual(
-          Object.keys(schema).filter((key) => !["description", "default", "title"].includes(key)),
+          Object.keys(schema).filter((key) => !ANNOTATIONS.includes(key)),
           [],
         );
         return "Schema.Json";
@@ -148,13 +223,24 @@ export function emitDeclarations(definitions, roots) {
   return declarations;
 }
 
-/** Returns the string enum members of `schema`, including those of its enum alternatives. */
-function enumValues(schema) {
-  if (schema.enum) return schema.enum;
-  const alternatives = schema.oneOf ?? schema.anyOf;
-  if (!alternatives) return;
-  const values = alternatives.flatMap((alternative) => enumValues(alternative) ?? []);
-  return values.length > 0 ? values : undefined;
+/** Returns whether `schema` is an inline enum of one string, the shape of a union tag. */
+function isTag(schema) {
+  return (
+    isJsonObject(schema) &&
+    isStringArray(schema.enum) &&
+    schema.enum.length === 1 &&
+    (schema.type === undefined || schema.type === "string") &&
+    !schema.$ref &&
+    !schema.allOf
+  );
+}
+
+function isNull(schema) {
+  return schema.type === "null" || (Array.isArray(schema.type) && schema.type.join() === "null");
+}
+
+function isObjectSchema(schema) {
+  return isJsonObject(schema) && (schema.type === "object" || schema.properties !== undefined);
 }
 
 function union(members) {
@@ -162,12 +248,10 @@ function union(members) {
   return expressions.length === 1 ? expressions[0] : `Schema.Union([${expressions.join(", ")}])`;
 }
 
-function assertWrapperSiblings(schema, keyword) {
+function assertSiblings(schema, keywords, message) {
   assert.deepEqual(
-    Object.keys(schema).filter(
-      (key) => ![keyword, "title", "description", "default"].includes(key),
-    ),
+    Object.keys(schema).filter((key) => !keywords.includes(key) && !ANNOTATIONS.includes(key)),
     [],
-    "Wrapper sibling constraints need explicit support",
+    message,
   );
 }

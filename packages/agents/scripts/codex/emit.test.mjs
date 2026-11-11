@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { emitDeclarations } from "./emit.mjs";
 
@@ -9,6 +10,15 @@ const variant = (title, type) => ({
   properties: { type: tag(type), text: { type: "string" } },
   required: ["type", "text"],
 });
+/** Returns the schemas that `declarations` define, by export name. */
+const compile = (declarations) =>
+  new Function(
+    "Schema",
+    [...declarations]
+      .map(([name, expression]) => `const ${name} = ${expression};`)
+      .concat(`return { ${[...declarations.keys()].join(", ")} };`)
+      .join("\n"),
+  )(Schema);
 
 describe("emitDeclarations", () => {
   it("rejects a variant title that names a definition emitted later", () => {
@@ -58,7 +68,10 @@ describe("emitDeclarations", () => {
 
   it("rejects variant type tags that are not inline single-value enums", () => {
     const wrapped = (type) => ({
-      oneOf: [{ ...variant("PlanItem", "plan"), properties: { type } }],
+      oneOf: [
+        { ...variant("PlanItem", "plan"), properties: { type } },
+        variant("OtherItem", "other"),
+      ],
     });
     for (const type of [
       ref("PlanType"),
@@ -95,7 +108,7 @@ describe("emitDeclarations", () => {
 
   it("validates variant tags through reference and allOf wrappers", () => {
     const definitions = {
-      Item: { anyOf: [{ allOf: [ref("Alias")] }] },
+      Item: { anyOf: [{ allOf: [ref("Alias")] }, variant("OtherItem", "other")] },
       Alias: ref("PlanItem"),
       PlanItem: { ...variant("PlanItem", "plan"), properties: { type: { type: "string" } } },
     };
@@ -153,7 +166,7 @@ describe("emitDeclarations", () => {
     );
   });
 
-  it("rejects open type tags inherited by inline union variants", () => {
+  it("rejects open tags inherited by inline union variants", () => {
     for (const keyword of ["oneOf", "anyOf"]) {
       const definitions = {
         Item: {
@@ -170,7 +183,7 @@ describe("emitDeclarations", () => {
             {
               title: "B",
               type: "object",
-              properties: { b: { type: "string" } },
+              properties: { type: tag("b"), b: { type: "string" } },
               required: ["b"],
             },
           ],
@@ -180,6 +193,26 @@ describe("emitDeclarations", () => {
         "Variant A needs an inline single-value type tag",
       );
     }
+  });
+
+  it("keeps open fields shared by variants that their required fields tell apart", () => {
+    const definitions = {
+      Item: {
+        type: "object",
+        properties: { type: { type: "string" }, id: { type: "string" } },
+        required: ["type", "id"],
+        oneOf: [
+          { title: "A", type: "object", properties: { a: { type: "string" } }, required: ["a"] },
+          { title: "B", type: "object", properties: { b: { type: "string" } }, required: ["b"] },
+        ],
+      },
+    };
+    const { Item } = compile(emitDeclarations(definitions, ["Item"]));
+    expect(Schema.decodeUnknownSync(Item)({ type: "x", id: "1", b: "kept" })).toEqual({
+      type: "x",
+      id: "1",
+      b: "kept",
+    });
   });
 
   it("rejects reference wrappers with sibling constraints", () => {
@@ -288,5 +321,247 @@ describe("emitDeclarations", () => {
     expect(emitDeclarations(definitions, ["ErrorInfo"]).get("ErrorInfoValues")).toBe(
       '["serverOverloaded","other"] as const',
     );
+  });
+  it("tags union variants on keys other than type", () => {
+    const kind = (value, properties = {}, required = []) => ({
+      type: "object",
+      properties: { kind: tag(value), ...properties },
+      required: ["kind", ...required],
+    });
+    const definitions = {
+      SpecialPath: {
+        oneOf: [
+          { title: "RootPath", ...kind("root") },
+          kind("unknown", { path: { type: "string" } }, ["path"]),
+        ],
+      },
+    };
+    const declarations = emitDeclarations(definitions, ["SpecialPath"]);
+    expect(declarations.get("RootPath")).toBe('Schema.Struct({"kind": Schema.Literal("root")})');
+    const { SpecialPath } = compile(declarations);
+    expect(Schema.decodeUnknownSync(SpecialPath)({ kind: "unknown", path: "/x" })).toEqual({
+      kind: "unknown",
+      path: "/x",
+    });
+    expect(Schema.is(SpecialPath)({ kind: "future" })).toBe(false);
+  });
+
+  it("rejects open tags on keys other than type", () => {
+    const definitions = {
+      Hook: {
+        oneOf: [
+          {
+            title: "CommandHook",
+            type: "object",
+            properties: { handlerType: tag("command"), command: { type: "string" } },
+            required: ["handlerType", "command"],
+          },
+          {
+            title: "PromptHook",
+            type: "object",
+            properties: { handlerType: { type: "string" } },
+            required: ["handlerType"],
+          },
+        ],
+      },
+    };
+    expect(() => emitDeclarations(definitions, ["Hook"])).toThrow(
+      "Variant PromptHook needs an inline single-value handlerType tag",
+    );
+  });
+
+  it("rejects union tags that are not required", () => {
+    const definitions = {
+      Item: {
+        oneOf: [
+          { ...variant("PlanItem", "plan"), required: ["text"] },
+          variant("OtherItem", "other"),
+        ],
+      },
+    };
+    expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+      "Variant PlanItem needs a required type tag",
+    );
+  });
+
+  it("rejects variants that an earlier variant would decode", () => {
+    const untagged = {
+      title: "TextItem",
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
+    };
+    for (const [alternatives, message] of [
+      [
+        [variant("PlanItem", "plan"), variant("DraftItem", "plan")],
+        "Variant PlanItem accepts the values of variant DraftItem; they need distinct tags",
+      ],
+      [
+        [untagged, variant("PlanItem", "plan")],
+        "Variant TextItem accepts the values of variant PlanItem; they need distinct tags",
+      ],
+    ]) {
+      const definitions = { Item: { anyOf: alternatives } };
+      expect(() => emitDeclarations(definitions, ["Item"])).toThrow(message);
+    }
+  });
+
+  it("keeps variants that share a tag when their required fields tell them apart", () => {
+    const definitions = {
+      Image: {
+        title: "Image",
+        type: "object",
+        properties: { type: tag("image"), id: { type: "string" } },
+        required: ["type", "id"],
+        anyOf: [
+          {
+            title: "FileImage",
+            type: "object",
+            properties: { fileId: { type: "string" } },
+            required: ["fileId"],
+          },
+          {
+            title: "InlineImage",
+            type: "object",
+            properties: { result: { type: "string" } },
+            required: ["result"],
+          },
+        ],
+      },
+    };
+    const { Image } = compile(emitDeclarations(definitions, ["Image"]));
+    for (const payload of [{ fileId: "file" }, { result: "data" }]) {
+      const image = { type: "image", id: "image", ...payload };
+      expect(Schema.decodeUnknownSync(Image)(image)).toEqual(image);
+    }
+  });
+
+  it("rejects union siblings that the variants would drop", () => {
+    for (const siblings of [
+      { required: ["text"] },
+      { enum: ["plan"] },
+      { type: "string", properties: { text: { type: "string" } } },
+    ]) {
+      const definitions = {
+        Item: { oneOf: [variant("PlanItem", "plan"), variant("OtherItem", "other")], ...siblings },
+      };
+      expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+        "Union sibling constraints need explicit support",
+      );
+    }
+  });
+
+  it("rejects a null alternative beside common properties", () => {
+    const definitions = {
+      Item: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+        anyOf: [variant("PlanItem", "plan"), { type: "null" }],
+      },
+    };
+    expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+      "A null alternative beside common properties needs explicit support",
+    );
+  });
+
+  it("keeps null alternatives written as a type list", () => {
+    const definitions = {
+      Root: { anyOf: [ref("Attachment"), { type: ["null"] }] },
+      Attachment: {
+        type: "object",
+        properties: { type: { type: "string" } },
+        required: ["type"],
+      },
+    };
+    expect(emitDeclarations(definitions, ["Root"]).get("Root")).toBe(
+      "Schema.Union([Attachment, Schema.Null])",
+    );
+  });
+
+  it("keeps a single-variant union whose object has an ordinary type field", () => {
+    const definitions = {
+      Root: {
+        oneOf: [
+          {
+            title: "Attachment",
+            type: "object",
+            properties: { type: { type: "string" } },
+            required: ["type"],
+          },
+        ],
+      },
+    };
+    expect(emitDeclarations(definitions, ["Root"]).get("Attachment")).toBe(
+      'Schema.Struct({"type": Schema.String})',
+    );
+  });
+
+  it("rejects variant wrappers that refer to each other", () => {
+    const definitions = {
+      Item: { oneOf: [ref("Alias"), variant("OtherItem", "other")] },
+      Alias: ref("Other"),
+      Other: { allOf: [ref("Alias")] },
+    };
+    expect(() => emitDeclarations(definitions, ["Item"])).toThrow(
+      "Recursive variant wrapper needs explicit support",
+    );
+  });
+
+  it("rejects a definition named after another definition's enum values", () => {
+    const definitions = {
+      Status: { enum: ["active", "idle"], type: "string" },
+      StatusValues: { type: "object", properties: { text: { type: "string" } } },
+    };
+    for (const roots of [
+      ["Status", "StatusValues"],
+      ["StatusValues", "Status"],
+    ]) {
+      expect(() => emitDeclarations(definitions, roots)).toThrow(
+        "Two schemas share the export name StatusValues",
+      );
+    }
+  });
+
+  it("keeps enums without a type as open strings", () => {
+    const declarations = emitDeclarations({ Mode: { enum: ["fast", "slow"] } }, ["Mode"]);
+    expect(declarations.get("Mode")).toBe("Schema.String");
+    expect(declarations.get("ModeValues")).toBe('["fast","slow"] as const');
+  });
+
+  it("lists the members of referenced enum alternatives", () => {
+    const definitions = {
+      ErrorInfo: { anyOf: [{ enum: ["serverOverloaded"], type: "string" }, ref("ErrorCode")] },
+      ErrorCode: { enum: ["other", "serverOverloaded"], type: "string" },
+    };
+    expect(emitDeclarations(definitions, ["ErrorInfo"]).get("ErrorInfoValues")).toBe(
+      '["serverOverloaded","other"] as const',
+    );
+  });
+
+  it("does not list enum members nested in an object alternative", () => {
+    const definitions = {
+      Code: {
+        anyOf: [
+          { enum: ["a", "b"], type: "string" },
+          {
+            title: "DetailedCode",
+            type: "object",
+            properties: { detail: { type: "string" } },
+            required: ["detail"],
+            anyOf: [
+              {
+                title: "NamedCode",
+                type: "object",
+                properties: { name: { type: "string" } },
+                required: ["name"],
+              },
+              { enum: ["nested"], type: "string" },
+            ],
+          },
+        ],
+      },
+    };
+    expect(emitDeclarations(definitions, ["Code"]).get("CodeValues")).toBe('["a","b"] as const');
   });
 });
