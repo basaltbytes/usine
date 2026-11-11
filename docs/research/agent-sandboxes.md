@@ -435,7 +435,7 @@ other attempts by a hypervisor instead of a directory. Ubicloud could replace th
 the limits listed in section 2 and an AGPL licence.
 
 We would operate hardware. Disk durability depends on mirrored NVMe and pushes to GitHub, not a
-streamed replica, and hosts are drained ([ADR 0023](../adr/0023-graceful-attempt-drain.md)), not
+streamed replica, and hosts are drained ([Drain](../architecture/run-lifecycle.mdx#drain)), not
 live-migrated.
 
 ### exe.dev capabilities that are hard to reproduce

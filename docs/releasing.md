@@ -34,8 +34,6 @@ The rerun skips versions that npm already exposes. The tag step checks every pub
 
 If a release fails after staging some packages, inspect its stage IDs and approve the valid artifacts before retrying that job. Use `pnpm stage reject <stage-id> --otp <code>` for artifacts that need replacement. The retry stages any versions that are still absent from the public registry; repeat approval and rerun until all versions are public and the GitHub releases exist.
 
-If the `usine` npm org is unavailable, ADR 0012 moves every package to the `@usine-dev` scope. The unscoped `usine` name belongs to an unrelated, unmaintained package.
-
 ## Snapshot publish retries
 
 Each snapshot uses a version such as `0.4.1-next.312.g1a2b3c4.1.2`: workflow run 312, commit `1a2b3c4`, job run attempt 1, and publish attempt 2. The `next` job retries Sigstore transparency-log 409s and previously staged-version conflicts up to three publish attempts, waiting 15 and 30 seconds before retrying. Each retry versions and rebuilds every published package from the original manifests so workspace dependencies refer to the same snapshot. Provenance remains required on every publish.

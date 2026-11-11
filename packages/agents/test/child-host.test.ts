@@ -530,7 +530,10 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
           const scope = yield* Scope.make();
           const received: Array<string> = [];
           const owner = yield* Effect.gen(function* () {
-            const owner = yield* startChildProcess(target, harness, input, transport, "handled");
+            const owner = yield* startChildProcess(target, harness, input, {
+              transport,
+              acknowledgement: "handled",
+            });
             yield* owner.stdout.pipe(
               Stream.runForEach((bytes) =>
                 Effect.sync(() => received.push(Buffer.from(bytes).toString())),
@@ -956,13 +959,13 @@ it.live("hands each acknowledged input to its callback once across later acknowl
         scriptedTarget,
         scriptedCommand,
         Stream.fromQueue(input),
-        undefined,
-        "received",
-        (bytes) =>
-          Effect.sync(() => {
-            acknowledged.push(Buffer.from(bytes).toString());
-            return 0;
-          }),
+        {
+          onInputAcknowledged: (bytes) =>
+            Effect.sync(() => {
+              acknowledged.push(Buffer.from(bytes).toString());
+              return 0;
+            }),
+        },
       );
       yield* Queue.offerAll(input, [Buffer.from("first"), Buffer.from("second")]);
       yield* owner.stdout.pipe(Stream.take(1), Stream.runDrain);

@@ -250,14 +250,14 @@ it("shows the newer revision on conflict and preserves the draft when reloading 
 
 it("creates from a template and refuses to replace an existing name through New", async () => {
   await mount("/configuration/workers");
-  await button("New").click();
+  await button("New worker").click();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("local");
-  await editText();
+  await button("Continue").click();
   await expect
     .element(page.getByText("This name already exists. Open the entity to edit it."))
     .toBeVisible();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("new-worker");
-  await button("Edit").click();
+  await button("Continue").click();
   await button("Edit as text").click();
   await expect
     .element(page.getByRole("textbox", { name: "Configuration text" }))
@@ -373,7 +373,7 @@ it("reports worker preflight refusals without discarding the draft", async () =>
 
 it("shows that new loops start paused", async () => {
   await mount("/configuration/loops");
-  await button("New").click();
+  await button("New loop").click();
   await expect
     .element(page.getByText("New loops start paused. Review the loop before resuming it."))
     .toBeVisible();
@@ -403,16 +403,16 @@ it.each(["alpha", "developer"])(
     await mount("/configuration/agents");
     await commands.delayConfigurationLookup(identifier);
     await commands.delayConfigurationLookup("beta");
-    await button("New").click();
+    await button("New agent").click();
     const name = page.getByRole("textbox", { name: "Name", exact: true });
     await name.fill(identifier);
-    await editText();
+    await button("Continue").click();
     await expect.element(name).toBeDisabled();
     await button("Cancel").click();
-    await button("New").click();
+    await button("New agent").click();
     await expect.element(name).toHaveValue("");
     await name.fill("beta");
-    await editText();
+    await button("Continue").click();
     await commands.releaseConfigurationLookup(identifier);
     await expect
       .poll(
@@ -585,14 +585,14 @@ it("keeps a form draft across a revision conflict and reloads the current values
 
 it("offers only unregistered installation repositories when creating a repository", async () => {
   await mount("/configuration/repositories");
-  await button("New").click();
+  await button("New repository").click();
   const picker = page.getByRole("combobox", { name: "Repository", exact: true });
   await expect.element(picker).toBeEnabled();
   await expect
     .element(page.getByRole("option", { name: "basaltbytes/usine", exact: true }))
     .not.toBeInTheDocument();
   await picker.selectOptions("basaltbytes/new-project");
-  await button("Edit").click();
+  await button("Continue").click();
   await expect
     .element(page.getByRole("textbox", { name: "Repository", exact: true }))
     .toHaveValue("basaltbytes/new-project");
@@ -923,10 +923,10 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
     }),
   );
   await mount("/configuration/loops");
-  await button("New").click();
+  await button("New loop").click();
   await page.getByRole("combobox", { name: "Project", exact: true }).selectOptions("usine");
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
-  await button("Edit").click();
+  await button("Continue").click();
   const condition = page.getByRole("textbox", { name: "Condition (CEL)", exact: true });
   await condition.fill("item.unknown == 1");
   await expect.element(page.getByText("Unknown field: unknown", { exact: true })).toBeVisible();
@@ -1003,10 +1003,10 @@ it("keeps resume confirmation, cancellation, and request errors on the loops lis
       },
     ],
   );
-  await button("New").click();
+  await button("New loop").click();
   await page.getByRole("combobox", { name: "Project", exact: true }).selectOptions("usine");
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
-  await button("Edit").click();
+  await button("Continue").click();
   await button("Save").click();
   await expect.element(button("Resume")).toBeVisible();
   await router.navigate({ to: "/configuration/loops" });
@@ -1137,16 +1137,16 @@ it("creates a project with two ordered repositories and lanes without phone page
     configurationQuery().queryKey,
     ConfigurationView.make({ ...configurationFixture(), projects: [] }),
   );
-  await button("New").click();
+  await button("New project").click();
   const identifier = page.getByRole("textbox", { name: "Project ID", exact: true });
   await identifier.fill("My Product");
-  await button("Edit").click();
+  await button("Continue").click();
   await expect
     .element(page.getByRole("alert"))
     .toHaveTextContent("Use lowercase letters, numbers, and hyphens for the project ID");
   await expect.element(identifier).toBeEnabled();
   await identifier.fill("product");
-  await button("Edit").click();
+  await button("Continue").click();
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Product");
   const repositories = page.getByRole("combobox", { name: "Add a repository", exact: true });
   await repositories.selectOptions("basaltbytes/usine");

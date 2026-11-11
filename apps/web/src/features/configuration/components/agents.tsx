@@ -16,7 +16,8 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
-import { agentCopy, plural } from "~/features/configuration/strings";
+import { agentCopy, emptyListCopy, plural } from "~/features/configuration/strings";
+import { ListEmpty } from "~/features/configuration/components/list-empty";
 import { AgentModels } from "~/features/configuration/components/agent-models";
 import { FileError } from "~/features/configuration/components/file-error";
 import {
@@ -104,36 +105,44 @@ const InvalidAgentRow = ({ agent }: InvalidAgentRowProps) => {
 
 type AgentsListProps = { readonly configuration: ConfigurationView };
 
-export const AgentsList = ({ configuration }: AgentsListProps) => (
-  <ConfigurationPage title="Agents" createKind="agent" counts={agentCounts(configuration)}>
-    {configuration.agents.length === 0 && configuration.invalidAgents.length === 0 ? (
-      <Missing title="No agents">{agentCopy.add}</Missing>
-    ) : (
-      <div className="-mx-2">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>Agent</TableHead>
-              <TableHead>Harness</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead className="hidden sm:table-cell">Effort</TableHead>
-              <TableHead className="hidden lg:table-cell">Parent model</TableHead>
-              <TableHead className="hidden md:table-cell">Loops</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {configuration.invalidAgents.map((agent) => (
-              <InvalidAgentRow key={agent.file} agent={agent} />
-            ))}
-            {configuration.agents.map((agent) => (
-              <AgentRow key={agent.name} agent={agent} />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    )}
-  </ConfigurationPage>
-);
+export const AgentsList = ({ configuration }: AgentsListProps) => {
+  const empty = configuration.agents.length === 0 && configuration.invalidAgents.length === 0;
+  return (
+    <ConfigurationPage
+      title="Agents"
+      createKind="agent"
+      empty={empty}
+      counts={agentCounts(configuration)}
+    >
+      {empty ? (
+        <ListEmpty {...emptyListCopy.agent} />
+      ) : (
+        <div className="-mx-2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Agent</TableHead>
+                <TableHead>Harness</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead className="hidden sm:table-cell">Effort</TableHead>
+                <TableHead className="hidden lg:table-cell">Parent model</TableHead>
+                <TableHead className="hidden md:table-cell">Loops</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {configuration.invalidAgents.map((agent) => (
+                <InvalidAgentRow key={agent.file} agent={agent} />
+              ))}
+              {configuration.agents.map((agent) => (
+                <AgentRow key={agent.name} agent={agent} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </ConfigurationPage>
+  );
+};
 
 type SourceProps = { readonly children: string };
 

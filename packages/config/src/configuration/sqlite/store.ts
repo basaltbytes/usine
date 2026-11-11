@@ -26,7 +26,7 @@ const revisionTable = getTableName(configurationRevisionsTable);
 /**
  * Provides a configuration store using the application's `SqlClient` and `ConfigParser`. Applies
  * embedded migrations with a separate ledger and commits revisions and entity values in one
- * transaction (ADR 0020).
+ * transaction.
  */
 export const sqliteConfigurationLayer = Layer.effect(
   ConfigurationStore,

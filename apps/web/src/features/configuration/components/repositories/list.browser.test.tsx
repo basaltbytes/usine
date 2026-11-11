@@ -68,10 +68,8 @@ it.each([
           </PermissionsContext.Provider>,
         ),
       );
-      await expect
-        .element(page.getByText("No repositories registered", { exact: true }))
-        .toBeVisible();
-      await page.getByRole("button", { name: "New", exact: true }).click();
+      await expect.element(page.getByText("No repositories", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "New repository", exact: true }).click();
       const picker = page.getByRole("combobox", { name: "Repository", exact: true });
       await expect.element(picker).toBeEnabled();
       await picker.selectOptions("basaltbytes/new-project");

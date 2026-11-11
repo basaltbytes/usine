@@ -294,7 +294,7 @@ const PROXY_REFUSED = "403";
 /**
  * Probes a brain on a Worker behind a Gateway (ADR 0027). If the Gateway has the credential of
  * the harness's provider, checks only the harness binary. Otherwise, Claude Code and Codex use
- * the operator's login (ADR 0026), or an API key in the Attempt's environment if `apiKeyed`
+ * the operator's login on the machine, or an API key in the Attempt's environment if `apiKeyed`
  * returns `true` for the harness: `probe` checks the login or the binary, then the machine must
  * connect to the login's hosts, or the provider's API host, through the forward proxy. Pi goes
  * to `probe`, which rejects it on any remote machine. The checks run through `shell`, on the
