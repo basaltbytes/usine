@@ -46,7 +46,7 @@ delivery. `ItemHints` contains only the hints of usine's own writes.
 | --- | --- | --- | --- |
 | `RunDriver` (`engine/run-driver.ts`) | One fiber per open run (`FiberMap`), each fiber's slot, the parent-task stops not yet confirmed, and the checkouts kept for reattachment (`checkout-recovery.ts`) | Each run's fiber, which waits for a slot and then blocks in `StepExecutor.execute` for the attempt's whole life. A run waiting for approval has no fiber; `approve` starts one | Yes: at startup, `recoverWorkspaces` and `reconcile` start a fiber per open run. An open attempt is reattached if its parent task is live, finished with its stored result if the task finished, and otherwise closed as interrupted |
 | Periodic reconcile (`engine/engine.ts`) | Nothing | A forked loop every `ReconcileInterval`, 3 minutes by default | It is the recovery: it restarts runs whose fiber stopped and retries unconfirmed stops |
-| `AttemptAdmission` (`engine/admission.ts`) | The admitted runs and the drain latch | Nothing | Admission is open again after a restart ([ADR 0023](../adr/0023-graceful-attempt-drain.md)) |
+| `AttemptAdmission` (`engine/admission.ts`) | The admitted runs and the drain latch | Nothing | Admission is open again after a restart ([Drain](../architecture/run-lifecycle.mdx#drain)) |
 | `RunStore` and its projections (`store/`, `database/`) | Nothing | Nothing | The source of truth: 20 Drizzle tables in `.usine/runtime.sqlite` through `@effect/sql-sqlite-node`, which uses `node:sqlite`. 30 migrations, multi-statement transactions, and `json_extract` in the transcript queries |
 
 ### Pi parent and children (`packages/durable`, `packages/agents`)
