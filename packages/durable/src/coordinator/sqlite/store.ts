@@ -18,7 +18,7 @@ import {
   JournalRevision,
   LedgerEntry,
 } from "../journal.ts";
-import { decided, opened, reserved, settled, transitioned } from "../ledger.ts";
+import { decided, keptDecision, opened, reserved, settled, transitioned } from "../ledger.ts";
 import { migrations } from "./migrations.ts";
 import { coordinationTable, delegationsTable, eventsTable, outboxTable } from "./schema.ts";
 
@@ -164,7 +164,9 @@ export const sqliteAttemptJournalLayer = Layer.effect(
         return yield* Effect.gen(function* () {
           const stored = yield* load(attemptId);
           if (Option.isSome(stored)) {
-            yield* Effect.logDebug("Attempt journal already open", { attemptId });
+            yield* Effect.logInfo("Attempt journal already open; kept the first request", {
+              attemptId,
+            });
             return stored.value;
           }
           const snapshot = opened(request);
@@ -249,8 +251,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           if (result.snapshot !== previous) {
             const encoded = yield* encode(DecisionJson)(decision);
             yield* sql`INSERT INTO ${sql(events)} ${sql.insert({ attempt_id: attemptId, sequence, event: null, decision: encoded })}`;
-          } else
-            yield* Effect.logDebug("Kept the decision recorded first", { attemptId, sequence });
+          } else yield* keptDecision(previous, sequence, result.recorded, decision);
           return result.recorded;
         }).pipe(
           transaction,
@@ -292,11 +293,13 @@ export const sqliteAttemptJournalLayer = Layer.effect(
         yield* Effect.annotateCurrentSpan({ attemptId });
         yield* Effect.gen(function* () {
           const stored = yield* load(attemptId);
-          const next = Option.flatMap(stored, settled);
-          if (Option.isNone(next))
-            return yield* Effect.logDebug("Attempt journal already settled or never opened", {
+          if (Option.isNone(stored))
+            return yield* Effect.logInfo("Skipped settling an Attempt that was never opened", {
               attemptId,
             });
+          const next = settled(stored.value);
+          if (Option.isNone(next))
+            return yield* Effect.logInfo("Attempt journal already settled", { attemptId });
           yield* updateCoordination(next.value);
           yield* Effect.logInfo("Attempt journal settled", { attemptId });
         }).pipe(

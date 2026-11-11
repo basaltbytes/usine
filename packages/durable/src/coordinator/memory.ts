@@ -2,7 +2,15 @@ import type { AttemptId } from "@usine/core/attempt";
 import { Effect, HashMap, Layer, Option, Ref, Semaphore } from "effect";
 
 import { AttemptJournal, type CoordinatorSnapshot } from "./journal.ts";
-import { acknowledged, decided, opened, reserved, settled, transitioned } from "./ledger.ts";
+import {
+  acknowledged,
+  decided,
+  keptDecision,
+  opened,
+  reserved,
+  settled,
+  transitioned,
+} from "./ledger.ts";
 
 /**
  * Provides an empty attempt journal in memory. Each layer build has its own state, and operations
@@ -34,7 +42,9 @@ export const memoryAttemptJournalLayer = Layer.effect(
           const all = yield* Ref.get(journals);
           const existing = HashMap.get(all, attemptId);
           if (Option.isSome(existing)) {
-            yield* Effect.logDebug("Attempt journal already open", { attemptId });
+            yield* Effect.logInfo("Attempt journal already open; kept the first request", {
+              attemptId,
+            });
             return existing.value;
           }
           const snapshot = opened(request);
@@ -78,7 +88,7 @@ export const memoryAttemptJournalLayer = Layer.effect(
           const previous = yield* stored(attemptId);
           const result = yield* decided(previous, sequence, decision);
           if (result.snapshot !== previous) yield* save(result.snapshot);
-          else yield* Effect.logDebug("Kept the decision recorded first", { attemptId, sequence });
+          else yield* keptDecision(previous, sequence, result.recorded, decision);
           return result.recorded;
         }).pipe(serialized);
       }),
@@ -101,11 +111,14 @@ export const memoryAttemptJournalLayer = Layer.effect(
         yield* Effect.annotateCurrentSpan({ attemptId });
         yield* Effect.gen(function* () {
           const all = yield* Ref.get(journals);
-          const next = Option.flatMap(HashMap.get(all, attemptId), settled);
-          if (Option.isNone(next))
-            return yield* Effect.logDebug("Attempt journal already settled or never opened", {
+          const stored = HashMap.get(all, attemptId);
+          if (Option.isNone(stored))
+            return yield* Effect.logInfo("Skipped settling an Attempt that was never opened", {
               attemptId,
             });
+          const next = settled(stored.value);
+          if (Option.isNone(next))
+            return yield* Effect.logInfo("Attempt journal already settled", { attemptId });
           yield* save(next.value);
           yield* Effect.logInfo("Attempt journal settled", { attemptId });
         }).pipe(serialized);

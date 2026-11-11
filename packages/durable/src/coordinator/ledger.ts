@@ -76,6 +76,23 @@ export const decided = (
     });
   });
 
+/** Logs why `decide` kept the recorded decision instead of `discarded`. */
+export const keptDecision = (
+  snapshot: CoordinatorSnapshot,
+  sequence: EventSequence,
+  recorded: EncodedDecision,
+  discarded: EncodedDecision,
+) =>
+  Equal.equals(recorded, discarded)
+    ? Effect.logInfo("Kept the decision recorded first; the new decision matches it", {
+        attemptId: snapshot.attemptId,
+        sequence,
+      })
+    : Effect.logInfo("Kept the decision recorded first; discarded a different decision", {
+        attemptId: snapshot.attemptId,
+        sequence,
+      });
+
 /** Returns the snapshot after `step`, or fails if `expected` is stale. */
 export const transitioned = (
   snapshot: CoordinatorSnapshot,

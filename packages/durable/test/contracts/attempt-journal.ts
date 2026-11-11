@@ -4,7 +4,7 @@ import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Exit, Option } from "effect";
+import { DateTime, Effect, Equal, Exit, Option, References, Result } from "effect";
 
 import { AttemptReport, StoredRequest } from "../../src/attempt-runtime.ts";
 import {
@@ -75,6 +75,8 @@ const revision = JournalRevision.make;
 const using = <A, E>(fixture: JournalFixture, work: Effect.Effect<A, E, AttemptJournal>) =>
   work.pipe(Effect.provide(fixture.open));
 const journal = Effect.service(AttemptJournal);
+const dies = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.exit, Effect.map(Exit.hasDies));
 
 /** Registers the contract for `adapter`; every adapter must pass it unchanged. */
 export const attemptJournalContract = (adapter: JournalAdapter) =>
@@ -223,6 +225,10 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
             return { pending, afterRestart, applied, afterApply };
           }),
         );
+        const reloaded = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+        );
 
         assert.deepStrictEqual(recorded, [first, first]);
         assert.deepStrictEqual(
@@ -233,6 +239,21 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
         assert.deepStrictEqual(restarted.applied.events[0]?.decision, first);
         assert.isTrue(Option.isNone(restarted.applied.pendingDecision));
         assert.deepStrictEqual(restarted.afterApply, first);
+        assert.deepStrictEqual(reloaded, Option.some(restarted.applied));
+        assert.deepStrictEqual(
+          Option.map(reloaded, ({ revision, events, pendingDecision, nextEvent }) => ({
+            revision,
+            events: events.map(({ sequence, decision }) => [sequence, decision]),
+            pendingDecision,
+            nextEvent,
+          })),
+          Option.some({
+            revision: revision(1),
+            events: [[1, first]],
+            pendingDecision: Option.none<EncodedDecision>(),
+            nextEvent: EventSequence.make(2),
+          }),
+        );
       }).pipe(Effect.scoped),
     );
 
@@ -408,6 +429,247 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
         assert.deepStrictEqual(
           Option.map(reopened, ({ status }) => status),
           Option.some(Terminal.make({ outcome })),
+        );
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("dies on a transition after the Attempt finished", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-after-finish");
+        const attemptId = request.spec.attemptId;
+        const outcome = Reported.make({ report: AttemptReport.make({ message: "Opened #1." }) });
+        const { finished, late } = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(request);
+            const finished = yield* store.transition(
+              attemptId,
+              revision(0),
+              step("ChildReported", { decision: "Complete", intents: [Finish.make({ outcome })] }),
+            );
+            const late = yield* store
+              .transition(attemptId, revision(1), step("ChildReported"))
+              .pipe(Effect.exit);
+            return { finished, late };
+          }),
+        );
+        const after = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+        );
+
+        assert.isTrue(Exit.hasDies(late));
+        assert.deepStrictEqual(after, Option.some(finished));
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("dies on an envelope out of sequence or for another Attempt", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-envelopes");
+        const attemptId = request.spec.attemptId;
+        const other = AttemptId.make("attempt-other");
+        const { opened, exits } = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            const opened = yield* store.open(request);
+            const exits = [
+              yield* store.reserve(attemptId, [envelope(attemptId, 2)]).pipe(dies),
+              yield* store
+                .reserve(attemptId, [envelope(attemptId, 1), envelope(attemptId, 3)])
+                .pipe(dies),
+              yield* store.reserve(attemptId, [envelope(other, 1)]).pipe(dies),
+              yield* store
+                .transition(
+                  attemptId,
+                  revision(0),
+                  step("AttemptStarted", { outbound: [envelope(attemptId, 2)] }),
+                )
+                .pipe(dies),
+              yield* store
+                .transition(
+                  attemptId,
+                  revision(0),
+                  step("AttemptStarted", { outbound: [envelope(other, 1)] }),
+                )
+                .pipe(dies),
+            ];
+            return { opened, exits };
+          }),
+        );
+        const after = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+        );
+
+        assert.deepStrictEqual(exits, [true, true, true, true, true]);
+        assert.deepStrictEqual(after, Option.some(opened));
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("dies when a transition repeats a delegation number", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-repeated-delegation");
+        const attemptId = request.spec.attemptId;
+        const { first, exits } = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(request);
+            const first = yield* store.transition(
+              attemptId,
+              revision(0),
+              step("AttemptStarted", { intents: [delegate(1)] }),
+            );
+            const exits = [
+              yield* store
+                .transition(
+                  attemptId,
+                  revision(1),
+                  step("ChildReported", { intents: [delegate(1)] }),
+                )
+                .pipe(dies),
+              yield* store
+                .transition(
+                  attemptId,
+                  revision(1),
+                  step("ChildReported", { intents: [delegate(2), delegate(2)] }),
+                )
+                .pipe(dies),
+            ];
+            return { first, exits };
+          }),
+        );
+        const after = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+        );
+
+        assert.deepStrictEqual(exits, [true, true]);
+        assert.deepStrictEqual(after, Option.some(first));
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("dies on a decision for an event past the next one", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-decide-ahead");
+        const attemptId = request.spec.attemptId;
+        const { opened, exit } = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            const opened = yield* store.open(request);
+            const exit = yield* store
+              .decide(attemptId, EventSequence.make(2), EncodedDecision.make({ _tag: "Complete" }))
+              .pipe(Effect.exit);
+            return { opened, exit };
+          }),
+        );
+        const after = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+        );
+
+        assert.isTrue(Exit.hasDies(exit));
+        assert.deepStrictEqual(after, Option.some(opened));
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("dies on operations for an Attempt that was never opened", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const attemptId = AttemptId.make("attempt-never-opened");
+        const { exits, after } = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            const exits = [
+              yield* store.transition(attemptId, revision(0), step("AttemptStarted")).pipe(dies),
+              yield* store
+                .decide(
+                  attemptId,
+                  EventSequence.make(1),
+                  EncodedDecision.make({ _tag: "Complete" }),
+                )
+                .pipe(dies),
+              yield* store.reserve(attemptId, [envelope(attemptId, 1)]).pipe(dies),
+              yield* store.acknowledge(attemptId, AttemptChannel.Sequence.make(1)).pipe(dies),
+            ];
+            return { exits, after: yield* store.load(attemptId) };
+          }),
+        );
+
+        assert.deepStrictEqual(exits, [true, true, true, true]);
+        assert.isTrue(Option.isNone(after));
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("applies concurrent operations one at a time", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-concurrent");
+        const attemptId = request.spec.attemptId;
+        const complete = EncodedDecision.make({ _tag: "Complete" });
+        const decisions = [
+          complete,
+          ...["RetryChild", "Failed"].map((_tag) => EncodedDecision.make({ _tag })),
+        ];
+        const { recorded, transitions } = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(request);
+            const recorded = yield* Effect.forEach(
+              decisions,
+              (decision) => store.decide(attemptId, EventSequence.make(1), decision),
+              { concurrency: "unbounded" },
+            );
+            const transitions = yield* Effect.forEach(
+              ["AttemptStarted", "ChildReported", "ChildFailed"],
+              (event) =>
+                store
+                  .transition(
+                    attemptId,
+                    revision(0),
+                    Transition.make({
+                      ...step(event, { outbound: [envelope(attemptId, 1)] }),
+                      decision: recorded[0] ?? complete,
+                    }),
+                  )
+                  .pipe(Effect.result),
+              { concurrency: "unbounded" },
+            );
+            return { recorded, transitions };
+          }).pipe(
+            // Yield after every operation so unserialized reads and writes would interleave.
+            Effect.provideService(References.MaxOpsBeforeYield, 8),
+          ),
+        );
+        const after = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+        );
+
+        assert.isTrue(recorded.every((decision) => Equal.equals(decision, recorded[0])));
+        assert.deepStrictEqual(
+          transitions
+            .map((result) => (Result.isSuccess(result) ? "committed" : result.failure._tag))
+            .sort(),
+          ["StaleRevision", "StaleRevision", "committed"],
+        );
+        assert.deepStrictEqual(
+          Option.map(after, ({ revision, events, outbox, nextOutbound }) => ({
+            revision,
+            events: events.length,
+            outbox: outbox.length,
+            nextOutbound,
+          })),
+          Option.some({ revision: revision(1), events: 1, outbox: 1, nextOutbound: 2 }),
         );
       }).pipe(Effect.scoped),
     );
