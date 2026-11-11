@@ -88,6 +88,27 @@ describe("Claude query tokens", () => {
     });
   });
 
+  it("keeps seeded message IDs in saved usage after a message from another stream", () => {
+    const assistant = (id: string, parent: string | null, output: number) => ({
+      type: "assistant",
+      parent_tool_use_id: parent,
+      message: { id, usage: { input_tokens: 0, output_tokens: output } },
+    });
+    const meter = claudeTokenMeter({
+      totalTokens: TokenCount.make(100),
+      costUsd: Option.none(),
+      messages: { seeded: TokenCount.make(100) },
+    });
+    const saved = Option.getOrThrow(meter.read(assistant("other", "tool", 10)));
+    assert.deepStrictEqual(saved.messages, {
+      seeded: TokenCount.make(100),
+      other: TokenCount.make(10),
+    });
+    const reattached = claudeTokenMeter(saved);
+    const replayed = Option.getOrThrow(reattached.read(assistant("seeded", null, 100)));
+    assert.strictEqual(replayed.totalTokens, 110);
+  });
+
   it("counts output plus uncached input, reconciling repeated blocks and cumulative results", () => {
     const { read } = claudeTokenMeter();
     const assistant = (id: string, output: number) =>

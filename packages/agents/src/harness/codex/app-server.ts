@@ -142,7 +142,7 @@ const makeCodexAppServer = Effect.gen(function* () {
           ],
         },
         Stream.fromQueue(input),
-        request.transport,
+        { transport: request.transport },
       ).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.mapError((cause) =>

@@ -124,7 +124,7 @@ const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
 /**
  * Returns a Node SQLite layer at `<instanceDirectory>/.usine/runtime.sqlite`, creating the
  * directory and applying engine migrations. Provides `RunDatabase` and its matching `SqlClient`;
- * reuse the layer to share the writer and read worker (ADR 0020).
+ * reuse the layer to share the writer and read worker.
  */
 export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
   const sqlClient = sqliteClientLayer(instanceDirectory);

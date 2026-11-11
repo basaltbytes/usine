@@ -88,7 +88,7 @@ export interface TranscriptTool extends TranscriptPosition {
   readonly state: ToolState;
 }
 
-/** An entry in a conversation; a child section cannot contain another child section (ADR 0008). */
+/** An entry in a conversation; a child section cannot contain another child section. */
 export type TranscriptEntry = TranscriptNotice | TranscriptTool;
 
 /** The status of a session, independent of its Attempt's success or failure. */

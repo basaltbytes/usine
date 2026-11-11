@@ -407,7 +407,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("park run for approval"));
 
   // Runs in the caller's transaction, so Attempt, Run, Step, and outbox writes commit or roll
-  // back together (ADR 0010, ADR 0020).
+  // back together.
   const applyFinish = Effect.fn("RunStore.applyFinish")(function* (
     tx: ReturnType<typeof queriesFor>,
     runId: RunId,
