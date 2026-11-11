@@ -107,7 +107,7 @@ The run ledger keeps the submitted agent, rendered task, payload snapshot, effec
 
 ### Attempt windows
 
-The sink given to `StepExecutor.execute`, and the `RecoverySink` given to `StepExecutor.recover`, read as `windows` the attempt's own window on the item and the agent's overlapping windows there (`RunStore.attemptWindows`). The harvest reads them after GitHub lists the comments, so attempts started meanwhile count, as does an end recorded when a cancel closed the attempt before the executor stopped. It keeps only comments inside the own window and no other ([ADR 0006](../../docs/adr/0006-executor-contract-run-host-attempt-channel.md), #429). An attempt that ended before end times were recorded has no window: its harvest keeps no comment, and it overlaps no other attempt.
+The sink given to `StepExecutor.execute`, and the `RecoverySink` given to `StepExecutor.recover`, read as `windows` the attempt's own window on the item and the agent's overlapping windows there (`RunStore.attemptWindows`). The harvest reads them after GitHub lists the comments, so attempts started meanwhile count, as does an end recorded when a cancel closed the attempt before the executor stopped. It keeps only comments inside the own window and no other (#429). An attempt that ended before end times were recorded has no window: its harvest keeps no comment, and it overlaps no other attempt.
 
 The sink also reads back the attempt's current-protocol envelopes in append order as `transcript` (`TranscriptAllQuery`), so a reattaching executor resumes its runaway guard.
 

@@ -16,7 +16,7 @@ The pin is the point: the engine version is **per-instance, committed, authored 
 4. Install the App on the managed repos.
 5. Fill the registry with the installation-bound add-repo picker (ADR 0016).
 
-The Workers page under Configuration is the **preflight surface**: it runs the verify-only preflight of [ADR 0006](./0006-executor-contract-run-host-attempt-channel.md) on demand and shows each typed capability error with its fix (for example, "run `claude /login` in a terminal"). Logins stay in the operator's terminal. The CLI is two commands: `pnpm create usine` and `usine up`.
+The Workers page under Configuration is the **preflight surface**: it runs the verify-only preflight of [ADR 0006](./0006-executor-prepares-checkouts-runs-children-on-workers.md) on demand and shows each typed capability error with its fix (for example, "run `claude /login` in a terminal"). Logins stay in the operator's terminal. The CLI is two commands: `pnpm create usine` and `usine up`.
 
 ## Considered options
 
@@ -32,7 +32,7 @@ The Workers page under Configuration is the **preflight surface**: it runs the v
 - The instance repo is a Node package: `package.json` and lockfile are committed config; `node_modules/` is gitignored like `.usine/`. UI config commits never touch the pin.
 - Onboarding must resume wherever a first run stopped: each step is idempotent and re-enterable (App created but key lost, key present but nothing installed, installation live but registry empty).
 - Locally, one install contains orchestrator and run host, so only remote workers can skew, which preflight catches (ADR 0006).
-- The prebuilt exe.dev image stays adapter-owned (ADR 0006).
+- The prebuilt exe.dev image stays adapter-owned.
 
 ## Amendment (2026-10-25, #154): the CLI starts, stops, restarts, and upgrades an instance
 

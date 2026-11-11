@@ -75,7 +75,7 @@ flowchart TB
 
 [Workers and the gateway](./workers-and-gateway.mdx) describes each path, including three that the diagram omits: the admin API forward ([#249](https://github.com/basaltbytes/usine/issues/249)), the `llm.<domain>` host ([proxy.ts:206](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/proxy/proxy.ts#L206)), and the forward proxy on port 3128. The gateway's listeners are in [environment.ts:121](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/environment.ts#L121).
 
-ADR 0006's run host is gone: [#176](https://github.com/basaltbytes/usine/issues/176) deleted `@usine/run-host` and its byte protocol ([ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-contract-run-host-attempt-channel.md), amendment of 2026-10-11), so no usine package is installed on a worker. Attempt channel envelopes remain the transcript format.
+The run host is gone: [#176](https://github.com/basaltbytes/usine/issues/176) deleted `@usine/run-host` and its byte protocol ([ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-prepares-checkouts-runs-children-on-workers.md)), so no usine package is installed on a worker. Attempt channel envelopes remain the transcript format.
 
 ## Packages and apps
 
