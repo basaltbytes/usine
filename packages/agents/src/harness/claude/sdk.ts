@@ -8,7 +8,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Context, Effect, Layer, Option, Result, Schema } from "effect";
+import { Context, Effect, Layer, Match, Option, Ref, Schema } from "effect";
 
 // The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
@@ -181,7 +181,7 @@ const SdkOnlyMessage = Schema.Union([
 ]);
 const MessageId = Schema.Struct({ uuid: Schema.String });
 const JsonObject = Schema.Record(Schema.String, Schema.Json);
-const decodeMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
+const decodeMessage = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
 const messageKey = (message: Schema.Json): string => {
   if (Schema.is(MessageId)(message)) return message.uuid;
   if (Array.isArray(message)) return serializeVendorValue(message.map(messageKey));
@@ -196,130 +196,277 @@ const messageKey = (message: Schema.Json): string => {
 
 const UserInput = Schema.Struct({ type: Schema.Literal("user") });
 
-/** Returns the index of the first line break, or -1. Like the SDK's `readline`, `\r` also ends a line. */
-const lineEnd = (bytes: Uint8Array) => {
-  const lf = bytes.indexOf(10);
-  const cr = bytes.indexOf(13);
-  if (lf < 0) return cr;
-  if (cr < 0) return lf;
-  return Math.min(lf, cr);
+const LF = 10;
+const CR = 13;
+
+/**
+ * Splits `buffer` into complete lines and the bytes after the last line break, scanning from
+ * `scanned`, the length of the remainder that an earlier call already scanned.
+ */
+const splitLines = (buffer: Buffer, scanned: number, ends: (byte: number) => boolean) => {
+  const lines: Array<Buffer> = [];
+  let start = 0;
+  for (let index = scanned; index < buffer.length; index++) {
+    if (!ends(buffer[index] ?? 0)) continue;
+    lines.push(buffer.subarray(start, index));
+    start = index + 1;
+  }
+  return { lines, rest: buffer.subarray(start) };
 };
 
-interface PendingOutput {
-  readonly key: string;
+/** Like the SDK's `readline`, Claude stdout lines also end at a lone `\r`. */
+const outputLineEnd = (byte: number) => byte === LF || byte === CR;
+const inputLineEnd = (byte: number) => byte === LF;
+
+/** A stdout line that the output checkpoint has not passed yet. */
+type PendingOutput = {
+  /** The line's position in the process output, from 0. */
+  readonly line: number;
+  /** The line's length, including its line break. */
   readonly bytes: number;
-  /** A control request's subtype; only its acknowledged response or its cancellation handles it. */
-  readonly request: Option.Option<string>;
-  handled: boolean;
+  readonly handled: boolean;
+} & (
+  | {
+      /** A line that the session handles, or that is handled when read. */
+      readonly _tag: "Output";
+      readonly key: string;
+    }
+  | {
+      /** A control request; only its acknowledged response or its cancellation handles it. */
+      readonly _tag: "ControlRequest";
+      readonly requestId: string;
+      readonly subtype: Option.Option<string>;
+      /** Whether a turn result already logged this request as unanswered. */
+      readonly reported: boolean;
+    }
+);
+
+interface CheckpointState {
+  /** Stdout bytes after the last line break; earlier reads scanned all of them. */
+  readonly output: Buffer;
+  /** Acknowledged input bytes after the last line break; earlier calls scanned all of them. */
+  readonly input: Buffer;
+  /** The number of stdout lines read. */
+  readonly lines: number;
+  readonly pending: ReadonlyArray<PendingOutput>;
+  /** The line of the last message that `handled` marked, or -1. */
+  readonly handledThrough: number;
+  /** Request IDs whose response input was acknowledged before the request was read. */
+  readonly answered: ReadonlySet<string>;
+  /** Request IDs released by a cancellation, until the SDK's late response is acknowledged. */
+  readonly cancelled: ReadonlySet<string>;
 }
+
+/** Removes the handled lines at the start of `pending`; returns their bytes and the rest. */
+const flush = (pending: ReadonlyArray<PendingOutput>) => {
+  let index = 0;
+  let bytes = 0;
+  while (pending[index]?.handled === true) bytes += pending[index++]?.bytes ?? 0;
+  return { bytes, pending: index === 0 ? pending : pending.slice(index) };
+};
+
+/** Marks the unanswered request `requestId` in `pending` handled; returns whether there was one. */
+const release = (pending: Array<PendingOutput>, requestId: string) => {
+  const index = pending.findIndex(
+    (entry) => !entry.handled && entry._tag === "ControlRequest" && entry.requestId === requestId,
+  );
+  const request = pending[index];
+  if (request === undefined) return false;
+  pending[index] = { ...request, handled: true };
+  return true;
+};
+
+const requestFields = (requestId: string, subtype: Option.Option<string>) =>
+  Option.match(subtype, {
+    onNone: () => ({ requestId }),
+    onSome: (subtype) => ({ requestId, subtype }),
+  });
+
+/** A decision made while reading stdout, logged after the state update. */
+type ReadNote =
+  | { readonly _tag: "NonJson"; readonly bytes: number }
+  | { readonly _tag: "Cancelled"; readonly requestId: string; readonly released: boolean };
+
+const readOutput =
+  (bytes: Uint8Array) =>
+  (
+    state: CheckpointState,
+  ): readonly [
+    { readonly bytes: number; readonly notes: ReadonlyArray<ReadNote> },
+    CheckpointState,
+  ] => {
+    const { lines, rest } = splitLines(
+      Buffer.concat([state.output, bytes]),
+      state.output.length,
+      outputLineEnd,
+    );
+    const pending = [...state.pending];
+    const answered = new Set(state.answered);
+    const cancelled = new Set(state.cancelled);
+    const notes: Array<ReadNote> = [];
+    let line = state.lines;
+    for (const raw of lines) {
+      const text = raw.toString();
+      const read = { line: line++, bytes: raw.length + 1 };
+      const blank = text.trim() === "";
+      const decoded = blank ? Option.none() : decodeMessage(text);
+      if (Option.isNone(decoded)) {
+        if (!blank) notes.push({ _tag: "NonJson", bytes: read.bytes });
+        pending.push({ ...read, _tag: "Output", key: text, handled: true });
+        continue;
+      }
+      const message = decoded.value;
+      if (Schema.is(ControlCancelRequest)(message)) {
+        const released = release(pending, message.request_id);
+        if (released) cancelled.add(message.request_id);
+        notes.push({ _tag: "Cancelled", requestId: message.request_id, released });
+        pending.push({ ...read, _tag: "Output", key: text, handled: true });
+        continue;
+      }
+      if (Schema.is(ControlRequest)(message)) {
+        pending.push({
+          ...read,
+          _tag: "ControlRequest",
+          requestId: message.request_id,
+          subtype: Schema.is(ControlRequestSubtype)(message)
+            ? Option.some(message.request.subtype)
+            : Option.none(),
+          reported: false,
+          handled: answered.delete(message.request_id),
+        });
+        continue;
+      }
+      pending.push({
+        ...read,
+        _tag: "Output",
+        key: messageKey(message),
+        handled: Schema.is(SdkOnlyMessage)(message),
+      });
+    }
+    const flushed = flush(pending);
+    return [
+      { bytes: flushed.bytes, notes },
+      { ...state, output: rest, lines: line, pending: flushed.pending, answered, cancelled },
+    ];
+  };
+
+const acknowledgeInput =
+  (bytes: Uint8Array) =>
+  (
+    state: CheckpointState,
+  ): readonly [{ readonly bytes: number; readonly userInputs: number }, CheckpointState] => {
+    const { lines, rest } = splitLines(
+      Buffer.concat([state.input, bytes]),
+      state.input.length,
+      inputLineEnd,
+    );
+    const pending = [...state.pending];
+    const answered = new Set(state.answered);
+    const cancelled = new Set(state.cancelled);
+    let userInputs = 0;
+    for (const line of lines) {
+      const decoded = decodeMessage(line.toString());
+      if (Option.isNone(decoded)) continue;
+      if (Schema.is(UserInput)(decoded.value)) {
+        userInputs++;
+        continue;
+      }
+      if (!Schema.is(ControlResponse)(decoded.value)) continue;
+      const id = decoded.value.response.request_id;
+      if (!release(pending, id) && !cancelled.delete(id)) answered.add(id);
+    }
+    const flushed = flush(pending);
+    return [
+      { bytes: flushed.bytes, userInputs },
+      { ...state, input: rest, pending: flushed.pending, answered, cancelled },
+    ];
+  };
+
+const handleMessage =
+  (message: Schema.Json) =>
+  (
+    state: CheckpointState,
+  ): readonly [
+    {
+      readonly bytes: number;
+      readonly unanswered: ReadonlyArray<{ readonly requestId: string; readonly subtype?: string }>;
+    },
+    CheckpointState,
+  ] => {
+    const key = messageKey(message);
+    const index = state.pending.findIndex(
+      (entry) => !entry.handled && entry._tag === "Output" && entry.key === key,
+    );
+    const entry = state.pending[index];
+    if (entry === undefined) return [{ bytes: 0, unanswered: [] }, state];
+    const pending = [...state.pending];
+    pending[index] = { ...entry, handled: true };
+    const unanswered: Array<{ readonly requestId: string; readonly subtype?: string }> = [];
+    if (Schema.is(ClaudeResult)(message))
+      for (const [at, earlier] of pending.slice(0, index).entries()) {
+        if (earlier._tag !== "ControlRequest" || earlier.handled || earlier.reported) continue;
+        unanswered.push(requestFields(earlier.requestId, earlier.subtype));
+        pending[at] = { ...earlier, reported: true };
+      }
+    const flushed = flush(pending);
+    return [
+      { bytes: flushed.bytes, unanswered },
+      { ...state, pending: flushed.pending, handledThrough: entry.line },
+    ];
+  };
 
 /**
  * Tracks which Claude output messages the session handled. Runs `onUserInput` when the process
  * owner acknowledges an input line that carries a user message.
  */
-export const claudeOutputCheckpoint = (onUserInput: Effect.Effect<void> = Effect.void) => {
-  let buffered = Buffer.alloc(0);
-  let input = Buffer.alloc(0);
-  const answered = new Set<string>();
-  const pending: Array<PendingOutput> = [];
-  const flush = () => {
-    let bytes = 0;
-    while (pending[0]?.handled === true) bytes += pending.shift()?.bytes ?? 0;
-    return bytes;
-  };
-  const unansweredRequest = (id: string) =>
-    pending.find((entry) => !entry.handled && Option.isSome(entry.request) && entry.key === id);
+export const claudeOutputCheckpoint = Effect.fn("ClaudeOutputCheckpoint.make")(function* (
+  onUserInput: Effect.Effect<void> = Effect.void,
+) {
+  const state = yield* Ref.make<CheckpointState>({
+    output: Buffer.alloc(0),
+    input: Buffer.alloc(0),
+    lines: 0,
+    pending: [],
+    handledThrough: -1,
+    answered: new Set(),
+    cancelled: new Set(),
+  });
   return {
+    /** Reads stdout bytes; returns the bytes that became checkpointed. */
     read: (bytes: Uint8Array) =>
       Effect.gen(function* () {
-        buffered = Buffer.concat([buffered, bytes]);
-        let end;
-        while ((end = lineEnd(buffered)) >= 0) {
-          const line = buffered.subarray(0, end).toString();
-          const decoded = yield* Effect.result(decodeMessage(line));
-          buffered = buffered.subarray(end + 1);
-          if (Result.isFailure(decoded)) {
-            yield* Effect.logDebug("Ignoring non-JSON Claude stdout", { bytes: end + 1 });
-            pending.push({ key: line, bytes: end + 1, request: Option.none(), handled: true });
-            continue;
-          }
-          const message = decoded.success;
-          if (Schema.is(ControlCancelRequest)(message)) {
-            const request = unansweredRequest(message.request_id);
-            if (request !== undefined) request.handled = true;
-            const log = request !== undefined ? Effect.logInfo : Effect.logDebug;
-            yield* log("Claude cancelled a control request", {
-              requestId: message.request_id,
-              released: request !== undefined,
-            });
-            pending.push({ key: line, bytes: end + 1, request: Option.none(), handled: true });
-            continue;
-          }
-          const request = Schema.is(ControlRequest)(message);
-          pending.push({
-            key: request ? message.request_id : messageKey(message),
-            bytes: end + 1,
-            request: request
-              ? Option.some(
-                  Schema.is(ControlRequestSubtype)(message) ? message.request.subtype : "unknown",
-                )
-              : Option.none(),
-            handled:
-              Schema.is(SdkOnlyMessage)(message) ||
-              (request && answered.delete(message.request_id)),
+        const read = yield* Ref.modify(state, readOutput(bytes));
+        for (const note of read.notes)
+          yield* Match.valueTags(note, {
+            NonJson: ({ bytes }) => Effect.logDebug("Ignoring non-JSON Claude stdout", { bytes }),
+            Cancelled: ({ requestId, released }) =>
+              (released ? Effect.logInfo : Effect.logDebug)("Claude cancelled a control request", {
+                requestId,
+              }),
           });
-        }
-        return flush();
+        return read.bytes;
       }),
+    /** Reads input bytes the process owner acknowledged; returns the bytes that became checkpointed. */
     inputAcknowledged: (bytes: Uint8Array) =>
       Effect.gen(function* () {
-        input = Buffer.concat([input, bytes]);
-        let end;
-        while ((end = input.indexOf(10)) >= 0) {
-          const decoded = yield* Effect.result(decodeMessage(input.subarray(0, end).toString()));
-          input = input.subarray(end + 1);
-          if (Result.isFailure(decoded)) continue;
-          if (Schema.is(UserInput)(decoded.success)) {
-            yield* onUserInput;
-            continue;
-          }
-          if (!Schema.is(ControlResponse)(decoded.success)) continue;
-          const id = decoded.success.response.request_id;
-          const entry = unansweredRequest(id);
-          if (entry !== undefined) entry.handled = true;
-          else answered.add(id);
-        }
-        return flush();
+        const acknowledged = yield* Ref.modify(state, acknowledgeInput(bytes));
+        for (let index = 0; index < acknowledged.userInputs; index++) yield* onUserInput;
+        return acknowledged.bytes;
       }),
-    /**
-     * Marks `message` handled. Returns the bytes that became checkpointed and whether the checkpoint
-     * now covers `message` and all output read before it.
-     */
+    /** Marks `message` handled; returns the bytes that became checkpointed. */
     handled: (message: Schema.Json) =>
       Effect.gen(function* () {
-        const key = messageKey(message);
-        const index = pending.findIndex(
-          (entry) => !entry.handled && Option.isNone(entry.request) && entry.key === key,
-        );
-        const entry = pending[index];
-        if (entry === undefined) return { bytes: 0, covered: false };
-        entry.handled = true;
-        if (Schema.is(ClaudeResult)(message)) {
-          const unanswered = pending
-            .slice(0, index)
-            .flatMap(({ key, handled, request }) =>
-              !handled && Option.isSome(request)
-                ? [{ requestId: key, subtype: request.value }]
-                : [],
-            );
-          if (unanswered.length > 0)
-            yield* Effect.logInfo(
-              "Claude finished a turn with unanswered control requests; the output checkpoint stays before them",
-              { requests: unanswered },
-            );
-        }
-        const bytes = flush();
-        return { bytes, covered: !pending.includes(entry) };
+        const handled = yield* Ref.modify(state, handleMessage(message));
+        if (handled.unanswered.length > 0)
+          yield* Effect.logInfo(
+            "Claude finished a turn with unanswered control requests; the output checkpoint stays before them",
+            { requests: handled.unanswered },
+          );
+        return handled.bytes;
       }),
+    /** Whether the checkpoint covers every message passed to `handled` and the output read before it. */
+    covered: Ref.get(state).pipe(
+      Effect.map(({ pending, handledThrough }) => (pending[0]?.line ?? Infinity) > handledThrough),
+    ),
   };
-};
+});
