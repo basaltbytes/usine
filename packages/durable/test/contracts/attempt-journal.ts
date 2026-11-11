@@ -712,6 +712,116 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
       }).pipe(Effect.scoped),
     );
 
+    it.effect("applies concurrent opens, reservations, and settlements one at a time", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const opening = storedRequest("attempt-concurrent-open");
+        const reserving = storedRequest("attempt-concurrent-reserve");
+        const settling = storedRequest("attempt-concurrent-settle");
+        const outcome = Reported.make({ report: AttemptReport.make({ message: "Opened #1." }) });
+        const outcomeOf = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
+          Option.match(Exit.findErrorOption(exit), {
+            onNone: () =>
+              Exit.isSuccess(exit) ? "succeeded" : Exit.hasDies(exit) ? "died" : "interrupted",
+            onSome: (error) => error._tag,
+          });
+        const { opens, reservations, settlement } = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            const opens = yield* Effect.forEach(
+              [1, 2, 3],
+              () => store.open(opening).pipe(Effect.exit),
+              { concurrency: "unbounded" },
+            );
+            yield* store.open(reserving);
+            const reservations = yield* Effect.forEach(
+              [1, 2],
+              () =>
+                store
+                  .reserve(reserving.spec.attemptId, [envelope(reserving.spec.attemptId, 1)])
+                  .pipe(Effect.exit),
+              { concurrency: "unbounded" },
+            );
+            yield* store.open(settling);
+            const [settled, transitioned] = yield* Effect.all(
+              [
+                store.settle(settling.spec.attemptId).pipe(Effect.exit),
+                store
+                  .transition(
+                    settling.spec.attemptId,
+                    revision(0),
+                    step("ChildReported", {
+                      decision: "Complete",
+                      intents: [Finish.make({ outcome })],
+                    }),
+                  )
+                  .pipe(Effect.exit),
+              ],
+              { concurrency: "unbounded" },
+            );
+            return {
+              opens,
+              reservations,
+              settlement: { settled, transitioned },
+            };
+          }).pipe(
+            // Yield after every operation so writes outside a transaction would interleave.
+            Effect.provideService(References.MaxOpsBeforeYield, 8),
+          ),
+        );
+        const after = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            return {
+              opened: yield* store.load(opening.spec.attemptId),
+              reserved: yield* store.load(reserving.spec.attemptId),
+              settled: yield* store.load(settling.spec.attemptId),
+            };
+          }),
+        );
+
+        assert.deepStrictEqual(opens.map(outcomeOf), ["succeeded", "succeeded", "succeeded"]);
+        assert.deepStrictEqual(
+          Option.map(after.opened, ({ revision, request }) => ({ revision, request })),
+          Option.some({ revision: revision(0), request: opening }),
+        );
+        assert.deepStrictEqual(reservations.map(outcomeOf).sort(), ["died", "succeeded"]);
+        assert.deepStrictEqual(
+          Option.map(after.reserved, ({ outbox, nextOutbound }) => ({
+            outbox: outbox.map(({ sequence }) => sequence),
+            nextOutbound,
+          })),
+          Option.some({ outbox: [1], nextOutbound: 2 }),
+        );
+        // Either order is valid, but a settlement must never overwrite a committed outcome.
+        assert.strictEqual(outcomeOf(settlement.settled), "succeeded");
+        const committed = outcomeOf(settlement.transitioned);
+        assert.deepStrictEqual(
+          Option.map(after.settled, ({ status, revision, events }) => ({
+            status,
+            revision,
+            events: events.length,
+          })),
+          Option.some(
+            committed === "succeeded"
+              ? {
+                  status: Settled.make({ outcome: Option.some(outcome) }),
+                  revision: revision(2),
+                  events: 1,
+                }
+              : {
+                  status: Settled.make({ outcome: Option.none() }),
+                  revision: revision(1),
+                  events: 0,
+                },
+          ),
+        );
+        assert.include(["succeeded", "StaleRevision"], committed);
+      }).pipe(Effect.scoped),
+    );
+
     it.effect("loads one consistent snapshot while transitions commit", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
