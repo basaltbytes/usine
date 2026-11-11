@@ -246,6 +246,8 @@ A 232px mantle sidebar, then the base work panel, inset 8px from the window's to
 
 Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at 768px) or full (fills the panel: the overview and every configuration page). List screens, such as Loops, are flat on the panel with no card: the page heading, then a table whose text aligns with the heading, so its hairlines and row fills extend 8px past it on each side. Below `sm`, tables drop or fold their least important columns instead of scrolling sideways. The Workers list shows **Location**, and the Repositories list **Tags**, from a 672px table.
 
+**Configuration list.** Loops, Agents, Workers, Projects, Repositories, Labels, and Role bindings share one layout: the page heading with counts (`3 labels`) and the primary create button at the right of the title row, named for the entity (`New loop`, `New role binding`), and wrapping under the title on phones. Each list is a flat table whose rows open the entity. The button opens the creation form between the heading and the table, and is disabled while the form is open: a 14px semibold title, the name step's fields and actions at most 768px wide, **Continue** and **Cancel**, then a hairline above the table. An empty list has no table: an empty state in an empty lane's dashed outline (8px radius, 20px padding) holds a 13px medium title (`No loops`), one 13px subtext0 sentence on what an entry does, and the create button, which then leaves the title row. When something else must exist first, such as a project for a loop, an outline button opens that list instead. The empty state hides while the creation form is open.
+
 **Board.** The project title and counts, then the lanes: 272px wide, 12px apart, scrolling sideways together, with headings sticky on the base ground. Folded lanes are 40px rails with the name set vertically and the count.
 
 **Overview** (`/`). The page heading with counts (`2 running, 7 stalled`), then Statistics, Needs attention, Running, Stalled, and Recent runs, 36px apart, each a 16px semibold title with its count in 13px subtext0, then the Workers line. An empty block is one 13px subtext0 fragment, such as `Nothing running`.
@@ -260,7 +262,7 @@ Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at
 
 Columns follow the table's width, not the window's: **Tokens** and **Estimated cost** from 896px, **Runs** and **Pull request** from 1024px, **Elapsed time** always. The title takes the remaining width on one line, cut short only when the table is narrower than its columns. From a 448px table, **Status** and **Runs** take their own width up to an equal share of what remains after 416px for the title and header width for the figure columns (112px to 208px). Past that, **Status** wraps and **Runs** truncates before the title is cut, and a status word wider than the share, such as the loop `dependency_updates`, breaks. A short status such as `Done · 28m ago` takes only its own width. On a phone, **Status** wraps to its longest word.
 
-**Configuration detail page.** From `lg`, the file's long parts (trigger, selector, prompt, persona, lanes, preflight) are in a main column and its short facts in a 19rem rail on the right behind a hairline; below `lg`, the rail comes first. The heading row has the name, state mark, and file path (12px mono, under the name), with edit and other actions at the right that wrap below on phones. A compact history link beside the file path shows the latest change's actor and relative time, or **View history** when no change is available. Revision lists and diffs appear on **Configuration > History**, with an entity type and name filter preserved in the URL. The filter stacks in two columns on phones. A worker's preflight table shows **Checked** and **Detail** from a 672px table; in a narrower one, each check's time folds under its result and its message under the check.
+**Configuration detail page.** From `lg`, the file's long parts (trigger, selector, prompt, persona, lanes, preflight) are in a main column and its short facts in a 19rem rail on the right behind a hairline; below `lg`, the rail comes first. The heading row has the name, state mark, and file path (12px mono, under the name), with edit and other actions at the right that wrap below on phones. A compact history link beside the file path shows the latest change's actor and relative time, or **View history** when no change is available. Revision lists and diffs appear on **Configuration > History**, narrowed to one entity with the filter (see Filter) and kept in the URL. History groups revisions by day under 12px subtext0 headings across the work panel, with the filter at the right of the title row. A row is the time in 12px mono, the message in 13px medium (`No message` in subtext0), a 12px subtext0 line with the revision number, actor, and entity keys in mono mauve, and a caret at the right; the whole row opens the diffs and Revert under the message column. A worker's preflight table shows **Checked** and **Detail** from a 672px table; in a narrower one, each check's time folds under its result and its message under the check.
 
 **Configuration forms.** Fields and actions stop at 768px, with 20px between field groups and a quiet **Edit as text** action. **Cmd+Enter** or **Ctrl+Enter** submits the editor. On phones and coarse pointers, input text is 16px and input, select, and button targets are at least 44px tall. Checkbox and radio marks keep their compact shape. Configuration pages use 24px between the heading and content.
 
@@ -307,7 +309,7 @@ Content is visible without motion. Under `prefers-reduced-motion: reduce`, durat
 
 ## Shapes
 
-Corners step down with nesting: the work panel 10px; cards, lane rails, menus, and Needs attention items 8px; buttons, inputs, and menu items 6px; extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so the box size doesn't change. The only dashed line is an empty lane's outline.
+Corners step down with nesting: the work panel 10px; cards, lane rails, menus, and Needs attention items 8px; buttons, inputs, and menu items 6px; extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so the box size doesn't change. The only dashed line is the outline of an empty lane or an empty configuration list.
 
 ## Components
 
@@ -325,6 +327,9 @@ Compact and quiet, mostly 28px tall.
 - **Label chip:** a 20px pill in the GitHub label's colour: text in the colour (dark ones lifted toward white for contrast), border at 40% alpha, fill at 12%. Used for lane sources, card labels (three, then a muted `+n` chip), and GitHub change lines.
 - **Plain chip:** hairline outline, muted text, for item states as lane sources.
 - Run state is not a chip but the dot and word from Colors.
+
+### Filter
+One chip per applied filter, then a **Filter** button (`FunnelSimple` in subtext0) in the chip's 28px hairline box, so the button keeps its place at the right of a title row as chips are added. The button opens a 256px menu that searches the fields and, while typing, their values; Backspace in an empty search returns to the fields, and choosing a value applies it. A chip is a 28px hairline box split by hairlines: the field and its icon in subtext0, `is`, the value in 13px medium, and a remove button; the field and value reopen the menu. On phones and coarse pointers, the controls and menu items are 44px tall and the search text is 16px.
 
 ### Cards / Containers
 - **Corner Style:** 8px.
@@ -346,7 +351,7 @@ Compact and quiet, mostly 28px tall.
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items red with a red 15% focus fill. Menus list only actions that apply.
 
 ### Page heading
-On the overview, board, tasks list, and configuration pages: the 20px semibold title, after the repository mark on a repository's page, its counts in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), any mark such as Needs attention, and the screen's actions at the right.
+On the overview, board, tasks list, and configuration pages: the 20px semibold title, after the repository mark on a repository's page, its counts in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), any mark such as Needs attention, and the screen's actions at the right: a list's create button, an entity's **Edit** and **Delete**, or History's filter.
 
 ### Flat table
 The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, with a 2px mauve outline on the link; other rows have no hover fill. Row actions are subtext0 ghost buttons, only those that apply, such as Pause or Resume.

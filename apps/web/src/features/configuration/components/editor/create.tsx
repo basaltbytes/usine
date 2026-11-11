@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ConfigurationEntityId, type ConfigurationEntityKind } from "@usine/config/configuration";
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Option, Schema } from "effect";
-import { useState } from "react";
+import { createContext, useContext, useId, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
 import { CommandButton } from "~/components/command-palette/button";
 import { Input } from "~/components/ui/input";
@@ -22,14 +22,13 @@ import { configurationQuery } from "~/lib/configuration/queries";
 import { rejectionMessage } from "~/lib/api";
 import { ConfigurationEditorForm } from "./form";
 
-type CreateEntityProps = {
+type CreationFormProps = {
   readonly kind: ConfigurationEntityKind;
   readonly initialMember?: string | undefined;
+  readonly cancel: () => void;
 };
 
-type CreationFormProps = CreateEntityProps & { readonly cancel: () => void };
-
-const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps) => {
+export const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps) => {
   const members = useQuery({ ...membersQuery(), enabled: kind === "binding" });
   const selectedMember = members.data?.find(({ login }) => login === initialMember);
   const grants = usePermissions();
@@ -40,17 +39,25 @@ const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps) => {
   const [checking, setChecking] = useState(false);
   const client = useQueryClient();
   const navigate = useNavigate();
+  const headingId = useId();
   const current = useQuery(configurationHeadQuery());
   const configuration = useQuery(configurationQuery());
   let bindingDraft: Schema.JsonObject = { name: editing ?? "", role: "viewer" };
   if (selectedMember !== undefined) bindingDraft = { ...bindingDraft, member: selectedMember.id };
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <h2 className="text-md font-semibold">{editorCopy.create(kind)}</h2>
-      {kind === "loop" && <p className="text-muted-foreground">{editorCopy.paused}</p>}
+    <section
+      aria-labelledby={headingId}
+      className="flex min-w-0 flex-col gap-4 border-b pb-6 last:border-b-0 last:pb-0"
+    >
+      <header className="flex flex-col gap-1">
+        <h2 id={headingId} className="text-md font-semibold">
+          {editorCopy.create(kind)}
+        </h2>
+        {kind === "loop" && <p className="text-muted-foreground">{editorCopy.paused}</p>}
+      </header>
       {editing === null ? (
         <form
-          className="flex flex-col items-start gap-3"
+          className="flex max-w-3xl flex-col items-start gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             const identifier: Option.Option<ProjectId | ConfigurationEntityId> =
@@ -121,7 +128,7 @@ const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps) => {
           {current.isError && <ErrorAlert message={current.error.message} />}
           <div className="flex gap-2">
             <CommandButton
-              command={editorCopy.edit}
+              command={editorCopy.continue}
               type="submit"
               disabled={
                 checking ||
@@ -130,7 +137,7 @@ const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps) => {
                 (kind === "loop" && project === "")
               }
             >
-              {checking ? editorCopy.loading : editorCopy.edit}
+              {checking ? editorCopy.loading : editorCopy.continue}
             </CommandButton>
             <CommandButton
               command={editorCopy.cancel}
@@ -162,23 +169,39 @@ const CreationForm = ({ kind, initialMember, cancel }: CreationFormProps) => {
           />
         )
       )}
-    </div>
+    </section>
   );
 };
 
-export const CreateEntity = ({ kind, initialMember }: CreateEntityProps) => {
+type Creation = {
+  readonly kind: ConfigurationEntityKind;
+  readonly creating: boolean;
+  readonly start: () => void;
+};
+
+export const CreationContext = createContext<Creation | null>(null);
+
+type NewEntityButtonProps = { readonly className?: string };
+
+/** Renders the button that opens the creation form of the page's `CreationContext`. */
+export const NewEntityButton = ({ className }: NewEntityButtonProps) => {
+  const creation = useContext(CreationContext);
   const admin = useCan("admin");
   const grants = usePermissions();
-  const [open, setOpen] = useState(initialMember !== undefined);
-  if (!admin && !(kind === "loop" && grants.some(({ permission }) => permission === "maintain")))
-    return null;
-  return open ? (
-    <CreationForm kind={kind} initialMember={initialMember} cancel={() => setOpen(false)} />
-  ) : (
-    <div>
-      <CommandButton command={editorCopy.new} onClick={() => setOpen(true)}>
-        {editorCopy.new}
-      </CommandButton>
-    </div>
+  if (creation === null) return null;
+  const allowed =
+    admin ||
+    (creation.kind === "loop" && grants.some(({ permission }) => permission === "maintain"));
+  if (!allowed) return null;
+  const label = editorCopy.create(creation.kind);
+  return (
+    <CommandButton
+      command={label}
+      className={className}
+      disabled={creation.creating}
+      onClick={creation.start}
+    >
+      {label}
+    </CommandButton>
   );
 };

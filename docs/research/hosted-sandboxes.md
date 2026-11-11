@@ -460,9 +460,9 @@ Costs are per Attempt-hour for 4 vCPU and 8 GB.
 ### Path (a): hosted, cheapest with EU compute
 
 1. **Boat, $0.036.** EU-only machines (Germany, Finland, France), a full VM per sandbox, and plain
-   OpenSSH, so `RemoteShell`, pid files, salvage, and ADR 0026's token file work as on the SSH
+   OpenSSH, so `RemoteShell`, pid files, salvage, and the per-attempt token file work as on the SSH
    Worker today. Node 22, pnpm, git, gh, Claude Code, and Codex are preinstalled. Trade-off: no
-   network rules, so no gateway posture. The token is on the VM as in ADR 0026 stage 1, and egress
+   network rules, so no gateway posture. The token is on the VM as on an SSH worker without a gateway, and egress
    control is an in-VM firewall that root can undo, applied again after every resume. Also: no custom
    image, snapshot copies that may leave the EU, fallback machines on Hetzner Cloud without KVM and
    about 3x slower on CPU-heavy work, no DPA found, and SOC 2 in progress.

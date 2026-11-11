@@ -124,7 +124,7 @@ export class GitHubApp extends Context.Service<
     /**
      * Reads delivery summaries with IDs greater than `after`, newest first. Pass `None` for
      * the first read. Reads at most ten pages of 100 summaries and drops older hints at that
-     * limit; polling still detects repository changes (ADR 0014).
+     * limit; polling still detects repository changes (ADR 0007).
      */
     readonly deliveries: (
       after: Option.Option<WebhookDeliveryId>,

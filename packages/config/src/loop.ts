@@ -43,7 +43,7 @@ export type LoopApproval = typeof LoopApproval.Type;
 
 /**
  * A parsed loop definition from `projects/<project>/loops/<loop>.md` or the legacy
- * `loops/<name>.md` format (ADR 0031).
+ * `loops/<name>.md` format.
  */
 export class LoopFile extends Schema.Class<LoopFile, Brand.Brand<"@usine/config/loop/LoopFile">>(
   "@usine/config/LoopFile",

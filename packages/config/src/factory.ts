@@ -67,7 +67,7 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
 
 const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
 
-/** A registry entry with selector tags and legacy repository lanes (ADR 0031). */
+/** A registry entry with selector tags and legacy repository lanes. */
 export class ManagedRepo extends Schema.Class<
   ManagedRepo,
   Brand.Brand<"@usine/config/factory/ManagedRepo">
@@ -79,8 +79,7 @@ export class ManagedRepo extends Schema.Class<
     .check(Schema.isUnique())
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   /**
-   * Repository lanes for version 1 and board views; version 2 persistence requires an empty list
-   * (ADR 0031).
+   * Repository lanes for version 1 and board views; version 2 persistence requires an empty list.
    */
   lanes: Lanes.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}

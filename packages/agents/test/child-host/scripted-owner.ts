@@ -153,16 +153,14 @@ export const detachAfterHookResponse = (
     const stopping = yield* Ref.make(false);
     const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
     const hookRead = yield* Deferred.make<void>();
-    const checkpoint = claudeOutputCheckpoint();
+    const checkpoint = yield* claudeOutputCheckpoint();
     const scope = yield* Scope.make();
     yield* Effect.gen(function* () {
       const owner = yield* startChildProcess(
         scriptedTarget,
         scriptedCommand,
         Stream.fromQueue(input),
-        undefined,
-        "handled",
-        checkpoint.inputAcknowledged,
+        { acknowledgement: "handled", onInputAcknowledged: checkpoint.inputAcknowledged },
       );
       yield* owner.stdout.pipe(
         Stream.runForEach((bytes) =>

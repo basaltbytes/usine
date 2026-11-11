@@ -195,7 +195,7 @@ export interface SshWorkerAddress {
   readonly port: Option.Option<SshPort>;
   /** The machine directory that contains `workers/<name>`. */
   readonly root: WorkerRoot;
-  /** The Gateway in front of the machine. If `None`, each Attempt's token is written on the machine (ADR 0026). */
+  /** The Gateway in front of the machine. If `None`, each Attempt's token is written on the machine (ADR 0011). */
   readonly gateway: Option.Option<SshWorkerGateway>;
   /** Each Attempt's container. Used only if the machine has Docker. */
   readonly container: SshWorkerContainer;
