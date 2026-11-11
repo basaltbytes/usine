@@ -1243,16 +1243,14 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect(
-    "records the first killed processes and the whole count when the kernel logs name more than the cap",
-    () => {
+  it.effect.each([MAX_KILLED_PROCESSES, MAX_KILLED_PROCESSES + 1])(
+    "records at most the cap of killed processes and the whole count when the kernel logs name %i",
+    (victims) => {
       const machine = dockerMachine();
       machine.state.kernelMemory = "readable";
-      machine.state.kernelVictims = MAX_KILLED_PROCESSES + 1;
+      machine.state.kernelVictims = victims;
       const exceedsMemory: StubParent = (context) =>
-        killsInContainer(machine, MAX_KILLED_PROCESSES + 1).pipe(
-          Effect.andThen(completes(context)),
-        );
+        killsInContainer(machine, victims).pipe(Effect.andThen(completes(context)));
       const logs = capturedLogs();
       return Effect.gen(function* () {
         const executor = yield* Executor;
@@ -1263,7 +1261,7 @@ describe("SSH Worker with Docker", () => {
           outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
         });
         assert.strictEqual(kills.length, 1);
-        assert.strictEqual(kills[0]?.kills, MAX_KILLED_PROCESSES + 1);
+        assert.strictEqual(kills[0]?.kills, victims);
         assert.deepStrictEqual(
           kills[0]?.processes,
           Array.from({ length: MAX_KILLED_PROCESSES }, (_, index) =>
@@ -1273,14 +1271,14 @@ describe("SSH Worker with Docker", () => {
         const capped = logs.warnings.filter((line) =>
           line.includes("Recording only the first killed processes"),
         );
-        assert.lengthOf(capped, 1);
-        const [, fields] = yield* Schema.decodeEffect(CapturedLog)(capped[0] ?? "").pipe(
-          Effect.orDie,
-        );
-        assert.deepInclude(fields, {
-          identified: MAX_KILLED_PROCESSES + 1,
-          kept: MAX_KILLED_PROCESSES,
-        });
+        if (victims <= MAX_KILLED_PROCESSES) assert.lengthOf(capped, 0);
+        else {
+          assert.lengthOf(capped, 1);
+          const [, fields] = yield* Schema.decodeEffect(CapturedLog)(capped[0] ?? "").pipe(
+            Effect.orDie,
+          );
+          assert.deepInclude(fields, { identified: victims, kept: MAX_KILLED_PROCESSES });
+        }
         const read = logs.infos.filter((line) =>
           line.includes("Read the kernel OOM process details on the worker"),
         );
@@ -1288,7 +1286,7 @@ describe("SSH Worker with Docker", () => {
         const [, readFields] = yield* Schema.decodeEffect(CapturedLog)(read[0] ?? "").pipe(
           Effect.orDie,
         );
-        assert.deepInclude(readFields, { source: "journal", identified: MAX_KILLED_PROCESSES + 1 });
+        assert.deepInclude(readFields, { source: "journal", identified: victims });
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -1400,22 +1398,31 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect("reads no kernel log when the container ran on and the kernel killed nothing", () => {
-    const machine = dockerMachine();
-    machine.state.kernelMemory = "readable";
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      const prepared = yield* executor.prepare(request);
-      const kills: Array<ContainerOutOfMemoryKills> = [];
-      yield* prepared.launch({
-        ...sink,
-        outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
-      });
-      assert.deepStrictEqual(kills, []);
-      assert(killsRead(machine) >= 0, "the counter was read");
-      assert(!linesOf(machine).some((line) => line.includes("journalctl -k")));
-    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
-  });
+  // The release of a failed Attempt starts the container again only if it stopped.
+  it.effect.each([
+    { outcome: "completes", parent: completes },
+    { outcome: "fails", parent: fails },
+  ])(
+    "reads no kernel log when the container ran on and the kernel killed nothing: $outcome",
+    ({ parent }) => {
+      const machine = dockerMachine();
+      machine.state.kernelMemory = "readable";
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const kills: Array<ContainerOutOfMemoryKills> = [];
+        yield* prepared
+          .launch({
+            ...sink,
+            outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+          })
+          .pipe(Effect.exit);
+        assert.deepStrictEqual(kills, []);
+        assert(killsRead(machine) >= 0, "the counter was read");
+        assert(!linesOf(machine).some((line) => line.includes("journalctl -k")));
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
+    },
+  );
 
   for (const change of ["docker-installed", "docker-removed"] as const)
     it.effect(
