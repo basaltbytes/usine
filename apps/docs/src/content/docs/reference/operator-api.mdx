@@ -57,7 +57,7 @@ Responses contain the resolved `base`, `head`, `files`, and `filesTruncated`. Ea
 
 Open PRs recorded before comparison bases were polled are fetched once on the next poll, including when GitHub reports no changes. This refresh is persisted across restarts. Until a base and head are recorded, the Changes view says **Pull request base or head not recorded yet**.
 
-A missing PR or unavailable commit comparison returns a `404` error envelope with `FileChangesNotFoundError`. A whole-PR selection whose base or head changed returns `409` with `PullRequestFilesChangedError`; refresh the task before retrying. GitHub rate limits return `503` with `GitHubRateLimitError`.
+A missing PR or unavailable commit comparison returns a `404` error envelope with `FileChangesNotFoundError`. When GitHub answers `404` because the GitHub App installation doesn't cover the repository, the endpoint returns `503` with `ProjectNotInstalledError`; grant the installation access to the repository, then retry. A whole-PR selection whose base or head changed returns `409` with `PullRequestFilesChangedError`; refresh the task before retrying. GitHub rate limits return `503` with `GitHubRateLimitError`.
 
 ## Operations
 

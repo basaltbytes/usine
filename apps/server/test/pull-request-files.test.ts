@@ -18,7 +18,14 @@ import {
   PullRequestFilesQuery,
 } from "@usine/github/file-changes";
 import { GitHubFiles } from "@usine/github/files";
-import { InstallationToken, InstallationWide } from "@usine/github/github-app";
+import {
+  CoveredProject,
+  InstallationId,
+  InstallationToken,
+  InstallationWide,
+  ProjectNotInstalledError,
+  RepositoryId,
+} from "@usine/github/github-app";
 import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse, HttpRouter } from "effect/http";
@@ -69,6 +76,7 @@ const fixture = Effect.fn(function* (
   permissions: ReadonlyArray<PermissionGrant> = administratorPermissions,
 ) {
   const requests: Array<string> = [];
+  const access = { checks: 0, installed: true };
   const github = GitHubFiles.layer.pipe(
     Layer.provide(
       Layer.mock(GitHubApp)({
@@ -79,6 +87,22 @@ const fixture = Effect.fn(function* (
             scope: InstallationWide.make(),
           }),
         ),
+        projectAccess: (registry) =>
+          Effect.sync(() => {
+            access.checks += 1;
+            return registry.map((repository) =>
+              access.installed
+                ? CoveredProject.make({
+                    installationId: InstallationId.make(77),
+                    repository,
+                    repositoryId: RepositoryId.make(99),
+                  })
+                : ProjectNotInstalledError.make({
+                    repository,
+                    message: `The GitHub App installation has no access to "${repository}"`,
+                  }),
+            );
+          }),
       }),
     ),
     Layer.provide(
@@ -122,7 +146,7 @@ const fixture = Effect.fn(function* (
       ),
     );
   });
-  return { ...app, requests, read };
+  return { ...app, requests, access, read };
 });
 
 const decode = Effect.fn(function* (response: Response) {
@@ -402,7 +426,31 @@ it.live.each([404, 422])(
         unavailable = false;
         assert.strictEqual((yield* app.read(query)).status, 200);
       }
+      assert.strictEqual(app.access.checks, status === 404 ? 2 : 0);
     }).pipe(Effect.scoped),
+);
+
+it.live("reports lost App access instead of a missing comparison when GitHub answers 404", () =>
+  Effect.gen(function* () {
+    const app = yield* fixture(() => new Response("{}", { status: 404 }));
+    app.access.installed = false;
+    for (const query of [
+      PullRequestFilesQuery.make({ base, head }),
+      CommitRangeFilesQuery.make({ base, head }),
+    ]) {
+      const response = yield* app.read(query);
+      assert.strictEqual(response.status, 503);
+      const body = yield* Effect.promise(() => response.json());
+      const error = yield* Schema.decodeUnknownEffect(
+        Schema.Struct({
+          error: Schema.Literal("ProjectNotInstalledError"),
+          message: Schema.String,
+        }),
+      )(body);
+      assert.match(error.message, /lost access to basaltbytes\/usine/u);
+    }
+    assert.strictEqual(app.access.checks, 2);
+  }).pipe(Effect.scoped),
 );
 
 it.live("preserves GitHub rate-limit errors instead of reporting a missing comparison", () =>
@@ -422,21 +470,26 @@ it.live("preserves GitHub rate-limit errors instead of reporting a missing compa
   }).pipe(Effect.scoped),
 );
 
-it.live("retains a diff larger than 512 KiB and shares one GitHub read between concurrent requests", () =>
-  Effect.gen(function* () {
-    const app = yield* fixture(() =>
-      json({ files: [{ ...file, patch: "+" + "é".repeat(300_000) }] }),
-    );
-    const query = CommitRangeFilesQuery.make({ base, head });
-    const [first, second] = yield* Effect.all(
-      [app.read(query).pipe(Effect.flatMap(decode)), app.read(query).pipe(Effect.flatMap(decode))],
-      { concurrency: "unbounded" },
-    );
-    assert.deepStrictEqual(second, first);
-    assert.strictEqual(first.files.length, 1);
-    assert.strictEqual(app.requests.length, 1);
-    const again = yield* app.read(query).pipe(Effect.flatMap(decode));
-    assert.deepStrictEqual(again, first);
-    assert.strictEqual(app.requests.length, 1);
-  }).pipe(Effect.scoped),
+it.live(
+  "retains a diff larger than 512 KiB and shares one GitHub read between concurrent requests",
+  () =>
+    Effect.gen(function* () {
+      const app = yield* fixture(() =>
+        json({ files: [{ ...file, patch: "+" + "é".repeat(300_000) }] }),
+      );
+      const query = CommitRangeFilesQuery.make({ base, head });
+      const [first, second] = yield* Effect.all(
+        [
+          app.read(query).pipe(Effect.flatMap(decode)),
+          app.read(query).pipe(Effect.flatMap(decode)),
+        ],
+        { concurrency: "unbounded" },
+      );
+      assert.deepStrictEqual(second, first);
+      assert.strictEqual(first.files.length, 1);
+      assert.strictEqual(app.requests.length, 1);
+      const again = yield* app.read(query).pipe(Effect.flatMap(decode));
+      assert.deepStrictEqual(again, first);
+      assert.strictEqual(app.requests.length, 1);
+    }).pipe(Effect.scoped),
 );

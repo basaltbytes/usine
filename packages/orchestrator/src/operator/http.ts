@@ -126,6 +126,7 @@ const errorStatuses = {
   BackendUnavailableError: 503,
   InstallationDiscoveryError: 503,
   AppPermissionError: 503,
+  ProjectNotInstalledError: 503,
   GitHubRateLimitError: 503,
 } as const;
 
