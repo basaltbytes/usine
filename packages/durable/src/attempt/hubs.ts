@@ -6,18 +6,8 @@ import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Exit, Option, Queue, Semaphore } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableStorageFailed, HarnessListener } from "../harness.ts";
+import type { ChildDelivery } from "./delegation/journal.ts";
 import { ATTEMPT_RECORD_KIND, type AttemptRecord } from "./documents.ts";
-
-/**
- * Whether a child read a queued operator input, with the child's state when it read it, or `None`
- * if it stopped first.
- */
-export interface ChildDelivery {
-  readonly _tag: "Delivery";
-  readonly inputSequence: AttemptChannel.Sequence;
-  readonly intervention: AttemptChannel.Intervention;
-  readonly delivered: Option.Option<AttemptChannel.InterventionState>;
-}
 
 /** Activity queued for relay, in order of occurrence. */
 export type RelayItem =

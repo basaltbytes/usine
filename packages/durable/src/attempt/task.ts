@@ -56,7 +56,8 @@ import {
 } from "./documents.ts";
 import { assistantText } from "./events.ts";
 import { completedOutcome, failedOutcome } from "./outcome.ts";
-import { parentSession, parentSessionId, resolveParent } from "./parent.ts";
+import { parentSession, resolveParent } from "./parent.ts";
+import { parentSessionId } from "./sessions.ts";
 import { type AttemptTaskInput, storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { hasPendingForwardedSteer } from "./steering.ts";

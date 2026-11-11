@@ -166,10 +166,16 @@ export class JournalError extends Schema.TaggedError<
   JournalError,
   Brand.Brand<"@usine/durable/coordinator/journal/JournalError">
 >("@usine/durable/JournalError")("JournalError", {
+  /** What failed, as a verb phrase such as "save the child's conversation". */
   operation: Schema.String,
   attemptId: AttemptId,
   cause: Schema.Defect(),
-}) {}
+}) {
+  override get message(): string {
+    const cause = this.cause instanceof Error ? this.cause.message : String(this.cause);
+    return `Could not ${this.operation}: ${cause}`;
+  }
+}
 
 /** A refused transition whose expected revision differs from the stored one. */
 export class StaleRevision extends Schema.TaggedError<

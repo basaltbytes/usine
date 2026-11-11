@@ -1,14 +1,24 @@
-import { ChildRequest } from "@usine/agents/runtime";
+import { ChildRequest, type RunningSession } from "@usine/agents/runtime";
 import {
+  type AgentSessionEvent,
   type AgentSessionId,
   ChildSession,
   type ChildSessionBudget,
+  type ChildSessionCount,
   HarnessSession,
 } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { MachineId, WorkerName } from "@usine/core/worker";
-import { type Brand, type Effect, type Option, Schema } from "effect";
-import type { DurableHarnessError } from "../../harness.ts";
+import {
+  type Brand,
+  type Deferred,
+  type Effect,
+  type Option,
+  Schema,
+  type Semaphore,
+} from "effect";
+import type { AttemptRequest } from "../../attempt-runtime.ts";
+import type { JournalError } from "../../coordinator/journal.ts";
 
 /** The saved conversation and worker that belong to one durable delegation. */
 export class SavedChild extends Schema.Class<
@@ -33,18 +43,6 @@ export type DelegationDetails = {
   saved?: typeof SavedChild.Encoded;
 };
 
-/**
- * The first blocker, question, or harness failure that a child of the Attempt reported, which fails
- * the Attempt unless its coordinator relays one.
- */
-export interface ChildBlocker {
-  readonly sessionId: string;
-  readonly message: string;
-  readonly kind: "blocked" | "question" | "failed" | "capacity" | "infra";
-  /** The ISO 8601 time a capacity report's usage limit resets, if known. */
-  readonly resetsAt?: string;
-}
-
 /** The progress that earlier runs of a delegation saved. */
 export interface DelegationProgress {
   /** The child's output so far. */
@@ -61,16 +59,26 @@ export interface DelegationProgress {
   readonly prompted: boolean;
 }
 
-/** The result of `DelegationJournal.start`. */
-interface DelegationStart {
-  /** The delegation's number among the Attempt's delegations, refused ones included. */
-  readonly count: number;
-  /** Whether an earlier run of the delegation counted it, as before a restart. */
+/** A delegation that its owner numbered and admitted within the child-session budget. */
+export interface Admitted {
+  readonly _tag: "Admitted";
+  /** The delegation's number among the Attempt's delegations, which names its child session. */
+  readonly count: ChildSessionCount;
+  /** Whether an earlier run of the delegation started it, as before a restart. */
   readonly resumed: boolean;
   readonly progress: DelegationProgress;
-  /** The session whose infrastructure failure the start cleared. */
-  readonly superseded: Option.Option<string>;
 }
+
+/** A delegation that its owner refused because the Attempt spent its child-session budget. */
+export interface Refused {
+  readonly _tag: "Refused";
+  /** The child count including the refused delegation. */
+  readonly attempted: ChildSessionCount;
+  readonly max: ChildSessionBudget;
+}
+
+/** The result of `DelegationJournal.start`. */
+export type DelegationStart = Admitted | Refused;
 
 /** An operator input queued for a child and not yet reported read. */
 export interface QueuedChildInput {
@@ -79,47 +87,30 @@ export interface QueuedChildInput {
 }
 
 /**
- * The durable state of one delegation and the parts of its Attempt that the delegation reads and
- * changes. Each operation is atomic. Operations fail with a `DurableHarnessError` that names the
- * step.
+ * The durable state of one delegation and the supervision of its child. Each operation is atomic.
+ *
+ * The journal's owner numbers delegations and applies the child-session budget in `start`: the Pi
+ * parent's `subagent` tool counts each call, and the event-driven coordinator numbers each
+ * delegation in the transition that decided it.
  */
 export interface DelegationJournal {
   /**
-   * Records the delegation's start. The first call counts the delegation as the Attempt's next one.
-   * Past `budget`, it records the Attempt's first refused delegation; within it, it clears the
-   * Attempt's child blocker if `supersedes` accepts it. A later call returns the same count and the
-   * progress saved since, and changes nothing.
+   * Records the delegation's start, or refuses it over the child-session budget. A later call
+   * returns the same number with the progress saved since, and changes nothing.
    */
-  readonly start: (
-    budget: ChildSessionBudget,
-    supersedes: (blocker: ChildBlocker) => boolean,
-  ) => Effect.Effect<DelegationStart, DurableHarnessError>;
-  /**
-   * Records `blocker` as the Attempt's child blocker unless the Attempt has one that `keeps`
-   * accepts. Returns whether it recorded `blocker`.
-   */
-  readonly recordBlocker: (
-    blocker: ChildBlocker,
-    keeps: (current: ChildBlocker) => boolean,
-  ) => Effect.Effect<boolean, DurableHarnessError>;
-  /** Clears the Attempt's child blocker if `accept` matches it. Returns whether it cleared one. */
-  readonly clearBlocker: (
-    accept: (current: ChildBlocker) => boolean,
-  ) => Effect.Effect<boolean, DurableHarnessError>;
+  readonly start: Effect.Effect<DelegationStart, JournalError>;
   /** Reads the operator inputs queued for the child, oldest first. */
   readonly queuedInputs: (
     sessionId: AgentSessionId,
-  ) => Effect.Effect<ReadonlyArray<QueuedChildInput>, DurableHarnessError>;
+  ) => Effect.Effect<ReadonlyArray<QueuedChildInput>, JournalError>;
   /** Reads whether the operator holds or pauses the child. */
   readonly supervision: (
     sessionId: AgentSessionId,
-  ) => Effect.Effect<{ readonly held: boolean; readonly paused: boolean }, DurableHarnessError>;
+  ) => Effect.Effect<{ readonly held: boolean; readonly paused: boolean }, JournalError>;
   /** Completes when the operator does not hold the child, starting with the current Hold. */
-  readonly holdEnded: (sessionId: AgentSessionId) => Effect.Effect<void, DurableHarnessError>;
+  readonly holdEnded: (sessionId: AgentSessionId) => Effect.Effect<void, JournalError>;
   /** Removes the child from the operator's Hold and pause. */
-  readonly releaseSupervision: (
-    sessionId: AgentSessionId,
-  ) => Effect.Effect<void, DurableHarnessError>;
+  readonly releaseSupervision: (sessionId: AgentSessionId) => Effect.Effect<void, JournalError>;
   /**
    * Saves the child's conversation. With `beforePrompt`, the delegation's first save also records
    * that the child has not received its prompt.
@@ -127,30 +118,93 @@ export interface DelegationJournal {
   readonly saveSession: (
     saved: typeof SavedChild.Encoded,
     options: { readonly beforePrompt: boolean },
-  ) => Effect.Effect<void, DurableHarnessError>;
+  ) => Effect.Effect<void, JournalError>;
   /** Records that the child received its prompt. */
-  readonly savePrompted: Effect.Effect<void, DurableHarnessError>;
+  readonly savePrompted: Effect.Effect<void, JournalError>;
   /** Saves the times of the child's continuation turns. */
   readonly saveContinuations: (
     timestamps: ReadonlyArray<number>,
-  ) => Effect.Effect<void, DurableHarnessError>;
+  ) => Effect.Effect<void, JournalError>;
   /** Saves the child's cumulative usage with its saved conversation, if one is saved. */
   readonly saveUsage: (
     usage: typeof ChildRequest.fields.usage.Encoded,
-  ) => Effect.Effect<void, DurableHarnessError>;
+  ) => Effect.Effect<void, JournalError>;
   /** Records a started tool call of the child, replacing one with the same `callId`. */
-  readonly toolStarted: (callId: string, tool: string) => Effect.Effect<void, DurableHarnessError>;
-  readonly toolFinished: (callId: string) => Effect.Effect<void, DurableHarnessError>;
+  readonly toolStarted: (callId: string, tool: string) => Effect.Effect<void, JournalError>;
+  readonly toolFinished: (callId: string) => Effect.Effect<void, JournalError>;
   /** Saves the child's report while it waits idle, or `None` when it works or finishes. */
-  readonly saveIdle: (report: Option.Option<string>) => Effect.Effect<void, DurableHarnessError>;
-  /** Appends `chunk` to the delegation's running output. */
-  readonly output: (chunk: string) => Effect.Effect<void, DurableHarnessError>;
+  readonly saveIdle: (report: Option.Option<string>) => Effect.Effect<void, JournalError>;
   /** Saves the running output retained so far, which a resumed delegation restores. */
-  readonly saveOutput: Effect.Effect<void, DurableHarnessError>;
+  readonly saveOutput: (output: string) => Effect.Effect<void, JournalError>;
+}
+
+/** A blocker, question, harness failure, or capacity refusal that a child ended with. */
+export interface ReservedChildReport {
+  readonly kind: "blocked" | "question" | "failed" | "capacity";
+  readonly message: string;
+  /** The time a capacity refusal's usage limit resets, if the provider reported one. */
+  readonly resetsAt: Option.Option<string>;
+}
+
+/**
+ * The call that runs one delegation: a Pi parent's `subagent` tool call, or the event-driven
+ * coordinator. It owns the running output and decides what a child's failure means for the
+ * Attempt.
+ */
+export interface DelegationCall {
+  /** Appends `chunk` to the delegation's running output. */
+  readonly output: (chunk: string) => Effect.Effect<void, JournalError>;
   /** The running output retained so far. */
   readonly retainedOutput: Effect.Effect<string>;
   /** Replaces the delegation's running details. */
-  readonly publish: (details: DelegationDetails) => Effect.Effect<void, DurableHarnessError>;
-  /** Completes when the owner of the delegation aborts it, such as at harness shutdown. */
+  readonly publish: (details: DelegationDetails) => Effect.Effect<void, JournalError>;
+  /** Completes when the owner aborts the delegation, such as at shutdown or cancellation. */
   readonly aborted: Effect.Effect<void>;
+  /** Records that a new child's session failed in a way the engine retries. */
+  readonly infrastructureFailed: (
+    sessionId: AgentSessionId,
+    message: string,
+  ) => Effect.Effect<void, JournalError>;
+  /** Records the reserved report that the child ended with. */
+  readonly reserved: (
+    sessionId: AgentSessionId,
+    report: ReservedChildReport,
+  ) => Effect.Effect<void, JournalError>;
+  /** Records that a resumed child returned, which supersedes its infrastructure failure. */
+  readonly recovered: (sessionId: AgentSessionId) => Effect.Effect<void, JournalError>;
+}
+
+/**
+ * Whether a child read a queued operator input, with the child's state when it read it, or `None`
+ * if it stopped first.
+ */
+export interface ChildDelivery {
+  readonly _tag: "Delivery";
+  readonly inputSequence: AttemptChannel.Sequence;
+  readonly intervention: AttemptChannel.Intervention;
+  readonly delivered: Option.Option<AttemptChannel.InterventionState>;
+}
+
+/** The in-process state of an Attempt that its delegations share. */
+export interface DelegationHub {
+  /** The live children by session ID. */
+  readonly children: Map<AgentSessionId, RunningSession>;
+  /** Child delegations admitted in this process, including children that have finished. */
+  readonly childSpawns: Set<string>;
+  /**
+   * The sequence numbers of operator inputs queued by children in this process and not yet
+   * reported read or unread.
+   */
+  readonly childInputs: Set<number>;
+  /** Serializes operator interventions. */
+  readonly routing: Semaphore.Semaphore;
+  /**
+   * Completes with the request of the `execute` call relaying the Attempt. Replaced when that call
+   * detaches, so read it at each use.
+   */
+  readonly attached: Deferred.Deferred<AttemptRequest>;
+  /** Relays a session event of a child. */
+  readonly event: (event: AgentSessionEvent) => Effect.Effect<void>;
+  /** Relays whether a child read a queued operator input. */
+  readonly delivery: (delivery: ChildDelivery) => Effect.Effect<void>;
 }

@@ -13,7 +13,7 @@ import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./docume
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
 import { encodeResult, finishedOf } from "./outcome.ts";
-import { parentSessionId } from "./parent.ts";
+import { parentSessionId } from "./sessions.ts";
 import { abortEndedAttempts, repairUnreadableConversations } from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt, relayDeliveries } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
