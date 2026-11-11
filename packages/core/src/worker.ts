@@ -330,9 +330,23 @@ export const BoatSnapshotName = Schema.String.check(
 ).pipe(Schema.brand("BoatSnapshotName"));
 export type BoatSnapshotName = typeof BoatSnapshotName.Type;
 
-/** A boxd snapshot's captured CPU and memory size. */
-export const BoxdSize = Schema.Literals(["1x4", "2x8", "4x16", "8x32"]);
+/**
+ * A boxd machine size as `<vcpu>x<GiB>`, such as `2x8` or `1x32`: positive whole numbers of vCPUs
+ * and GiB of memory, without leading zeros. A self-hosted cluster offers the sizes its operator
+ * lists, so any such size is accepted here.
+ */
+export const BoxdSize = Schema.String.check(
+  Schema.isPattern(/^[1-9][0-9]{0,3}x[1-9][0-9]{0,5}$/u, {
+    message: "Expected a boxd size as <vcpu>x<GiB>, such as 2x8",
+  }),
+).pipe(Schema.brand("BoxdSize"));
 export type BoxdSize = typeof BoxdSize.Type;
+
+/** Returns the vCPU count and the memory in GiB of `size`. */
+export const boxdSizeParts = (size: BoxdSize) => {
+  const [vcpu = "", memoryGib = ""] = size.split("x");
+  return { vcpu: Number(vcpu), memoryGib: Number(memoryGib) };
+};
 
 /**
  * The id of the boxd region containing a machine and its snapshot, such as `fra` or `nyc`.

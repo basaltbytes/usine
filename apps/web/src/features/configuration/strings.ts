@@ -105,7 +105,9 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
         provisioner._tag === "hetzner"
           ? `hetzner ${provisioner.serverType} in ${provisioner.location}`
           : provisioner._tag === "boxd"
-            ? `boxd ${provisioner.size}${provisioner.region === null ? "" : ` ${provisioner.region}`}`
+            ? ["boxd", provisioner.size, provisioner.region]
+                .filter((part) => part !== null)
+                .join(" ")
             : `boat ${provisioner.size}`;
       return `${machine}, one machine per attempt`;
     }
@@ -435,6 +437,8 @@ export const workerFormCopy = {
   sshKey: "SSH key name",
   sshUser: "SSH user",
   size: "Machine size",
+  boxdSizeHint:
+    "The snapshot's size as <vcpu>x<GiB>, such as 2x8 or 1x32. Preflight fails when the snapshot has another size. Leave empty to accept the snapshot's size.",
   endpoint: "Endpoint",
   endpointHint:
     "The account endpoint of a self-hosted or bring-your-own-cloud boxd cluster, such as https://boxd.example.com:9443. Leave empty for the hosted service.",

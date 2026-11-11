@@ -334,7 +334,10 @@ export class BoatProvisioner extends Schema.Class<
 /** @deprecated Use ProvisionerTailnet. */
 export { ProvisionerTailnet as BoatTailnet };
 
-/** Restores each boxd machine from a snapshot with a matching captured size. */
+/**
+ * Restores each boxd machine from a snapshot, which fixes the machine's size. Each attempt gets a
+ * new machine, so a boxd worker ignores `reuse`.
+ */
 export class BoxdProvisioner extends Schema.Class<
   BoxdProvisioner,
   Brand.Brand<"@usine/config/factory/BoxdProvisioner">
@@ -352,7 +355,11 @@ export class BoxdProvisioner extends Schema.Class<
    * runs in one place.
    */
   region: Schema.OptionFromOptionalKey(BoxdRegion),
-  size: BoxdSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("2x8"))),
+  /**
+   * The size that preflight expects the snapshot to have, or `None` to accept the snapshot's
+   * size.
+   */
+  size: Schema.OptionFromOptionalKey(BoxdSize),
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
   /**
@@ -363,6 +370,10 @@ export class BoxdProvisioner extends Schema.Class<
   tailnet: ProvisionerTailnetFromYaml,
   apiKeys: ProviderApiKeysFromYaml,
   timings: ProvisionerTimingsFromYaml,
+  /**
+   * Ignored: every attempt gets a new machine. It is decoded so that a stored worker that sets it
+   * still loads, and preflight warns that it has no effect.
+   */
   reuse: ProvisionerReuseFromYaml,
 }) {}
 

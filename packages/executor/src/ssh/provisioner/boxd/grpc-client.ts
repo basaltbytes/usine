@@ -321,8 +321,8 @@ export const boxdApiLayer = (
               {
                 snapshot: request.snapshot,
                 name: request.name,
-                // Machines keep the SSH setting they had before commands moved to `Exec`.
-                config: { network: { ssh: true } },
+                // Commands run over `Exec`, so the machine serves no SSH.
+                config: { network: { ssh: false } },
                 spec: {
                   version: 1,
                   isolated: request.isolated,
@@ -358,12 +358,6 @@ export const boxdApiLayer = (
               decode(machines, Schema.Array(BoxdMachine), "listVms")(value.vms.map(machineValue)),
             ),
           ),
-        ),
-        updateLabels: Effect.fn("BoxdApi.updateLabels")(
-          (id: MachineId, set: Record<string, string>) =>
-            call(machines, "updateLabels", (opts) =>
-              client.updateVmLabels({ vm: id, set }, opts),
-            ).pipe(Effect.asVoid),
         ),
         destroy: Effect.fn("BoxdApi.destroy")((id: MachineId) =>
           call(machines, "destroy", (opts) => client.destroyVm({ vmId: id }, opts)).pipe(

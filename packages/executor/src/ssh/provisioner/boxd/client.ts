@@ -123,10 +123,6 @@ export class BoxdApi extends Context.Service<
     readonly listVms: (
       selector: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<BoxdMachine>, BoxdCallError>;
-    readonly updateLabels: (
-      id: MachineId,
-      set: Record<string, string>,
-    ) => Effect.Effect<void, BoxdCallError>;
     readonly destroy: (id: MachineId) => Effect.Effect<void, BoxdCallError>;
     /**
      * Replaces the machine's egress allowlist; an empty list makes egress unrestricted. Returns

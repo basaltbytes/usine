@@ -131,7 +131,10 @@ export interface BoatProvisioner {
 /** @deprecated Use ProvisionerTailnet. */
 export type BoatTailnet = ProvisionerTailnet;
 
-/** Restores each attempt's boxd machine from a prepared snapshot. */
+/**
+ * Restores each attempt's boxd machine from a prepared snapshot. A restore takes under a second,
+ * so every attempt gets a new machine and the provisioner has no reuse policy.
+ */
 export interface BoxdProvisioner {
   readonly provider: "boxd";
   readonly token: Redacted.Redacted<string>;
@@ -142,7 +145,11 @@ export interface BoxdProvisioner {
   readonly endpoint: Option.Option<BoxdEndpoint>;
   /** The region of the machines, or `None` to create them where the account endpoint runs them. */
   readonly region: Option.Option<BoxdRegion>;
-  readonly size: BoxdSize;
+  /**
+   * The size that preflight expects the snapshot to have, or `None` to accept the snapshot's size.
+   * A restore keeps its snapshot's size.
+   */
+  readonly size: Option.Option<BoxdSize>;
   readonly snapshot: BoxdSnapshotName;
   readonly isolated: boolean;
   /** The allowlist each machine gets before usine connects to it, or `None` for unrestricted egress. */
@@ -150,10 +157,18 @@ export interface BoxdProvisioner {
   readonly tailnet: Option.Option<ProvisionerTailnet>;
   readonly apiKeys: ProviderApiKeys;
   readonly timings: ProvisionerTimings;
-  readonly reuse: Option.Option<ProvisionerReuse>;
+  /**
+   * The `reuse` that the worker's configuration sets, which usine ignores and preflight warns
+   * about, or `None`.
+   */
+  readonly ignoredReuse: Option.Option<ProvisionerReuse>;
 }
 
 export type SshProvisioner = HetznerProvisioner | BoatProvisioner | BoxdProvisioner;
+
+/** Returns the machine reuse policy of `provisioner`, which is `None` for single-use machines. */
+export const machineReuseOf = (provisioner: SshProvisioner): Option.Option<ProvisionerReuse> =>
+  provisioner.provider === "boxd" ? Option.none() : provisioner.reuse;
 
 /** How the executor finds a Worker's machines: one long-lived machine, or one per Attempt. */
 export type SshWorkerMachine =
