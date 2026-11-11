@@ -185,12 +185,14 @@ export const sessionEventsFrom = (
 
 /** The HTTP status of a rate-limited request, including a request over the usage limit. */
 const RATE_LIMITED = 429;
+/** The HTTP status of a request that the overloaded provider refused. */
+const OVERLOADED = 529;
 
 /** Returns the capacity failure of a retry that exposes an overload or rate-limit code or HTTP status. */
 export const apiRetryFailure = (sessionId: AgentSessionId, retry: typeof ClaudeApiRetry.Type) =>
   retry.error_status === RATE_LIMITED ||
   retry.error === "rate_limit" ||
-  retry.error_status === 529 ||
+  retry.error_status === OVERLOADED ||
   retry.error === "overloaded_error" ||
   (retry.error_status === 503 && retry.retry_delay_ms > 0)
     ? Option.some(
@@ -240,8 +242,9 @@ export const resultFailure = (
 
 /**
  * Returns the capacity refusal or usage limit that ended a turn whose `success` result has
- * `is_error`: the turn's capacity failure, or else one for the result's HTTP 429 status. Returns
- * `None` for other API errors, whose text stays the session's answer.
+ * `is_error`: the turn's capacity failure, or else one for the result's HTTP 429 or 529 status or
+ * for capacity error text that `harnessFailure` recognizes. Returns `None` for other API errors,
+ * whose text stays the session's answer.
  */
 export const apiErrorRefusal = (
   sessionId: AgentSessionId,
@@ -250,11 +253,22 @@ export const apiErrorRefusal = (
 ): Option.Option<AgentCapacityError> => {
   if (result.is_error !== true) return Option.none();
   const refusal = Option.filter(providerFailure, Schema.is(AgentCapacityError));
-  if (Option.isSome(refusal) || result.api_error_status !== RATE_LIMITED) return refusal;
-  return Option.some(
-    AgentCapacityError.make({
-      sessionId: Option.some(sessionId),
-      message: result.result?.trim() || "Claude reached its usage limit.",
-    }),
+  if (Option.isSome(refusal)) return refusal;
+  const text = result.result?.trim();
+  if (result.api_error_status === RATE_LIMITED || result.api_error_status === OVERLOADED)
+    return Option.some(
+      AgentCapacityError.make({
+        sessionId: Option.some(sessionId),
+        message:
+          text ||
+          (result.api_error_status === RATE_LIMITED
+            ? "Claude reached its usage limit."
+            : "Claude's provider is overloaded."),
+      }),
+    );
+  if (text === undefined || text === "") return Option.none();
+  return Option.filter(
+    Option.some(harnessFailure(Option.some(sessionId), text)),
+    Schema.is(AgentCapacityError),
   );
 };

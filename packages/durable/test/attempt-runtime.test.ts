@@ -21,6 +21,7 @@ import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   AgentFailure,
+  AttemptFailure,
   ProviderCapacityFailure,
   BlockedFailure,
   InfraFailure,
@@ -2541,10 +2542,13 @@ describe("durable AttemptRuntime", () => {
 
             yield* (yield* (yield* StubChildren).next).limit(message, resetsAt);
             const failure = yield* Fiber.join(execution).pipe(Effect.flip);
-            assert.deepStrictEqual(
-              failure,
-              ProviderCapacityFailure.make({ message, resetsAt: Option.some(resetsAt) }),
-            );
+            // Chai compares errors by name and message only, so compare the encoded failure.
+            const encoded = yield* Schema.encodeEffect(AttemptFailure)(failure);
+            assert.deepStrictEqual(encoded, {
+              _tag: "ProviderCapacityFailure",
+              message,
+              resetsAt: DateTime.formatIso(resetsAt),
+            });
           }).pipe(
             Effect.provide(layer({ database, parent: [delegate("Review the PR"), parentAnswer] })),
           );

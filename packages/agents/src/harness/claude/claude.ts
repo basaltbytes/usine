@@ -707,6 +707,11 @@ const makeClaudeChild = Effect.gen(function* () {
             yield* failTurn(refusal.value);
             return;
           }
+          if (message.is_error === true)
+            yield* Effect.logInfo(
+              "Claude turn ended on an API error that is not a capacity refusal; its text is the session's answer",
+              { sessionId: session.id, apiErrorStatus: message.api_error_status },
+            );
           providerFailure = Option.none();
           // Typed-prompt turns stamp only their first assistant frame, even after folding guidance.
           // A result that lists `user_message_uuids` already names every folded message.

@@ -1577,6 +1577,22 @@ describe("Claude child backend", () => {
     error: "rate_limit",
     message: { content: [{ type: "text", text: LIMIT_TEXT }] },
   };
+  const overloadError = {
+    type: "assistant",
+    error: "overloaded",
+    message: { content: [{ type: "text", text: LIMIT_TEXT }] },
+  };
+  const rateLimitRetry = {
+    type: "system",
+    subtype: "api_retry",
+    attempt: 1,
+    max_retries: 10,
+    retry_delay_ms: 5_000,
+    error_status: 429,
+    error: "rate_limit",
+  };
+  const OVERLOAD_TEXT = "Repeated server overload; giving up";
+  const UNAVAILABLE_TEXT = "API Error: 503 Service Unavailable. Please try again later.";
   const limitResult = {
     type: "result",
     subtype: "success",
@@ -1601,18 +1617,66 @@ describe("Claude child backend", () => {
       resetsAt: Option.none(),
     },
     {
+      name: "a rate limit on a result without an HTTP status",
+      messages: [rejected, limitError, { ...limitResult, api_error_status: null }],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rate-limited API retry with HTTP 429 that ends the turn",
+      messages: [
+        rejected,
+        { ...rateLimitRetry, error: "unknown" },
+        { type: "result", subtype: "error_during_execution", errors: ["API failed"] },
+      ],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+      message: "API request failed with HTTP 429 (unknown); retry 1 of 10 in 5s",
+    },
+    {
+      name: "a rate-limited API retry without a response that ends the turn",
+      messages: [
+        rejected,
+        { ...rateLimitRetry, error_status: null },
+        { type: "result", subtype: "error_during_execution", errors: ["API failed"] },
+      ],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+      message: "API request failed without a response (rate_limit); retry 1 of 10 in 5s",
+    },
+    {
       name: "an overload that ends the turn",
+      messages: [overloadError, { ...limitResult, api_error_status: 529 }],
+      resetsAt: Option.none(),
+    },
+    {
+      name: "an overload during a usage-limit warning",
       messages: [
         {
-          type: "assistant",
-          error: "overloaded",
-          message: { content: [{ type: "text", text: LIMIT_TEXT }] },
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "five_hour",
+            utilization: 0.9,
+            resetsAt: 1_794_373_200,
+          },
         },
+        overloadError,
         { ...limitResult, api_error_status: 529 },
       ],
       resetsAt: Option.none(),
     },
-  ])("fails the session with a capacity refusal after $name", ({ messages, resetsAt }) => {
+    {
+      name: "an HTTP 529 result without an overload error",
+      messages: [{ ...limitResult, api_error_status: 529, result: OVERLOAD_TEXT }],
+      resetsAt: Option.none(),
+      message: OVERLOAD_TEXT,
+    },
+    {
+      name: "an HTTP 503 result that asks to retry",
+      messages: [{ ...limitResult, api_error_status: 503, result: UNAVAILABLE_TEXT }],
+      resetsAt: Option.none(),
+      message: UNAVAILABLE_TEXT,
+    },
+  ])("fails the session with a capacity refusal after $name", (testCase) => {
+    const { messages, resetsAt } = testCase;
     const sdk = Layer.succeed(ClaudeSdk)({ open: () => scripted(messages) });
     return Effect.scoped(
       Effect.gen(function* () {
@@ -1620,7 +1684,7 @@ describe("Claude child backend", () => {
         const error = yield* Effect.flip(session.result);
         const matchesError = Schema.is(AgentCapacityError)(error);
         assert(matchesError);
-        assert.strictEqual(error.message, LIMIT_TEXT);
+        assert.strictEqual(error.message, "message" in testCase ? testCase.message : LIMIT_TEXT);
         assert.deepStrictEqual(error.resetsAt.pipe(Option.map(DateTime.formatIso)), resetsAt);
       }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
     );
