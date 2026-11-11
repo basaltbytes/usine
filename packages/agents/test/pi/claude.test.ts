@@ -36,7 +36,7 @@ import {
   Stream,
 } from "effect";
 import { createInterface } from "node:readline";
-import { scriptedOwner } from "../child-host/scripted-owner.ts";
+import { jsonLine, scriptedOwner } from "../child-host/scripted-owner.ts";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
 import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
@@ -777,9 +777,9 @@ describe("Claude child backend", () => {
   it.live("checkpoints a message only after the session has handled it", () =>
     Effect.gen(function* () {
       const stdout = (messages: ReadonlyArray<Schema.Json>) =>
-        Effect.forEach(messages, (message) =>
-          Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(message),
-        ).pipe(Effect.map((lines) => Buffer.from(`${lines.join("\n")}\n`).toString("base64")));
+        Effect.forEach(messages, jsonLine).pipe(
+          Effect.map((lines) => Buffer.concat(lines).toString("base64")),
+        );
       const { spawner, saved, frame } = yield* scriptedOwner(
         [
           { offset: 10, ready: true, sequence: 0, retained: false },
