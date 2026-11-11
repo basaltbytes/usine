@@ -326,6 +326,83 @@ it.effect("exchanges the key again and retries once when boxd refuses a session 
   }).pipe(Effect.scoped),
 );
 
+it.effect("keeps a newer session when a late call reports an older session refused", () =>
+  Effect.gen(function* () {
+    let exchanges = 0;
+    const refused = new Set<string>();
+    const seen: Array<string> = [];
+    const held = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const services = yield* Effect.context<never>();
+    let holding = true;
+    const http = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.gen(function* () {
+          exchanges++;
+          const now = yield* Clock.currentTimeMillis;
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(jsonKey({ token: `jwt-${exchanges}`, expires_at: now / 1000 + 3600 })),
+          );
+        }),
+      ),
+    );
+    const bearerOf = (context: { requestHeader: Headers }) =>
+      (context.requestHeader.get("authorization") ?? "").replace("Bearer ", "");
+    const transport = (() =>
+      createRouterTransport((router) => {
+        router.service(BoxdService, {
+          whoami: (_request, context) => {
+            const jwt = bearerOf(context);
+            seen.push(jwt);
+            if (refused.has(jwt)) throw new ConnectError("session revoked", Code.Unauthenticated);
+            return { userId: "member" };
+          },
+          listVms: (_request, context) =>
+            Effect.runPromiseWith(services)(
+              Effect.gen(function* () {
+                const jwt = bearerOf(context);
+                seen.push(jwt);
+                if (holding) {
+                  holding = false;
+                  yield* Deferred.succeed(held, undefined);
+                  yield* Deferred.await(release);
+                }
+                if (refused.has(jwt))
+                  return yield* Effect.die(
+                    new ConnectError("session revoked", Code.Unauthenticated),
+                  );
+                return { vms: [] };
+              }),
+            ),
+        });
+      })) satisfies Parameters<typeof boxdApiLayer>[3];
+    yield* Effect.gen(function* () {
+      const api = yield* BoxdApi;
+      yield* api.whoami;
+      assert.deepStrictEqual(seen, ["jwt-1"]);
+      refused.add("jwt-1");
+      const late = yield* api.listVms([]).pipe(Effect.forkChild);
+      yield* Deferred.await(held);
+      const identity = yield* api.whoami;
+      assert.strictEqual(identity.userId, "member");
+      assert.strictEqual(exchanges, 2, "the early refusal renews the session");
+      yield* Deferred.succeed(release, undefined);
+      const machines = yield* Fiber.join(late);
+      assert.deepStrictEqual(machines, []);
+      assert.deepStrictEqual(seen, ["jwt-1", "jwt-1", "jwt-1", "jwt-2", "jwt-2"]);
+      assert.strictEqual(exchanges, 2, "the late refusal keeps the newer session");
+    }).pipe(
+      Effect.provide(
+        boxdApiLayer(Redacted.make("key"), BoxdRegion.make("fra"), UNUSED_ENDPOINT, transport).pipe(
+          Layer.provide(http),
+        ),
+      ),
+    );
+  }).pipe(Effect.scoped),
+);
+
 for (const [status, code] of [
   [400, "INVALID_ARGUMENT"],
   [401, "UNAUTHENTICATED"],
