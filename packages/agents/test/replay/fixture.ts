@@ -54,7 +54,17 @@ const environmentKeys = [
   "USINE_GATEWAY_TOKEN",
 ] as const;
 
-export const openFixture = (provider: Provider, scenario: Scenario, mode: "record" | "replay") =>
+export interface FixtureOptions {
+  /** Rewrites the decoded transcript before the replay tape reads it. Ignored when recording. */
+  readonly transform?: (transcript: Transcript) => Transcript;
+}
+
+export const openFixture = (
+  provider: Provider,
+  scenario: Scenario,
+  mode: "record" | "replay",
+  options: FixtureOptions = {},
+) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -69,6 +79,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
                 onExcessProperty: "error",
               }),
             ),
+            Effect.map((transcript) => options.transform?.(transcript) ?? transcript),
           );
     const tape = new Tape(source);
     tape.bind(cwd, "$WORKTREE");

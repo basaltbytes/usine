@@ -103,7 +103,8 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {
       commands: [], agents: [], models: [{ value: ${model}, displayName: 'Replay', description: 'Recorded model' }], account: { apiKeySource: 'none' }, output_style: 'default', available_output_styles: ['default'],
     } } });
-    if (message.request.subtype === 'interrupt') {
+    // An interrupt without a waiting turn reports no turn result.
+    if (message.request.subtype === 'interrupt' && waiting) {
       waiting = false;
       const result = messages.find(message => message.type === 'result');
       sendBatch([{ ...result, result: 'Interrupted' }, sessionState('idle')]);
