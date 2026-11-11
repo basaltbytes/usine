@@ -136,8 +136,10 @@ interface FakeContainer {
   readonly labels: ReadonlyMap<string, string>;
   /** The `--env-file` content read from standard input. */
   readonly environment: string;
-  /** Whether its init runs. A stopped container reads as one that the kernel killed for memory. */
+  /** Whether its init runs. */
   running: boolean;
+  /** Whether the kernel killed its init for memory, if it stopped. */
+  initKilledForMemory: boolean;
   /** The processes that the kernel killed for memory since it started, which `memory.events` counts. */
   oomKills: number;
 }
@@ -495,6 +497,7 @@ export const fakeMachine = () => {
         labels,
         environment: input,
         running: true,
+        initKilledForMemory: true,
         oomKills: 0,
       });
       return oneShotHandle(`${id}\n`, 0);
@@ -508,7 +511,14 @@ export const fakeMachine = () => {
       const name = words.at(-1) ?? "";
       const container = state.containers.get(name);
       if (container === undefined) return oneShotHandle("", 1, `Error: No such container: ${name}`);
-      return oneShotHandle(container.running ? "running 0 false\n" : "exited 137 true\n", 0);
+      return oneShotHandle(
+        container.running
+          ? "running 0 false\n"
+          : container.initKilledForMemory
+            ? "exited 137 true\n"
+            : "exited 143 false\n",
+        0,
+      );
     }
     if (line.startsWith("exec 'docker' 'start' ")) {
       const name = words.at(-1) ?? "";
@@ -531,7 +541,7 @@ export const fakeMachine = () => {
         `container ${container.id}\n` +
           (container.running
             ? `low 0\nhigh 0\nmax 9\noom ${container.oomKills}\noom_kill ${container.oomKills}\noom_group_kill 0\n`
-            : "oom_kill 1\n"),
+            : `oom_kill ${container.initKilledForMemory ? 1 : 0}\n`),
         0,
       );
     }
@@ -541,8 +551,8 @@ export const fakeMachine = () => {
       const container = state.containers.get(words.at(-1) ?? "");
       return oneShotHandle(
         container === undefined
-          ? ""
-          : `oom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=1234,uid=1000\n`,
+          ? "source dmesg\n"
+          : `source journal\noom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=1234,uid=1000\n`,
         0,
       );
     }

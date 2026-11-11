@@ -756,6 +756,7 @@ describe("SSH Worker with Docker", () => {
         ]),
         environment: "",
         running: true,
+        initKilledForMemory: true,
         oomKills: 0,
       });
       machine.state.containers.set("usine-crashed", leftover(WORKER));
@@ -1171,6 +1172,65 @@ describe("SSH Worker with Docker", () => {
       );
     },
   );
+
+  it.effect(
+    "records a process the kernel killed for memory before a start for another reason reset the container's counter",
+    () => {
+      const machine = dockerMachine();
+      machine.state.kernelMemory = "readable";
+      // The kernel kills a test runner, then a test signals the container's init.
+      const killsThenStops: StubParent = (context) =>
+        killsInContainer(machine, 1).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              const container = machine.state.containers.get(CONTAINER);
+              assert(container !== undefined, "the Attempt's container runs");
+              container.running = false;
+              container.initKilledForMemory = false;
+            }),
+          ),
+          Effect.andThen(fails(context)),
+        );
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.salvage = "dirty";
+        const prepared = yield* executor.prepare(request);
+        const kills: Array<ContainerOutOfMemoryKills> = [];
+        yield* prepared
+          .launch({
+            ...sink,
+            outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+          })
+          .pipe(Effect.flip);
+        assert.deepStrictEqual(
+          kills.map(({ kills, processes }) => ({ kills, processes })),
+          [
+            {
+              kills: 1,
+              processes: [MemoryKilledProcess.make({ command: "vitest worker", pid: 1234 })],
+            },
+          ],
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), killsThenStops)));
+    },
+  );
+
+  it.effect("reads no kernel log when the container ran on and the kernel killed nothing", () => {
+    const machine = dockerMachine();
+    machine.state.kernelMemory = "readable";
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      const kills: Array<ContainerOutOfMemoryKills> = [];
+      yield* prepared.launch({
+        ...sink,
+        outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+      });
+      assert.deepStrictEqual(kills, []);
+      assert(killsRead(machine) >= 0, "the counter was read");
+      assert(!linesOf(machine).some((line) => line.includes("journalctl -k")));
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+  });
 
   for (const change of ["docker-installed", "docker-removed"] as const)
     it.effect(

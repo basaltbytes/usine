@@ -12,7 +12,7 @@ const diagnostic = (cgroup: string, command: string, pid: number) =>
 
 describe("kernel OOM process attribution", () => {
   it.live.each([true, false])(
-    "reads the kernel through journalctl, falling back to dmesg: journal available %s",
+    "reads the kernel through journalctl, falling back to dmesg filtered on the worker: journal available %s",
     (journalAvailable) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -34,13 +34,13 @@ printf '"%s"\\n' '${created}'
           path.join(directory, "journalctl"),
           `#!/bin/sh
 [ "$1" = -k ] && [ "$2" = --since ] && [ "$3" = '${created}' ] || exit 2
-${journalAvailable ? "echo journal-diagnostic" : "exit 1"}
+${journalAvailable ? "echo oom-kill:journal-diagnostic" : "exit 1"}
 `,
           { mode: 0o755 },
         );
         yield* fs.writeFileString(
           path.join(directory, "dmesg"),
-          "#!/bin/sh\necho ring-buffer-diagnostic\n",
+          "#!/bin/sh\necho unrelated-diagnostic\necho oom-kill:ring-buffer-diagnostic\n",
           {
             mode: 0o755,
           },
@@ -51,15 +51,21 @@ ${journalAvailable ? "echo journal-diagnostic" : "exit 1"}
             extendEnv: false,
           }),
         );
-        expect(output).toBe(journalAvailable ? "journal-diagnostic\n" : "ring-buffer-diagnostic\n");
+        expect(output).toBe(
+          journalAvailable
+            ? "source journal\noom-kill:journal-diagnostic\n"
+            : "source dmesg\noom-kill:ring-buffer-diagnostic\n",
+        );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it("uses the victim cgroup for Docker and rootless Podman, including nested cgroups", () => {
+  it("uses the victim cgroup for Docker and Podman, including nested cgroups", () => {
     const logs = [
       diagnostic(`/docker/${container}`, "node (vitest 1)", 123),
       diagnostic(`/user.slice/libpod-${container}.scope/build`, "esbuild", 456),
       diagnostic(`/system.slice/docker-${container}.scope`, "codex", 789),
+      // Podman with the cgroupfs manager names the cgroup without `.scope`.
+      diagnostic(`/libpod_parent/libpod-${container}`, "pnpm", 321),
       // The cpuset and OOM ancestor alone do not identify the victim's container.
       diagnostic(`/docker/${other}`, "sibling", 999),
       diagnostic(`/docker/${container}ff`, "prefix collision", 1000),
@@ -70,6 +76,7 @@ ${journalAvailable ? "echo journal-diagnostic" : "exit 1"}
       { command: "node (vitest 1)", pid: 123 },
       { command: "esbuild", pid: 456 },
       { command: "codex", pid: 789 },
+      { command: "pnpm", pid: 321 },
     ]);
   });
 
