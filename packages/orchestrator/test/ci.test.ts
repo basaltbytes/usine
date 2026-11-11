@@ -160,7 +160,9 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   });
   const directory = InstanceDirectory.make(currentDirectory);
   const currentInstance = yield* Ref.make(selectedInstance);
-  const observed = yield* Ref.make(CheckSnapshot.make({ head, state: "pending" }));
+  const observed = yield* Ref.make(
+    CheckSnapshot.make({ pullRequest: "open", head, state: "pending" }),
+  );
   const itemState = yield* Ref.make<"OPEN" | "CLOSED" | "MERGED" | "gone">("OPEN");
   const observationFailure = yield* Ref.make(Option.none<GitHubApiError | GitHubRateLimitError>());
   const snapshotFailure = yield* Ref.make(Option.none<GitHubApiError>());
@@ -452,7 +454,10 @@ it.live("reports CI observation failures after a repository is removed from conf
 
         assert.strictEqual((yield* polling.poll(removed)).failures.length, 1);
         yield* Ref.set(setup.observationFailure, Option.none());
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "success" }),
+        );
 
         assert.deepStrictEqual((yield* polling.poll(removed)).failures, []);
 
@@ -535,7 +540,10 @@ it.live("green CI observed after the deadline applies the recorded labels once",
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
 
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "success" }),
+        );
         yield* Effect.sleep("1100 millis");
 
         yield* monitor.reconcile(fixtureInstance, Option.none());
@@ -550,6 +558,39 @@ it.live("green CI observed after the deadline applies the recorded labels once",
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each(["closed", "merged"] as const)(
+  "a pull request %s before CI settles ends the wait without labels or a fix",
+  (pullRequest) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequest, head, state: "pending" }),
+          );
+
+          yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+          const failed = yield* engine.inspect(runId);
+          assert.strictEqual(failed.run.state._tag, "Failed");
+          const outcome = Option.getOrNull(failed.attempts.at(-1)?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(
+            outcome.failure.message,
+            `Pull request #815 was ${pullRequest} before CI settled on head ${head}. usine applied no completion labels and started no fix.`,
+          );
+          const mutations = yield* Ref.get(setup.mutations);
+          assert.deepStrictEqual(mutations, []);
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 const partialRun = IncompleteWorkflowRun.make({
@@ -574,7 +615,7 @@ it.live.each(["success", "failure"] as const)(
             Effect.succeed(HeadWorkflowRunState.make({ incomplete: [partialRun], running: [] })),
           );
           yield* Ref.set(setup.failedJobs, []);
-          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state }));
+          yield* Ref.set(setup.observed, CheckSnapshot.make({ pullRequest: "open", head, state }));
 
           yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
@@ -615,7 +656,10 @@ it.live("a workflow run that has not concluded keeps green CI waiting until the 
           setup.workflowRuns,
           Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
         );
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "success" }),
+        );
 
         yield* monitor.reconcile(fixtureInstance, Option.none());
 
@@ -651,7 +695,10 @@ it.live("green CI passes once the workflow runs on the head have concluded", () 
           setup.workflowRuns,
           Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
         );
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "success" }),
+        );
         yield* monitor.reconcile(fixtureInstance, Option.none());
         assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
 
@@ -679,7 +726,10 @@ it.live("a failed job routes CI to the fix loop even beside a partially created 
           setup.workflowRuns,
           Effect.succeed(HeadWorkflowRunState.make({ incomplete: [partialRun], running: [] })),
         );
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
 
         yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
@@ -702,7 +752,10 @@ it.live("a failed job routes CI to the fix loop while another workflow run is st
           setup.workflowRuns,
           Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
         );
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
 
         yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
@@ -727,7 +780,10 @@ it.live("a red rollup without a failed job waits for workflow runs that have not
           Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
         );
         yield* Ref.set(setup.failedJobs, []);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
 
         yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
@@ -755,7 +811,10 @@ it.live("unreadable workflow runs leave green CI to the check rollup", () =>
             }),
           ),
         );
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "success" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "success" }),
+        );
 
         const result = yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
 
@@ -776,7 +835,10 @@ it.live("a conflicting head without checks starts one fix before the CI deadline
         const engine = yield* RunEngine;
         const monitor = yield* CiMonitor;
         const sourceId = yield* openWait(setup.timeoutSeconds);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "conflict" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "conflict" }),
+        );
 
         yield* monitor.reconcile(fixtureInstance, Option.none());
 
@@ -810,7 +872,10 @@ it.live("red CI observed after the deadline starts one budgeted fix with failure
         const monitor = yield* CiMonitor;
         const engine = yield* RunEngine;
         const runId = yield* openWait(setup.timeoutSeconds);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
         yield* Effect.sleep("1100 millis");
 
         yield* monitor.reconcile(fixtureInstance, Option.none());
@@ -900,6 +965,7 @@ it.live.each(["failure", "conflict"] as const)(
             yield* Ref.set(
               setup.observed,
               CheckSnapshot.make({
+                pullRequest: "open",
                 head: failedHead,
                 state: failedHead === head ? initialState : "failure",
               }),
@@ -924,7 +990,7 @@ it.live.each(["failure", "conflict"] as const)(
           }
           yield* Ref.set(
             setup.observed,
-            CheckSnapshot.make({ head: failedHead, state: "success" }),
+            CheckSnapshot.make({ pullRequest: "open", head: failedHead, state: "success" }),
           );
 
           yield* monitor.reconcile(fixtureInstance, Option.none());
@@ -961,7 +1027,11 @@ it.live("a new push observed after the deadline supersedes the old head", () =>
         const runId = yield* openWait(setup.timeoutSeconds);
         yield* Ref.set(
           setup.observed,
-          CheckSnapshot.make({ head: CommitSha.make("c".repeat(40)), state: "success" }),
+          CheckSnapshot.make({
+            pullRequest: "open",
+            head: CommitSha.make("c".repeat(40)),
+            state: "success",
+          }),
         );
         yield* Effect.sleep("1100 millis");
 
@@ -1073,7 +1143,10 @@ it.live("CI fixes from their own loop are admitted before the source hands off",
       const setup = yield* scenario(3600);
       yield* Effect.gen(function* () {
         const sourceId = yield* openWait(setup.timeoutSeconds, true);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
 
         yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
         yield* Ref.get(setup.tasks).pipe(
@@ -1105,7 +1178,10 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
       const setup = yield* scenario(3600, limited);
       yield* Effect.gen(function* () {
         const runId = yield* openWait(setup.timeoutSeconds, true);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
 
         yield* (yield* CiMonitor).reconcile(limited, Option.none());
 
@@ -1136,7 +1212,10 @@ it.live("a cycle reset revokes a blocked CI fix when the PR moves to a failing h
         const budgets = yield* CycleBudgets;
         const reader = yield* RunReader;
         yield* openWait(setup.timeoutSeconds, true);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
         yield* (yield* CiMonitor).reconcile(limited, Option.none());
         const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
         const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
@@ -1144,7 +1223,11 @@ it.live("a cycle reset revokes a blocked CI fix when the PR moves to a failing h
 
         yield* Ref.set(
           setup.observed,
-          CheckSnapshot.make({ head: CommitSha.make("c".repeat(40)), state: "failure" }),
+          CheckSnapshot.make({
+            pullRequest: "open",
+            head: CommitSha.make("c".repeat(40)),
+            state: "failure",
+          }),
         );
         const replayed = yield* budgets.reset(
           ask.id,
@@ -1204,7 +1287,10 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
           const budgets = yield* CycleBudgets;
           const monitor = yield* CiMonitor;
           yield* openWait(setup.timeoutSeconds, true);
-          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+          );
           yield* monitor.reconcile(limited, Option.none());
           const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
           const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
@@ -1237,6 +1323,7 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
             yield* Ref.set(
               setup.observed,
               CheckSnapshot.make({
+                pullRequest: "open",
                 head: state === "superseded" ? CommitSha.make("c".repeat(40)) : head,
                 state: "success",
               }),
@@ -1354,7 +1441,10 @@ it.live.each([
           const budgets = yield* CycleBudgets;
           const reader = yield* RunReader;
           const sourceId = yield* openWait(setup.timeoutSeconds, true);
-          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+          );
           yield* (yield* CiMonitor).reconcile(configured(recorded), Option.none());
           const source = yield* engine.inspect(sourceId);
           assert.strictEqual(source.run.state._tag, "Failed");
@@ -1486,7 +1576,10 @@ it.live.each(["added", "removed", "changed"] as const)(
           const reader = yield* RunReader;
           const budgets = yield* CycleBudgets;
           const sourceId = yield* openWait(setup.timeoutSeconds, true);
-          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+          );
           yield* (yield* CiMonitor).reconcile(recorded, Option.none());
           const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
           const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
@@ -1577,7 +1670,10 @@ it.live("revokes a replayed CI fix when its loop's agent leaves the roster", () 
         const reader = yield* RunReader;
         const budgets = yield* CycleBudgets;
         yield* openWait(setup.timeoutSeconds, true);
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+        );
         yield* (yield* CiMonitor).reconcile(recorded, Option.none());
         const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
         const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
@@ -1624,7 +1720,10 @@ it.live.each(["newer head", "green checks"] as const)(
           const budgets = yield* CycleBudgets;
           const polling = yield* PollingTriggers;
           yield* openWait(setup.timeoutSeconds, true);
-          yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequest: "open", head, state: "failure" }),
+          );
           yield* (yield* CiMonitor).reconcile(limited, Option.none());
           const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
           const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
@@ -1653,6 +1752,7 @@ it.live.each(["newer head", "green checks"] as const)(
           yield* Ref.set(
             setup.observed,
             CheckSnapshot.make({
+              pullRequest: "open",
               head: change === "newer head" ? CommitSha.make("c".repeat(40)) : head,
               state: change === "green checks" ? "success" : "failure",
             }),
@@ -1724,7 +1824,7 @@ it.live.each([
           }),
           Effect.timeout("5 seconds"),
         );
-        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state }));
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ pullRequest: "open", head, state }));
         const monitor = yield* CiMonitor;
 
         yield* monitor.reconcile(fixtureInstance, Option.none());
@@ -1753,7 +1853,11 @@ it.live.each([
         if (outcome === "admitted and pushed") {
           yield* Ref.set(
             setup.observed,
-            CheckSnapshot.make({ head: CommitSha.make("c".repeat(40)), state: "success" }),
+            CheckSnapshot.make({
+              pullRequest: "open",
+              head: CommitSha.make("c".repeat(40)),
+              state: "success",
+            }),
           );
         }
 

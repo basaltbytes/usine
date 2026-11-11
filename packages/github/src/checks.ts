@@ -9,12 +9,16 @@ import { retryTransientRequest } from "./retry.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
 import { ActionsJob, FAILED_CONCLUSIONS, failedStepsExcerpt } from "./actions-log.ts";
 
-/** The current PR head and CI state, including conflicts that prevent checks from starting. */
+/**
+ * The current PR head, whether the PR is open, and its CI state, including conflicts that prevent
+ * checks from starting.
+ */
 export class CheckSnapshot extends Schema.Class<
   CheckSnapshot,
   Brand.Brand<"@usine/github/checks/CheckSnapshot">
 >("CheckSnapshot")({
   head: CommitSha,
+  pullRequest: Schema.Literals(["open", "closed", "merged"]),
   state: Schema.Literals(["pending", "success", "failure", "conflict"]),
 }) {}
 
@@ -76,8 +80,11 @@ const Head = Schema.Struct({
     Schema.Struct({
       pullRequest: Schema.NullOr(
         Schema.Struct({
+          state: Schema.Literals(["OPEN", "CLOSED", "MERGED"]),
           headRefOid: CommitSha,
-          headRef: Schema.NullOr(Schema.Struct({ target: Schema.Struct({ oid: CommitSha }) })),
+          headRef: Schema.NullOr(
+            Schema.Struct({ target: Schema.NullOr(Schema.Struct({ oid: CommitSha })) }),
+          ),
           mergeable: Schema.Literals(["MERGEABLE", "CONFLICTING", "UNKNOWN"]),
           statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
         }),
@@ -87,7 +94,7 @@ const Head = Schema.Struct({
 });
 const HEAD_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) { headRefOid headRef { target { oid } } mergeable statusCheckRollup { state } }
+    pullRequest(number: $number) { state headRefOid headRef { target { oid } } mergeable statusCheckRollup { state } }
   }
 }`;
 const Checks = Schema.Struct({
@@ -472,7 +479,10 @@ export class GitHubChecks extends Context.Service<
               "The pull request awaiting CI is unavailable",
             );
           const state = pr.statusCheckRollup?.state;
-          const branchHead = pr.headRef?.target.oid ?? pr.headRefOid;
+          const pullRequest =
+            pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed";
+          // GitHub's schema makes both `headRef` and its `target` nullable.
+          const branchHead = pr.headRef?.target?.oid ?? pr.headRefOid;
           if (branchHead !== pr.headRefOid) {
             yield* Effect.logInfo("Pull request head lags its branch; CI remains pending", {
               repository,
@@ -480,10 +490,11 @@ export class GitHubChecks extends Context.Service<
               branchHead,
               pullRequestHead: pr.headRefOid,
             });
-            return CheckSnapshot.make({ head: branchHead, state: "pending" });
+            return CheckSnapshot.make({ head: branchHead, pullRequest, state: "pending" });
           }
           return CheckSnapshot.make({
             head: pr.headRefOid,
+            pullRequest,
             state:
               state === "SUCCESS"
                 ? "success"
