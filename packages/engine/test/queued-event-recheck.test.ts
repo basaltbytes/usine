@@ -445,4 +445,99 @@ describe("queued Event trigger re-check", () => {
         }),
       ),
   );
+  it.live("admits only the queued CI fixes, leaving a queued trigger match on another Item", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const fixGate = yield* Deferred.make<void>();
+        const triggerGate = yield* Deferred.make<void>();
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Deferred.await(fixGate).pipe(Effect.as(stepResult("blocks the fix"))),
+          Deferred.await(triggerGate).pipe(Effect.as(stepResult("blocks the trigger match"))),
+          Effect.succeed(stepResult("fixed")),
+          Effect.succeed(stepResult("triggered")),
+        ]);
+        const fix = Submission.make({
+          ...submission({ number: 48, item: "item-fix" }),
+          ciFailureHead: Option.some(CommitSha.make("b".repeat(40))),
+        });
+        const triggerMatch = submission({ number: 50, item: "item-trigger" });
+        const rechecks = yield* Ref.make<ReadonlyArray<EventId>>([]);
+        const triggerChecking = yield* Deferred.make<void>();
+        const releaseTrigger = yield* Deferred.make<void>();
+        const runtime = engineLayer(
+          directory,
+          executorLayer(plans),
+          conditionLayer((candidate) =>
+            Ref.updateAndGet(rechecks, (all) => [...all, candidate.event.id]).pipe(
+              Effect.flatMap((checked): Effect.Effect<TriggerRecheck> => {
+                const times = checked.filter((id) => id === candidate.event.id).length;
+                if (candidate.event.id === fix.event.id && times === 1) {
+                  return Effect.succeed(TriggerRecheck.Undetermined());
+                }
+                if (candidate.event.id === triggerMatch.event.id && times === 1) {
+                  // The trigger match's own continuation holds here, so the queue stays
+                  // admissible while `admitCiFixes` runs.
+                  return Deferred.succeed(triggerChecking, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseTrigger)),
+                    Effect.andThen(stillMatches(candidate)),
+                  );
+                }
+                return stillMatches(candidate);
+              }),
+            ),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const blockingFix = yield* engine.submit(submission({ number: 47, item: "item-fix" }));
+          assert(blockingFix._tag === "Claimed");
+          yield* waitFor(engine, blockingFix.runId, ({ run }) => run.state._tag === "Running");
+          assert.strictEqual((yield* engine.submit(fix))._tag, "Queued");
+          yield* Deferred.succeed(fixGate, undefined);
+          yield* waitFor(engine, blockingFix.runId, ({ run }) => run.state._tag === "Succeeded");
+          yield* Ref.get(rechecks).pipe(
+            Effect.repeat({
+              until: (checked) => checked.length === 1,
+              schedule: Schedule.spaced("10 millis"),
+              times: 500,
+            }),
+          );
+
+          const blockingTrigger = yield* engine.submit(
+            submission({ number: 49, item: "item-trigger" }),
+          );
+          assert(blockingTrigger._tag === "Claimed");
+          yield* waitFor(engine, blockingTrigger.runId, ({ run }) => run.state._tag === "Running");
+          assert.strictEqual((yield* engine.submit(triggerMatch))._tag, "Queued");
+          yield* Deferred.succeed(triggerGate, undefined);
+          yield* waitFor(
+            engine,
+            blockingTrigger.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          yield* Deferred.await(triggerChecking);
+
+          const fixRunId = yield* runIdFor(fix);
+          const triggerRunId = yield* runIdFor(triggerMatch);
+          const opened = yield* engine.admitCiFixes;
+          assert.deepStrictEqual(opened, [fixRunId]);
+          const checked = yield* Ref.get(rechecks);
+          assert.deepStrictEqual(checked, [fix.event.id, triggerMatch.event.id, fix.event.id]);
+          const unopened = yield* Effect.flip(engine.inspect(triggerRunId));
+          assert.strictEqual(unopened._tag, "RunNotFoundError");
+          yield* waitFor(engine, fixRunId, ({ run }) => run.state._tag === "Succeeded");
+
+          yield* Deferred.succeed(releaseTrigger, undefined);
+          yield* engine.inspect(triggerRunId).pipe(
+            Effect.retry({
+              while: (error) => error._tag === "RunNotFoundError",
+              times: 500,
+              schedule: Schedule.spaced("10 millis"),
+            }),
+          );
+          yield* waitFor(engine, triggerRunId, ({ run }) => run.state._tag === "Succeeded");
+        }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
 });
