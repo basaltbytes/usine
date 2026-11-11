@@ -35,5 +35,5 @@ if (args[1] !== `repos/acme/demo/commits/${head}/pulls?per_page=100`) {
 if (process.argv.includes("--lookup-fails")) process.exit(1);
 const pr = JSON.parse(readFileSync(".test-pull-request.json", "utf8"));
 process.stdout.write(
-  JSON.stringify([[{ ...pr, number: 99, head: { sha: "f".repeat(40) } }], [pr, pr]]),
+  JSON.stringify([[{ ...pr, number: 99, head: { ...pr.head, sha: "f".repeat(40) } }], [pr, pr]]),
 );

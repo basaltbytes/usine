@@ -48,21 +48,39 @@ const handoff = (head: CommitSha) =>
 const OWN = { id: 1, full_name: "basaltbytes/usine" };
 const FORK = { id: 2, full_name: "someone/usine" };
 
-/** GitHub's pull request 815 of the repository with ID 1, with a head that lags at `BASE`. */
+interface PullRequestFixture {
+  readonly number?: number;
+  readonly url?: string;
+  readonly head: CommitSha;
+  readonly branch?: string;
+  readonly repository?: { readonly id: number; readonly full_name: string };
+  readonly state?: "open" | "closed" | "merged";
+}
+
+/** GitHub's REST response for a pull request into the repository with ID 1, #815 by default. */
+const pullResponse = ({
+  number = 815,
+  url = URL_815,
+  head,
+  branch = BRANCH,
+  repository = OWN,
+  state = "open",
+}: PullRequestFixture) => ({
+  number,
+  html_url: url,
+  state: state === "open" ? "open" : "closed",
+  merged_at: state === "merged" ? "2026-11-11T12:00:00Z" : null,
+  head: { sha: head, ref: branch, repo: repository },
+  base: { repo: { id: 1 } },
+});
+
+/** GitHub's pull request 815 of the repository with ID 1, with a head that lags at `BASE` by default. */
 const pullRequest = (
   branch: string,
   repository: { readonly id: number; readonly full_name: string },
-  state = "open",
-): Answer =>
-  Effect.succeed([
-    jsonKey({
-      number: 815,
-      html_url: URL_815,
-      state,
-      head: { sha: BASE, ref: branch, repo: repository },
-      base: { repo: { id: 1 } },
-    }),
-  ]);
+  state: PullRequestFixture["state"] = "open",
+  head: CommitSha = BASE,
+): Answer => Effect.succeed([jsonKey(pullResponse({ head, branch, repository, state }))]);
 
 const ghFailed: Answer = Effect.fail(GhFailed.make({ message: "gh: Bad Gateway (HTTP 502)" }));
 const branchAt = (commit: CommitSha) => `${commit}\trefs/heads/${BRANCH}`;
@@ -245,7 +263,12 @@ it.live(
             [
               Effect.succeed([
                 jsonKey([
-                  { number: 900, html_url: "https://github.com/basaltbytes/usine/pull/900" },
+                  pullResponse({
+                    number: 900,
+                    url: "https://github.com/basaltbytes/usine/pull/900",
+                    head: BASE,
+                    branch: "revision-1",
+                  }),
                 ]),
               ]),
             ],
@@ -285,10 +308,7 @@ it.live.each([
           branch,
           origin: [branchAt(BASE)],
           github: [
-            [
-              BRANCH_PULL_REQUESTS,
-              [Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])])],
-            ],
+            [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey([pullResponse({ head: BASE })])])]],
           ],
         },
         revision,
@@ -342,6 +362,18 @@ it.live.each([
     },
     failure: "AgentFailure",
     detail: "pull request #815 is closed",
+    reads: 1,
+  },
+  {
+    reason: "PullRequestNotOpen for a merged pull request",
+    message: handoff(HEAD),
+    checkout: {
+      branch: BRANCH,
+      origin: [branchAt(HEAD), PULL_REF],
+      github: [[PULL_REQUEST, [pullRequest(BRANCH, OWN, "merged")]]],
+    },
+    failure: "AgentFailure",
+    detail: "pull request #815 is merged",
     reads: 1,
   },
   {
@@ -491,10 +523,7 @@ it.live.each([
     index: "lists another pull request at the head",
     answer: Effect.succeed([
       jsonKey([
-        [
-          { number: 815, html_url: URL_815, head: { sha: HEAD } },
-          { number: 816, html_url: URL_816, head: { sha: HEAD } },
-        ],
+        [pullResponse({ head: HEAD }), pullResponse({ number: 816, url: URL_816, head: HEAD })],
       ]),
     ]),
     pullRequests: [815, 816],
@@ -538,7 +567,7 @@ it.live.each([
   {
     outcome: "waits on the open pull request of the pushed branch",
     github: [
-      [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])])]],
+      [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey([pullResponse({ head: HEAD })])])]],
       // GitHub's commit-to-pull-request index lags and doesn't list the pull request yet.
       [INDEX, [Effect.succeed([jsonKey([[]])])]],
     ],
@@ -580,9 +609,7 @@ it.live.each([
 );
 
 /** GitHub's commit-to-pull-request index listing pull request 815 at `HEAD`. */
-const indexed: Answer = Effect.succeed([
-  jsonKey([[{ number: 815, html_url: URL_815, head: { sha: HEAD } }]]),
-]);
+const indexed: Answer = Effect.succeed([jsonKey([[pullResponse({ head: HEAD })]])]);
 
 const plainSuccessDiscovery = [
   {
@@ -591,7 +618,7 @@ const plainSuccessDiscovery = [
     origin: [branchAt(HEAD)],
     command: BRANCH_PULL_REQUESTS,
     warning: `Could not read the pull requests of branch ${BRANCH} on GitHub; retrying`,
-    success: Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])]),
+    success: Effect.succeed([jsonKey([pullResponse({ head: HEAD })])]),
   },
   {
     path: "the pull request whose ref is the detached checkout's HEAD",
@@ -599,7 +626,7 @@ const plainSuccessDiscovery = [
     origin: [PULL_REF],
     command: PULL_REQUEST,
     warning: "Could not read pull request #815 on GitHub; retrying",
-    success: pullRequest(BRANCH, OWN),
+    success: pullRequest(BRANCH, OWN, "open", HEAD),
   },
 ];
 
@@ -654,7 +681,7 @@ it.live.each(plainSuccessDiscovery)(
 it.live.each([
   {
     outcome: "waits on the open pull request from the Run's repository",
-    pullRequest: pullRequest(BRANCH, OWN),
+    pullRequest: pullRequest(BRANCH, OWN, "open", HEAD),
     decision: "RunAwaitingCi",
     failure: Option.none<string>(),
   },
@@ -664,6 +691,14 @@ it.live.each([
     decision: "RunFailed",
     failure: Option.some(
       "CI can't wait on the pushed pull request: pull request #815 comes from someone/usine, not from the Run's repository",
+    ),
+  },
+  {
+    outcome: "fails with an AgentFailure for an open pull request whose head on GitHub isn't HEAD",
+    pullRequest: pullRequest(BRANCH, OWN),
+    decision: "RunFailed",
+    failure: Option.some(
+      `CI can't wait on the pushed pull request: no open pull request has the checkout's HEAD ${HEAD} as its head`,
     ),
   },
   {
@@ -702,7 +737,7 @@ it.live.each([
 it.live.each([
   {
     outcome: "waits on the other branch's open pull request",
-    open: [{ number: 815, html_url: URL_815 }],
+    open: [pullResponse({ head: HEAD })],
     decision: "RunAwaitingCi",
     warnings: 1,
   },
@@ -750,7 +785,7 @@ it.live.each([
 it.live.each([
   {
     outcome: "waits on the other pull request when it is open",
-    pullRequest: pullRequest(BRANCH, OWN),
+    pullRequest: pullRequest(BRANCH, OWN, "open", HEAD),
     decision: "RunAwaitingCi",
     warnings: 1,
   },
@@ -810,9 +845,7 @@ it.live.each([
     const finished = yield* finishHarvested("Finished the change.", {
       branch: BRANCH,
       origin,
-      github: [
-        [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])])]],
-      ],
+      github: [[BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey([pullResponse({ head: HEAD })])])]]],
     });
     assert.strictEqual(finished.decision._tag, "RunFailed");
     assert(Option.isSome(finished.failure));
@@ -845,7 +878,7 @@ it.live("an unpushed detached HEAD fails as an agent mistake without reading Git
 it.live.each([
   {
     outcome: "waits despite a lagging commit index",
-    open: [{ number: 815, html_url: URL_815 }],
+    open: [pullResponse({ head: HEAD })],
     decision: "RunAwaitingCi",
   },
   {

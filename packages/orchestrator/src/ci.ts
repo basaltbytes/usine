@@ -190,13 +190,13 @@ export class CiMonitor extends Context.Service<
         // GitHub stops updating a closed pull request's head, so its CI wait would last until the
         // deadline, and a fix can't land on it. Green CI on a merged head still passes with labels.
         if (
-          observed.pullRequest === "closed" ||
-          (observed.pullRequest === "merged" && observed.state !== "success")
+          observed.pullRequestState === "closed" ||
+          (observed.pullRequestState === "merged" && observed.state !== "success")
         ) {
           return yield* settleClosed(
             runId,
             handoff,
-            observed.pullRequest === "merged",
+            observed.pullRequestState === "merged",
             observed.state === "pending"
               ? "before CI settled"
               : observed.state === "conflict"

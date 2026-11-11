@@ -956,6 +956,7 @@ export const request = CheckoutRequest.make({
   parentEffort: "high",
   salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
   resume: Option.none(),
+  requiresCi: false,
   commitAuthor: COMMIT_AUTHOR,
 });
 
