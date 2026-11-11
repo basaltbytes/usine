@@ -162,6 +162,8 @@ describe("Codex child backend", () => {
         const skips = [
           "Skipping an undecodable Codex tool item",
           "Skipping a Codex item without a transcript event",
+          "Skipping an undecodable Codex agent message",
+          "Skipping an undecodable Codex user message",
         ];
         const server = connectionLayer(
           {
@@ -177,6 +179,7 @@ describe("Codex child backend", () => {
                     items: [
                       { type: "commandExecution", id: "tool-1", status: "inProgress" },
                       { type: "mcpToolCall", status: "inProgress" },
+                      { type: "agentMessage", id: "", text: "Saved without an id" },
                       ...(savedAnswer
                         ? [
                             {
@@ -207,6 +210,7 @@ describe("Codex child backend", () => {
               },
             })),
             ...[
+              { type: "userMessage", id: "steer-3" },
               { type: "fileChange", status: "inProgress" },
               { type: "collabAgentToolCall", id: "agent-1" },
             ].map((item) => ({
@@ -219,6 +223,14 @@ describe("Codex child backend", () => {
                 threadId: "thread-1",
                 turnId: "active-turn",
                 item: { type: "commandExecution", id: "tool-1", status: "completed" },
+              },
+            },
+            {
+              method: "item/completed",
+              params: {
+                threadId: "thread-1",
+                turnId: "active-turn",
+                item: { type: "agentMessage", id: "broken", phase: "final_answer" },
               },
             },
             ...(!savedAnswer
@@ -272,8 +284,11 @@ describe("Codex child backend", () => {
               ),
               [
                 { level: "Warn", message: skips[0], itemType: "mcpToolCall" },
+                { level: "Warn", message: skips[2], itemType: "agentMessage" },
+                { level: "Warn", message: skips[3], itemType: "userMessage" },
                 { level: "Warn", message: skips[0], itemType: "fileChange" },
                 { level: "Info", message: skips[1], itemType: "collabAgentToolCall" },
+                { level: "Warn", message: skips[2], itemType: "agentMessage" },
               ],
             );
           }),
