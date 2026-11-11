@@ -492,6 +492,17 @@ describe("emitDeclarations", () => {
         [keyed, fallback, { title: "OtherInfo", type: "object" }],
         "Variant HttpFailed accepts the values of variant UnknownInfo; they need distinct tags",
       ],
+      [
+        [
+          keyed,
+          {
+            title: "OpenInfo",
+            type: "object",
+            properties: { httpFailed: { type: "object" }, detail: { type: "string" } },
+          },
+        ],
+        "Variant HttpFailed accepts the values of variant OpenInfo; they need distinct tags",
+      ],
     ]) {
       const definitions = { ErrorInfo: { anyOf: alternatives } };
       expect(() => emitDeclarations(definitions, ["ErrorInfo"])).toThrow(message);
