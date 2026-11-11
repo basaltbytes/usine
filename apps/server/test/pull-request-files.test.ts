@@ -15,9 +15,9 @@ import {
   CommitRangeFilesQuery,
   FileChanges,
   FileChangesQuery,
-  GitHubFiles,
   PullRequestFilesQuery,
-} from "@usine/github/files";
+} from "@usine/github/file-changes";
+import { GitHubFiles } from "@usine/github/files";
 import { InstallationToken, InstallationWide } from "@usine/github/github-app";
 import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";

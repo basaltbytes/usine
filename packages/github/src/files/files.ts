@@ -17,15 +17,6 @@ import {
   type FileChangesQuery,
 } from "./model.ts";
 
-export {
-  ChangedFile,
-  FileChanges,
-  FileChangesQuery,
-  PullRequestFilesQuery,
-  CommitRangeFilesQuery,
-  PullRequestFilesChangedError,
-} from "./model.ts";
-
 const MAX_CACHED_RESPONSE_BYTES = 512 * 1024;
 const encoder = new TextEncoder();
 
