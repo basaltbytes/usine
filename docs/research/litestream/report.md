@@ -17,7 +17,7 @@ below establish feasibility; they do not establish a recovery deadline from obje
 storage on the factory host.
 
 This report changes no production behavior. The backup and restore contract in
-[ADR 0010](../../adr/0010-single-sqlite-runtime-store.md) continues to apply.
+[ADR 0010](../../adr/0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md) continues to apply.
 
 ## Method and limits
 
@@ -303,7 +303,7 @@ Litestream replicates files independently and adds no cross-file transaction.
 Using the same timestamp for both cannot create one. The existing
 [`usine backup`](../../../apps/server/src/backup.ts) copies durable storage before
 the runtime store and relies on startup reconciliation for the separate snapshots
-([ADR 0010](../../adr/0010-single-sqlite-runtime-store.md)). A stopped-writer boundary
+([ADR 0010](../../adr/0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md)). A stopped-writer boundary
 plus two confirmed TXIDs gives a common quiet point for upgrade rollback, while
 continuous disaster recovery still needs reconciliation. The generated markers
 verify a quiet pair; they do not test reattachment of live Pi tasks.

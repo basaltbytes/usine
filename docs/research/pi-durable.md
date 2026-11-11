@@ -105,7 +105,7 @@ ADRs to amend, each with a dated entry giving the new why: 0003 (run durability 
 
 Steps 1 to 4 merged to main in PRs #188, #194, #202, #206, and #208, with two departures from the plan:
 
-- The pi-durable task is the attempt (`usine.attempt`), not the run: a run task would add a second task type for a dozen lines of state machine whose state is already in usine's tables. The run loop (approval gate, worker reserve, attempt, finish decision, continuation) is an engine fiber over the run tables with a startup reconcile. The Effect workflow, the workflow commands table, and the cluster tables are gone (ADR 0003 amendment).
+- The pi-durable task is the attempt (`usine.attempt`), not the run: a run task would add a second task type for a dozen lines of state machine whose state is already in usine's tables. The run loop (approval gate, worker reserve, attempt, finish decision, continuation) is an engine fiber over the run tables with a startup reconcile. The Effect workflow, the workflow commands table, and the cluster tables are gone ([ADR 0002](../adr/0002-run-model-event-run-step-attempt.md)).
 - The transcript store stays. Claude Code and Codex children run outside the harness, so their events reach storage only through the relay that appends attempt channel envelopes to `usine_attempt_transcripts`; pi-durable's conversation entries contain only the parent. The run drawer still reads the transcript, so `PROTOCOL_VERSION` stays on the envelopes.
 
 Dogfooded on the factory instance: after a SIGKILL mid-attempt and a restart, the same attempt reattaches and the run finishes on it; cancel stops the parent task and its child with no orphan; the approval gate waits and resumes. Follow-ups are on the issues linked from #176.
