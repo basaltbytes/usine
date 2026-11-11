@@ -215,6 +215,21 @@ it.live("deletes a released boxd machine and creates a new one for the next atte
   }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
 });
 
+it.live(
+  "creates a boxd machine without container isolation although the worker stores reuse",
+  () => {
+    const machine = machineFixture();
+    machine.state.docker = "absent";
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
+      assert.isTrue(providers.boxd.machines.has(first.id));
+      yield* machines.release(first.hold);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
+  },
+);
+
 it.effect("retires an idle machine at its age limit without waiting for another attempt", () => {
   const machine = machineFixture();
   const providers = fakeProviders();
