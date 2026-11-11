@@ -570,16 +570,15 @@ workers:
           .pipe(Effect.result);
         assert.isTrue(Result.isFailure(result));
       }
-      const reused = yield* parser
-        .parseUsineYaml(
-          InstancePath.make("usine.yaml"),
-          yaml + "      reuse: { attempts: 5, max_age: 2h }\n",
-        )
-        .pipe(Effect.flip);
-      assert.include(
-        reused.message,
-        'SSH worker "boxd-pool" sets provisioner.reuse, which a boxd worker doesn\'t support',
+      // Releases before boxd's single-use machines accepted reuse; a boxd worker ignores it.
+      const reused = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        yaml + "      reuse: { attempts: 5, max_age: 2h }\n",
       );
+      const reusedWorker = reused.workers[0];
+      assert(reusedWorker?.kind === "ssh" && Option.isSome(reusedWorker.provisioner));
+      assert(reusedWorker.provisioner.value.provider === "boxd");
+      assert.isTrue(Option.isSome(reusedWorker.provisioner.value.reuse));
       // Releases before boxd's Exec transport required identity_file; a boxd worker ignores it.
       const withKey = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),

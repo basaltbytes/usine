@@ -14,6 +14,7 @@ Coordinator startup and `subagent` use the shared harness admission check. `/liv
 - `/backup`: `backup(instanceDirectory, destination)`, an online copy of `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file. `usine backup` writes it next to the runtime database copy.
 - `/gateway`: `gatewayModelAccess(transport)` returns an Effect that builds Pi model access from a gateway transport. Parent admission checks the configured coordinator providers. It uses no local provider login.
 - `/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the child backends from `@usine/agents`.
+- `/coordinator/journal`: the `AttemptJournal` port of the event-driven coordinator, with its records and errors. `/coordinator/memory` and `/coordinator/sqlite` provide its adapters; see [Coordinator journal](#coordinator-journal).
 - `/testing`: a scripted parent model and stub children for whole-attempt tests, and a stub `AttemptRuntime` for executor tests.
 
 ```ts
@@ -55,6 +56,8 @@ The task doesn't store the host or environment. It stores the run spec, worker, 
 `AttemptRequest.gatewayCredential`, supplied the same way, is the credential kind that the worker's gateway uses for the children, from the worker's latest preflight, or none if they use their harness's login. The `subagent` tool records it on each child's `ChildSession` at start, so usage counts the child in the right pool. A preflight during the attempt applies to its next child, including a resumed child after a restart.
 
 Every child receives the stored rendered loop task unchanged. The parent supplies supplemental context through `subagent.task`. The child's `SessionStarted.prompt` records its exact initial prompt for the run page, including its persona, task, parent context, and completion instructions. Older transcripts leave this field absent.
+
+The `subagent` tool is an adapter over the delegation core in `src/attempt/delegation/`. `delegate` runs one child from launch or resume to a `DelegationOutcome`: `Reported`, `Reserved`, `Interrupted`, or `BudgetExceeded`. It stores state only through a `DelegationJournal`, a port in usine terms (the delegation's start, the child blocker, holds, pauses, queued operator input, the saved child session, and output). The tool implements the journal over its pi-durable tool call and maps the outcome to its tool result.
 
 The `subagent` tool commits the child's continuation identity (session ID, harness, home, and Codex model provider ID), worker, cumulative usage, and partial output before relaying them. Saved child identity excludes credential routes and billing metadata. Each launch resolves the current credential kind and repeats admission, including after a restart. A changed harness, home, checkout, or Codex provider ID refuses continuation with a message identifying the mismatch. After a restart, it waits for the executor's host and environment, then continues the saved conversation in the same checkout and transcript. Recovery keeps the child ID, child-session budget slot, and persisted operator hold and pause. A held child that finished its turn stays idle after restart until Release returns its saved report or operator guidance starts another turn. A paused child stays idle until a steer or operator message starts its next turn; releasing its hold preserves the pause. Launch admission requires `resume-session` for the worker's placement and credential route. If the saved conversation is missing or cannot be decoded, the original worker, machine, or checkout is unavailable, admission refuses resume, or recovery fails, the parent receives an interrupted tool result with the committed output.
 
@@ -142,6 +145,20 @@ Durable storage fixtures use the shared [SQLite fixture directory helper](../../
 See [Development](../../CONTRIBUTING.md#development) for temporary storage selection and worker concurrency.
 
 A child's `SessionOperationError` is recorded as an infrastructure failure. This classification takes precedence over a later parent blocker, so the engine can retry the attempt from its recorded salvage.
+
+## Coordinator journal
+
+`AttemptJournal` stores what the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) needs to resume an attempt: the stored request, an append-only ledger of events with their decisions, the coordinator state, the delegations it decided, and an outbox of channel envelopes that the sink hasn't acknowledged. Nothing runs an attempt on it yet. It doesn't use pi-durable.
+
+- `open` creates the journal, or returns the existing one unchanged.
+- `decide` records the first decision for an event and returns it to every later caller, so a restarted coordinator applies the recorded decision instead of deciding again.
+- `transition` appends the event with that decision, replaces the state, records `Delegate` and `Finish` intents, and reserves envelopes in one transaction. It fails with `StaleRevision` if the expected revision isn't current.
+- `reserve` and `acknowledge` keep the outbox in sequence order across restarts.
+- `settle` keeps the outcome and the outbox, and advances the revision, so a late transition fails as stale.
+
+The coordinator encodes events, decisions, and state as JSON; the journal stores them without reading them. Breaking a ledger invariant is a defect: an operation on an attempt that was never opened, a transition after `Finish`, a decision other than the recorded one, or an envelope out of sequence.
+
+`memoryAttemptJournalLayer` from `/coordinator/memory` keeps the journal in a `Ref`. `sqliteAttemptJournalLayer` from `/coordinator/sqlite` requires `SqlClient`; the application supplies the runtime database's connection. Its dialect SQL, Drizzle schema, and embedded migrations are in `src/coordinator/sqlite/`, with their own `usine_attempt_journal_migrations` ledger. Run `pnpm db:generate` after changing the schema. `test/contracts/` runs one contract suite against both adapters, plus a SQLite write-failure check.
 
 ## Storage contracts
 

@@ -49,7 +49,7 @@ export class StepExecution extends Schema.Class<
   /** Whether to reattach to the Attempt's live parent task instead of starting it. */
   reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** Whether the Run has a CI policy, so the Attempt's pull request must be verified on origin. */
-  requiresCi: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  requiresCi: Schema.Boolean,
 }) {}
 
 /** A reservation of one Worker slot for an Attempt, freed by `release`. */

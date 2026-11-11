@@ -157,6 +157,11 @@ export interface BoxdProvisioner {
   readonly tailnet: Option.Option<ProvisionerTailnet>;
   readonly apiKeys: ProviderApiKeys;
   readonly timings: ProvisionerTimings;
+  /**
+   * The `reuse` that the worker's configuration sets, which usine ignores and preflight warns
+   * about, or `None`.
+   */
+  readonly ignoredReuse: Option.Option<ProvisionerReuse>;
 }
 
 export type SshProvisioner = HetznerProvisioner | BoatProvisioner | BoxdProvisioner;

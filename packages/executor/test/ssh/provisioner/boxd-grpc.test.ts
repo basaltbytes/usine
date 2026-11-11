@@ -97,6 +97,11 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
               calls.push("destroy");
               return {};
             },
+            setVmEgressAllow: (request) => {
+              calls.push(`egress ${request.vm} ${request.entries.join(",")}`);
+              machine.egressAllow = request.entries;
+              return { entries: request.entries };
+            },
             setAutoHibernateTimeout: (request) => {
               assert.strictEqual(request.timeoutSecs, 0);
               calls.push("hibernate");
@@ -179,6 +184,13 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
       assert.strictEqual(vm.createdAt, 1_700_000_000);
       yield* api.listVms(["usine.worker=worker"]);
       assert.deepStrictEqual(vm.egressAllow, ["*.tailscale.com"]);
+      const inEffect = yield* api.setEgressAllow(created.id, [
+        "*.tailscale.com",
+        "registry.npmjs.org",
+      ]);
+      assert.deepStrictEqual(inEffect, ["*.tailscale.com", "registry.npmjs.org"]);
+      const restricted = yield* api.vm(created.id);
+      assert.deepStrictEqual(restricted.egressAllow, inEffect);
       yield* api.setAutoHibernateTimeout(created.id, 0);
       yield* api.setAutoSuspendTimeout(created.id, 0);
       yield* api.destroy(MachineId.make("vm-1"));
@@ -196,7 +208,12 @@ it.effect("decodes real gRPC responses, exchanges a refused key once, and saniti
     }).pipe(Effect.provide(layer));
     assert.strictEqual(exchanges, 2);
     assert.deepStrictEqual(selectors[0], ["usine.worker=worker"]);
-    assert.deepStrictEqual(calls, ["hibernate", "suspend", "destroy"]);
+    assert.deepStrictEqual(calls, [
+      "egress vm-1 *.tailscale.com,registry.npmjs.org",
+      "hibernate",
+      "suspend",
+      "destroy",
+    ]);
     const host = fakeMachine();
     const ambient = fakeBoxd();
     ambient.state.keyRefused = true;

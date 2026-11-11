@@ -60,6 +60,7 @@ export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProv
   tailnet: Option.none(),
   apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
   timings: ProvisionerTimings.make({}),
+  ignoredReuse: Option.none(),
   ...overrides,
 });
 

@@ -364,6 +364,12 @@ export const boxdApiLayer = (
             Effect.asVoid,
           ),
         ),
+        setEgressAllow: Effect.fn("BoxdApi.setEgressAllow")(
+          (id: MachineId, entries: ReadonlyArray<string>) =>
+            call(machines, "setEgressAllow", (opts) =>
+              client.setVmEgressAllow({ vm: id, entries: [...entries] }, opts),
+            ).pipe(Effect.map(({ entries: inEffect }) => inEffect)),
+        ),
         setAutoHibernateTimeout: Effect.fn("BoxdApi.setAutoHibernateTimeout")(
           (id: MachineId, seconds: number) =>
             call(machines, "setAutoHibernateTimeout", (opts) =>

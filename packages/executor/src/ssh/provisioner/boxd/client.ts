@@ -124,6 +124,14 @@ export class BoxdApi extends Context.Service<
       selector: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<BoxdMachine>, BoxdCallError>;
     readonly destroy: (id: MachineId) => Effect.Effect<void, BoxdCallError>;
+    /**
+     * Replaces the machine's egress allowlist; an empty list makes egress unrestricted. Returns
+     * the list in effect.
+     */
+    readonly setEgressAllow: (
+      id: MachineId,
+      entries: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyArray<string>, BoxdCallError>;
     readonly setAutoHibernateTimeout: (
       id: MachineId,
       seconds: number,

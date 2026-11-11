@@ -275,7 +275,7 @@ export class CheckoutRequest extends Schema.Class<
    * Whether the Run's Loop has a CI policy, copied into the RunSpec. If true, harvesting a
    * success without a CI handoff verifies the pull request of the checkout's branch on origin.
    */
-  requiresCi: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  requiresCi: Schema.Boolean,
   /**
    * The author and committer of every commit that the Attempt's parent and children make. Their
    * environment sets it, so no git config on the Worker's machine applies.

@@ -24,7 +24,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Array as Arr, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import {
   AccountUpdated,
   AgentMessageItem,
@@ -43,7 +43,6 @@ import {
   ThreadResumeParams,
   ThreadResumeResponse,
   ThreadStartResponse,
-  ToolItem,
   TurnActivity,
   TurnCompleted,
   TurnStartParams,
@@ -54,12 +53,17 @@ import {
 } from "../../protocol/codex/codex.ts";
 import {
   userMessageText,
+  AgentMessageKindItem,
+  decodeItem,
   decodeResponse,
   decodeNotification,
+  decodeNotifiedToolItem,
+  decodeToolItem,
   providerRetryMessage,
   turnFailure,
   toolName,
   rateLimitWindow,
+  UserMessageKindItem,
 } from "./codec.ts";
 import {
   type AgentSessionError,
@@ -323,15 +327,14 @@ const makeCodexChild = Effect.gen(function* () {
       let turnId = Option.match(thread.activeTurn, { onNone: () => "", onSome: (turn) => turn.id });
       let turnActive = Option.isSome(thread.activeTurn);
       let interrupting = false;
+      const resumedTools = yield* Effect.forEach(
+        Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
+        (item) => decodeToolItem(session.id, item),
+      ).pipe(Effect.map(Arr.getSomes));
       const toolsInFlight = new Map<string, string>(
-        Option.match(thread.activeTurn, {
-          onNone: () => [],
-          onSome: (turn) =>
-            turn.items
-              .filter(Schema.is(ToolItem))
-              .filter((item) => isToolStatus(item.status, "inProgress"))
-              .map((item): [string, string] => [item.id, toolName(item)]),
-        }),
+        resumedTools
+          .filter((item) => isToolStatus(item.status, "inProgress"))
+          .map((item): [string, string] => [item.id, toolName(item)]),
       );
       const pendingMessages: Array<{ message: string; id: OperatorMessageId | undefined }> = [];
       const submitted: Array<{
@@ -345,13 +348,15 @@ const makeCodexChild = Effect.gen(function* () {
           if (index >= 0) submitted.splice(index, 1);
         });
       const observedItems = new Set<string>();
-      const savedMessages = Option.match(thread.activeTurn, {
-        onNone: () => [],
-        onSome: (turn) =>
-          turn.items
-            .filter(Schema.is(AgentMessageItem))
-            .filter((item) => item.text.trim().length > 0),
-      });
+      const savedMessages = yield* Effect.forEach(
+        Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
+        (item) =>
+          Schema.is(AgentMessageKindItem)(item)
+            ? decodeItem(AgentMessageItem, "agent message", session.id, item)
+            : Effect.succeedNone,
+      ).pipe(
+        Effect.map((items) => Arr.getSomes(items).filter((item) => item.text.trim().length > 0)),
+      );
       let lastText = savedMessages.at(-1)?.text.trim();
       let finalText = savedMessages
         .filter((item) => isMessagePhase(item.phase, "final_answer"))
@@ -593,10 +598,17 @@ const makeCodexChild = Effect.gen(function* () {
               if (Option.isNone(notification)) return;
               const item = notification.value.item;
               if (notification.value.threadId !== thread.id) return;
-              if (Schema.is(UserMessageItem)(item)) {
-                const text = userMessageText(item);
-                if (observedItems.has(item.id)) return;
-                observedItems.add(item.id);
+              if (Schema.is(UserMessageKindItem)(item)) {
+                const message = yield* decodeItem(
+                  UserMessageItem,
+                  "user message",
+                  session.id,
+                  item,
+                );
+                if (Option.isNone(message)) return;
+                const text = userMessageText(message.value);
+                if (observedItems.has(message.value.id)) return;
+                observedItems.add(message.value.id);
                 const index = submitted.findIndex(
                   (input) =>
                     (input.turnId === undefined || input.turnId === notification.value.turnId) &&
@@ -613,14 +625,15 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: notification.value.turnId,
                 });
               }
-              if (!Schema.is(ToolItem)(notification.value.item)) return;
-              toolsInFlight.set(notification.value.item.id, toolName(notification.value.item));
+              const tool = yield* decodeNotifiedToolItem(session.id, item);
+              if (Option.isNone(tool)) return;
+              toolsInFlight.set(tool.value.id, toolName(tool.value));
               return yield* channel.emit(
                 ToolStarted.make({
                   session,
-                  callId: notification.value.item.id,
-                  tool: toolName(notification.value.item),
-                  input: notification.value.item,
+                  callId: tool.value.id,
+                  tool: toolName(tool.value),
+                  input: item,
                 }),
               );
             }
@@ -639,25 +652,33 @@ const makeCodexChild = Effect.gen(function* () {
                 });
               }
               const item = notification.value.item;
-              if (Schema.is(AgentMessageItem)(item)) {
-                const text = item.text.trim();
+              if (Schema.is(AgentMessageKindItem)(item)) {
+                const message = yield* decodeItem(
+                  AgentMessageItem,
+                  "agent message",
+                  session.id,
+                  item,
+                );
+                if (Option.isNone(message)) return;
+                const text = message.value.text.trim();
                 if (text.length === 0) return;
                 lastText = text;
-                if (isMessagePhase(item.phase, "final_answer")) finalText = text;
+                if (isMessagePhase(message.value.phase, "final_answer")) finalText = text;
                 return yield* channel.emit(TextOutput.make({ session, text }));
               }
-              if (!Schema.is(ToolItem)(item)) return;
-              toolsInFlight.delete(item.id);
+              const tool = yield* decodeNotifiedToolItem(session.id, item);
+              if (Option.isNone(tool)) return;
+              toolsInFlight.delete(tool.value.id);
               yield* channel.emit(
                 ToolFinished.make({
                   session,
-                  callId: item.id,
-                  tool: toolName(item),
+                  callId: tool.value.id,
+                  tool: toolName(tool.value),
                   output: item,
                   isError:
-                    isToolStatus(item.status, "failed") ||
-                    isApprovalToolStatus(item.status, "declined") ||
-                    item.success === false,
+                    isToolStatus(tool.value.status, "failed") ||
+                    isApprovalToolStatus(tool.value.status, "declined") ||
+                    tool.value.success === false,
                 }),
               );
               if (toolsInFlight.size === 0 && (yield* conversation.isPaused))

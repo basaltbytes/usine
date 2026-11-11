@@ -146,6 +146,7 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
                   egress: settings.egress,
                   size: settings.size,
                   snapshot: settings.snapshot,
+                  ignoredReuse: settings.reuse,
                 }
               : {
                   provider: settings.provider,

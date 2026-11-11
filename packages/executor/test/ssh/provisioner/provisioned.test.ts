@@ -7,6 +7,7 @@ import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
   ProvisionerReuse,
+  ProvisionerSeconds,
   MachineAttemptLimit,
   MachineMaxAge,
   ContainerCpus,
@@ -1073,6 +1074,37 @@ describe("Provisioned SSH Worker", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(runtimeOf(machine, providers, keyed).pipe(Layer.provideMerge(logs.layer))),
+    );
+  });
+
+  it.live("warns at preflight that a boxd Worker ignores its provisioner.reuse", () => {
+    const machine = fakeMachine();
+    const providers = fakeProviders();
+    const logs = capturedLogs();
+    const reused: SshWorkerAddress = {
+      ...boxdAddress,
+      machine: {
+        _tag: "Provisioned",
+        provisioner: boxdSettings({
+          timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
+          ignoredReuse: Option.some(
+            ProvisionerReuse.make({
+              attempts: MachineAttemptLimit.make(5),
+              maxAge: MachineMaxAge.make("2h"),
+            }),
+          ),
+        }),
+      },
+    };
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      assert.isTrue(
+        logs.warnings.some((line) => line.includes("sets provisioner.reuse, which usine ignores")),
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtimeOf(machine, providers, reused).pipe(Layer.provideMerge(logs.layer))),
     );
   });
 

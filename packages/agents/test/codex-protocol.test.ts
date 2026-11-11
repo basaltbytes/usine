@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import { AgentSessionId } from "@usine/core/agent/session";
 import { Effect, Option, Schema } from "effect";
 import {
   AccountResponse,
@@ -24,8 +25,14 @@ import packageJson from "../package.json" with { type: "json" };
 import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
 import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
+import { decodeNotifiedToolItem, decodeToolItem } from "../src/harness/codex/codec.ts";
+import { collectLogs } from "./logs.ts";
 import {
+  CommandExecutionStatusValues,
+  DynamicToolCallStatusValues,
   ImageGenerationThreadItem,
+  McpToolCallStatusValues,
+  PatchApplyStatusValues,
   ThreadTokenUsageUpdatedNotification,
 } from "../src/protocol/codex/generated.ts";
 import { UsageCount } from "../src/protocol/count.ts";
@@ -79,6 +86,24 @@ describe("generated Codex protocol selections", () => {
     expect(isAuthMode("chatgpt", "chatgpt")).toBe(true);
   });
 
+  it("compares tool statuses against the status list of each compared tool kind", () => {
+    const expectLists = (
+      actual: ReadonlyArray<ReadonlyArray<string>>,
+      expected: ReadonlyArray<ReadonlyArray<string>>,
+    ) => {
+      expect(actual).toHaveLength(expected.length);
+      // Identity, not equality: the command and file-change lists have the same members.
+      expected.forEach((list, index) => expect(actual[index]).toBe(list));
+    };
+    expectLists(isToolStatus.lists, [
+      CommandExecutionStatusValues,
+      PatchApplyStatusValues,
+      McpToolCallStatusValues,
+      DynamicToolCallStatusValues,
+    ]);
+    expectLists(isApprovalToolStatus.lists, [CommandExecutionStatusValues, PatchApplyStatusValues]);
+  });
+
   it.effect("requires comparison inputs to be strings rather than whole protocol objects", () =>
     Effect.gen(function* () {
       const item = yield* Schema.decodeEffect(ToolItem)({
@@ -102,6 +127,13 @@ describe("generated Codex protocol selections", () => {
 
   it.effect("keeps common fields on generated image payload alternatives", () =>
     Effect.gen(function* () {
+      expectTypeOf<
+        Pick<typeof ImageGenerationThreadItem.Type, "id" | "type" | "status">
+      >().toEqualTypeOf<{
+        readonly id: string;
+        readonly type: "imageGeneration";
+        readonly status: string;
+      }>();
       for (const payload of [{ fileId: "file" }, { result: "image-data" }]) {
         const image = yield* Schema.decodeEffect(ImageGenerationThreadItem)({
           id: "image",
@@ -157,7 +189,7 @@ describe("generated Codex protocol selections", () => {
 
   it.effect("decodes new enum members in saved turns and assistant messages", () =>
     Effect.gen(function* () {
-      const response = yield* Schema.decodeUnknownEffect(ThreadResumeResponse)({
+      const response = yield* Schema.decodeEffect(ThreadResumeResponse)({
         modelProvider: "openai",
         thread: {
           id: "saved-thread",
@@ -178,7 +210,7 @@ describe("generated Codex protocol selections", () => {
       const items = response.thread.turns[0]?.items ?? [];
       expect(items.filter(Schema.is(AgentMessageItem))[0]?.phase).toBe("new_phase");
       expect(items.filter(Schema.is(ToolItem))[0]?.status).toBe("waitingForApproval");
-      expect(items.at(-1)?.type).toBe("futureItem");
+      expect(items.at(-1)).toEqual({ type: "futureItem", payload: { anything: true } });
       expect(Schema.is(ToolItem)({ type: "futureTool", id: "tool" })).toBe(false);
     }),
   );
@@ -251,4 +283,99 @@ describe("generated Codex protocol selections", () => {
     );
     expect(Option.isSome(unsupportedCodexVersion("codex-cli 0.165.0"))).toBe(true);
   });
+});
+
+describe("Codex tool item decoding", () => {
+  const sessionId = AgentSessionId.make("session");
+  const warning = (itemType: string) => ({
+    level: "Warn",
+    message: ["Skipping an undecodable Codex tool item", { sessionId, cause: expect.anything() }],
+    annotations: { itemType },
+  });
+
+  it.effect("logs a tool item that does not decode and leaves other item kinds to the caller", () =>
+    Effect.gen(function* () {
+      const { records: warnings, layer } = collectLogs(["Warn"]);
+      const decode = (item: Schema.Json) =>
+        decodeToolItem(sessionId, item).pipe(Effect.provide(layer));
+
+      const tool = yield* decode({ type: "mcpToolCall", id: "call", status: "completed" });
+      expect(Option.map(tool, ({ id }) => id)).toEqual(Option.some("call"));
+      const reasoning = yield* decode({ type: "reasoning", id: "thought" });
+      expect(reasoning).toEqual(Option.none());
+      expect(warnings).toEqual([]);
+
+      const malformed = yield* decode({ type: "mcpToolCall", status: "completed" });
+      expect(malformed).toEqual(Option.none());
+      expect(warnings).toEqual([warning("mcpToolCall")]);
+    }),
+  );
+
+  it.effect("logs a notified item of a kind without a transcript event", () =>
+    Effect.gen(function* () {
+      const { records, layer } = collectLogs(["Info", "Warn"]);
+      const decode = (item: Schema.Json) =>
+        decodeNotifiedToolItem(sessionId, item).pipe(Effect.provide(layer));
+
+      const messages = yield* Effect.forEach(
+        [
+          { type: "agentMessage", id: "answer", text: "Done" },
+          { type: "userMessage", id: "prompt", content: [] },
+        ],
+        decode,
+      );
+      expect(messages).toEqual([Option.none(), Option.none()]);
+      expect(records).toEqual([]);
+
+      const items = yield* Effect.forEach(
+        [
+          { type: "commandExecution", id: "call", status: "completed" },
+          { type: "collabAgentToolCall", id: "agent" },
+          { type: "commandExecution", status: "completed" },
+        ],
+        decode,
+      );
+      expect(items.map(Option.map(({ id }) => id))).toEqual([
+        Option.some("call"),
+        Option.none(),
+        Option.none(),
+      ]);
+      expect(records).toEqual([
+        {
+          level: "Info",
+          message: ["Skipping a Codex item without a transcript event", { sessionId }],
+          annotations: { itemType: "collabAgentToolCall" },
+        },
+        warning("commandExecution"),
+      ]);
+    }),
+  );
+
+  it.effect("keeps every item of a resumed turn for the tool item decoder", () =>
+    Effect.gen(function* () {
+      const { records: warnings, layer } = collectLogs(["Warn"]);
+      const response = yield* Schema.decodeEffect(ThreadResumeResponse)({
+        modelProvider: "openai",
+        thread: {
+          id: "saved-thread",
+          turns: [
+            {
+              id: "saved-turn",
+              status: "inProgress",
+              items: [
+                { type: "dynamicToolCall", id: "", status: "inProgress" },
+                { type: "commandExecution", id: "command", status: "inProgress" },
+                { type: "reasoning", id: "thought" },
+              ],
+            },
+          ],
+        },
+      });
+      const tools = yield* Effect.forEach(response.thread.turns[0]?.items ?? [], (item) =>
+        decodeToolItem(sessionId, item),
+      ).pipe(Effect.provide(layer));
+      expect(tools.flatMap(Option.toArray).map(({ id }) => id)).toEqual(["command"]);
+      expect(warnings).toEqual([warning("dynamicToolCall")]);
+    }),
+  );
 });
