@@ -12,7 +12,7 @@ The pin is the point: the engine version is **per-instance, committed, authored 
 
 1. Create the App by manifest flow against the orchestrator's redirect endpoint ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md) permissions; active `hook_attributes` with the `.invalid` URL and events of [ADR 0014](./0014-webhook-delivery-as-hints.md)).
 2. Save the conversion response (App id, private key, webhook secret) to the 0600 `.usine/` secrets file (environment override).
-3. Prefill the operator's GitHub login into `usine.yaml` ([ADR 0017](./0017-away-intervention-github-native-asks.md)).
+3. Prefill the operator's GitHub login into `usine.yaml`.
 4. Install the App on the managed repos.
 5. Fill the registry with the installation-bound add-repo picker (ADR 0016).
 
