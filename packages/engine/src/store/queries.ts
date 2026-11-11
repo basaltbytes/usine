@@ -261,7 +261,6 @@ export const queriesFor = (
       });
       yield* changedRun(row.runId);
     });
-  // `.execute()` stays explicit (ADR 0020).
   const eventRouteByDedup = Effect.fn("RunStoreQueries.eventRouteByDedup")(function* (
     dedupKey: DedupKey,
   ) {

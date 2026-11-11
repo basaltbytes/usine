@@ -172,9 +172,6 @@ _Avoid_: runner, sandbox, executor
 The setting of an SSH worker that creates and retires machines at Hetzner Cloud, Boat, or boxd (ADR 0029). A worker with one is a provisioned worker.
 _Avoid_: autoscaler, pool, fleet
 
-**Run host**:
-Removed in ADR 0006.
-
 **Attempt channel**:
 The messages of one attempt: session events from its parent and children, and operator input to a session.
 _Avoid_: stream, pipe, socket

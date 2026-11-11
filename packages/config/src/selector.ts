@@ -5,7 +5,7 @@ import { RegistryTag, type ManagedRepo } from "./factory.ts";
 
 /**
  * Repository names or tags that narrow a loop's project membership. When both are set, both must
- * match (ADR 0004).
+ * match.
  */
 export class Selector extends Schema.Class<
   Selector,

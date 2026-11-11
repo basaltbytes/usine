@@ -602,7 +602,7 @@ export class RunDriver extends Context.Service<
         if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
         if (started._tag === "RunClosed") return "Unchanged";
 
-        // An executor defect becomes a `DefectFailure`, which isn't retried automatically (ADR 0003).
+        // An executor defect becomes a `DefectFailure`, which isn't retried automatically.
         const result = yield* executor
           .execute(started.execution, {
             append: (direction, envelope) =>

@@ -115,7 +115,7 @@ State is in `<instance>/.usine/workers/<worker>/`: `repos/` caches, `attempts/` 
 
 Every command is `ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 [-p port] [-i key -o IdentitiesOnly=yes] <destination> -- <quoted command>` ([commands.ts:87][], [ssh/ssh.ts:22][], [child-host.ts:85][]), and the client inherits only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` ([commands.ts:70][]).
 
-A shell script writes the token from standard input, never a command line, to `<root>/workers/<name>/credentials/<attempt>` ([ssh/credentials.ts:25][]), with mode 700 directories and mode 600 files. A process's first attempt on a worker removes earlier processes' credential directories. Each attempt's container mounts only its own directory, so attempts can't read each other's tokens; on a machine without Docker, they share a user and can ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md), [#231][]).
+A shell script writes the token from standard input, never a command line, to `<root>/workers/<name>/credentials/<attempt>` ([ssh/credentials.ts:25][]), with mode 700 directories and mode 600 files. A process's first attempt on a worker removes earlier processes' credential directories. Each attempt's container mounts only its own directory, so attempts can't read each other's tokens; on a machine without Docker, they share a user and can ([ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md), [#231][]).
 
 ### ssh behind a gateway
 
@@ -632,7 +632,7 @@ The orchestrator reads the gateway's admin token from the `admin_token_env` vari
 
 With `openai` in a worker's `llm_providers`, the gateway stores the ChatGPT login in the Codex `auth.json` named by `USINE_GATEWAY_CHATGPT_AUTH_FILE`. It refreshes the access token before expiry and writes the rotated tokens back to that file. Use a separate login for the gateway: two copies that refresh the same token invalidate each other. The [gateway setup guide](https://docs.usine.dev/guides/add-a-worker/) describes the configuration. An OpenAI API key can occupy the same provider slot.
 
-Each attempt uses a caller token instead of the ChatGPT credential. The executor writes `<root>/workers/<name>/codex/<attempt>/config.toml`, sets `CODEX_HOME` to that directory, and configures a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key = "USINE_GATEWAY_TOKEN"`, `wire_api = "responses"`, and `requires_openai_auth = false`. The file contains no token; the caller token reaches the attempt through SSH environment forwarding or the container's standard input. The gateway validates its attachment, replaces it with the ChatGPT access token and account ID, and forwards Responses requests to the ChatGPT backend. See [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-25.
+Each attempt uses a caller token instead of the ChatGPT credential. The executor writes `<root>/workers/<name>/codex/<attempt>/config.toml`, sets `CODEX_HOME` to that directory, and configures a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key = "USINE_GATEWAY_TOKEN"`, `wire_api = "responses"`, and `requires_openai_auth = false`. The file contains no token; the caller token reaches the attempt on standard input. The gateway validates its attachment, replaces it with the ChatGPT access token and account ID, and forwards Responses requests to the ChatGPT backend. See [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md).
 
 With `anthropic` in `llm_providers`, Claude Code calls `llm.<domain>/anthropic` with the caller token, and the gateway substitutes its API key or subscription token. A harness whose provider isn't listed uses the login on a long-lived worker, through the forward proxy when configured. Those logins need their hosts in the proxy's allowlist. A provisioned machine has no saved login; see [Harness credentials](#harness-credentials).
 
@@ -712,7 +712,7 @@ LABEL=${LABEL:-usine=gateway}
 GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 ```
 
-[Gaps](./gaps.md) lists the open gateway issues, such as [#254][] and [#264][].
+Open gateway issues are in the issue tracker, such as [#254][] and [#264][].
 
 [factory.ts:150]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L150
 [factory.ts:214]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L214

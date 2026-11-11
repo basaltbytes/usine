@@ -357,7 +357,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
  * The executor for Linux machines accessed over SSH. Each Attempt's Pi parent is a durable task
  * in this process (`AttemptRuntime`), and each child runs on the machine as one SSH command, in
  * the Attempt's own container if the machine has Docker. Without a Gateway, the Attempt's GitHub
- * token is written next to its checkout (ADR 0026). Behind a Gateway, the machine gets only a
+ * token is written next to its checkout (ADR 0011). Behind a Gateway, the machine gets only a
  * caller token for an attachment made through the Gateway's admin API (ADR 0027). A provisioned
  * Worker creates machines at a provider and optionally reuses them between attempts
  * (`WorkerMachines`, #550). `SshWorkers` adds and removes Workers at runtime. Requires Node.

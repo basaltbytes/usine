@@ -26,6 +26,12 @@ declare module "vitest/browser" {
 }
 
 const button = (name: string) => page.getByRole("button", { name, exact: true });
+const revision = (number: number) =>
+  page
+    .getByRole("listitem")
+    .filter({ hasText: `Revision ${number}` })
+    .getByRole("button")
+    .first();
 const select = (name: string) => page.getByRole("combobox", { name, exact: true });
 const assertForm = async () => {
   await expect.element(select("Member")).toBeVisible();
@@ -93,7 +99,7 @@ it.each([1440, 390])(
       await capture("members");
       await page.getByRole("link", { name: "Add binding · olivia-operator", exact: true }).click();
       await page.getByRole("textbox", { name: "Name", exact: true }).fill("olivia-project");
-      await button("Edit").click();
+      await button("Continue").click();
       await assertForm();
       await expect.element(select("Member")).toHaveValue("2");
       expect([...document.querySelectorAll("select")][0]?.textContent).toContain("olivia-operator");
@@ -156,7 +162,7 @@ it.each([1440, 390])(
       await page
         .getByRole("link", { name: "View history for binding:olivia-project", exact: true })
         .click();
-      await expect.element(button("Revision 5")).toBeVisible();
+      await expect.element(revision(5)).toBeVisible();
       const actors = page
         .getByRole("region", { name: "History" })
         .getByText("alice-admin", { exact: true });
@@ -213,9 +219,9 @@ it("starts a binding from Configuration with an explicit member choice", async (
         </QueryClientProvider>,
       ),
     );
-    await button("New").click();
+    await button("New role binding").click();
     await page.getByRole("textbox", { name: "Name", exact: true }).fill("new-binding");
-    await button("Edit").click();
+    await button("Continue").click();
     await assertForm();
     await expect.element(select("Member")).toHaveValue("");
     await button("Save").click();

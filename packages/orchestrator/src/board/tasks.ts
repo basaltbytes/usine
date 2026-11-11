@@ -46,7 +46,7 @@ const itemLink = (item: ProjectedItem) =>
 
 /**
  * Joins explicit issue and pull request relationships into Task cards, without stored Task
- * identities (ADR 0024). Each card includes its running Run, which sets its Board lane.
+ * identities (ADR 0008). Each card includes its running Run, which sets its Board lane.
  */
 export const taskCards = (
   repository: RepositoryName,
