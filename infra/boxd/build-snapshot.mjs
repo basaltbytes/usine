@@ -149,8 +149,11 @@ const runSetup = async (boxd, machine, { runtime, image }, { output, signal }) =
   }
 };
 
-/** Saves `machine` as snapshot `name` and waits until boxd reports the new version ready. */
-const saveSnapshot = async (boxd, machine, name, signal) => {
+/**
+ * Saves `machine` as snapshot `name` and waits until boxd reports the new version ready, polling
+ * every `pollMs` for at most `timeoutMs`.
+ */
+const saveSnapshot = async (boxd, machine, name, { signal, pollMs, timeoutMs }) => {
   const previous = await boxd.snapshots.get(name).then(
     (snapshot) => snapshot.version ?? 0,
     (error) => {
@@ -159,7 +162,7 @@ const saveSnapshot = async (boxd, machine, name, signal) => {
     },
   );
   await boxd.snapshots.create(machine, name);
-  const deadline = Date.now() + SNAPSHOT_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     throwIfAborted(signal);
     const snapshot = await boxd.snapshots.get(name);
@@ -167,7 +170,7 @@ const saveSnapshot = async (boxd, machine, name, signal) => {
     if (snapshot.status === "ready" && (snapshot.version ?? 0) > previous) return snapshot;
     if (Date.now() > deadline)
       throw new Error(`Snapshot ${name} is still ${snapshot.status} after 10 minutes`);
-    await sleep(POLL_MS);
+    await sleep(pollMs);
   }
 };
 
@@ -176,9 +179,14 @@ const saveSnapshot = async (boxd, machine, name, signal) => {
  * shared with the API key's org, isolated, at `options.size`, with the egress allowlist of
  * `egress.mjs` in its spec, which the snapshot keeps. The setup runs with egress unrestricted,
  * because it downloads from hosts outside the allowlist. The machine is deleted when the build
- * ends, fails, or `signal` aborts; `log` names it if its deletion fails.
+ * ends, fails, or `signal` aborts; `log` names it if its deletion fails. `pollMs` and
+ * `snapshotTimeoutMs` set how often and how long the script waits for the snapshot.
  */
-export const build = async (boxd, options, { log, output, signal }) => {
+export const build = async (
+  boxd,
+  options,
+  { log, output, signal, pollMs = POLL_MS, snapshotTimeoutMs = SNAPSHOT_TIMEOUT_MS },
+) => {
   const egress = boxdEgress();
   const stamp = new Date().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
   const name = `usine-snapshot-${stamp}-${process.pid}`;
@@ -215,7 +223,11 @@ export const build = async (boxd, options, { log, output, signal }) => {
         "boxd didn't record the egress allowlist in the temporary machine's spec, so the snapshot would start unrestricted",
       );
     log(`Saving snapshot ${options.snapshot}`);
-    await saveSnapshot(boxd, machine.id, options.snapshot, signal);
+    await saveSnapshot(boxd, machine.id, options.snapshot, {
+      signal,
+      pollMs,
+      timeoutMs: snapshotTimeoutMs,
+    });
     return options.snapshot;
   } finally {
     signal.removeEventListener("abort", remove);
