@@ -346,6 +346,57 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
+it.effect(
+  "fails preflight with the key advice and no exchange when boxd refuses the key for another reason",
+  () =>
+    Effect.gen(function* () {
+      const key = "bxd_revoked_key";
+      const bearers: Array<string> = [];
+      const transport = (() =>
+        createRouterTransport((router) => {
+          router.service(BoxdService, {
+            whoami: (_request, context) => {
+              bearers.push(context.requestHeader.get("authorization") ?? "");
+              // A wrong or revoked key, which a session from the same key can't fix.
+              throw new ConnectError("API key not recognized", Code.Unauthenticated);
+            },
+          });
+        })) satisfies Parameters<typeof boxdApiLayer>[2];
+      const drivers = yield* machineDriversFor({
+        instance: "endpoint-test",
+        settings: {
+          boxdClient: (token, cluster) => boxdApiLayer(token, cluster, transport),
+        },
+      });
+      const driver = yield* drivers.forPreflight({
+        address: {
+          ...boxdAddress,
+          machine: {
+            _tag: "Provisioned",
+            provisioner: boxdSettings({
+              token: Redacted.make(key),
+              endpoint: Option.some(BoxdEndpoint.make("https://boxd.example.com:9443")),
+              region: Option.none(),
+            }),
+          },
+        },
+        gateway: Option.none(),
+        machine: Option.none(),
+      });
+      for (const _ of [1, 2]) {
+        const failure = yield* driver.verify(WORKER, 2).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "WorkerCapabilityError");
+        assert.include(failure.message, "boxd refused the API key");
+        assert.notInclude(failure.message, key);
+      }
+      assert.deepStrictEqual(
+        bearers,
+        [`Bearer ${key}`, `Bearer ${key}`],
+        "every call keeps the API key, so boxd's refusal didn't switch the worker to sessions",
+      );
+    }).pipe(Effect.scoped, Effect.provide([noExchange, fakeMachine().layer])),
+);
+
 it.effect("sends every call to the account endpoint without a region", () =>
   Effect.gen(function* () {
     const calls: Array<RoutedCall> = [];
