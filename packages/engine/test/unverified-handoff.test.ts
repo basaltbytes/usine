@@ -38,19 +38,29 @@ const BRANCH_PULL_REQUESTS =
   "gh api repos/basaltbytes/usine/pulls?head=basaltbytes:usine%2Ffix&state=open&per_page=100";
 const INDEX = `gh api repos/basaltbytes/usine/commits/${HEAD}/pulls?per_page=100 --paginate --slurp`;
 const URL_815 = "https://github.com/basaltbytes/usine/pull/815";
+const URL_816 = "https://github.com/basaltbytes/usine/pull/816";
 
 const policy = CiPolicy.make({ fixLoop: LoopName.make("fix"), timeoutSeconds: 3600 });
 
 const handoff = (head: CommitSha) =>
   `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: 3600, on_green: [] })}`;
 
-/** GitHub's pull request 815 with a head that lags at `BASE`. */
-const pullRequest = (branch: string, repository: string): Answer =>
+const OWN = { id: 1, full_name: "basaltbytes/usine" };
+const FORK = { id: 2, full_name: "someone/usine" };
+
+/** GitHub's pull request 815 of the repository with ID 1, with a head that lags at `BASE`. */
+const pullRequest = (
+  branch: string,
+  repository: { readonly id: number; readonly full_name: string },
+  state = "open",
+): Answer =>
   Effect.succeed([
     jsonKey({
       number: 815,
       html_url: URL_815,
-      head: { sha: BASE, ref: branch, repo: { full_name: repository } },
+      state,
+      head: { sha: BASE, ref: branch, repo: repository },
+      base: { repo: { id: 1 } },
     }),
   ]);
 
@@ -216,7 +226,7 @@ it.live.each([
     assert.strictEqual(finished.failure.value._tag, "InfraFailure");
     assert.strictEqual(
       finished.failure.value.message,
-      "CI can't wait on the pushed pull request: GitHub couldn't be read: GitFailed: git: Could not resolve host",
+      "CI can't wait on the pushed pull request: git couldn't read the checkout or origin: GitFailed: git: Could not resolve host",
     );
   }),
 );
@@ -316,10 +326,22 @@ it.live.each([
     checkout: {
       branch: BRANCH,
       origin: [branchAt(HEAD), PULL_REF],
-      github: [[PULL_REQUEST, [pullRequest(BRANCH, "someone/usine")]]],
+      github: [[PULL_REQUEST, [pullRequest(BRANCH, FORK)]]],
     },
     failure: "AgentFailure",
     detail: "pull request #815 comes from someone/usine, not from the Run's repository",
+    reads: 1,
+  },
+  {
+    reason: "PullRequestNotOpen",
+    message: handoff(HEAD),
+    checkout: {
+      branch: BRANCH,
+      origin: [branchAt(HEAD), PULL_REF],
+      github: [[PULL_REQUEST, [pullRequest(BRANCH, OWN, "closed")]]],
+    },
+    failure: "AgentFailure",
+    detail: "pull request #815 is closed",
     reads: 1,
   },
   {
@@ -328,14 +350,14 @@ it.live.each([
     checkout: {
       branch: BRANCH,
       origin: [branchAt(OTHER), PULL_REF],
-      github: [[PULL_REQUEST, [pullRequest(BRANCH, "basaltbytes/usine")]]],
+      github: [[PULL_REQUEST, [pullRequest(BRANCH, OWN)]]],
     },
     failure: "AgentFailure",
     detail: `branch ${BRANCH} of pull request #815 is at ${OTHER} on origin, not at the checkout's HEAD ${HEAD}`,
     reads: 1,
   },
   {
-    reason: "GitHubReadFailed on timeout",
+    reason: "VerificationTimedOut",
     message: handoff(HEAD),
     checkout: {
       branch: BRANCH,
@@ -343,26 +365,20 @@ it.live.each([
       github: [[PULL_REQUEST, [Effect.never]]],
     },
     failure: "InfraFailure",
-    detail: "GitHub couldn't be read: the reads didn't finish within 10 seconds",
+    detail: "the git and GitHub reads didn't finish within 10 seconds",
     reads: 1,
   },
   {
-    reason: "GitHubReadFailed on invalid output without retrying",
+    reason: "GitHubReadFailed on invalid output after retries",
     message: handoff(HEAD),
     checkout: {
       branch: BRANCH,
       origin: [branchAt(HEAD), PULL_REF],
-      github: [
-        [
-          PULL_REQUEST,
-          [Effect.succeed(["invalid JSON"]), pullRequest(BRANCH, "basaltbytes/usine")],
-        ],
-      ],
+      github: [[PULL_REQUEST, [Effect.succeed(["invalid JSON"])]]],
     },
     failure: "InfraFailure",
-    detail:
-      "GitHub couldn't be read: HarvestError: GitHub returned invalid CI handoff pull request",
-    reads: 1,
+    detail: "GitHub couldn't be read: HarvestError: GitHub returned invalid pull request #815",
+    reads: 3,
   },
   {
     reason: "GitHubReadFailed",
@@ -411,12 +427,18 @@ it.live.each([
     }),
 );
 
-it.live("a CI handoff verifies after a failed pull request read is retried", () =>
+it.live.each([
+  { failure: "a failed read", first: ghFailed },
+  { failure: "invalid output", first: Effect.succeed(["invalid JSON"]) },
+])("a CI handoff verifies after $failure of its pull request is retried", ({ first }) =>
   Effect.gen(function* () {
     const finished = yield* finishHarvested(handoff(HEAD), {
       branch: BRANCH,
       origin: [branchAt(HEAD), PULL_REF],
-      github: [[PULL_REQUEST, [ghFailed, pullRequest(BRANCH, "basaltbytes/usine")]]],
+      github: [
+        [PULL_REQUEST, [first, pullRequest(BRANCH, OWN)]],
+        [INDEX, [Effect.succeed([jsonKey([[]])])]],
+      ],
     });
     assert.strictEqual(finished.decision._tag, "RunAwaitingCi");
     assert(finished.state._tag === "AwaitingCi");
@@ -441,17 +463,19 @@ it.live("a CI handoff verifies after a failed pull request read is retried", () 
       assert.strictEqual(span.attributes.get("repository"), finished.execution.repository);
       assert.strictEqual(span.attributes.get("item"), 1);
     }
-    // Each read logs the branch's commit on origin against GitHub's lagging pull request head.
+    // The read logs the branch's commit on origin against GitHub's lagging pull request head.
     assert.deepStrictEqual(
       finished.infos.filter(
-        (logged) => Array.isArray(logged) && logged[0] === "Read the CI handoff's pull request",
+        (logged) =>
+          Array.isArray(logged) && logged[0] === "Read the pull request that CI would wait on",
       ),
       [
         [
-          "Read the CI handoff's pull request",
+          "Read the pull request that CI would wait on",
           {
             attemptId: finished.execution.attempt.id,
             pullRequest: 815,
+            state: "open",
             branch: BRANCH,
             branchHead: HEAD,
             pullRequestHead: BASE,
@@ -460,6 +484,54 @@ it.live("a CI handoff verifies after a failed pull request read is retried", () 
       ],
     );
   }),
+);
+
+it.live.each([
+  {
+    index: "lists another pull request at the head",
+    answer: Effect.succeed([
+      jsonKey([
+        [
+          { number: 815, html_url: URL_815, head: { sha: HEAD } },
+          { number: 816, html_url: URL_816, head: { sha: HEAD } },
+        ],
+      ]),
+    ]),
+    pullRequests: [815, 816],
+    warnings: 0,
+  },
+  { index: "can't be read", answer: ghFailed, pullRequests: [815], warnings: 1 },
+])(
+  "a CI handoff from a renamed repository keeps its pull request when the index $index",
+  ({ answer, pullRequests, warnings }) =>
+    Effect.gen(function* () {
+      const finished = yield* finishHarvested(handoff(HEAD), {
+        branch: BRANCH,
+        origin: [branchAt(HEAD), PULL_REF],
+        github: [
+          // GitHub answers for the renamed repository under its old name.
+          [PULL_REQUEST, [pullRequest(BRANCH, { id: 1, full_name: "basaltbytes/old-usine" })]],
+          [INDEX, [answer]],
+        ],
+      });
+      assert.strictEqual(finished.decision._tag, "RunAwaitingCi");
+      assert(finished.decision._tag === "RunAwaitingCi");
+      assert.deepStrictEqual(
+        finished.decision.result.facts.flatMap((fact) =>
+          fact._tag === "PullRequest" && Option.contains(fact.head, HEAD) ? [fact.number] : [],
+        ),
+        pullRequests,
+      );
+      assert.lengthOf(
+        finished.warnings.filter(
+          (logged) =>
+            Array.isArray(logged) &&
+            logged[0] ===
+              "Pull request discovery failed; keeping only the CI handoff's pull request",
+        ),
+        warnings,
+      );
+    }),
 );
 
 it.live.each([
@@ -508,19 +580,9 @@ it.live.each([
 );
 
 /** GitHub's commit-to-pull-request index listing pull request 815 at `HEAD`. */
-const indexed = (state: "open" | "closed", repository: string): Answer =>
-  Effect.succeed([
-    jsonKey([
-      [
-        {
-          number: 815,
-          html_url: URL_815,
-          state,
-          head: { sha: HEAD, repo: { full_name: repository } },
-        },
-      ],
-    ]),
-  ]);
+const indexed: Answer = Effect.succeed([
+  jsonKey([[{ number: 815, html_url: URL_815, head: { sha: HEAD } }]]),
+]);
 
 const plainSuccessDiscovery = [
   {
@@ -532,12 +594,12 @@ const plainSuccessDiscovery = [
     success: Effect.succeed([jsonKey([{ number: 815, html_url: URL_815 }])]),
   },
   {
-    path: "the detached checkout's commit index",
+    path: "the pull request whose ref is the detached checkout's HEAD",
     branch: "",
     origin: [PULL_REF],
-    command: INDEX,
-    warning: "Could not read the final commit's pull requests on GitHub; retrying",
-    success: indexed("open", "basaltbytes/usine"),
+    command: PULL_REQUEST,
+    warning: "Could not read pull request #815 on GitHub; retrying",
+    success: pullRequest(BRANCH, OWN),
   },
 ];
 
@@ -587,16 +649,18 @@ it.live.each(plainSuccessDiscovery)(
     }),
 );
 
+// GitHub's commit-to-pull-request index can lag, so the detached checkout's pull request ref is
+// read by number.
 it.live.each([
   {
     outcome: "waits on the open pull request from the Run's repository",
-    index: indexed("open", "basaltbytes/usine"),
+    pullRequest: pullRequest(BRANCH, OWN),
     decision: "RunAwaitingCi",
     failure: Option.none<string>(),
   },
   {
     outcome: "fails with an AgentFailure for an open pull request from a fork",
-    index: indexed("open", "someone/usine"),
+    pullRequest: pullRequest(BRANCH, FORK),
     decision: "RunFailed",
     failure: Option.some(
       "CI can't wait on the pushed pull request: pull request #815 comes from someone/usine, not from the Run's repository",
@@ -604,7 +668,7 @@ it.live.each([
   },
   {
     outcome: "fails with an AgentFailure for a closed pull request",
-    index: indexed("closed", "basaltbytes/usine"),
+    pullRequest: pullRequest(BRANCH, OWN, "closed"),
     decision: "RunFailed",
     failure: Option.some(
       `CI can't wait on the pushed pull request: no open pull request has the checkout's HEAD ${HEAD} as its head`,
@@ -612,23 +676,127 @@ it.live.each([
   },
 ] satisfies ReadonlyArray<{
   readonly outcome: string;
-  readonly index: Answer;
+  readonly pullRequest: Answer;
   readonly decision: string;
   readonly failure: Option.Option<string>;
-}>)("a CI loop's success from a detached checkout $outcome", ({ index, decision, failure }) =>
+}>)("a CI loop's success from a detached checkout $outcome", ({ pullRequest, decision, failure }) =>
   Effect.gen(function* () {
     const finished = yield* finishHarvested("Finished the change.", {
       branch: "",
       origin: [PULL_REF],
-      github: [[INDEX, [index]]],
+      github: [
+        [PULL_REQUEST, [pullRequest]],
+        [INDEX, [indexed]],
+      ],
     });
     assert.strictEqual(finished.decision._tag, decision);
     assert.deepStrictEqual(
       Option.map(finished.failure, ({ message }) => message),
       failure,
     );
+    assert.notInclude(finished.commands, INDEX);
     assert.notInclude(finished.commands, BRANCH_PULL_REQUESTS);
   }),
+);
+
+it.live.each([
+  {
+    outcome: "waits on the other branch's open pull request",
+    open: [{ number: 815, html_url: URL_815 }],
+    decision: "RunAwaitingCi",
+    warnings: 1,
+  },
+  {
+    outcome: "retries the attempt when no other branch has an open pull request",
+    open: [],
+    decision: "RetryAttempt",
+    warnings: 0,
+  },
+])(
+  "a detached success with one unreadable candidate branch $outcome",
+  ({ open, decision, warnings }) =>
+    Effect.gen(function* () {
+      const finished = yield* finishHarvested("Finished the change.", {
+        branch: "",
+        origin: [`${HEAD}\trefs/heads/unreadable`, branchAt(HEAD)],
+        github: [
+          [
+            "gh api repos/basaltbytes/usine/pulls?head=basaltbytes:unreadable&state=open&per_page=100",
+            [ghFailed],
+          ],
+          [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey(open)])]],
+        ],
+      });
+      assert.strictEqual(finished.decision._tag, decision);
+      if (decision === "RetryAttempt") {
+        assert(Option.isSome(finished.failure));
+        assert.strictEqual(
+          finished.failure.value.message,
+          "CI can't wait on the pushed pull request: GitHub couldn't be read: GhFailed: gh: Bad Gateway (HTTP 502)",
+        );
+      }
+      assert.lengthOf(
+        finished.warnings.filter(
+          (logged) =>
+            Array.isArray(logged) &&
+            logged[0] ===
+              "Could not read one candidate's pull requests; CI waits on the other candidates' open pull requests",
+        ),
+        warnings,
+      );
+    }),
+);
+
+it.live.each([
+  {
+    outcome: "waits on the other pull request when it is open",
+    pullRequest: pullRequest(BRANCH, OWN),
+    decision: "RunAwaitingCi",
+    warnings: 1,
+  },
+  {
+    outcome: "retries the attempt when the other pull request is closed",
+    pullRequest: pullRequest(BRANCH, OWN, "closed"),
+    decision: "RetryAttempt",
+    warnings: 0,
+  },
+])(
+  "a detached success with one unreadable candidate pull request ref $outcome",
+  ({ pullRequest, decision, warnings }) =>
+    Effect.gen(function* () {
+      const unreadable = "gh api repos/basaltbytes/usine/pulls/816";
+      const finished = yield* finishHarvested("Finished the change.", {
+        branch: "",
+        origin: [PULL_REF, `${HEAD}\trefs/pull/816/head`],
+        github: [
+          [unreadable, [ghFailed]],
+          [PULL_REQUEST, [pullRequest]],
+        ],
+      });
+      assert.strictEqual(finished.decision._tag, decision);
+      assert.strictEqual(tries(finished.commands, unreadable), 3);
+      if (decision === "RunAwaitingCi") {
+        assert(finished.state._tag === "AwaitingCi");
+        assert.strictEqual(finished.state.handoff.pullRequest, 815);
+        assert.strictEqual(finished.state.handoff.head, HEAD);
+      } else {
+        assert(Option.isSome(finished.failure));
+        assert.strictEqual(finished.failure.value._tag, "InfraFailure");
+        assert.strictEqual(
+          finished.failure.value.message,
+          "CI can't wait on the pushed pull request: GitHub couldn't be read: GhFailed: gh: Bad Gateway (HTTP 502)",
+        );
+      }
+      assert.lengthOf(
+        finished.warnings.filter(
+          (logged) =>
+            Array.isArray(logged) &&
+            logged[0] ===
+              "Could not read one candidate's pull requests; CI waits on the other candidates' open pull requests",
+        ),
+        warnings,
+      );
+    }),
 );
 
 it.live.each([
@@ -696,7 +864,7 @@ it.live.each([
           [Effect.succeed([jsonKey([])])],
         ],
         [BRANCH_PULL_REQUESTS, [Effect.succeed([jsonKey(open)])]],
-        [INDEX, [indexed("open", "basaltbytes/usine")]],
+        [INDEX, [indexed]],
       ],
     });
     assert.strictEqual(finished.decision._tag, decision);

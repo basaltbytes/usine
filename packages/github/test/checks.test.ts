@@ -82,6 +82,7 @@ it.effect.each([
           data: {
             repository: {
               pullRequest: {
+                state: "OPEN",
                 headRefOid: head,
                 headRef: { target: { oid: head } },
                 mergeable,
@@ -109,10 +110,44 @@ it.effect.each(["SUCCESS", "FAILURE", null])(
             data: {
               repository: {
                 pullRequest: {
+                  state: "OPEN",
                   headRefOid: "b".repeat(40),
                   headRef: { target: { oid: head } },
                   mergeable: "CONFLICTING",
                   statusCheckRollup: rollup === null ? null : { state: rollup },
+                },
+              },
+            },
+          }),
+        ),
+      ),
+    ),
+);
+
+it.effect.each([
+  { state: "OPEN", headRef: { target: null }, expected: "open" },
+  { state: "CLOSED", headRef: null, expected: "closed" },
+  { state: "MERGED", headRef: { target: null }, expected: "merged" },
+] as const)(
+  "reads a $state pull request whose branch target is $headRef as $expected at its head",
+  ({ state, headRef, expected }) =>
+    Effect.gen(function* () {
+      const snapshot = yield* (yield* GitHubChecks).snapshot(repository, ItemNumber.make(815));
+      assert.strictEqual(snapshot.head, head);
+      assert.strictEqual(snapshot.pullRequest, expected);
+      assert.strictEqual(snapshot.state, "success");
+    }).pipe(
+      Effect.provide(
+        withClient(() =>
+          json({
+            data: {
+              repository: {
+                pullRequest: {
+                  state,
+                  headRefOid: head,
+                  headRef,
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: { state: "SUCCESS" },
                 },
               },
             },

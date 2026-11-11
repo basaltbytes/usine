@@ -174,17 +174,21 @@ describe("harvesting an Attempt's facts", () => {
     }),
   );
 
+  // GitHub answers for a renamed repository under its new name, so repositories match by ID.
   it.effect.each([
-    { branchHead: HEAD, repository: "acme/demo", expected: [HEAD] },
-    { branchHead: OTHER, repository: "acme/demo", expected: [] },
-    { branchHead: HEAD, repository: "someone/demo", expected: [] },
+    { branchHead: HEAD, repository: { id: 1, full_name: "acme/old-demo" }, expected: [71, 72] },
+    { branchHead: OTHER, repository: { id: 1, full_name: "acme/demo" }, expected: [] },
+    { branchHead: HEAD, repository: { id: 2, full_name: "acme/demo" }, expected: [] },
   ])(
-    "verifies a handoff with a stale PR head against $repository at $branchHead",
+    "verifies a handoff with a stale PR head from $repository.full_name at $branchHead",
     ({ branchHead, repository, expected }) =>
       Effect.gen(function* () {
-        const { facts, commands, warnings } = yield* harvest(
+        const { facts, warnings } = yield* harvest(
           [`${branchHead}\trefs/heads/usine/fix`, `${HEAD}\trefs/heads/unrelated`],
-          Effect.die("An explicit handoff must not depend on the commit-to-PR index"),
+          pages(
+            { number: 71, html_url: "https://github.com/acme/demo/pull/71", head: { sha: HEAD } },
+            { number: 72, html_url: "https://github.com/acme/demo/pull/72", head: { sha: HEAD } },
+          ),
           [
             [
               "gh api repos/acme/demo/pulls/71",
@@ -192,7 +196,9 @@ describe("harvesting an Attempt's facts", () => {
                 jsonKey({
                   number: 71,
                   html_url: "https://github.com/acme/demo/pull/71",
-                  head: { sha: BASE, ref: "usine/fix", repo: { full_name: repository } },
+                  state: "open",
+                  head: { sha: BASE, ref: "usine/fix", repo: repository },
+                  base: { repo: { id: 1 } },
                 }),
               ]),
             ],
@@ -210,10 +216,11 @@ describe("harvesting an Attempt's facts", () => {
           ),
         );
         assert.deepStrictEqual(
-          facts.flatMap((fact) => (fact._tag === "PullRequest" ? Option.toArray(fact.head) : [])),
+          facts.flatMap((fact) =>
+            fact._tag === "PullRequest" && Option.contains(fact.head, HEAD) ? [fact.number] : [],
+          ),
           expected,
         );
-        assert.notInclude(commands, PULL_REQUESTS);
         assert.deepStrictEqual(warnings, []);
       }),
   );

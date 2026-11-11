@@ -301,6 +301,41 @@ it.live("a required CI loop fails a success report without a pushed PR", () =>
   ),
 );
 
+// A result harvested before reasons were recorded fails as an InfraFailure without one, which
+// the engine retries only up to the Attempt cap.
+it.live("a CI handoff without a harvested pull request or reason stops after three attempts", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const unverified = Effect.succeed(
+        StepResult.make({
+          message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: 3600, on_green: [] })}`,
+          facts: [],
+        }),
+      );
+      const worker = yield* slottedExecutor([unverified, unverified, unverified]);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const accepted = yield* engine.submit(required());
+        assert(accepted._tag === "Claimed");
+        const failed = yield* waitFor(
+          engine,
+          accepted.runId,
+          ({ run }) => run.state._tag === "Failed",
+        );
+        assert.deepStrictEqual(
+          failed.attempts.map(({ outcome }) =>
+            Option.match(outcome, {
+              onNone: () => "open",
+              onSome: (ended) => (ended._tag === "Failed" ? ended.failure._tag : ended._tag),
+            }),
+          ),
+          ["InfraFailure", "InfraFailure", "InfraFailure"],
+        );
+      }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
+    }),
+  ),
+);
+
 it.live("operator cancellation settles the ended CI attempt and rejects late completion", () =>
   withInstance((directory) =>
     Effect.gen(function* () {

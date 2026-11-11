@@ -5,12 +5,15 @@ import { repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
 import {
   CiFailed,
+  type CiHandoff,
   CiHandedOff,
   CiIncomplete,
   CiPassed,
+  CiPullRequestClosed,
   CiSuperseded,
   CiTimedOut,
 } from "@usine/core/ci";
+import type { RunId } from "@usine/core/run";
 import {
   canonicalRepositoryName,
   type RepositoryName,
@@ -109,6 +112,38 @@ export class CiMonitor extends Context.Service<
       const observationServices = (yield* Effect.context<
         CycleBudgets | GitHubPolling | ItemProjectionWriter
       >()).pipe(Context.pick(CycleBudgets, GitHubPolling, ItemProjectionWriter));
+      // A person decided the outcome of a closed or merged pull request, so the Run ends without
+      // an agent failure: a merge passes, and a close without a merge cancels the Run.
+      const settleClosed = Effect.fn("CiMonitor.settleClosed")(function* (
+        runId: RunId,
+        handoff: CiHandoff,
+        merged: boolean,
+        when: string,
+      ) {
+        const { head, pullRequest } = handoff;
+        if (merged) {
+          yield* Effect.logInfo(
+            "The pull request was merged before CI passed; the CI wait passes without completion labels",
+            {
+              runId,
+              head,
+              pullRequest,
+              detail: `Pull request #${pullRequest} was merged ${when} on head ${head}. usine applied no completion labels and started no fix.`,
+            },
+          );
+          return yield* engine.settleCi(runId, head, CiPassed.make());
+        }
+        yield* Effect.logInfo(
+          "The pull request was closed without a merge before CI passed; the run is canceled",
+          {
+            runId,
+            head,
+            pullRequest,
+            detail: `Pull request #${pullRequest} was closed ${when} on head ${head}. usine applied no completion labels and started no fix.`,
+          },
+        );
+        return yield* engine.settleCi(runId, head, CiPullRequestClosed.make({ pullRequest }));
+      });
       const reconcileOne = Effect.fn("CiMonitor.reconcileOne")(function* (
         instance: LoadedInstance,
         wait: RunSnapshot,
@@ -151,6 +186,25 @@ export class CiMonitor extends Context.Service<
             newHead: observed.head,
           });
           return yield* engine.settleCi(runId, head, CiSuperseded.make({ head: observed.head }));
+        }
+        // GitHub stops updating a closed pull request's head, so its CI wait would last until the
+        // deadline, and a fix can't land on it. Green CI on a merged head still passes with labels.
+        if (
+          observed.pullRequest === "closed" ||
+          (observed.pullRequest === "merged" && observed.state !== "success")
+        ) {
+          return yield* settleClosed(
+            runId,
+            handoff,
+            observed.pullRequest === "merged",
+            observed.state === "pending"
+              ? "before CI settled"
+              : observed.state === "conflict"
+                ? "while it conflicted with its base branch"
+                : observed.state === "failure"
+                  ? "after CI failed"
+                  : "after CI passed",
+          );
         }
         const now = yield* DateTime.now;
         const timedOut =
@@ -322,12 +376,14 @@ export class CiMonitor extends Context.Service<
         }
         if (observation.projection.payload.state !== "OPEN") {
           yield* Effect.logInfo("CI fix skipped because the pull request closed", { runId, head });
-          return yield* engine.settleCi(
+          return yield* settleClosed(
             runId,
-            head,
-            CiFailed.make({
-              message: `${failureReason} The pull request closed; no fix was started.`,
-            }),
+            handoff,
+            observation.projection.payload.merged === true ||
+              observation.projection.payload.state === "MERGED",
+            observed.state === "conflict"
+              ? "while it conflicted with its base branch"
+              : "after CI failed",
           );
         }
         const task = yield* parser.renderPrompt(fix.loop, {

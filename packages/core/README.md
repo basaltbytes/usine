@@ -110,7 +110,7 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 
 ## CI waits
 
-`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The branch must belong to the attempt's repository and point at the checkout's final commit; the pull request API can report an older head. Without a handoff, a `HarvestSpec` with `requiresCi` verifies the open pull requests of the checkout's branch the same way; a detached checkout queries branches on origin at its HEAD. An unchanged detached checkout fails with `PullRequestNotFound` unless its revision is the fixed base commit. When only pull request refs match, it keeps the open pull requests from the attempt's repository that GitHub's commit-to-pull-request index lists at that HEAD. The pull request read retries with `retryTransient` while origin has the pull request's `refs/pull/<n>/head`.
+`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The pull request must be open, its head repository must have the attempt's repository ID, and the branch must point at the checkout's final commit; the pull request API can report an older head. A verified handoff also keeps the other pull requests that GitHub's commit-to-pull-request index lists at its head; if that read fails, it keeps only the handoff's pull request. Without a handoff, a `HarvestSpec` with `requiresCi` verifies the open pull requests of the checkout's branch the same way; a detached checkout queries branches on origin at its HEAD. An unchanged detached checkout fails with `PullRequestNotFound` unless its revision is the fixed base commit. When only pull request refs match, it reads each pull request whose `refs/pull/<n>/head` is that HEAD and keeps the open ones from the attempt's repository. A candidate branch or pull request whose read fails is skipped if another candidate has an open pull request. GitHub reads retry failures and invalid output with `retryTransient`; the handoff's pull request read retries only while origin has its `refs/pull/<n>/head`.
 
 A verification that fails returns no pull request and sets `Harvest.unverifiedHandoff`, which the executor copies to `StepResult.unverifiedHandoff`:
 
@@ -118,15 +118,18 @@ A verification that fails returns no pull request and sets `Harvest.unverifiedHa
 | --- | --- | --- |
 | `HeadMismatch` | The handoff's `head` isn't the checkout's HEAD. | `AgentFailure` |
 | `PullRequestNotFound` | Origin has no such pull request, or no open pull request heads the branch or detached HEAD. | `AgentFailure` |
+| `PullRequestNotOpen` | The handoff's pull request is closed or merged. | `AgentFailure` |
 | `RepositoryMismatch` | The pull request, or every open one at a detached HEAD, comes from another repository. | `AgentFailure` |
 | `BranchNotAtHead` | The branch on origin is missing or at another commit. | `AgentFailure` |
-| `GitHubReadFailed` | A GitHub API read failed after retries, a git read failed, or the reads took longer than 10 seconds. | `InfraFailure` |
+| `GitHubReadFailed` | A GitHub API read failed or returned invalid output after retries. Keeps the read's error as `cause`. | `InfraFailure` |
+| `GitReadFailed` | A `git` read of the checkout or of origin failed or returned invalid output. | `InfraFailure` |
+| `VerificationTimedOut` | The `git` and GitHub reads took longer than 10 seconds. | `InfraFailure` |
 
 `describeUnverifiedHandoff` returns the reason as the failure message shows it.
 
 `HandedOff` is a closed, neutral run state with the failed head, reason, fix loop, and fix run ID. `CiHandedOff` settles a CI wait into this state and ends its attempt as `AttemptHandedOff`.
 
-`CiTimedOut` settles a CI wait that remains pending at its deadline as an `InfraFailure`. `CiIncomplete` settles a CI wait whose workflow run failed or was canceled with no failed job as an `InfraFailure` for the operator. `CiFailed` records an `AgentFailure` when failed CI cannot start a fix.
+`CiTimedOut` settles a CI wait that remains pending at its deadline as an `InfraFailure`. `CiIncomplete` settles a CI wait whose workflow run failed or was canceled with no failed job as an `InfraFailure` for the operator. `CiFailed` records an `AgentFailure` when failed CI cannot start a fix. `CiPullRequestClosed` settles a CI wait whose pull request was closed without a merge before CI passed: the run is `Canceled` with the cancel reason `PullRequestClosed`, and the attempt ends as `AttemptCanceled`.
 
 Attempt timing and provider-retry helpers accept the metadata they use, so polling summaries can omit prompts and comments.
 
