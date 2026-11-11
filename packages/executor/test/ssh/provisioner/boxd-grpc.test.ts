@@ -17,6 +17,7 @@ import { BoxdApi as BoxdService } from "../../../src/ssh/provisioner/boxd/api-pb
 import {
   BoxdApi,
   type BoxdApiLayer,
+  BoxdCallError,
   type BoxdCreate,
 } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
@@ -727,5 +728,91 @@ it.effect("builds a boxd Worker's driver once for concurrent callers", () =>
     const [one, two] = yield* Fiber.joinAll([first, second]);
     assert.strictEqual(builds, 1);
     assert.strictEqual(one, two);
+  }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
+);
+
+it.effect("fails concurrent callers together when a boxd build fails, and builds again after", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    let builds = 0;
+    let closed = 0;
+    const drivers = yield* machineDriversFor({
+      instance: "regions-test",
+      settings: {
+        boxdClient: () => {
+          builds += 1;
+          return Layer.effect(
+            BoxdApi,
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() => Effect.sync(() => closed++));
+              yield* Deferred.succeed(started, undefined);
+              yield* Deferred.await(release);
+              return yield* BoxdCallError.make({
+                operation: "listRegions",
+                code: "UNAVAILABLE",
+                message: "boxd is down",
+              });
+            }),
+          );
+        },
+      },
+    });
+    const entry = { address: boxdAddress, gateway: Option.none(), machine: Option.none() };
+    const first = yield* drivers.forEntry(entry).pipe(Effect.flip, Effect.forkChild);
+    yield* Deferred.await(started);
+    const second = yield* drivers.forEntry(entry).pipe(Effect.flip, Effect.forkChild);
+    yield* Effect.yieldNow;
+    yield* Deferred.succeed(release, undefined);
+    const one = yield* Fiber.join(first);
+    const two = yield* Fiber.join(second);
+    assert.strictEqual(builds, 1, "the waiting caller shares the failed build");
+    assert.strictEqual(one._tag, "MachineUnavailableError");
+    assert.strictEqual(two._tag, "MachineUnavailableError");
+    assert.strictEqual(closed, 1, "the failed build closes what it opened");
+    const preflight = yield* drivers.forPreflight(entry).pipe(Effect.flip);
+    assert.strictEqual(builds, 2, "a later caller builds again");
+    assert.strictEqual(preflight._tag, "WorkerCapabilityError");
+    assert.include(preflight.message, "boxd didn't answer listRegions");
+  }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
+);
+
+it.effect("shares one boxd client among Worker revisions with the same key and region", () =>
+  Effect.gen(function* () {
+    const boxd = fakeBoxd();
+    const clients: Array<string> = [];
+    const execs: Array<string> = [];
+    const drivers = yield* machineDriversFor({
+      instance: "regions-test",
+      settings: {
+        boxdClient: (token, region) => {
+          clients.push(`${Redacted.value(token)} ${region}`);
+          return Layer.succeed(BoxdApi, boxd.api);
+        },
+        boxdExec: (endpoint) => {
+          execs.push(endpoint);
+          return boxd.execLayer;
+        },
+      },
+    });
+    const revision = (token: string) => ({
+      address: {
+        ...boxdAddress,
+        machine: {
+          _tag: "Provisioned" as const,
+          provisioner: boxdSettings({ token: Redacted.make(token) }),
+        },
+      },
+      gateway: Option.none(),
+      machine: Option.none(),
+    });
+    const first = yield* drivers.forEntry(revision("bxd_one"));
+    const second = yield* drivers.forEntry(revision("bxd_one"));
+    assert.notStrictEqual(first, second, "each revision has its own driver");
+    assert.deepStrictEqual(clients, ["bxd_one fra"]);
+    assert.lengthOf(execs, 1);
+    yield* drivers.forEntry(revision("bxd_two"));
+    assert.deepStrictEqual(clients, ["bxd_one fra", "bxd_two fra"]);
+    assert.lengthOf(execs, 2);
   }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
 );

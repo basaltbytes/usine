@@ -1,22 +1,69 @@
-import { Context, Effect, FileSystem, Layer, Option, Ref } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Scope,
+} from "effect";
 import { HttpClient } from "effect/http";
 import { homedir } from "node:os";
-import type { WorkerName } from "@usine/core/worker";
 import { WorkerCapabilityError } from "../../executor.ts";
-import { keyedLockFor } from "../../keyed-lock.ts";
+import type { BoxdProvisioner } from "../model.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { ProvisionedMachinesOptions } from "./machines.ts";
-import { boxdConnectError, boxdDriverFor, execCredential } from "./boxd.ts";
-import { BoxdApi } from "./boxd/client.ts";
+import { boxdConnectError, boxdDriverFor, boxdPreflightError, execCredential } from "./boxd.ts";
+import { BoxdApi, type BoxdCallError, type BoxdUnknownRegion } from "./boxd/client.ts";
 import { BoxdExec, boxdExecLayer } from "./boxd/exec.ts";
 import { boxdApiLayer } from "./boxd/grpc-client.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
 import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
 import { type MachineDriver, tagValue } from "./model.ts";
 
+type BoxdConnectFailure = BoxdCallError | BoxdUnknownRegion;
+
 /** Returns the absolute path of a key file given as absolute or `~/`. */
 const expandHome = (file: string): string =>
   file.startsWith("~/") ? `${homedir()}/${file.slice(2)}` : file;
+
+/** The `get`, `set`, and `delete` of a `Map` or `WeakMap` that holds builds by key. */
+interface Builds<K, A, E> {
+  readonly get: (key: K) => Deferred.Deferred<A, E> | undefined;
+  readonly set: (key: K, build: Deferred.Deferred<A, E>) => void;
+  readonly delete: (key: K) => boolean;
+}
+
+/**
+ * Returns a function that runs a build once per key in `scope` and shares its result. A caller
+ * that arrives while the build runs waits for the same result, so concurrent callers fail together
+ * when it fails. `builds` keeps a success for later callers and drops a failure, so the next
+ * caller builds again. A caller's interruption doesn't interrupt the build.
+ */
+const sharedBuilds =
+  <K, A, E>(scope: Scope.Scope, builds: Builds<K, A, E>) =>
+  (key: K, build: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+    Effect.suspend(() => {
+      const running = builds.get(key);
+      if (running !== undefined) return Deferred.await(running);
+      const result = Deferred.makeUnsafe<A, E>();
+      builds.set(key, result);
+      return build.pipe(
+        Effect.onExit((exit) =>
+          Effect.andThen(
+            Effect.sync(() => {
+              if (Exit.isFailure(exit)) builds.delete(key);
+            }),
+            Deferred.done(result, exit),
+          ),
+        ),
+        Effect.forkIn(scope),
+        Effect.andThen(Deferred.await(result)),
+      );
+    });
 
 /** Reuses provider clients for each worker connection; running machines retain their client. */
 export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(function* (
@@ -26,6 +73,37 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
   const fs = yield* FileSystem.FileSystem;
   const http = yield* HttpClient.HttpClient;
   const { settings, instance } = options;
+  /**
+   * The boxd API and `Exec` clients by API key, region, and endpoint, which every revision of a
+   * Worker with the same three shares. A failed build closes what it opened.
+   */
+  const boxdClients = sharedBuilds(
+    scope,
+    new Map<string, Deferred.Deferred<Context.Context<BoxdApi | BoxdExec>, BoxdConnectFailure>>(),
+  );
+  const boxdClientsFor = (value: BoxdProvisioner) => {
+    const endpoint = settings.providerEndpoints?.boxd;
+    return boxdClients(
+      // None of the three contains a line break.
+      [Redacted.value(value.token), value.region, endpoint ?? ""].join("\n"),
+      Effect.gen(function* () {
+        const clients = yield* Scope.fork(scope);
+        return yield* Effect.gen(function* () {
+          const client = yield* Layer.buildWithScope(
+            (settings.boxdClient ?? boxdApiLayer)(value.token, value.region, endpoint),
+            clients,
+          );
+          const api = Context.get(client, BoxdApi);
+          // One connection to the region carries every command of the Worker's machines.
+          const exec = yield* Layer.buildWithScope(
+            (settings.boxdExec ?? boxdExecLayer)(api.endpoint, execCredential(value)),
+            clients,
+          );
+          return Context.add(exec, BoxdApi, api);
+        }).pipe(Effect.onError((cause) => Scope.close(clients, Exit.failCause(cause))));
+      }).pipe(Effect.provideService(HttpClient.HttpClient, http)),
+    );
+  };
   const readPublicKey = Effect.fn("SshExecutor.readPublicKey")(function* (entry: SshWorkerEntry) {
     const worker = entry.address.name;
     yield* Effect.annotateCurrentSpan({ worker });
@@ -72,32 +150,19 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           settings.providerEndpoints?.hetzner ?? HETZNER_API,
         );
       case "boxd": {
-        const context = yield* Layer.buildWithScope(
-          (settings.boxdClient ?? boxdApiLayer)(
-            value.token,
-            value.region,
-            settings.providerEndpoints?.boxd,
-          ),
-          scope,
-        ).pipe(
-          Effect.mapError((failure) => boxdConnectError(worker, failure)),
-          Effect.tapError((error) =>
+        const clients = yield* boxdClientsFor(value).pipe(
+          Effect.tapError((failure) =>
             Effect.logWarning("Could not connect to the boxd region", {
               worker,
               region: value.region,
-              message: error.message,
+              ...(failure._tag === "BoxdUnknownRegion"
+                ? { failure: "unknown region", available: failure.available }
+                : { failure: failure.operation, code: failure.code, message: failure.message }),
             }),
           ),
         );
-        const api = Context.get(context, BoxdApi);
-        // One connection to the region carries every command of the Worker's machines.
-        const exec = yield* Layer.buildWithScope(
-          (settings.boxdExec ?? boxdExecLayer)(api.endpoint, execCredential(value)),
-          scope,
-        );
         return yield* boxdDriverFor(worker, value, entry.address.identityFile).pipe(
-          Effect.provideService(BoxdApi, api),
-          Effect.provideService(BoxdExec, Context.get(exec, BoxdExec)),
+          Effect.provide(clients),
         );
       }
       case "boat": {
@@ -111,23 +176,40 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
       }
     }
   });
-  const drivers = new WeakMap<SshWorkerEntry, MachineDriver>();
-  // A boxd build calls the provider, so only builds for the same Worker wait for each other.
-  const building = yield* keyedLockFor<WorkerName>();
+  // A boxd build calls the provider, so only callers for the same entry wait for each other.
+  const drivers = sharedBuilds(
+    scope,
+    new WeakMap<
+      SshWorkerEntry,
+      Deferred.Deferred<MachineDriver, Effect.Error<ReturnType<typeof buildDriver>>>
+    >(),
+  );
+  const driverOf = (entry: SshWorkerEntry) =>
+    drivers(entry, buildDriver(entry).pipe(Effect.provideService(HttpClient.HttpClient, http)));
+  /**
+   * Returns the driver of `entry` for attempts and cleanup. A boxd region that doesn't answer or
+   * rate-limits fails with a `MachineUnavailableError`, which the scheduler retries.
+   */
   const forEntry = Effect.fn("SshExecutor.driverForConnection")(function* (entry: SshWorkerEntry) {
     const worker = entry.address.name;
     yield* Effect.annotateCurrentSpan({ worker });
-    const cached = drivers.get(entry);
-    if (cached !== undefined) return cached;
-    return yield* Effect.gen(function* () {
-      const existing = drivers.get(entry);
-      if (existing !== undefined) return existing;
-      const driver = yield* buildDriver(entry).pipe(
-        Effect.provideService(HttpClient.HttpClient, http),
-      );
-      drivers.set(entry, driver);
-      return driver;
-    }).pipe(building.withLock(worker));
+    const connectError = (failure: BoxdConnectFailure) =>
+      Effect.fail(boxdConnectError(worker, failure));
+    return yield* driverOf(entry).pipe(
+      Effect.catchTags({ BoxdCallError: connectError, BoxdUnknownRegion: connectError }),
+    );
+  });
+  /** Returns the driver of `entry` for preflight, which reports every boxd failure as a gap. */
+  const forPreflight = Effect.fn("SshExecutor.driverForPreflight")(function* (
+    entry: SshWorkerEntry,
+  ) {
+    const worker = entry.address.name;
+    yield* Effect.annotateCurrentSpan({ worker });
+    const preflightError = (failure: BoxdConnectFailure) =>
+      Effect.fail(boxdPreflightError(worker, failure));
+    return yield* driverOf(entry).pipe(
+      Effect.catchTags({ BoxdCallError: preflightError, BoxdUnknownRegion: preflightError }),
+    );
   });
 
   const warned = yield* Ref.make(false);
@@ -181,6 +263,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
   });
   return {
     forEntry,
+    forPreflight,
     warnUnowned,
   };
 });
