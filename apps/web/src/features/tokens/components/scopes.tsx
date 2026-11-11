@@ -7,7 +7,7 @@ import {
   InstanceScope,
 } from "@usine/core/access";
 import { Schema } from "effect";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Input } from "~/components/ui/input";
@@ -66,6 +66,7 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
   const [secret, setSecret] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const operationsHintId = useId();
   const choices = permits(permissions, "admin", InstanceScope.make())
     ? [
         ...administratorPermissions,
@@ -151,17 +152,20 @@ export const TokenScopes = ({ token, close }: TokenScopesProps) => {
           </Label>
         ))}
       </fieldset>
-      <Label className="flex flex-col items-start gap-2">
-        {scopeCopy.operations}
-        <Input
-          value={operations}
-          onChange={(event) => setOperations(event.target.value)}
-          placeholder="operator.overview, operator.approve"
-        />
-        <span className="text-xs font-normal text-muted-foreground">
+      <div className="flex flex-col items-start gap-2">
+        <Label className="flex w-full flex-col items-start gap-2">
+          {scopeCopy.operations}
+          <Input
+            value={operations}
+            onChange={(event) => setOperations(event.target.value)}
+            placeholder="operator.overview, operator.approve"
+            aria-describedby={operationsHintId}
+          />
+        </Label>
+        <p id={operationsHintId} className="text-xs text-muted-foreground">
           {scopeCopy.operationsHint}
-        </span>
-      </Label>
+        </p>
+      </div>
       {token === undefined && (
         <Label className="flex flex-col items-start gap-2">
           {scopeCopy.expires}
