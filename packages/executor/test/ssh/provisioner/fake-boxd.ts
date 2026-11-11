@@ -1,5 +1,5 @@
 import { MachineId } from "@usine/core/worker";
-import { Clock, Effect, Layer, Option, Stream } from "effect";
+import { Clock, Duration, Effect, Layer, Option, Stream } from "effect";
 import {
   BoxdApi,
   BoxdCallError,
@@ -27,6 +27,7 @@ export const fakeBoxd = () => {
   const execs: Array<{ machine: MachineId; command: string }> = [];
   /** The endpoint and credential of each `BoxdExec` that the executor built. */
   const connections: Array<{ endpoint: string; credential: string }> = [];
+  const snapshotEgress: ReadonlyArray<string> = [];
   const state = {
     machines,
     creates,
@@ -63,7 +64,19 @@ export const fakeBoxd = () => {
      * unrestricted.
      */
     egressIgnored: false,
+    /**
+     * The snapshot's egress allowlist. A restore merges its request's list over it, in order
+     * without duplicates, as the boxd SDK documents for list fields of a spec.
+     */
+    snapshotEgress,
+    /** Whether `SetVmEgressAllow` keeps the snapshot's allowlist along with the entries it sets. */
+    egressKeepsSnapshot: false,
+    /** How long `SetVmEgressAllow` takes, in milliseconds. */
+    egressLatencyMillis: 0,
   };
+  const merged = (entries: ReadonlyArray<string>) => [
+    ...new Set([...state.snapshotEgress, ...entries]),
+  ];
   const failure = (operation: string, code: string) =>
     BoxdCallError.make({ operation, code, message: `boxd ${operation}: ${code}` });
   const call = <A>(operation: string, run: () => Effect.Effect<A, BoxdCallError>) =>
@@ -114,7 +127,7 @@ export const fakeBoxd = () => {
             status: state.provisioningReads > 0 ? "starting" : "running",
             createdAt: Math.floor(now / 1000),
             labels: request.labels,
-            egressAllow: state.egressIgnored ? [] : [...request.egress],
+            egressAllow: state.egressIgnored ? [] : merged(request.egress),
           };
           machines.set(id, machine);
           names.set(id, request.name);
@@ -172,9 +185,15 @@ export const fakeBoxd = () => {
             return yield* failure("setEgressAllow", state.egressFails.value);
           const machine = machines.get(id);
           if (machine === undefined) return yield* failure("setEgressAllow", "NOT_FOUND");
+          if (state.egressLatencyMillis > 0)
+            yield* Effect.sleep(Duration.millis(state.egressLatencyMillis));
           egress.push({ id, entries, after: [...(operations.get(id) ?? [])] });
           record(id, "egress");
-          const inEffect = state.egressIgnored ? [] : [...entries];
+          const inEffect = state.egressIgnored
+            ? []
+            : state.egressKeepsSnapshot
+              ? merged(entries)
+              : [...entries];
           machines.set(id, { ...machine, egressAllow: inEffect });
           return inEffect;
         }),
