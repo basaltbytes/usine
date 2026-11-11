@@ -797,7 +797,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               workerName,
               Option.none(),
               distinct,
-              agentsHarnessProbe(harnesses, worker.shellFor(name), {}, "sandbox-api-key"),
+              agentsHarnessProbe(harnesses, worker.shellFor(name), {}, "api-key", "sandbox"),
             );
           }),
         );
@@ -923,7 +923,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             request.worker,
             Option.none(),
             [request.agent.brain],
-            agentsHarnessProbe(harnesses, shell, {}, "sandbox-api-key"),
+            agentsHarnessProbe(harnesses, shell, {}, "api-key", "sandbox"),
           );
         }
         const access = yield* acquireSandbox(

@@ -68,14 +68,14 @@ export const probeBinary = Effect.fn("HarnessPreflight.binary")(function* (
   command: string,
   args: ReadonlyArray<string>,
 ) {
-  const { host, environment, credential } = target;
+  const { host, environment, placement, credential } = target;
   yield* Effect.annotateCurrentSpan({ harness: descriptor.id, worker: target.worker, credential });
   const failed = () =>
     HarnessUnavailableError.make({
       harness: descriptor.id,
       capability: "binary",
       message:
-        credential === "sandbox-api-key"
+        placement === "sandbox"
           ? `${command} --version failed in the sandbox image. Check the ${descriptor.label} installation in the sandbox image.`
           : command === "node" && credential !== "host-login"
             ? `Remote ${descriptor.label} children require Node.js on the worker's command path.`

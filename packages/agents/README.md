@@ -16,7 +16,7 @@ The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the
 
 ## Compose the child backends
 
-`/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` contracts. `/harness/node` provides `Harnesses`, whose runtimes each own preflight, scoped launch, and native resume. Registration rejects missing runtimes, missing descriptors, and duplicate runtime IDs. `childDispatcherLayer` (`/children`) selects a registered runtime from the agent's harness. The application composes the production SDKs:
+`/prompt` and `/runtime` are platform-free: prompt assembly, typed runtime errors, the `ChildBackend` contracts, and `RestartState`, the conversation state that a saved session restores after a restart. `/harness/node` provides `Harnesses`, whose runtimes each own preflight and scoped native sessions. Registration rejects missing runtimes, missing descriptors, and duplicate runtime IDs. `childDispatcherLayer` (`/children`) selects a registered runtime from the agent's harness. The application composes the production SDKs:
 
 ```ts
 import { Layer } from "effect";
@@ -26,7 +26,26 @@ import { harnessesLive } from "@usine/agents/harness/node";
 const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive));
 ```
 
-`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. Registered launch and preflight methods apply admission with that catalog, including credential-provider lookup for child launches. A `HarnessRuntime` has an ID, `preflight(brain, target)`, and `launch(request)`. `ProbeTarget` names the host, environment, worker, optional provisioned machine, and credential route (`host-login`, `gateway`, `api-key`, or `sandbox-api-key`). Preflight reports capability gaps as `HarnessUnavailableError` values; transport failures and timeouts fail with `SessionOperationError`.
+`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. Registered runtimes open and stop sessions with only their own harness's host variables. They admit each opened session's brain at its placement and credential route, adding `resume-session` for a `StartResume`, and admit preflight brains with that catalog. A `HarnessRuntime` has an ID, `preflight(brain, target)`, `open(spec, start, continuation)`, and `stop(spec)`; it names no role.
+
+`/harness/contract` exports the role-neutral session input. A `SessionSpec` holds the session identity (`ParentSession`, `ChildSession`, or `RoleSession`), the placement and credential route, the host, worker, provisioned machine, checkout, and environment. `StartPrompt` starts a conversation with its first message; `StartResume` reopens a saved `HarnessSession` without sending one. `open` returns a `NativeSession`: the running session, whether a reopened process was already in a turn, and the recovery of interrupted tool calls. Adapters read only the spec, the start, and the continuation policy, so a role other than the child opens a session the same way. Open it through `Harnesses`, which admits the spec before the adapter starts:
+
+```ts
+import { Effect } from "effect";
+import { continuationPolicy } from "@usine/agents/continuation";
+import { type SessionSpec, StartPrompt } from "@usine/agents/harness/contract";
+import { Harnesses } from "@usine/agents/harness/node";
+import { RestartState } from "@usine/agents/runtime";
+
+const openSession = (spec: SessionSpec, prompt: string) =>
+  Effect.gen(function* () {
+    const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
+    const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
+    return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy);
+  });
+```
+
+`childContinuation(catalog, runtime)` (`/continuation`) is the child role over a runtime. Each `launch`, `resume`, or `stop` builds a `SessionSpec` from the `ChildRequest`. `launch` and `resume` first admit the child with the catalog, including the credential-provider lookup, and also build a `RestartState`. The continuation policy carries the restart state, so adapters read operator holds, pauses, unread messages, and committed usage from it. `ProbeTarget` names the host, environment, placement, worker, optional provisioned machine, and credential route. The placement and route use the admission vocabulary (`Placement` and `CredentialRoute`), so a sandbox probe is the `api-key` route at the `sandbox` placement. Preflight reports capability gaps as `HarnessUnavailableError` values; transport failures and timeouts fail with `SessionOperationError`.
 
 Use `harnessesLiveFrom(catalog, configure)` to extend or reuse the raw built-in adapters before registry admission wraps them. The callback receives adapters with the production SDKs; return the runtimes for the supplied catalog.
 
@@ -40,7 +59,7 @@ Child prompts include the rendered loop task unchanged, including edit-and-retry
 
 - **Parent:** a Pi model with an API key, or an `openai-codex` ChatGPT model through Plus or Pro OAuth. The start log records `apiKeys` or `chatgptPlan`. A child past the run spec's child-session budget stops the parent with `ChildSessionBudgetExceededError`.
 - **Claude Code:** the worker's `claude` through the Agent SDK, with `bypassPermissions`, worker-user settings only, and the CLI login. Subscription sessions map `rate_limit_event` reports to `PoolRateLimitsUpdated` for `claudePlan`. The five-hour allowance is the primary window; the latest seven-day allowance, including model-specific allowances, is the secondary window. Each report contains only the observed window. The pool projection preserves the other window across children, attempts, and resumes. Utilization fractions become percentages, reset timestamps use epoch seconds, and omitted reset times remain unknown. Reports without utilization and unsupported allowance types are skipped. API-key sessions emit no Claude plan windows.
-- **Codex:** app-server JSON-RPC over stdio, with `approvalPolicy: never` and the CLI login. It checks the login with `account/read` before creating a thread, and records plan rate windows as `PoolRateLimitsUpdated`. An API-key login, no login, or an unsupported account fails with `PoolUnavailableError`, which needs the operator. A change to unsupported authentication ends the session before more rate windows are recorded. If `ChildSession.gatewayCredential` is set, the gateway holds the OpenAI credential and Codex has no login: the child skips the login check and ignores login changes, and its pool follows the credential kind, `chatgptPlan` for a ChatGPT login and `apiKeys` for an API key.
+- **Codex:** app-server JSON-RPC over stdio, with `approvalPolicy: never` and the CLI login. It checks the login with `account/read` before creating a thread, and records plan rate windows as `PoolRateLimitsUpdated`. An API-key login, no login, or an unsupported account fails with `PoolUnavailableError`, which needs the operator. A change to unsupported authentication ends the session before more rate windows are recorded. If the session's credential route is `gateway-subscription` or `gateway-api-key`, the gateway holds the OpenAI credential and Codex has no login: the child skips the login check and ignores login changes, and its pool follows the credential kind, `chatgptPlan` for a ChatGPT login and `apiKeys` for an API key.
 - **Pi children:** an API key for the selected provider, or a ChatGPT subscription login for an `openai-codex/...` model, using the same authentication and billing pools as the parent. Other OAuth providers remain unavailable. Pi reports tokens and cost, but no plan rate windows, so usine cannot warn before Pi sessions reach the ChatGPT plan limit.
 
 Codex rate-window events include the login email returned by `account/read`. A supported account change refreshes that identity before more snapshots are recorded. Gateway-backed children have no local login and leave it absent. Account identity is stored for display and excluded from diagnostic logs.

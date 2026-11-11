@@ -49010,6 +49010,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -49043,6 +49046,57 @@
           "pool",
           "tokens",
           "cost"
+        ],
+        "additionalProperties": false
+      },
+      "Agent_RoleSessionEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RoleSession"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "parentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "brain": {
+            "$ref": "#/components/schemas/Agent_BrainSpecEncoded"
+          },
+          "pool": {
+            "type": "string",
+            "enum": [
+              "apiKeys",
+              "claudePlan",
+              "chatgptPlan"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "_tag",
+          "id",
+          "role",
+          "agent",
+          "brain"
         ],
         "additionalProperties": false
       },
@@ -50177,6 +50231,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50209,6 +50266,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50246,6 +50306,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50348,6 +50411,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           }
@@ -50374,6 +50440,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50404,6 +50473,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           }
@@ -50430,6 +50502,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50559,6 +50634,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50601,6 +50679,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50639,6 +50720,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },
@@ -50670,6 +50754,9 @@
               },
               {
                 "$ref": "#/components/schemas/Agent_ChildSessionEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/Agent_RoleSessionEncoded"
               }
             ]
           },

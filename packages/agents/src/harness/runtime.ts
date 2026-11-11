@@ -4,16 +4,17 @@ import {
   HarnessReady,
   HarnessUnavailableError,
 } from "@usine/core/agent/capability";
-import type { HarnessSession } from "@usine/core/agent/session";
 import type { Scope } from "effect";
-import type { AgentSessionError, ChildRequest, RunningSession } from "../runtime.ts";
+import type { AgentSessionError } from "../runtime.ts";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
 import type { HarnessCatalog } from "./harness.ts";
-import { hostPlacement } from "./launch.ts";
+import { CredentialRoute, Placement } from "./capability.ts";
 import { ChildHost } from "../child-host/child-host.ts";
-import { type ChildBackendService, SessionOperationError } from "../runtime.ts";
+import { SessionOperationError } from "../runtime.ts";
+import type { ContinuationPolicy } from "./continuation.ts";
+import type { NativeSession, SessionSpec, Start } from "./contract.ts";
 
 /** Where and how to check a brain without starting a prompt. */
 export class ProbeTarget extends Schema.Class<
@@ -22,25 +23,32 @@ export class ProbeTarget extends Schema.Class<
 >("@usine/agents/ProbeTarget")({
   host: ChildHost,
   environment: Schema.Record(Schema.String, Schema.String),
-  credential: Schema.Literals(["host-login", "gateway", "api-key", "sandbox-api-key"]),
+  /** Where `host` runs sessions; a sandbox shell is `sandbox`, not `ssh`. */
+  placement: Placement,
+  /** The route that supplies the model credential, as admission names it. */
+  credential: CredentialRoute,
   worker: WorkerName,
   machine: Schema.Option(MachineId),
 }) {}
 
-/** A reopened conversation; an active retained process needs no new turn. */
-export interface ReopenedSession {
-  readonly running: RunningSession;
-  readonly active: boolean;
-}
-
-/** A harness's preflight and scoped session launch. */
-export interface HarnessRuntime extends ChildBackendService {
+/**
+ * One harness behind a role-neutral seam: a preflight without a prompt, and native sessions opened
+ * from a `SessionSpec`. Roles add their policy on top, as `childContinuation` does for children.
+ */
+export interface HarnessRuntime {
   readonly id: Harness;
-  /** Reopens a saved conversation without sending a prompt; `None` means it was unavailable. */
-  readonly resume: (
-    request: ChildRequest,
-    reference: HarnessSession,
-  ) => Effect.Effect<Option.Option<ReopenedSession>, AgentSessionError, Scope.Scope>;
+  /**
+   * Opens the native session that `spec` describes in the calling scope, starting with a prompt
+   * or reopening a saved conversation. `continuation` supplies the restored conversation state and
+   * the recovery decisions after a lost transport.
+   */
+  readonly open: (
+    spec: SessionSpec,
+    start: Start,
+    continuation: ContinuationPolicy,
+  ) => Effect.Effect<NativeSession, AgentSessionError, Scope.Scope>;
+  /** Stops a retained native process of `spec` without reopening its conversation. */
+  readonly stop: (spec: SessionSpec) => Effect.Effect<void, AgentSessionError>;
   readonly preflight: (
     brain: BrainSpec,
     target: ProbeTarget,
@@ -66,10 +74,7 @@ export const admitPreflight = Effect.fn("HarnessAdmission.preflight")(function* 
       catalog,
       "coding-agent",
       brain,
-      AdmissionContext.make({
-        placement: target.credential === "sandbox-api-key" ? "sandbox" : hostPlacement(target.host),
-        credential: target.credential === "sandbox-api-key" ? "api-key" : target.credential,
-      }),
+      AdmissionContext.make({ placement: target.placement, credential: target.credential }),
     ),
   ).pipe(
     Effect.tapError((error) =>
@@ -104,6 +109,7 @@ export const checkedPreflight = <R>(
         model: brain.model,
         worker: target.worker,
         host: target.host._tag,
+        placement: target.placement,
         credential: target.credential,
         ...Option.match(target.machine, { onNone: () => ({}), onSome: (machine) => ({ machine }) }),
       });
