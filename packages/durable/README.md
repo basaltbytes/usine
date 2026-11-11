@@ -88,6 +88,25 @@ pi-durable reports failures that don't fail their caller through `onReport`. The
 
 pi-durable has no cross-process locking: tasks and documents from a second writer can't be read back. `usine up` locks the instance folder to prevent this.
 
+## Coordinator rules
+
+`src/attempt/coordinator/rules.ts` holds the policy of the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) as three pure functions. It imports only `@usine/core` schemas and performs no IO. No attempt runs through it yet.
+
+- `ruleFor(event, context)` returns the rule's `Decision` for a `CoordinatorEvent`.
+- `clamp(decision, context)` checks a decision from a rule or a model against the event and resolves its defaults.
+- `apply(state, decision)` returns the next `CoordinatorState` and the effect intents: `Delegate` starts a child and `Finish` ends the Attempt.
+
+`Decision` is the contract that a model handler answers with. `Schema.toJsonSchemaDocument(Decision)` has one branch per tag, and its free-text fields are optional wherever the event supplies the text.
+
+The rules handle each lifecycle event as follows:
+
+- `AttemptStarted` delegates child 1 with a fixed context.
+- `ChildReported` with a reserved marker fails the Attempt with `BlockedFailure`, `QuestionFailure`, or `AgentFailure`. Without a marker, it completes the Attempt with the report.
+- `ChildInterrupted` delegates one replacement in the next child-session budget slot, with a context that tells the child to inspect the checkout and continue. With no slot left, the Attempt fails with `InfraFailure`.
+- `ChildAtCapacity` fails the Attempt with `ProviderCapacityFailure`, `ChildFailed` with `InfraFailure`, and `BudgetExceeded` with `ChildSessionBudgetFailure`.
+
+A model may answer only a report without a marker or an interruption. For every other event, `clamp` applies the rule, so a reserved marker always wins. `clamp` turns a `RetryChild` past the budget into `Failed`. `apply` ignores a decision about a child other than the latest one, a repeated start, and anything after the Attempt settles, so an interruption gets at most one replacement.
+
 ## Testing
 
 ```ts
