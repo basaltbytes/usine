@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CiFailed,
   CiHandedOff,
+  CiIncomplete,
   CiLabelMutation,
   CiPassed,
   CiPolicy,
@@ -183,6 +184,7 @@ it.live.each([
   CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
   CiFailed.make({ message: "CI failed without an available fix loop" }),
   CiTimedOut.make({ message: "CI is still running after its deadline" }),
+  CiIncomplete.make({ message: "CI ran only in part" }),
 ])("CI settlement preserves the result's producing attempt after $_tag", (resolution) =>
   withInstance((directory) =>
     Effect.gen(function* () {
@@ -208,11 +210,16 @@ it.live.each([
           resolution._tag === "CiSuperseded" ? "Canceled" : "Failed",
         );
         assert.deepStrictEqual(settled.step.result, waiting.step.result);
-        if (resolution._tag === "CiTimedOut") {
+        if (resolution._tag === "CiTimedOut" || resolution._tag === "CiIncomplete") {
           const outcome = Option.getOrNull(settled.attempts[0]?.outcome ?? Option.none());
           assert(outcome?._tag === "Failed");
-          assert.strictEqual(outcome.failure._tag, "InfraFailure");
+          assert(outcome.failure._tag === "InfraFailure");
           assert.strictEqual(outcome.failure.message, resolution.message);
+          assert.deepStrictEqual(outcome.failure.cause, {
+            resolution: resolution._tag,
+            pullRequest: 815,
+            head,
+          });
         }
         if (resolution._tag === "CiFailed") {
           yield* engine.retry(accepted.runId);

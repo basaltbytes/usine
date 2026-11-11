@@ -16,7 +16,7 @@ The run page and board show **Waiting for CI** with a link to the PR checks. Rev
 
 ## Amendment — 2026-11-08: pending CI deadlines
 
-A pending CI deadline records an infrastructure failure because a queued or stalled CI job is outside the agent's execution. The run still requires operator attention, without automatically starting another agent. Timeout diagnostics include pending job names and elapsed times, with the matching job's last successful workflow duration when available. Diagnostics have a ten-second limit so GitHub reads cannot stall settlement.
+A pending CI deadline records an infrastructure failure because a queued or stalled CI job is outside the agent's execution. The run still requires operator attention, without automatically starting another agent. The exemption from the automatic infrastructure retry rests on the settlement path: CI settlement sets the attempt and run outcome in one transaction and never passes through attempt completion, where the retry decision is made. A CI wait whose CI ran only in part follows the same path. The failure's cause records the CI resolution, pull request, and head. Timeout diagnostics include pending job names and elapsed times, with the matching job's last successful workflow duration when available. Diagnostics have a ten-second limit so GitHub reads cannot stall settlement.
 
 ## Amendment — 2026-11-11: partial pending diagnostics (#1052)
 

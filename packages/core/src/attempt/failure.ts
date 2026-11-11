@@ -17,7 +17,9 @@ export class GitHubPushFailure extends Schema.TaggedError<
 
 /**
  * An infrastructure failure outside the agent, such as an unreachable Worker or failed checkout.
- * The engine retries it automatically, up to the attempt cap.
+ * The engine retries a failed attempt with it automatically, up to the attempt cap. A CI wait that
+ * times out or ends with partly run CI also records it, and needs the operator: CI settlement sets
+ * the attempt and run outcome directly, without the automatic retry.
  */
 export class InfraFailure extends Schema.TaggedError<
   InfraFailure,
