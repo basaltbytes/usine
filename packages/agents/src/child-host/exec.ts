@@ -39,12 +39,14 @@ export const unreachableCause = (
   Schema.is(HostUnreachable)(error.reason.cause) ? Option.some(error.reason.cause) : Option.none();
 
 /**
- * Returns the command's stdin: `input`'s stream, which closes stdin with a warning if it fails, or
- * end of file without input.
+ * Returns the command's stdin: `input`'s stream, or end of file without input. If the stream fails,
+ * stdin closes with a warning, even when `endOnDone` is `false`.
  */
 const stdinOf = (host: ExecShell, input: HostInput | undefined): Stream.Stream<Uint8Array> => {
   if (input === undefined) return Stream.empty;
-  const relayed = input.stream.pipe(
+  const stream =
+    input.endOnDone === false ? Stream.concat(input.stream, Stream.never) : input.stream;
+  return stream.pipe(
     Stream.catch((error) =>
       Effect.logWarning("The input of a command on an exec shell failed; closing its stdin", {
         host: host.destination,
@@ -52,7 +54,6 @@ const stdinOf = (host: ExecShell, input: HostInput | undefined): Stream.Stream<U
       }).pipe(Stream.fromEffectDrain),
     ),
   );
-  return input.endOnDone === false ? Stream.concat(relayed, Stream.never) : relayed;
 };
 
 /**

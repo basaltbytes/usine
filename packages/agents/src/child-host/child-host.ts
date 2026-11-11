@@ -119,8 +119,8 @@ export interface ExecTransport {
  * errors instead of an exit code.
  *
  * Its stdin differs from a `RemoteShell`'s: a command without input reads end of file at once,
- * where an SSH client keeps an open pipe, and a failing input stream closes the command's stdin
- * and logs a warning instead of failing the command.
+ * where an SSH client without `stdinEnvironment` keeps an open pipe, and a failing input stream
+ * closes the command's stdin and logs a warning instead of failing the command.
  */
 export class ExecShell extends Schema.TaggedClass<
   ExecShell,
@@ -179,7 +179,8 @@ export interface HostInput {
 
 /**
  * The process options of a command on a host, with its input as a stream. Without `stdin`, a local
- * process or an SSH client gets an open pipe, and an `ExecShell` command reads end of file.
+ * process or an SSH client gets an open pipe, except that an SSH client with `stdinEnvironment`
+ * reads the environment block and then end of file. An `ExecShell` command reads end of file.
  */
 export type HostCommandOptions = Omit<ChildProcess.CommandOptions, "stdin"> & {
   readonly stdin?: HostInput | undefined;
