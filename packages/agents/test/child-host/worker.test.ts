@@ -56,6 +56,9 @@ beforeAll(async () => {
     target: "node22",
     format: "iife",
     globalName: "ChildHostWorker",
+    // The options of build-worker.mjs, so every test runs a minified owner like the shipped one.
+    minify: true,
+    legalComments: "none",
     write: false,
   });
   const output = result.outputFiles[0];
