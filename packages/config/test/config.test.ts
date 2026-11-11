@@ -496,24 +496,61 @@ workers:
       assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
       const settings = worker.provisioner.value;
       assert(settings.provider === "boxd");
-      assert.strictEqual(settings.region, "fra");
+      assert.deepStrictEqual(settings.region, Option.none());
+      assert.deepStrictEqual(settings.endpoint, Option.none());
       assert.strictEqual(settings.size, "2x8");
       assert.isTrue(settings.isolated);
       const custom = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
-        yaml + "      region: eu-own-1\n",
+        yaml + "      region: eu-own-1\n      endpoint: https://boxd.example.com:9443\n",
       );
       const customWorker = custom.workers[0];
       assert(customWorker?.kind === "ssh" && Option.isSome(customWorker.provisioner));
       assert(customWorker.provisioner.value.provider === "boxd");
-      assert.strictEqual(customWorker.provisioner.value.region, "eu-own-1");
-      const encoded = yield* Schema.encodeEffect(UsineConfig)(parsed);
-      const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
-      assert.deepStrictEqual(decoded, parsed);
+      assert.deepStrictEqual(customWorker.provisioner.value.region, Option.some("eu-own-1"));
+      assert.deepStrictEqual(
+        customWorker.provisioner.value.endpoint,
+        Option.some("https://boxd.example.com:9443"),
+      );
+      for (const config of [parsed, custom]) {
+        const encoded = yield* Schema.encodeEffect(UsineConfig)(config);
+        const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
+        assert.deepStrictEqual(decoded, config);
+      }
+      for (const endpoint of [
+        "http://127.0.0.1:9443",
+        "http://localhost:9443",
+        "http://[::1]:9443",
+        "https://[::1]:9443",
+        "https://boxd.sh",
+        "https://boxd.example.com:65535",
+      ]) {
+        const accepted = yield* parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          yaml + `      endpoint: ${endpoint}\n`,
+        );
+        const acceptedWorker = accepted.workers[0];
+        assert(acceptedWorker?.kind === "ssh" && Option.isSome(acceptedWorker.provisioner));
+        assert(acceptedWorker.provisioner.value.provider === "boxd");
+        assert.deepStrictEqual(acceptedWorker.provisioner.value.endpoint, Option.some(endpoint));
+      }
       for (const invalid of [
         yaml + "      size: small\n",
         yaml + "      region: FRA\n",
         yaml + '      region: ""\n',
+        yaml + "      endpoint: boxd.example.com:9443\n",
+        yaml + "      endpoint: https://boxd.example.com:9443/api\n",
+        yaml + "      endpoint: https://boxd.example.com:9443/\n",
+        yaml + "      endpoint: ftp://boxd.example.com\n",
+        yaml + "      endpoint: HTTPS://boxd.example.com:9443\n",
+        yaml + "      endpoint: https://Boxd.example.com:9443\n",
+        yaml + "      endpoint: https://user@boxd.example.com\n",
+        // Plain HTTP would carry the API key in clear text off the host.
+        yaml + "      endpoint: http://boxd.example.com:9443\n",
+        yaml + "      endpoint: http://10.0.0.5:9443\n",
+        yaml + "      endpoint: https://boxd.example.com:99999\n",
+        yaml + "      endpoint: https://boxd.example.com:0\n",
+        yaml + "      endpoint: https://[:::]:9443\n",
         yaml.replace("snapshot: usine-attempt", "snapshot: Bad_Name"),
         yaml.replace("      snapshot: usine-attempt\n", ""),
         yaml +

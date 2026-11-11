@@ -144,7 +144,7 @@ it.effect.each(["success", "restart", "cancel", "cap", "ordinary"] as const)(
             workers: Effect.succeed([worker]),
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeedNone,
-            recover: () => Effect.void,
+            recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             occupy: () => Effect.succeed({ worker, release: Effect.void }),

@@ -50,8 +50,8 @@ export const LoadedLoop = ({ loop, configuration, pause }: LoadedLoopProps) => {
               <span>
                 Condition uses{" "}
                 {loop.undeclaredLabels.length === 1 ? "an undeclared label" : "undeclared labels"}:{" "}
-                {loop.undeclaredLabels.join(", ")}. usine creates only the labels under{" "}
-                <code>labels</code> in <code>usine.yaml</code>.
+                {loop.undeclaredLabels.join(", ")}. usine creates only the labels in Configuration
+                &gt; Labels.
               </span>
             </p>
           )}

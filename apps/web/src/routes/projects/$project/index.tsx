@@ -4,7 +4,7 @@ import { projectQuery } from "~/features/projects/queries";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { RouteError, RoutePending } from "~/components/route-status";
-import { ProjectNotFound } from "~/components/project-not-found";
+import { missingProjectDescription, ProjectNotFound } from "~/components/project-not-found";
 import { ProjectBoard } from "~/features/projects/board.page";
 import { deskQuery } from "~/lib/desk/queries";
 import { overviewQuery } from "~/lib/overview";
@@ -21,7 +21,7 @@ const BoardRoute = () => {
   const openRun = useOpenRun();
   const { data: project, error } = useSuspenseQuery(projectQuery(ProjectId.make(slug)));
   if (Schema.is(OperatorHttpError)(error) && error.error === "BoardProjectNotFoundError")
-    return <ProjectNotFound />;
+    return <ProjectNotFound description={missingProjectDescription(slug)} />;
   return (
     <ProjectBoard
       project={project}

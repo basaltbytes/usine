@@ -17,7 +17,10 @@ export class TaskPullRequestState extends Schema.Class<
   review: Schema.NullOr(Schema.String),
 }) {}
 
-/** An attempt's recorded commits associated with one pull request. */
+/**
+ * An attempt's recorded commits associated with one pull request. `base` equals `head` when the
+ * attempt pushed no new commits.
+ */
 export class TaskAttemptChangesView extends Schema.Class<
   TaskAttemptChangesView,
   Brand.Brand<"@usine/orchestrator/operator/TaskAttemptChangesView">
@@ -39,12 +42,7 @@ export const harvestedAttemptChanges = (
       onNone: () => [],
       onSome: (result) =>
         result.facts.flatMap((fact) => {
-          if (
-            fact._tag !== "PullRequest" ||
-            Option.isNone(fact.base) ||
-            Option.isNone(fact.head) ||
-            fact.base.value === fact.head.value
-          )
+          if (fact._tag !== "PullRequest" || Option.isNone(fact.base) || Option.isNone(fact.head))
             return [];
           return [
             TaskAttemptChangesView.make({

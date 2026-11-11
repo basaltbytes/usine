@@ -79,6 +79,8 @@ export const ciQueries = (
             }),
           CiSuperseded: ({ head }) =>
             RunState.Canceled.make({ reason: RunState.HeadChanged.make({ head }) }),
+          CiPullRequestClosed: ({ pullRequest }) =>
+            RunState.Canceled.make({ reason: RunState.PullRequestClosed.make({ pullRequest }) }),
         });
         const outcome = Match.valueTags(resolution, {
           CiPassed: () => AttemptSucceeded.make(),
@@ -90,6 +92,7 @@ export const ciQueries = (
           CiIncomplete: ({ message }) =>
             AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
           CiSuperseded: () => AttemptCanceled.make(),
+          CiPullRequestClosed: () => AttemptCanceled.make(),
         });
         yield* queries.settleCiAttempt(runId, outcome);
         const observedAt = yield* DateTime.now;

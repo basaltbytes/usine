@@ -1,5 +1,5 @@
 import { MachineId } from "@usine/core/worker";
-import { Clock, Duration, Effect, Layer, Option, Stream } from "effect";
+import { Clock, Duration, Effect, Layer, Option, Redacted, Stream } from "effect";
 import {
   BoxdApi,
   BoxdCallError,
@@ -78,7 +78,12 @@ export const fakeBoxd = () => {
     ...new Set([...state.snapshotEgress, ...entries]),
   ];
   const failure = (operation: string, code: string) =>
-    BoxdCallError.make({ operation, code, message: `boxd ${operation}: ${code}` });
+    BoxdCallError.make({
+      operation,
+      url: BOXD_ENDPOINT,
+      code,
+      message: `boxd ${operation}: ${code}`,
+    });
   const call = <A>(operation: string, run: () => Effect.Effect<A, BoxdCallError>) =>
     Effect.suspend(() =>
       state.unreachable
@@ -98,6 +103,7 @@ export const fakeBoxd = () => {
     );
   const api = BoxdApi.of({
     endpoint: BOXD_ENDPOINT,
+    execBearer: Effect.sync(() => Redacted.make(state.token)),
     whoami: call("whoami", () => Effect.succeed({ userId: "test-user" })),
     orgMachineLimit: call("orgMachineLimit", () =>
       Effect.succeed({ maxVms: state.maxVms, vmCount: state.vmCount }),
@@ -112,6 +118,7 @@ export const fakeBoxd = () => {
           if (state.reservedNames.has(request.name))
             return yield* BoxdCallError.make({
               operation: "createFromSnapshot",
+              url: BOXD_ENDPOINT,
               code: "INVALID_ARGUMENT",
               message: `name '${request.name}' is reserved`,
             });

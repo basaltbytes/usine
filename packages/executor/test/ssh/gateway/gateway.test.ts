@@ -842,7 +842,10 @@ describe("SSH Worker behind a Gateway", () => {
         assert.strictEqual(noBase64.capability, "gateway");
         assert.strictEqual(noBase64.message, notReceived);
         assert.instanceOf(noBase64.cause, Error);
-        assert.strictEqual(noBase64.cause.message, "sh: 1: base64: not found");
+        assert.strictEqual(
+          noBase64.cause.message,
+          "variables not received: GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN (exit code 127): sh: 1: base64: not found",
+        );
 
         machine.state.stdinVariables = "disconnects";
         const disconnected = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);

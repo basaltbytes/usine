@@ -176,7 +176,7 @@ const setup = (
         }),
       );
     const started = emit(
-      AttemptChannel.Started.make({ parentModel: ModelId.make("openai/parent") }),
+      AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("openai/parent")) }),
     );
     /** Waits until the guard started delivering `count` warnings. */
     const warned = (count: number) =>

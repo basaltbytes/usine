@@ -866,13 +866,14 @@ export const queriesFor = (
     yield* changedAttempt(attemptId);
   });
 
+  /** Records the parent model from the Attempt's `Started` envelope, clearing it for an Attempt without a parent session. */
   const updateAttemptParentModel = Effect.fn("RunStoreQueries.updateAttemptParentModel")(function* (
     attemptId: AttemptId,
-    parentModel: ModelId,
+    parentModel: Option.Option<ModelId>,
   ) {
     yield* database
       .update(attempts)
-      .set({ parentModel })
+      .set({ parentModel: Option.getOrNull(parentModel) })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
     yield* changedAttempt(attemptId);

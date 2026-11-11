@@ -3,8 +3,6 @@ import { Harness } from "@usine/core/agent/brain";
 import { Option, Schema } from "effect";
 import {
   catalog,
-  CredentialWiring,
-  gatewayTokenVariables,
   HarnessCatalog,
   HarnessCredential,
   HarnessDescriptor,
@@ -72,37 +70,6 @@ describe("harness catalog", () => {
       Option.isNone(
         HarnessCredential.makeOption({ ...credential, cloudflare: credential.gateway }),
       ),
-    );
-  });
-
-  it("extends gateway token forwarding by registration and deduplicates shared variables", () => {
-    assert(Option.isSome(codex.worker.credential));
-    const original = codex.worker.credential.value;
-    const added = HarnessDescriptor.make({
-      ...codex,
-      id: Harness.make("another-responses-harness"),
-      worker: WorkerRequirements.make({
-        ...codex.worker,
-        credential: Option.some(
-          HarnessCredential.make({
-            ...original,
-            gateway: CredentialWiring.make({
-              ...original.gateway,
-              tokenVariable: "OTHER_GATEWAY_TOKEN",
-            }),
-          }),
-        ),
-      }),
-    });
-    const shared = HarnessDescriptor.make({
-      ...codex,
-      id: Harness.make("shared-responses-harness"),
-    });
-    assert.deepStrictEqual(
-      gatewayTokenVariables(
-        HarnessCatalog.make({ descriptors: [...catalog.descriptors, added, shared] }),
-      ),
-      [...gatewayTokenVariables(catalog), "OTHER_GATEWAY_TOKEN"],
     );
   });
 

@@ -666,7 +666,7 @@ describe("Task view", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("omits attempt comparisons without a checkout base or new commits", () =>
+  it.effect("omits attempts without a checkout base and keeps attempts without new commits", () =>
     Effect.gen(function* () {
       const legacy = yield* Schema.decodeEffect(PullRequest)({
         _tag: "PullRequest",
@@ -707,7 +707,13 @@ describe("Task view", () => {
           }),
         ),
       });
-      assert.deepStrictEqual(harvestedAttemptChanges(noPush), []);
+      assert.deepStrictEqual(
+        harvestedAttemptChanges(noPush).map(({ base, head }) => ({ base, head })),
+        noPush.attempts.map(() => ({
+          base: CommitSha.make("a".repeat(40)),
+          head: CommitSha.make("a".repeat(40)),
+        })),
+      );
     }),
   );
 

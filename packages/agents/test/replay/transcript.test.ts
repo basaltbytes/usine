@@ -5,7 +5,7 @@ import { TestClock } from "effect/testing";
 import { ChildRequest } from "../../src/runtime.ts";
 import { openFixture } from "./fixture.ts";
 import { runScenario } from "./scenarios.ts";
-import { Tape } from "./transcript.ts";
+import { Tape, type Transcript } from "./transcript.ts";
 
 for (const type of ["expect_outbound", "emit_inbound"] as const)
   it.effect(`resets the replay idle deadline after ${type} progress`, () =>
@@ -29,6 +29,56 @@ for (const type of ["expect_outbound", "emit_inbound"] as const)
       tape.assertComplete();
     }),
   );
+
+const idleFailure = (
+  entries: Transcript["entries"],
+  consume: (tape: Tape) => Effect.Effect<void>,
+) =>
+  Effect.gen(function* () {
+    const tape = new Tape({
+      protocol: "claude-sdk",
+      harnessVersion: "2.1.311",
+      model: "recorded-model",
+      scenario: "simple",
+      environment: {},
+      entries,
+    });
+    const replay = yield* consume(tape).pipe(
+      Effect.andThen(Effect.never),
+      tape.guard,
+      Effect.forkChild,
+    );
+    yield* TestClock.adjust("5 seconds");
+    const outcome = yield* Fiber.await(replay);
+    assert(Exit.isFailure(outcome));
+    return Cause.pretty(outcome.cause);
+  });
+
+it.effect("reports a stall after every transcript entry is consumed", () =>
+  Effect.gen(function* () {
+    const failure = yield* idleFailure(
+      [{ type: "expect_outbound", port: "claude:1/input", payload: "done" }],
+      (tape) => Effect.sync(() => tape.outbound("claude:1/input", "done")),
+    );
+    assert.include(failure, "replay idle for 5 seconds; no transcript entries pending");
+    assert.notInclude(failure, "missing requests");
+  }),
+);
+
+it.effect("reports inbound frames that the replay never read", () =>
+  Effect.gen(function* () {
+    const failure = yield* idleFailure(
+      [
+        { type: "expect_outbound", port: "claude:1/input", payload: "request" },
+        { type: "emit_inbound", port: "claude:1/output", payload: "unread-reply" },
+      ],
+      (tape) => Effect.sync(() => tape.outbound("claude:1/input", "request")),
+    );
+    assert.include(failure, "inbound frames never read:\nclaude:1/output:");
+    assert.include(failure, "unread-reply");
+    assert.notInclude(failure, "no transcript entries pending");
+  }),
+);
 
 it.live("rejects a changed outbound request through the real adapter", () =>
   Effect.gen(function* () {

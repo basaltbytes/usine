@@ -14,7 +14,12 @@ import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
+import type {
+  AttemptRecovery,
+  AttemptSalvage,
+  RecoveredLeftovers,
+  RecoverySink,
+} from "@usine/core/attempt/salvage";
 import type { LoopPermissions } from "@usine/core/loop";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
@@ -686,7 +691,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       yield* session.stopForRecovery(attempt);
       const worker = yield* attemptWorkerFor("cleanup", attempt.worker, attempt.attemptId);
       const name = sandboxName(worker.owner, attempt.attemptId);
-      yield* Effect.scoped(
+      return yield* Effect.scoped(
         Effect.gen(function* () {
           yield* claim(name);
           yield* Cache.get(orphansReconciled, worker);
@@ -707,15 +712,15 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             record,
           );
           if (Option.isNone(summary)) {
-            yield* Effect.logInfo("The Attempt's sandbox is gone; nothing to reconcile", {
+            yield* Effect.logDebug("The Attempt's sandbox is gone; nothing to reconcile", {
               attemptId: attempt.attemptId,
               sandbox: name,
             });
-            return;
+            return "gone" satisfies RecoveredLeftovers;
           }
           if (!present) {
             yield* destroySandbox(worker, name, "its checkout is gone");
-            return;
+            return "found" satisfies RecoveredLeftovers;
           }
           const retained = yield* reconcileCheckout(
             attempt,
@@ -731,6 +736,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             });
             yield* holdSandbox(worker, name, "its checkout holds unpushed work");
           } else yield* destroySandbox(worker, name, "its checkout was reconciled");
+          return "found" satisfies RecoveredLeftovers;
         }),
       );
     });

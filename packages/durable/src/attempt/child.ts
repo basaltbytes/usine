@@ -1,25 +1,5 @@
-import { ChildRequest } from "@usine/agents/runtime";
 import { defineDoc } from "@earendil-works/pi-durable";
-import { ChildSession, HarnessSession } from "@usine/core/agent/session";
-import { MachineId, WorkerName } from "@usine/core/worker";
-import { type Brand, Schema } from "effect";
-
-/** The saved conversation and worker that belong to one durable delegation. */
-export class SavedChild extends Schema.Class<
-  SavedChild,
-  Brand.Brand<"@usine/durable/attempt/SavedChild">
->("@usine/durable/SavedChild")({
-  session: Schema.Struct({
-    id: ChildSession.fields.id,
-    parentId: ChildSession.fields.parentId,
-    agent: ChildSession.fields.agent,
-    brain: ChildSession.fields.brain,
-  }),
-  usage: ChildRequest.fields.usage,
-  harnessSession: HarnessSession,
-  worker: WorkerName,
-  machine: Schema.OptionFromNullOr(MachineId),
-}) {}
+import type { SavedChild } from "./delegation/journal.ts";
 
 type SubagentRecord = {
   count: number | null;
@@ -33,6 +13,7 @@ type SubagentRecord = {
   prompted?: boolean;
 };
 
+/** The progress of one `subagent` call's delegation, keyed by the call's task. */
 export const SubagentDoc = defineDoc<SubagentRecord>({
   kind: "usine.subagent",
   version: 1,

@@ -4,7 +4,11 @@ import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
 import { Harnesses } from "@usine/agents/harness/node";
-import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
+import type {
+  AttemptRecovery,
+  RecoveredLeftovers,
+  RecoverySink,
+} from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -322,8 +326,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           : Option.none(),
         record,
       );
-      if (!present) return;
+      // A local Worker keeps nothing of an Attempt outside its checkout.
+      if (!present) return "gone" satisfies RecoveredLeftovers;
       yield* reconcileCheckout(attempt, worktree, record.salvage, commitAuthor);
+      return "found" satisfies RecoveredLeftovers;
     });
 
     /**

@@ -5,6 +5,7 @@ import { CiHandoff } from "../ci.ts";
 import { CommitSha } from "../repository.ts";
 import { RunId } from "./id.ts";
 import { EventId } from "../event.ts";
+import { ItemNumber } from "../item.ts";
 
 /** An operator-requested cancellation, with the operator login when recorded. */
 export class OperatorCanceled extends Schema.TaggedClass<
@@ -39,8 +40,23 @@ export class HeadChanged extends Schema.TaggedClass<
   Brand.Brand<"@usine/core/run/state/HeadChanged">
 >("CancelReason/HeadChanged")("HeadChanged", { head: CommitSha }) {}
 
-/** Why a run was canceled: operator action, a newer event or head, or an item that stopped matching its trigger. */
-export const CancelReason = Schema.Union([OperatorCanceled, Superseded, Revoked, HeadChanged]);
+/** Cancellation because a person closed the pull request awaiting CI without merging it. */
+export class PullRequestClosed extends Schema.TaggedClass<
+  PullRequestClosed,
+  Brand.Brand<"@usine/core/run/state/PullRequestClosed">
+>("CancelReason/PullRequestClosed")("PullRequestClosed", { pullRequest: ItemNumber }) {}
+
+/**
+ * Why a run was canceled: operator action, a newer event or head, an item that stopped matching
+ * its trigger, or a pull request closed while it awaited CI.
+ */
+export const CancelReason = Schema.Union([
+  OperatorCanceled,
+  Superseded,
+  Revoked,
+  HeadChanged,
+  PullRequestClosed,
+]);
 export type CancelReason = typeof CancelReason.Type;
 
 /** A new Run with no Attempt started and no approval gate passed. */

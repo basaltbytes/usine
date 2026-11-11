@@ -2,7 +2,12 @@ import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
-import { CHILD_KILL_SCRIPT, type ChildHost, RemoteShell } from "@usine/agents/child-host";
+import {
+  CHILD_KILL_SCRIPT,
+  type ChildHost,
+  RemoteShell,
+  STDIN_ENVIRONMENT_PREFIX,
+} from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -171,6 +176,8 @@ interface FakeMachineState {
   /** Whether the SSH connection drops while the machine's resources are read, so `ssh` exits 255. */
   resourcesDisconnect: boolean;
   cacheExists: boolean;
+  /** Paths that `find` lists under the Worker's `attempts` directory besides the existing checkout. */
+  readonly attemptPaths: Array<string>;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
   /** The checkout the salvage finds: clean, dirty, or one whose `git status` never answers. */
@@ -361,6 +368,7 @@ export const fakeMachine = () => {
     threadsMax: 62_000,
     pidMax: 4_194_304,
     cacheExists: false,
+    attemptPaths: [],
     cloneEchoesToken: false,
     salvage: "clean",
     salvageCommitted: false,
@@ -725,7 +733,10 @@ export const fakeMachine = () => {
       return oneShotHandle("", 0);
     }
     if (line.startsWith("exec 'find' ") && line.includes("/attempts'")) {
-      const listed = state.cacheExists ? [`${WORKER_ROOT}/attempts/remote-run_execute_1`] : [];
+      const listed = [
+        ...(state.cacheExists ? [`${WORKER_ROOT}/attempts/remote-run_execute_1`] : []),
+        ...state.attemptPaths,
+      ];
       return oneShotHandle(listed.map((entry) => `${entry}${NUL}`).join(""), 0);
     }
     if (line.startsWith("exec 'find' ") && line.includes("/repos'"))
@@ -812,12 +823,12 @@ export const fakeMachine = () => {
       let line = remoteLine(command);
       let input = yield* standardInput(command);
       let stdinEnvironment: Readonly<Record<string, string>> = {};
-      if (line.startsWith("set +x; IFS= read -r usine_environment")) {
+      if (line.startsWith(STDIN_ENVIRONMENT_PREFIX)) {
         const boundary = input.indexOf("\n");
         if (state.stdinVariables === "received")
           stdinEnvironment = stdinExports(input.slice(0, boundary));
         input = input.slice(boundary + 1);
-        line = line.slice(line.indexOf(" && ", line.indexOf('eval "unset usine_environment;')) + 4);
+        line = line.slice(STDIN_ENVIRONMENT_PREFIX.length);
         if (state.stdinVariables === "no-base64") {
           state.calls.push({ command, line, input, stdinEnvironment });
           return oneShotHandle("", 127, "sh: 1: base64: not found\n");

@@ -120,8 +120,8 @@ export const needCopy = (need: NeedView): NeedCopy =>
       title: "Worker not configured",
       detail:
         running > 0
-          ? `${worker} is not in usine.yaml. ${running} ${running === 1 ? "attempt" : "attempts"} still running on it. Discard the leftovers after they end`
-          : `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Add the worker back and restart usine up, or discard the leftovers`,
+          ? `${worker} is not in Configuration > Workers. ${running} ${running === 1 ? "attempt" : "attempts"} still running on it. Discard the leftovers after they end`
+          : `${worker} is not in Configuration > Workers. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Add the worker back and restart usine up, or discard the leftovers`,
       repository: null,
       runId: null,
     }),

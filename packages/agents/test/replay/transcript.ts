@@ -209,6 +209,10 @@ export class Tape {
     return inbox;
   }
 
+  /**
+   * Fails `effect` when a replay sees no transport progress for 5 seconds. The window also
+   * counts work inside `effect` that never touches the transport, such as building layers.
+   */
   readonly guard = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => {
     const idle = Effect.gen({ self: this }, function* () {
       for (;;) {
@@ -216,13 +220,7 @@ export class Tape {
           Effect.timeoutOption("5 seconds"),
         );
         if (Option.isSome(progress)) continue;
-        const pending = [...this.#groups.values()].flatMap((group) => {
-          const next = group.entries[group.cursor];
-          return next === undefined
-            ? []
-            : [`transcript entry ${next.index} on ${next.entry.port}: ${encode(next.entry)}`];
-        });
-        this.fail(new Error(`replay idle for 5 seconds; missing requests:\n${pending.join("\n")}`));
+        this.fail(new Error(`replay idle for 5 seconds; ${this.#pending()}`));
       }
     });
     return Effect.raceFirst(
@@ -232,6 +230,23 @@ export class Tape {
         : Effect.raceFirst(Deferred.await(this.failure), idle),
     );
   };
+
+  #pending(): string {
+    const missing = [...this.#groups.values()].flatMap((group) => {
+      const next = group.entries[group.cursor];
+      return next === undefined
+        ? []
+        : [`transcript entry ${next.index} on ${next.entry.port}: ${encode(next.entry)}`];
+    });
+    const unread = [...this.#inboxes].flatMap(([port, inbox]) =>
+      inbox.pending.map((entry) => `${port}: ${encode(entry)}`),
+    );
+    const sections = [
+      ...(missing.length === 0 ? [] : [`missing requests:\n${missing.join("\n")}`]),
+      ...(unread.length === 0 ? [] : [`inbound frames never read:\n${unread.join("\n")}`]),
+    ];
+    return sections.length === 0 ? "no transcript entries pending" : sections.join("\n");
+  }
 
   #advance(): void {
     Deferred.doneUnsafe(this.#progress, Effect.void);

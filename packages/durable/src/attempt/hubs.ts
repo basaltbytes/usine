@@ -64,7 +64,7 @@ export interface AttemptHub {
   readonly childInputs: Set<number>;
   parent: Option.Option<ConversationId>;
   channel: Option.Option<AttachedChannel>;
-  /** The Worker notices received before the parent started, sent right after `Started`. */
+  /** The Worker notices received before the Attempt started, sent right after `Started`. */
   early: ReadonlyArray<AttemptChannel.WorkerNotice>;
   /**
    * Completes with the request of the `execute` call relaying this Attempt. Replaced when that call

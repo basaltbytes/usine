@@ -7,7 +7,10 @@ import {
 } from "@usine/core/agent/session";
 import { DateTime, Effect, Option, Schema } from "effect";
 
-const isRateLimitEvent = Schema.is(Schema.Struct({ type: Schema.Literal("rate_limit_event") }));
+/** Returns whether `message` is Claude Code's report of the account's rate-limit state. */
+export const isRateLimitEvent = Schema.is(
+  Schema.Struct({ type: Schema.Literal("rate_limit_event") }),
+);
 const AllowanceType = Schema.Literals([
   "five_hour",
   "seven_day",
@@ -15,23 +18,23 @@ const AllowanceType = Schema.Literals([
   "seven_day_sonnet",
   "seven_day_overage_included",
 ]);
-const decodeRateLimit = Schema.decodeUnknownEffect(
-  Schema.Struct({
-    rate_limit_info: Schema.Struct({
-      status: Schema.Literals(["allowed", "allowed_warning", "rejected"]),
-      rateLimitType: Schema.optionalKey(Schema.String),
-      utilization: Schema.optionalKey(
-        Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_VALUE / 100 })),
+const ClaudeRateLimit = Schema.Struct({
+  rate_limit_info: Schema.Struct({
+    status: Schema.Literals(["allowed", "allowed_warning", "rejected"]),
+    rateLimitType: Schema.optionalKey(Schema.String),
+    utilization: Schema.optionalKey(
+      Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_VALUE / 100 })),
+    ),
+    // Epoch seconds within JavaScript's supported date range.
+    resetsAt: Schema.optionalKey(
+      Schema.Int.check(
+        Schema.isBetween({ minimum: -8_640_000_000_000, maximum: 8_640_000_000_000 }),
       ),
-      // Epoch seconds within JavaScript's supported date range.
-      resetsAt: Schema.optionalKey(
-        Schema.Int.check(
-          Schema.isBetween({ minimum: -8_640_000_000_000, maximum: 8_640_000_000_000 }),
-        ),
-      ),
-    }),
+    ),
   }),
-);
+});
+const decodeRateLimit = Schema.decodeUnknownEffect(ClaudeRateLimit);
+const decodeRateLimitOption = Schema.decodeUnknownOption(ClaudeRateLimit);
 
 /** Emits only the allowance window included in the provider report. */
 export const claudeRateLimits = (session: ChildSession) => {
@@ -86,3 +89,14 @@ export const claudeRateLimits = (session: ChildSession) => {
     ),
   );
 };
+
+/**
+ * Returns the reset time of the usage limit that a rate-limit report rejects requests under, or
+ * `None` if the report allows requests, has no reset time, or doesn't decode.
+ */
+export const rejectedUntil = (message: Schema.Json): Option.Option<DateTime.Utc> =>
+  decodeRateLimitOption(message).pipe(
+    Option.filter(({ rate_limit_info: info }) => info.status === "rejected"),
+    Option.flatMap(({ rate_limit_info: info }) => Option.fromUndefinedOr(info.resetsAt)),
+    Option.map(DateTime.fromEpochSeconds),
+  );

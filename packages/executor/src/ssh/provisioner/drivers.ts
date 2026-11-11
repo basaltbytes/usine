@@ -16,15 +16,19 @@ import { WorkerCapabilityError } from "../../executor.ts";
 import type { BoxdProvisioner } from "../model.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { ProvisionedMachinesOptions } from "./machines.ts";
-import { boxdConnectError, boxdDriverFor, boxdPreflightError, execCredential } from "./boxd.ts";
-import { BoxdApi, type BoxdCallError, type BoxdUnknownRegion } from "./boxd/client.ts";
+import {
+  type BoxdConnectFailure,
+  boxdConnectError,
+  boxdDriverFor,
+  boxdPreflightError,
+} from "./boxd.ts";
+import { BoxdApi, BoxdPlainTextEndpoint } from "./boxd/client.ts";
 import { BoxdExec, boxdExecLayer } from "./boxd/exec.ts";
+import { BOXD_API, rawKeyAllowed } from "./boxd/endpoint.ts";
 import { boxdApiLayer } from "./boxd/grpc-client.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
 import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
 import { type MachineDriver, tagValue } from "./model.ts";
-
-type BoxdConnectFailure = BoxdCallError | BoxdUnknownRegion;
 
 /** Returns the absolute path of a key file given as absolute or `~/`. */
 const expandHome = (file: string): string =>
@@ -74,29 +78,43 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
   const http = yield* HttpClient.HttpClient;
   const { settings, instance } = options;
   /**
-   * The boxd API and `Exec` clients by API key, region, and endpoint, which every revision of a
-   * Worker with the same three shares. A failed build closes what it opened.
+   * The boxd API and `Exec` clients by API key, endpoint, and region, which every revision of a
+   * Worker with the same three shares. A failed build closes what it opened. Building fails with
+   * `BoxdPlainTextEndpoint` when the region's API endpoint uses neither TLS nor a loopback address.
    */
   const boxdClients = sharedBuilds(
     scope,
     new Map<string, Deferred.Deferred<Context.Context<BoxdApi | BoxdExec>, BoxdConnectFailure>>(),
   );
   const boxdClientsFor = (value: BoxdProvisioner) => {
-    const endpoint = settings.providerEndpoints?.boxd;
+    const cluster = {
+      endpoint: Option.getOrElse(
+        value.endpoint,
+        () => settings.providerEndpoints?.boxd ?? BOXD_API,
+      ),
+      region: value.region,
+    };
     return boxdClients(
       // None of the three contains a line break.
-      [Redacted.value(value.token), value.region, endpoint ?? ""].join("\n"),
+      [
+        Redacted.value(value.token),
+        cluster.endpoint,
+        Option.getOrElse(value.region, () => ""),
+      ].join("\n"),
       Effect.gen(function* () {
         const clients = yield* Scope.fork(scope);
         return yield* Effect.gen(function* () {
           const client = yield* Layer.buildWithScope(
-            (settings.boxdClient ?? boxdApiLayer)(value.token, value.region, endpoint),
+            (settings.boxdClient ?? boxdApiLayer)(value.token, cluster),
             clients,
           );
           const api = Context.get(client, BoxdApi);
+          // A region that boxd lists with an `http://` API endpoint would get the key in clear text.
+          if (!rawKeyAllowed(api.endpoint))
+            return yield* BoxdPlainTextEndpoint.make({ endpoint: api.endpoint });
           // One connection to the region carries every command of the Worker's machines.
           const exec = yield* Layer.buildWithScope(
-            (settings.boxdExec ?? boxdExecLayer)(api.endpoint, execCredential(value)),
+            (settings.boxdExec ?? boxdExecLayer)(api.endpoint, api.execBearer),
             clients,
           );
           return Context.add(exec, BoxdApi, api);
@@ -154,10 +172,12 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           Effect.tapError((failure) =>
             Effect.logWarning("Could not connect to the boxd region", {
               worker,
-              region: value.region,
+              region: Option.getOrElse(value.region, () => "none"),
               ...(failure._tag === "BoxdUnknownRegion"
                 ? { failure: "unknown region", available: failure.available }
-                : { failure: failure.operation, code: failure.code, message: failure.message }),
+                : failure._tag === "BoxdPlainTextEndpoint"
+                  ? { failure: "plain-text endpoint", endpoint: failure.endpoint }
+                  : { failure: failure.operation, code: failure.code, message: failure.message }),
             }),
           ),
         );
@@ -196,7 +216,11 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
     const connectError = (failure: BoxdConnectFailure) =>
       Effect.fail(boxdConnectError(worker, failure));
     return yield* driverOf(entry).pipe(
-      Effect.catchTags({ BoxdCallError: connectError, BoxdUnknownRegion: connectError }),
+      Effect.catchTags({
+        BoxdCallError: connectError,
+        BoxdUnknownRegion: connectError,
+        BoxdPlainTextEndpoint: connectError,
+      }),
     );
   });
   /** Returns the driver of `entry` for preflight, which reports every boxd failure as a gap. */
@@ -208,7 +232,11 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
     const preflightError = (failure: BoxdConnectFailure) =>
       Effect.fail(boxdPreflightError(worker, failure));
     return yield* driverOf(entry).pipe(
-      Effect.catchTags({ BoxdCallError: preflightError, BoxdUnknownRegion: preflightError }),
+      Effect.catchTags({
+        BoxdCallError: preflightError,
+        BoxdUnknownRegion: preflightError,
+        BoxdPlainTextEndpoint: preflightError,
+      }),
     );
   });
 

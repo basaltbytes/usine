@@ -614,3 +614,76 @@ for (const acknowledged of [false, true])
       assert.deepStrictEqual(restored, [acknowledged]);
     }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
   );
+
+// A harness saves the conversation again on every launch, a resume included, and a resumed child
+// that already has its prompt does not acknowledge it again.
+it.live("keeps a prompted child's receipt when its resumed launch saves it again", () =>
+  Effect.gen(function* () {
+    const database = yield* temporaryDatabase;
+    const request = attemptRequest("recovery/prompted-twice");
+    const restored: Array<boolean> = [];
+    const backend = Layer.effectContext(
+      Effect.gen(function* () {
+        const services = yield* Effect.context<ChildBackend | StubChildren>();
+        const stub = Context.get(services, ChildBackend);
+        return Context.add(services, ChildBackend, {
+          ...stub,
+          launch: (child) =>
+            Effect.gen(function* () {
+              const journal = yield* ChildSessionJournal.current;
+              if (Option.isSome(child.resume)) {
+                restored.push(child.prompted);
+                if (restored.length > 1)
+                  return yield* SessionInterruptedError.make({
+                    sessionId: child.session.id,
+                    message: "Native reopen failed",
+                  });
+                yield* journal.started(child.resume.value);
+                return yield* stub.launch(child);
+              }
+              yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+              yield* journal.prompted;
+              return yield* stub.launch(child);
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(stubChildBackendLayer));
+    const open = (parent: Parameters<typeof fauxParent>[0]) =>
+      runtimeLayer.pipe(
+        Layer.provideMerge(
+          harnessLayer({
+            ...fauxParent(parent),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open recovery storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+    const restart = (parent: Parameters<typeof fauxParent>[0]) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const services = yield* Layer.build(open(parent));
+          const execution = yield* Effect.forkChild(
+            Context.get(services, AttemptRuntime).execute(request, recordingSink().sink),
+          );
+          yield* Context.get(services, StubChildren).next;
+          yield* Fiber.interrupt(execution);
+        }),
+      );
+    yield* restart([delegate("Fix the findings.")]);
+    yield* restart([answer("Recovered.")]);
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(open([answer("Recovered.")]));
+        const result = yield* Context.get(services, AttemptRuntime).execute(
+          request,
+          recordingSink().sink,
+        );
+        assert.strictEqual(result.message, "Recovered.");
+      }),
+    );
+    assert.deepStrictEqual(restored, [true, true]);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+);

@@ -8,7 +8,9 @@ import { ProjectId } from "@usine/core/project";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
+import { AttemptTask } from "@usine/core/attempt";
 import {
+  AttemptView,
   boardTaskRuns,
   boardRunSummary,
   BoardItemLink,
@@ -18,7 +20,9 @@ import {
   FactoryOverview,
   ProjectView,
   ReadyOverview,
+  RunDetailView,
   RunSummaryView,
+  RunView,
   WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
@@ -28,6 +32,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
 import { overviewQuery, attentionQuery, projectId } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
+import { runDetailQuery } from "~/lib/runs/queries";
 import { boardOverview } from "~/lib/projects/fixture";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
@@ -179,6 +184,72 @@ it("redirects a legacy URL for the second repository to its project", async () =
   const router = await mount("/projects/board-test/api", 1440);
   await expect.poll(() => router.state.location.pathname).toBe("/projects/product");
   await expect.element(page.getByRole("heading", { name: "Product", exact: true })).toBeVisible();
+});
+
+it("names the repository of a legacy URL that no project includes", async () => {
+  await mount("/projects/acme/widget", 1440);
+  await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
+  await expect
+    .element(
+      page.getByText(
+        "No project includes the repository acme/widget. Admins manage projects in Configuration > Projects.",
+        { exact: true },
+      ),
+    )
+    .toBeVisible();
+  await expect.element(page.getByText(/No project has the ID/u)).not.toBeInTheDocument();
+});
+
+it("names the unknown page of a URL under an existing project", async () => {
+  await mount("/projects/product/board", 1440);
+  await expect.element(page.getByText("Page not found", { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByText("The project product has no page board.", { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(/No project includes the repository/u))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByText("Project not found", { exact: true }))
+    .not.toBeInTheDocument();
+});
+
+it("says a run belongs to another project instead of calling the URL project missing", async () => {
+  const run = overview()
+    .projects.flatMap(({ board }) =>
+      board.lanes.flatMap(({ items }) => items.flatMap(boardTaskRuns)),
+    )
+    .find(({ repository }) => repository === RepositoryName.make("board-test/repo"));
+  if (run === undefined) throw new Error("Missing run fixture");
+  client.setQueryData(
+    runDetailQuery(client, run.id).queryKey,
+    RunDetailView.make({
+      run: RunView.make({
+        ...run,
+        task: "Implement the issue.",
+        resultMessage: null,
+        attempts: run.attempts.map((attempt) =>
+          AttemptView.make({ ...attempt, task: AttemptTask.make("Implement the issue.") }),
+        ),
+      }),
+      agentDefinitionChanged: false,
+      eventDedupKey: "event",
+      eventPayload: {},
+      transcript: [],
+      sessionState: [],
+      earlierTranscript: [],
+    }),
+  );
+  await mount(`/projects/other/runs/${run.id}`, 1440);
+  await expect.element(page.getByText("Run not found", { exact: true })).toBeVisible();
+  await expect
+    .element(
+      page.getByText(
+        `Run ${run.id} does not belong to the project other. Admins manage projects in Configuration > Projects.`,
+        { exact: true },
+      ),
+    )
+    .toBeVisible();
 });
 
 it("filters the project task list by repository without changing the project", async () => {

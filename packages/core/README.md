@@ -19,7 +19,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/attempt` | `Attempt`, `FailureResolution` (the time and operator of a failure resolution), `AttemptId`, `AttemptNumber`, `AttemptTask`, `MemoryKilledProcess` (a kernel task name and host PID), `OutOfMemoryKills` (the processes the kernel killed in an attempt's containers for memory), `ContainerOutOfMemoryKills` (those of one container, by `ContainerId`), `totalOutOfMemoryKills`, `shouldAutoRetry`, `MAX_AUTO_ATTEMPTS`, `ProviderRetry`, `pendingProviderRetry`, and `AttemptWindow`, `windowOf`, `windowHolds`, `windowsOverlap`, `AttemptWindows` |
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptAwaitingCi`, `AttemptHandedOff`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `GitHubPushFailure`, `InfraFailure`, `DefectFailure`, `ProviderCapacityFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
-| `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvagePartlyPushed` (pushed work whose checkout keeps the files that the push left out), `SalvageRetained`, `SalvageRejected` (a push that the remote refused for good), `AttemptSalvage`, `AttemptRecovery` (its `rejected` is the recorded `SalvageRejected`, whose commit recovery doesn't push again), `RecoverySink` (its `windows` reads the windows a recovered attempt's harvest needs) |
+| `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvagePartlyPushed` (pushed work whose checkout keeps the files that the push left out), `SalvageRetained`, `SalvageRejected` (a push that the remote refused for good), `AttemptSalvage`, `AttemptRecovery` (its `rejected` is the recorded `SalvageRejected`, whose commit recovery doesn't push again), `RecoveredLeftovers` (`gone` when recovery finds neither the attempt's machine nor its checkout), `RecoverySink` (its `windows` reads the windows a recovered attempt's harvest needs) |
 | `@usine/core/attempt/start` | Why an attempt started: `StartedByEvent`, `StartedByRetry`, `StartedByEditAndRetry` (with the operator login), `StartedByInfraRetry`, `StartedByProviderRetry`, `StartedAfterRestart`, `AttemptStart`, `OperatorRetryStart` |
 | `@usine/core/attempt/channel` | `RunSpec`, versioned envelopes, the `Sink` (stores envelopes, records the salvage, comments, and out-of-memory kills, reads the `transcript` and the harvest's `windows`), and the `admit` reducer. Import as a namespace (`AttemptChannel.Started`). |
 | `@usine/core/agent`, `/agent/brain`, `/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent model resolution, `githubSignature` (the last line of an agent's GitHub comments); `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
@@ -32,6 +32,8 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
 Parent and child sessions record the resolved `pool` at launch. API-key sessions can also record an `endpoint` provider name. Both keys are optional in serialized records, so older transcripts remain readable. `sessionPool` reads the recorded pool and applies the historical harness and model rule only when it is absent.
+
+`Started.parentModel` is the selected Pi parent model, or `None` for an attempt without a parent session. A stored `Started` without the key decodes as `None`.
 
 `SessionStarted.prompt` records the exact initial prompt sent to a child. It is `None` for parents and older transcripts.
 
@@ -90,7 +92,7 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 
 `ProvisionerTimings` in `/worker` validates provisioner waits and check intervals in seconds, including ordered creation backoff bounds. Defaults are 600 seconds for SSH, 30 to 600 seconds for backoff, and 86400 seconds between machine checks.
 
-`ProviderCapacityFailure` records a temporary model provider refusal. It permits an automatic retry under the same attempt cap as `InfraFailure`. `pendingProviderRetry` derives the next attempt number, provider message, and earliest start from a running run's last failed attempt: two minutes after attempt 1 and five after attempt 2. `StartedByProviderRetry` distinguishes these starts from infrastructure retries.
+`ProviderCapacityFailure` records a temporary model provider refusal. It permits an automatic retry under the same attempt cap as `InfraFailure`. `pendingProviderRetry` derives the next attempt number, provider message, and earliest start from a running run's last failed attempt: two minutes after attempt 1 and five after attempt 2, or the failure's `resetsAt`, the provider's usage-limit reset time, if that is later. `StartedByProviderRetry` distinguishes these starts from infrastructure retries.
 
 ## Project identities
 
@@ -108,7 +110,7 @@ Authenticated operator actions use `ActingMember` and `requestActor` from `@usin
 
 ## CI waits
 
-`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The branch must belong to the attempt's repository and point at the checkout's final commit; the pull request API can report an older head. Without a handoff, a `HarvestSpec` with `requiresCi` verifies the open pull requests of the checkout's branch the same way; a detached checkout queries branches on origin at its HEAD. An unchanged detached checkout fails with `PullRequestNotFound` unless its revision is the fixed base commit. When only pull request refs match, it keeps the open pull requests from the attempt's repository that GitHub's commit-to-pull-request index lists at that HEAD. The pull request read retries with `retryTransient` while origin has the pull request's `refs/pull/<n>/head`.
+`@usine/core/ci` exports `CiPolicy`, `CiHandoff`, `CiLabelMutation`, the CI resolution variants, and `ciHandoff` for the `[usine:awaiting-ci]` final-answer protocol. `AwaitingCi` is an open run state; `AttemptAwaitingCi` records an ended session whose CI outcome is pending. Harvested `PullRequest` facts include the pushed `head`, with `None` for older facts. Pass `Option.some(handoff)` as the fourth argument to `harvestFacts` to verify its pull request number and source branch against origin. The pull request must be open, its head repository must have the attempt's repository ID, and the branch must point at the checkout's final commit; the pull request API can report an older head. A verified handoff also keeps the other pull requests that GitHub's commit-to-pull-request index lists at its head; if that read fails, it keeps only the handoff's pull request. Without a handoff, a `HarvestSpec` with `requiresCi` verifies the open pull requests of the checkout's branch the same way; a detached checkout queries branches on origin at its HEAD. An unchanged detached checkout fails with `PullRequestNotFound` unless its revision is the fixed base commit. When only pull request refs match, it reads each pull request whose `refs/pull/<n>/head` is that HEAD and keeps the open ones from the attempt's repository. A candidate branch or pull request whose read fails is skipped if another candidate has an open pull request. GitHub reads retry failures and invalid output with `retryTransient`; the handoff's pull request read retries only while origin has its `refs/pull/<n>/head`.
 
 A verification that fails returns no pull request and sets `Harvest.unverifiedHandoff`, which the executor copies to `StepResult.unverifiedHandoff`:
 
@@ -116,15 +118,18 @@ A verification that fails returns no pull request and sets `Harvest.unverifiedHa
 | --- | --- | --- |
 | `HeadMismatch` | The handoff's `head` isn't the checkout's HEAD. | `AgentFailure` |
 | `PullRequestNotFound` | Origin has no such pull request, or no open pull request heads the branch or detached HEAD. | `AgentFailure` |
+| `PullRequestNotOpen` | The handoff's pull request is closed or merged. | `AgentFailure` |
 | `RepositoryMismatch` | The pull request, or every open one at a detached HEAD, comes from another repository. | `AgentFailure` |
 | `BranchNotAtHead` | The branch on origin is missing or at another commit. | `AgentFailure` |
-| `GitHubReadFailed` | A GitHub API read failed after retries, a git read failed, or the reads took longer than 10 seconds. | `InfraFailure` |
+| `GitHubReadFailed` | A GitHub API read failed or returned invalid output after retries. Keeps the read's error as `cause`. | `InfraFailure` |
+| `GitReadFailed` | A `git` read of the checkout or of origin failed or returned invalid output. | `InfraFailure` |
+| `VerificationTimedOut` | The `git` and GitHub reads took longer than 10 seconds. | `InfraFailure` |
 
 `describeUnverifiedHandoff` returns the reason as the failure message shows it.
 
 `HandedOff` is a closed, neutral run state with the failed head, reason, fix loop, and fix run ID. `CiHandedOff` settles a CI wait into this state and ends its attempt as `AttemptHandedOff`.
 
-`CiTimedOut` settles a CI wait that remains pending at its deadline as an `InfraFailure`. `CiIncomplete` settles a CI wait whose workflow run failed or was canceled with no failed job as an `InfraFailure` for the operator. `CiFailed` records an `AgentFailure` when failed CI cannot start a fix.
+`CiTimedOut` settles a CI wait that remains pending at its deadline as an `InfraFailure`. `CiIncomplete` settles a CI wait whose workflow run failed or was canceled with no failed job as an `InfraFailure` for the operator. `CiFailed` records an `AgentFailure` when failed CI cannot start a fix. `CiPullRequestClosed` settles a CI wait whose pull request was closed without a merge before CI passed: the run is `Canceled` with the cancel reason `PullRequestClosed`, and the attempt ends as `AttemptCanceled`.
 
 Attempt timing and provider-retry helpers accept the metadata they use, so polling summaries can omit prompts and comments.
 

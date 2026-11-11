@@ -28,9 +28,13 @@ usine adapts Inngest's run model, not n8n's or Temporal's ([run-model research](
 
 - **Revised 2026-10-29 ([#692](https://github.com/basaltbytes/usine/issues/692))**: automatic retry also covers a typed provider capacity refusal. A Codex child stopped with “Selected model is at capacity” after 43 minutes of work; treating that refusal as a task failure required an operator retry even though the salvaged work could continue.
 
-  Harness adapters classify capacity using provider error codes when available, and narrow message matching otherwise. A dedicated failure and child report marker preserve the classification through the Pi parent and durable storage. Task, authentication, and usage-limit failures keep their existing behavior.
+  Harness adapters classify capacity using provider error codes when available, and narrow message matching otherwise. A dedicated failure and child report marker preserve the classification through the Pi parent and durable storage. Task and authentication failures keep their existing behavior; usage limits were also excluded until the revision below.
 
   Capacity retries use the existing three-attempt cap, with delays of two minutes after attempt 1 and five minutes after attempt 2. A running run with a closed capacity-failed attempt waits without a worker reservation; its persisted end time determines the retry deadline after a restart. The next attempt resumes from the newest pushed salvage. Cancellation interrupts the wait, and the run page shows the provider message and the next try. This extends the infrastructure-only automatic retry rule above; it adds no run state or stored timer.
+
+- **Revised 2026-11-11 ([#1147](https://github.com/basaltbytes/usine/issues/1147))**: a provider usage limit is a capacity refusal. The Claude subscription reached its usage limit while a Pi parent kept answering; its Claude children ended their turns on HTTP 429 and returned the limit text as their reports, and the parent reported a blocker. The Run waited five hours for an operator. Keeping usage limits out of the capacity retry put the limit's reset on the operator.
+
+  The Claude adapter classifies the `rate_limit` code and HTTP 429 as a capacity refusal that carries the reset time of Claude's last rejected rate-limit report. The retry starts no earlier than that time, so a single retry covers a limit that resets hours later. A child's capacity report outranks the parent's own blocker, question, or failure, because the parent can only describe the refusal. Codex usage limits keep their existing behavior.
 
 ## Amendment (2026-11-04): step outputs
 

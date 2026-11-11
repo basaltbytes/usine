@@ -10,6 +10,7 @@ import {
   ProvisionerReuse,
   BoatSize,
   BoxdSize,
+  BoxdEndpoint,
   BoxdRegion,
   BoxdSnapshotName,
   BoxdEgressAllowlist,
@@ -341,7 +342,17 @@ export class BoxdProvisioner extends Schema.Class<
 >("@usine/config/BoxdProvisioner")({
   provider: Schema.Literal("boxd"),
   tokenEnv: EnvironmentVariableName,
-  region: BoxdRegion.pipe(Schema.withDecodingDefaultKey(Effect.succeed("fra"))),
+  /**
+   * The account endpoint of the boxd cluster, or `None` for the hosted service at
+   * `https://boxd.sh:9443`.
+   */
+  endpoint: Schema.OptionFromOptionalKey(BoxdEndpoint),
+  /**
+   * The region of the machines, which boxd lists at `endpoint`, or `None` to create them where
+   * `endpoint` runs them: Frankfurt on the hosted service, or the only location of a cluster that
+   * runs in one place.
+   */
+  region: Schema.OptionFromOptionalKey(BoxdRegion),
   size: BoxdSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("2x8"))),
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),

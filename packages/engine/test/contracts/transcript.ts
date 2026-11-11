@@ -41,6 +41,39 @@ import { type PersistenceAdapter, withPersistence } from "./adapter.ts";
 
 export const transcriptContract = (adapter: PersistenceAdapter) => {
   describe(`${adapter.name} Transcripts contract`, () => {
+    it.live("clears the parent model of an Attempt that starts without a parent session", () =>
+      withPersistence(
+        adapter,
+        Effect.gen(function* () {
+          const runId = RunId.make("parentless-run");
+          const store = yield* RunStore;
+          yield* store.recordAndClaim(
+            Submission.make({
+              ...lifecycleSubmission,
+              parentModel: Option.some(ModelId.make("openai/gpt-5.6-sol")),
+            }),
+            runId,
+          );
+          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(started._tag === "AttemptStarted");
+          const attemptId = started.execution.attempt.id;
+          assert.isTrue(Option.isSome(started.execution.attempt.parentModel));
+          yield* store.appendTranscript(
+            "outbound",
+            AttemptChannel.OutboundEnvelope.make({
+              version: AttemptChannel.PROTOCOL_VERSION,
+              attemptId,
+              sequence: AttemptChannel.Sequence.make(1),
+              sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
+              payload: AttemptChannel.Started.make({}),
+            }),
+          );
+          const snapshot = yield* store.snapshot(runId);
+          assert.isTrue(Option.isNone(snapshot.attempts[0]?.parentModel ?? Option.some("missing")));
+        }),
+      ),
+    );
+
     it.live("writes the effective parent model back onto the Attempt", () =>
       withPersistence(
         adapter,
@@ -61,7 +94,9 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
               attemptId,
               sequence: AttemptChannel.Sequence.make(1),
               sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-              payload: AttemptChannel.Started.make({ parentModel: effectiveParentModel }),
+              payload: AttemptChannel.Started.make({
+                parentModel: Option.some(effectiveParentModel),
+              }),
             }),
           );
           const parent = ParentSession.make({
@@ -390,7 +425,9 @@ export const transcriptContract = (adapter: PersistenceAdapter) => {
             yield* append(silent);
             for (let i = 0; i < 205; i++)
               yield* append(
-                AttemptChannel.Started.make({ parentModel: ModelId.make("test-model") }),
+                AttemptChannel.Started.make({
+                  parentModel: Option.some(ModelId.make("test-model")),
+                }),
               );
             assert.deepStrictEqual(
               (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),

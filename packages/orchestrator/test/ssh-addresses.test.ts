@@ -42,6 +42,7 @@ for (const provider of ["boat", "boxd"] as const) {
                 provider === "boxd"
                   ? {
                       ...yamlProvisioner,
+                      endpoint: "https://boxd.example.com:9443",
                       region: "nyc",
                       isolated: false,
                       egress: ["*.tailscale.com", "registry.npmjs.org"],
@@ -71,7 +72,11 @@ for (const provider of ["boat", "boxd"] as const) {
           Option.some("usine-attempt"),
         );
         if (provisioner.provider === "boxd") {
-          assert.strictEqual(provisioner.region, "nyc");
+          assert.deepStrictEqual(provisioner.region, Option.some("nyc"));
+          assert.deepStrictEqual(
+            provisioner.endpoint,
+            Option.some("https://boxd.example.com:9443"),
+          );
           assert.isFalse(provisioner.isolated);
           const egress: ReadonlyArray<string> | null = Option.getOrNull(provisioner.egress);
           assert.deepStrictEqual(egress, ["*.tailscale.com", "registry.npmjs.org"]);
@@ -80,6 +85,8 @@ for (const provider of ["boat", "boxd"] as const) {
           assert(entry?.kind === "ssh");
           const view = provisionerView(entry);
           assert(view?._tag === "boxd");
+          assert.strictEqual(view.endpoint, "https://boxd.example.com:9443");
+          assert.strictEqual(view.region, "nyc");
           const viewed: ReadonlyArray<string> | null = view.egress;
           assert.deepStrictEqual(viewed, ["*.tailscale.com", "registry.npmjs.org"]);
         }

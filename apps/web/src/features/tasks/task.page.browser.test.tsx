@@ -49,6 +49,7 @@ let overview: FactoryOverview;
 let fileRequests: Array<string>;
 let fileFailure: boolean;
 let emptyFiles: boolean;
+let staleHead: CommitSha | undefined;
 let changedPath: string;
 const prHead = CommitSha.make("a".repeat(40));
 const attemptHead = CommitSha.make("c".repeat(40));
@@ -150,6 +151,15 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         502,
       );
     const head = CommitSha.make(url.searchParams.get("head") ?? prHead);
+    if (head === staleHead)
+      return json(
+        JSON.stringify({
+          error: "PullRequestFilesChangedError",
+          message:
+            "The pull request base or head changed. Refresh the task to load the latest changes.",
+        }),
+        409,
+      );
     return json(JSON.stringify(Schema.encodeSync(FileChanges)(changesOf(head))));
   }
   if (url.pathname === "/api/overview")
@@ -238,6 +248,7 @@ beforeEach(() => {
   fileRequests = [];
   fileFailure = false;
   emptyFiles = false;
+  staleHead = undefined;
   changedPath = "src/reader.ts";
   taskUnavailable = false;
   taskDelay = undefined;
@@ -609,6 +620,12 @@ it("shows file marks and patch availability on a phone without widening the task
   expect(getComputedStyle(path.element()).whiteSpace).toBe("normal");
   expect(path.element().scrollWidth).toBeLessThanOrEqual(path.element().clientWidth);
   await expect.element(changes.getByRole("combobox", { name: "Compare" })).not.toBeInTheDocument();
+  await expect
+    .element(changes.getByText("No attempt commits recorded for this pull request"))
+    .toBeVisible();
+  await expect
+    .element(changes.getByText("pushed no new commits", { exact: false }))
+    .not.toBeInTheDocument();
   await expect.element(changes.getByText("Whole pull request", { exact: true })).toBeVisible();
   await expect.element(changes.getByText("test", { exact: true })).toBeVisible();
   await expect.element(changes.getByText("generated", { exact: true })).toBeVisible();
@@ -632,4 +649,67 @@ it("keeps errors local with retry and shows an empty commit comparison", async (
   emptyFiles = true;
   await changes.getByRole("button", { name: "Retry", exact: true }).click();
   await expect.element(changes.getByText("No files changed in this comparison")).toBeVisible();
+});
+
+it("refreshes the task when Retry follows a pull request whose head changed", async () => {
+  tasks.set("40", taskWithChanges());
+  staleHead = prHead;
+  await mount(40);
+  await page
+    .getByRole("region", { name: /^Pull requests/u })
+    .getByText("Changes", { exact: true })
+    .nth(1)
+    .click();
+  const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
+  await expect
+    .element(changes.getByText("The pull request base or head changed.", { exact: false }))
+    .toBeVisible();
+  const pushed = CommitSha.make("e".repeat(40));
+  tasks.set(
+    "40",
+    TaskView.make({
+      ...taskWithChanges(),
+      items: EffectArray.map(taskWithChanges().items, (item) =>
+        TaskItemView.make({
+          ...item,
+          pullRequest:
+            item.pullRequest === null
+              ? null
+              : TaskPullRequestState.make({ ...item.pullRequest, head: pushed }),
+        }),
+      ),
+    }),
+  );
+  const requests = taskRequests.length;
+  await changes.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect.element(changes.getByText("src/reader.ts", { exact: true })).toBeVisible();
+  expect(taskRequests.length).toBeGreaterThan(requests);
+  expect(fileRequests.at(-1)).toContain("head=" + pushed);
+});
+
+it("says when the pull request's attempts pushed no new commits", async () => {
+  const task = taskWithChanges();
+  tasks.set(
+    "40",
+    TaskView.make({
+      ...task,
+      attemptChanges: EffectArray.map(task.attemptChanges, (attempt) =>
+        TaskAttemptChangesView.make({ ...attempt, base: attempt.head }),
+      ),
+    }),
+  );
+  await mount(40);
+  await page
+    .getByRole("region", { name: /^Pull requests/u })
+    .getByText("Changes", { exact: true })
+    .nth(1)
+    .click();
+  const changes = page.getByRole("region", { name: "Changes for pull request #42", exact: true });
+  await expect
+    .element(changes.getByText("Attempts on this pull request pushed no new commits"))
+    .toBeVisible();
+  await expect.element(changes.getByRole("combobox", { name: "Compare" })).not.toBeInTheDocument();
+  await expect
+    .element(changes.getByText("No attempt commits recorded", { exact: false }))
+    .not.toBeInTheDocument();
 });

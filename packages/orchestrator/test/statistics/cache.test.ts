@@ -279,7 +279,7 @@ describe("Statistics cache", () => {
         workers: Effect.succeed([worker]),
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeedNone,
-        recover: () => Effect.void,
+        recover: () => Effect.succeed("found" as const),
         intervene: () => Effect.void,
         interrupt: () => Effect.void,
         occupy: () => Effect.succeed({ worker, release: Effect.void }),

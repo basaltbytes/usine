@@ -161,7 +161,7 @@ export class Attempt extends Schema.Class<
   agent: AgentName,
   /** Whether an operator action was accepted during this attempt. */
   operatorIntervened: Schema.Boolean,
-  /** The Pi parent model recorded for this attempt, or `None` if unavailable. */
+  /** The Pi parent model recorded for this attempt, or `None` if unavailable or the attempt has no parent session. */
   parentModel: Schema.OptionFromNullOr(ModelId),
   /** The time this attempt started, also the start of its attribution window. */
   startedAt: Schema.DateTimeUtc,
@@ -293,7 +293,8 @@ export class ProviderRetry extends Schema.Class<
  * Returns a pending capacity retry from persisted state, including after an orchestrator restart.
  * `attempts` must be ordered oldest to newest. Returns `None` unless the run is running and its
  * latest attempt has a recorded end time and a capacity failure below the automatic retry cap.
- * The retry starts no earlier than two minutes after attempt 1 or five minutes after attempt 2.
+ * The retry starts no earlier than two minutes after attempt 1 or five minutes after attempt 2,
+ * and no earlier than the usage-limit reset time that the failure reports.
  */
 export const pendingProviderRetry = (
   state: RunState,
@@ -311,11 +312,13 @@ export const pendingProviderRetry = (
   const outcome = last.outcome.value;
   if (outcome._tag !== "Failed" || outcome.failure._tag !== "ProviderCapacityFailure")
     return Option.none();
+  const backoff = DateTime.add(last.endedAt.value, { minutes: last.number === 1 ? 2 : 5 });
   return Option.some(
     ProviderRetry.make({
       nextAttempt: AttemptNumber.make(last.number + 1),
-      retryAt: DateTime.add(last.endedAt.value, {
-        minutes: last.number === 1 ? 2 : 5,
+      retryAt: Option.match(outcome.failure.resetsAt, {
+        onNone: () => backoff,
+        onSome: (resetsAt) => DateTime.max(backoff, resetsAt),
       }),
       message: outcome.failure.message,
     }),
