@@ -1320,7 +1320,7 @@ export class RunStore extends Context.Service<
     ) => Effect.Effect<void, RunStoreError>;
     /**
      * Returns the Attempt's window and the overlapping windows of the same Agent's other Attempts
-     * on the Item, oldest first (ADR 0006, #429).
+     * on the Item, oldest first (#429).
      */
     readonly attemptWindows: (attemptId: AttemptId) => Effect.Effect<AttemptWindows, RunStoreError>;
     /** The persisted Attempts that startup reconciliation visits, excluding discarded leftovers. */

@@ -86,7 +86,7 @@ Two mistakes in the script's first draft that usine code is likely to repeat:
 - **One Session, one process.** One bad commit from any extension poisons the Session for every running conversation, so the orchestrator needs a reopen supervisor, and extensions need typed boundaries like other code.
 - **No forced termination in-process.** Killing a tool that ignores its abort signal means killing the orchestrator. The parent's only tool delegates to a remote process that the transport can kill.
 - **Two SQLite connections, one file.** usine's rows (items, events, workers, projections) stay under drizzle; runs, attempts, and conversations move to pi-durable storage. A usine row and a pi-durable commit are never one transaction, so ADR 0010's projection-plus-startup-sweep pattern stays for usine's rows.
-- **Web UI rework.** The run drawer, ADR 0025's bookmarks, and the transcript reader use transcript sequences and attempt/session/call ids, and would read conversation entries and `watchEvents()` instead.
+- **Web UI rework.** The run drawer, the reader bookmarks, and the transcript reader use transcript sequences and attempt/session/call ids, and would read conversation entries and `watchEvents()` instead.
 - **Remote child spawn.** The Agent SDK over an SSH wrapper is unverified. If it fails, the exe.dev adapter would drive the Claude CLI's stream-json mode over SSH.
 - **Cloudflare.** The Durable Object adapter suits a one-writer harness, but spawning children on a worker from a Durable Object needs a worker-side agent protocol that doesn't exist yet. The local and exe.dev targets don't need it.
 

@@ -12,7 +12,7 @@ usine is a monorepo in the manywalls/atoly shape (pnpm workspaces, turbo, `apps/
 - `orchestrator`: embeddable composition
 - `run-host`: the worker-side one-shot CLI, published since workers install it and preflight checks its version
 
-`orchestrator` is a **library** that exports the full Effect-layer composition and starts in-process; `apps/server` is a thin CLI running it headless and serving the internal `apps/web`. Packages version **independently** with changesets; orchestrator and run-host compatibility follows the envelope schema version ([ADR 0006](./0006-executor-contract-run-host-attempt-channel.md)). `effect` and the `@effect/*` packages each block uses are **peerDependencies**, exact-pinned once at the root. v1 commits to publish discipline (exports maps, no cross-package deep imports, a README each), not to API stability, docs, or support: 0.x is honest while APIs change.
+`orchestrator` is a **library** that exports the full Effect-layer composition and starts in-process; `apps/server` is a thin CLI running it headless and serving the internal `apps/web`. Packages version **independently** with changesets; orchestrator and run-host compatibility follows the envelope schema version ([ADR 0006](./0006-executor-prepares-checkouts-runs-children-on-workers.md)). `effect` and the `@effect/*` packages each block uses are **peerDependencies**, exact-pinned once at the root. v1 commits to publish discipline (exports maps, no cross-package deep imports, a README each), not to API stability, docs, or support: 0.x is honest while APIs change.
 
 ## Considered options
 

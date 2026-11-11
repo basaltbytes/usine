@@ -15,8 +15,7 @@ Single-context repo:
 ```
 /
 ├── CONTEXT.md
-├── docs/adr/
-└── src/
+└── docs/adr/
 ```
 
 ## Use glossary terms
@@ -25,6 +24,6 @@ In your output (issue titles, refactor proposals, hypotheses, test names), name 
 
 If the concept isn't in the glossary, either you're inventing language the project doesn't use (reconsider) or the glossary has a gap (note it for `/domain-modeling`).
 
-## Amend ADRs that a change contradicts
+## ADRs that a change contradicts
 
-An ADR records why a decision was taken, not a limit on later work. If your change contradicts one, make the change and amend the ADR in the same pull request: add a dated section with the new reason, and name the ADR in the pull request body.
+Follow the ADR rule in `AGENTS.md`: rewrite the ADR as the current decision and its reasons, or delete it. Never append a dated section.

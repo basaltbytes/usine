@@ -2,7 +2,7 @@
 
 v1 distributes only through **npm**: `apps/server` publishes as **`@usine/server`** (bin **`usine`**), a thin CLI over `@usine/orchestrator` that bundles the built web UI. `apps/web` stays unpublished (ADR 0012 amended).
 
-**`pnpm create usine`** (`create-usine`) creates an instance folder: a local git repo ([ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md)), a `usine.yaml` skeleton (schema `version:`, empty registry, implicit local worker, `webhooks.mode: off`), empty `loops/` and `agents/`, a `.gitignore` for `.usine/` and `node_modules/`, and a **`package.json` and lockfile that exact-pin `@usine/server`**, then installs and commits.
+**`pnpm create usine`** (`create-usine`) creates an instance folder: a local git repo, a `usine.yaml` skeleton (schema `version:`, empty registry, implicit local worker, `webhooks.mode: off`), empty `loops/` and `agents/`, a `.gitignore` for `.usine/` and `node_modules/`, and a **`package.json` and lockfile that exact-pin `@usine/server`**, then installs and commits.
 
 The pin is the point: the engine version is **per-instance, committed, authored config**. To upgrade, edit the pin and restart; forward-only SQLite migrations run at startup (back up with `usine backup`, [ADR 0010](./0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md)). Sharing the repo reproduces the instance, engine included. No example loop or agent is scaffolded; the first ones are made in the UI, paused.
 
@@ -16,7 +16,7 @@ The pin is the point: the engine version is **per-instance, committed, authored 
 4. Install the App on the managed repos.
 5. Fill the registry with the installation-bound add-repo picker (ADR 0016).
 
-The Workers page under Configuration is the **preflight surface**: it runs the verify-only preflight of [ADR 0006](./0006-executor-contract-run-host-attempt-channel.md) on demand and shows each typed capability error with its fix (for example, "run `claude /login` in a terminal"). Logins stay in the operator's terminal. The CLI is two commands: `pnpm create usine` and `usine up`.
+The Workers page under Configuration is the **preflight surface**: it runs the verify-only preflight of [ADR 0006](./0006-executor-prepares-checkouts-runs-children-on-workers.md) on demand and shows each typed capability error with its fix (for example, "run `claude /login` in a terminal"). Logins stay in the operator's terminal. The CLI is two commands: `pnpm create usine` and `usine up`.
 
 ## Considered options
 
@@ -29,10 +29,10 @@ The Workers page under Configuration is the **preflight surface**: it runs the v
 ## Consequences
 
 - ADR 0012 amended: `create-usine` publishes next to `@usine/server` as a scaffolder, not a block. It's unscoped, so the `@usine-dev` fallback doesn't affect it.
-- The instance repo is a Node package: `package.json` and lockfile are committed config; `node_modules/` is gitignored like `.usine/`. UI config commits (ADR 0009) never touch the pin.
+- The instance repo is a Node package: `package.json` and lockfile are committed config; `node_modules/` is gitignored like `.usine/`. UI config commits never touch the pin.
 - Onboarding must resume wherever a first run stopped: each step is idempotent and re-enterable (App created but key lost, key present but nothing installed, installation live but registry empty).
 - Locally, one install contains orchestrator and run host, so only remote workers can skew, which preflight catches (ADR 0006).
-- The prebuilt exe.dev image stays adapter-owned (ADR 0006).
+- The prebuilt exe.dev image stays adapter-owned.
 
 ## Amendment (2026-10-25, #154): the CLI starts, stops, restarts, and upgrades an instance
 
