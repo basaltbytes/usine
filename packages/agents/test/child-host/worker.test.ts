@@ -503,6 +503,8 @@ describe("standalone worker owner", () => {
     });
     expect(await relay.closed, relay.stderr()).toBe(0);
     expect(existsSync(pidFile)).toBe(false);
+    // The exit record proves that the lifeline started the harness and stopped it at pipe EOF.
+    await eventually(() => existsSync(join(root, "exit")));
     await eventually(() => !existsSync(join(root, "process")));
     expect(JSON.parse(readFileSync(join(root, "exit"), "utf8"))).toMatchObject({ exitCode: 143 });
   }, 15_000);
