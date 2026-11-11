@@ -48,6 +48,10 @@ export const ClaudeResultMessage = Schema.Struct({
   result: Schema.optionalKey(Schema.String),
   errors: Schema.optionalKey(Schema.Array(Schema.String)),
   queued_turn_count: Schema.optionalKey(Schema.Finite),
+  /** On a `success` result, marks a turn that ended on an API error; `result` is the error text. */
+  is_error: Schema.optionalKey(Schema.Boolean),
+  /** The HTTP status of the API error that ended the turn, or `null` without a response. */
+  api_error_status: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
 });
 const ClaudeBackgroundTasks = Schema.Struct({
   type: Schema.Literal("system"),
@@ -179,9 +183,16 @@ export const sessionEventsFrom = (
   return events;
 };
 
-/** Returns the capacity failure of a retry that exposes an overload code or HTTP status. */
+/** The HTTP status of a rate-limited request, including a request over the usage limit. */
+const RATE_LIMITED = 429;
+/** The HTTP status of a request that the overloaded provider refused. */
+const OVERLOADED = 529;
+
+/** Returns the capacity failure of a retry that exposes an overload or rate-limit code or HTTP status. */
 export const apiRetryFailure = (sessionId: AgentSessionId, retry: typeof ClaudeApiRetry.Type) =>
-  retry.error_status === 529 ||
+  retry.error_status === RATE_LIMITED ||
+  retry.error === "rate_limit" ||
+  retry.error_status === OVERLOADED ||
   retry.error === "overloaded_error" ||
   (retry.error_status === 503 && retry.retry_delay_ms > 0)
     ? Option.some(
@@ -192,7 +203,10 @@ export const apiRetryFailure = (sessionId: AgentSessionId, retry: typeof ClaudeA
       )
     : Option.none<AgentCapacityError>();
 
-/** Uses the assistant's error code, retaining the last HTTP status for a generic server error. */
+/**
+ * Uses the assistant's error code, retaining the last HTTP status for a generic server error. An
+ * overload or rate-limit error, including a usage limit, is a capacity failure.
+ */
 export const assistantFailure = (
   sessionId: AgentSessionId,
   message: Schema.Json,
@@ -204,7 +218,8 @@ export const assistantFailure = (
       message:
         error.message.content.map(({ text }) => text).join("\n") || "Claude API request failed.",
     };
-    if (error.error === "overloaded") return AgentCapacityError.make(fields);
+    if (error.error === "overloaded" || error.error === "rate_limit")
+      return AgentCapacityError.make(fields);
     if (error.error === "server_error" || error.error === "unknown") {
       return Option.exists(previous, (failure) => Schema.is(AgentCapacityError)(failure))
         ? AgentCapacityError.make(fields)
@@ -223,4 +238,37 @@ export const resultFailure = (
   return result.subtype === "error_during_execution"
     ? Option.getOrElse(providerFailure, () => harnessFailure(Option.some(sessionId), message))
     : AgentResultError.make({ sessionId: Option.some(sessionId), message });
+};
+
+/**
+ * Returns the capacity refusal or usage limit that ended a turn whose `success` result has
+ * `is_error`: the turn's capacity failure, or else one for the result's HTTP 429 or 529 status or
+ * for capacity error text that `harnessFailure` recognizes. Returns `None` for other API errors,
+ * whose text stays the session's answer.
+ */
+export const apiErrorRefusal = (
+  sessionId: AgentSessionId,
+  result: typeof ClaudeResultMessage.Type,
+  providerFailure: Option.Option<AgentCapacityError | AgentResultError>,
+): Option.Option<AgentCapacityError> => {
+  if (result.is_error !== true) return Option.none();
+  const refusal = Option.filter(providerFailure, Schema.is(AgentCapacityError));
+  if (Option.isSome(refusal)) return refusal;
+  const text = result.result?.trim();
+  if (result.api_error_status === RATE_LIMITED || result.api_error_status === OVERLOADED)
+    return Option.some(
+      AgentCapacityError.make({
+        sessionId: Option.some(sessionId),
+        message:
+          text ||
+          (result.api_error_status === RATE_LIMITED
+            ? "Claude reached its usage limit."
+            : "Claude's provider is overloaded."),
+      }),
+    );
+  if (text === undefined || text === "") return Option.none();
+  return Option.filter(
+    Option.some(harnessFailure(Option.some(sessionId), text)),
+    Schema.is(AgentCapacityError),
+  );
 };

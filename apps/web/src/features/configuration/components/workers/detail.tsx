@@ -38,7 +38,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
     return (
       <ConfigurationPage entity={entityKey("worker", name)} title={name}>
         <Missing title="Worker not found">
-          <code>usine.yaml</code> has no worker {name}.{" "}
+          Configuration &gt; Workers has no worker {name}.{" "}
           <Link to="/configuration/workers" className="text-primary hover:underline">
             See all workers
           </Link>

@@ -21,6 +21,7 @@ import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   AgentFailure,
+  AttemptFailure,
   ProviderCapacityFailure,
   BlockedFailure,
   InfraFailure,
@@ -73,6 +74,7 @@ import {
   delegate,
   fauxParent,
   layer,
+  PARENT_MODEL,
   type ParentStep,
   stubChildBackendLayer,
   StubChildren,
@@ -243,7 +245,7 @@ describe("durable AttemptRuntime", () => {
         });
         const live = yield* runtime.isLive(request.spec.attemptId);
         assert.isFalse(live);
-        // Sent before `execute` starts, so the notice is buffered until the parent starts.
+        // Sent before `execute` starts, so the notice is buffered until the Attempt starts.
         yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* children.next;
@@ -307,6 +309,9 @@ describe("durable AttemptRuntime", () => {
           "parent.SessionStarted",
           "WorkerUnresponsive",
         ]);
+        const started = outbound[0]?.payload;
+        assert(started?._tag === "Started");
+        assert.deepStrictEqual(started.parentModel, Option.some(PARENT_MODEL));
         assert.deepStrictEqual(
           trace(outbound).filter((tag) => !tag.startsWith("Worker")),
           [
@@ -471,7 +476,7 @@ describe("durable AttemptRuntime", () => {
         assertAdmitted(request.spec.attemptId, outbound);
         assert.deepStrictEqual(trace(outbound), ["Failed"]);
         assert.lengthOf(
-          logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
+          logs.matching(/Dropped the Worker notices kept for an Attempt that never started/u),
           1,
         );
       }).pipe(Effect.provide(layer({ database, parent: [] }).pipe(Layer.provideMerge(logs.layer))));
@@ -525,6 +530,10 @@ describe("durable AttemptRuntime", () => {
                   const record = await tx.doc(AttemptRecordDoc, request.spec.attemptId, null);
                   assert.deepStrictEqual(record.pendingOutbound, []);
                   delete record.pendingOutbound;
+                  // A record written before the `started` marker started once it has a model.
+                  assert.isTrue(record.started);
+                  assert.isNotNull(record.parentModel);
+                  delete record.started;
                 }, context),
             );
             return { child, found };
@@ -2506,6 +2515,53 @@ describe("durable AttemptRuntime", () => {
         );
       }
     }).pipe(Effect.scoped),
+  );
+
+  // In #1147 the Claude children hit the subscription's usage limit and the parent, which kept
+  // answering, reported the refusal as its own blocker.
+  it.live(
+    "fails with the child's usage limit and reset time when the parent reports a blocker",
+    () =>
+      Effect.gen(function* () {
+        const message = "You've hit your limit · resets 5am (UTC)";
+        const resetsAt = DateTime.makeUnsafe("2026-11-11T05:00:00Z");
+        const relay: ParentStep = (context) => {
+          const result = [...context.messages].reverse().find(({ role }) => role === "toolResult");
+          const parts = result?.role === "toolResult" ? result.content : [];
+          return answer(
+            parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+          );
+        };
+        for (const [attempt, parentAnswer] of [
+          ["limit/step/1", relay],
+          [
+            "limit/step/2",
+            answer(
+              "[usine:blocked]\nSubagent delegation is unavailable: the attempt was rejected with HTTP 429.",
+            ),
+          ],
+        ] as const) {
+          const database = yield* temporaryDatabase;
+          yield* Effect.gen(function* () {
+            const runtime = yield* AttemptRuntime;
+            const execution = yield* Effect.forkChild(
+              runtime.execute(attemptRequest(attempt), recordingSink().sink),
+            );
+
+            yield* (yield* (yield* StubChildren).next).limit(message, resetsAt);
+            const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+            // Chai compares errors by name and message only, so compare the encoded failure.
+            const encoded = yield* Schema.encodeEffect(AttemptFailure)(failure);
+            assert.deepStrictEqual(encoded, {
+              _tag: "ProviderCapacityFailure",
+              message,
+              resetsAt: DateTime.formatIso(resetsAt),
+            });
+          }).pipe(
+            Effect.provide(layer({ database, parent: [delegate("Review the PR"), parentAnswer] })),
+          );
+        }
+      }).pipe(Effect.scoped),
   );
 
   // The Claude children of #602 ended with "Claude output stream failed" until the parent used

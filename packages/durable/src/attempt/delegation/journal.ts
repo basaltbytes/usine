@@ -41,6 +41,8 @@ export interface ChildBlocker {
   readonly sessionId: string;
   readonly message: string;
   readonly kind: "blocked" | "question" | "failed" | "capacity" | "infra";
+  /** The ISO 8601 time a capacity report's usage limit resets, if known. */
+  readonly resetsAt?: string;
 }
 
 /** The progress that earlier runs of a delegation saved. */

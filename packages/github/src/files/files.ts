@@ -1,10 +1,10 @@
-import { jsonKey } from "@usine/core/json-key";
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha, RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
-import { Cache, Clock, Context, Effect, Exit, Layer, Schema } from "effect";
+import { Cache, Clock, Context, Effect, Layer, Match, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../github-app.ts";
-import type { GitHubAppError } from "../error.ts";
+import type { ProjectNotInstalledError } from "../access.ts";
+import type { GitHubApiError, GitHubAppError } from "../error.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "../http.ts";
 import { retryTransientRequest } from "../retry.ts";
 import {
@@ -16,18 +16,9 @@ import {
   GitHubFile,
   type FileChangesQuery,
 } from "./model.ts";
+import { RetainedFiles } from "./retained.ts";
 
-export {
-  ChangedFile,
-  FileChanges,
-  FileChangesQuery,
-  PullRequestFilesQuery,
-  CommitRangeFilesQuery,
-  PullRequestFilesChangedError,
-} from "./model.ts";
-
-const MAX_CACHED_RESPONSE_BYTES = 512 * 1024;
-const encoder = new TextEncoder();
+const RETAINED_BYTES = 64 * 1024 * 1024;
 
 const PullRequest = Schema.Struct({
   head: Schema.Struct({ sha: CommitSha }),
@@ -38,7 +29,11 @@ const Comparison = Schema.Struct({
   files: Schema.Array(GitHubFile),
 });
 
-/** Reads commit-pinned patches with installation authentication and a shared immutable cache. */
+/**
+ * Reads commit-pinned patches with installation authentication and a shared immutable cache. When
+ * GitHub answers 404 and the installation doesn't cover the repository, fails with
+ * `ProjectNotInstalledError` instead of the 404.
+ */
 export class GitHubFiles extends Context.Service<
   GitHubFiles,
   {
@@ -46,7 +41,10 @@ export class GitHubFiles extends Context.Service<
       repository: RepositoryName,
       item: ItemNumber,
       selection: FileChangesQuery,
-    ) => Effect.Effect<FileChanges, GitHubAppError | PullRequestFilesChangedError>;
+    ) => Effect.Effect<
+      FileChanges,
+      GitHubAppError | PullRequestFilesChangedError | ProjectNotInstalledError
+    >;
   }
 >()("@usine/github/files/files/GitHubFiles") {
   static readonly layer = Layer.effect(
@@ -149,14 +147,43 @@ export class GitHubFiles extends Context.Service<
         });
         return changes;
       });
-      const cache = yield* Cache.makeWith(load, {
-        capacity: 128,
-        timeToLive: (exit) =>
-          Exit.isSuccess(exit) &&
-          encoder.encode(jsonKey(exit.value)).byteLength <= MAX_CACHED_RESPONSE_BYTES
-            ? Infinity
-            : 0,
+      // GitHub answers 404 for a repository the App can't read, so a 404 checks whether the
+      // installation still covers the repository before it's reported as missing changes.
+      const explainNotFound = Effect.fn("GitHubFiles.explainNotFound")(function* (
+        repository: RepositoryName,
+        error: GitHubApiError,
+      ) {
+        if (!Option.exists(error.status, (status) => status === 404)) return yield* error;
+        yield* Effect.annotateCurrentSpan({ repository });
+        const access = yield* app.projectAccess([repository]).pipe(
+          Effect.tapError((probe) =>
+            Effect.logWarning("Could not check GitHub App access after a missing file read", {
+              repository,
+              errorTag: probe._tag,
+            }),
+          ),
+          Effect.option,
+        );
+        const [coverage] = Option.getOrElse(access, () => []);
+        if (coverage?._tag !== "ProjectNotInstalledError") return yield* error;
+        yield* Effect.logWarning("The GitHub App installation lost access to the repository", {
+          repository,
+        });
+        return yield* coverage;
       });
+      // A zero time-to-live shares a lookup between concurrent reads without keeping its result;
+      // `retained` keeps successful results within its byte budget.
+      const pending = yield* Cache.makeWith(
+        (read: FileRead) =>
+          load(read).pipe(
+            Effect.catchTag("GitHubApiError", (error) => explainNotFound(read.repository, error)),
+          ),
+        {
+          capacity: Number.POSITIVE_INFINITY,
+          timeToLive: () => 0,
+        },
+      );
+      const retained = new RetainedFiles(RETAINED_BYTES);
       return {
         read: Effect.fn("GitHubFiles.read")(function* (
           repository: RepositoryName,
@@ -169,14 +196,38 @@ export class GitHubFiles extends Context.Service<
             base: selection.base,
             head: selection.head,
           });
-          return yield* Cache.get(
-            cache,
-            FileRead.make({
-              repository: RepositoryName.make(canonicalRepositoryName(repository)),
-              item,
-              selection,
-            }),
-          );
+          const read = FileRead.make({
+            repository: RepositoryName.make(canonicalRepositoryName(repository)),
+            item,
+            selection,
+          });
+          const hit = retained.get(read);
+          if (Option.isSome(hit)) {
+            yield* Effect.logDebug("Read file changes from the shared cache", { repository, item });
+            return hit.value;
+          }
+          const changes = yield* Cache.get(pending, read);
+          const retention = retained.retain(read, changes);
+          yield* Match.valueTags(retention, {
+            Retained: ({ bytes, evicted }) =>
+              evicted === 0
+                ? Effect.void
+                : Effect.logDebug("Evicted older file changes to retain a new response", {
+                    repository,
+                    item,
+                    bytes,
+                    evicted,
+                    retainedBytes: retained.used,
+                  }),
+            Oversized: ({ bytes }) =>
+              Effect.logInfo("File changes exceed the shared cache budget and were not retained", {
+                repository,
+                item,
+                bytes,
+                budget: retained.budget,
+              }),
+          });
+          return changes;
         }),
       };
     }),

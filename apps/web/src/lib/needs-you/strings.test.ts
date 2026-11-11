@@ -104,7 +104,7 @@ describe("unconfigured Worker copy in Needs attention", () => {
   it("names the Worker, counts its Attempts, and gives both ways out", () => {
     const copy = needCopy(need(114));
     assert.strictEqual(copy.title, "Worker not configured");
-    assert.include(copy.detail, "local is not in usine.yaml");
+    assert.include(copy.detail, "local is not in Configuration > Workers");
     assert.include(copy.detail, "114 recorded attempts");
     assert.include(copy.detail, "Add the worker back");
     assert.include(copy.detail, "discard the leftovers");
@@ -114,7 +114,7 @@ describe("unconfigured Worker copy in Needs attention", () => {
   it("says how many Attempts still run on a removed Worker", () => {
     assert.strictEqual(
       needCopy(need(3, 2)).detail,
-      "local is not in usine.yaml. 2 attempts still running on it. Discard the leftovers after they end",
+      "local is not in Configuration > Workers. 2 attempts still running on it. Discard the leftovers after they end",
     );
     assert.include(needCopy(need(3, 1)).detail, "1 attempt still running on it");
   });
@@ -211,6 +211,9 @@ it("names a paused worker and how to resume it", () => {
   );
   assert.strictEqual(copy.title, "trial: paused");
   assert.include(copy.detail, "takes no new attempts");
-  assert.include(copy.detail, "running attempts finish");
+  assert.include(
+    copy.detail,
+    "Running attempts finish. Clear Paused in Configuration > Workers to resume it.",
+  );
   assert.strictEqual(copy.repository, null);
 });

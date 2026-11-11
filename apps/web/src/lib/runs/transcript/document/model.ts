@@ -164,6 +164,15 @@ export type ChapterRow =
   | GitHubChangeRow
   | BoardMoveRow;
 
+/**
+ * The parent of an Attempt as its `Started` envelope reports it: `Unreported` before the envelope
+ * arrives, and `NoSession` for an Attempt that runs without a parent session.
+ */
+type ChapterParent =
+  | { readonly _tag: "Unreported" }
+  | { readonly _tag: "Model"; readonly model: string }
+  | { readonly _tag: "NoSession" };
+
 /** One Attempt of a Run, with its sessions, rows in transcript order, and account readings. */
 export interface Chapter {
   readonly key: string;
@@ -171,7 +180,7 @@ export interface Chapter {
   readonly attempt: Option.Option<AttemptView>;
   /** Whether the Attempt has no outcome and no terminal envelope yet. */
   readonly live: boolean;
-  readonly parentModel: Option.Option<string>;
+  readonly parent: ChapterParent;
   /** The parent session first, then each child in start order. */
   readonly sessions: ReadonlyArray<TranscriptSession>;
   readonly rows: ReadonlyArray<ChapterRow>;
@@ -536,12 +545,15 @@ export const readerDocument = (
       attemptId,
       attempt: Option.fromNullishOr(attempt),
       live,
-      parentModel:
+      parent:
         started?._tag === "Notice" &&
         started.origin._tag === "Envelope" &&
         started.origin.payload._tag === "Started"
-          ? Option.some(started.origin.payload.parentModel)
-          : Option.none(),
+          ? Option.match(started.origin.payload.parentModel, {
+              onNone: (): ChapterParent => ({ _tag: "NoSession" }),
+              onSome: (model): ChapterParent => ({ _tag: "Model", model }),
+            })
+          : { _tag: "Unreported" },
       sessions: projection.sessions
         .filter((session) => session.attemptId === attemptId)
         .sort(

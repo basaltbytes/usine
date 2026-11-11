@@ -223,7 +223,7 @@ export const FAILED_MARKER = "[usine:failed]";
 /** The reserved report prefix for a temporary provider capacity refusal. */
 export const CAPACITY_MARKER = "[usine:provider-capacity]";
 
-/** A harness refusal because its model provider has no capacity. */
+/** A harness refusal because its model provider has no capacity or the usage limit is reached. */
 export class AgentCapacityError extends Schema.TaggedError<
   AgentCapacityError,
   Brand.Brand<"@usine/agents/runtime/AgentCapacityError">
@@ -232,6 +232,10 @@ export class AgentCapacityError extends Schema.TaggedError<
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   /** The provider's capacity refusal, or the details after the capacity report marker. */
   message: Schema.NonEmptyString,
+  /** The time the provider's usage limit resets, or `None` if the provider didn't report one. */
+  resetsAt: Schema.OptionFromOptionalKey(Schema.DateTimeUtcFromString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
 }) {}
 
 /** An error for a session that finished and reported that the work failed. */
@@ -441,8 +445,8 @@ export const reportText = (report: AgentReport): string => {
 
 /**
  * Maps a session error to an attempt failure: SDK and process failures are retryable infrastructure
- * failures; capacity refusals use a delayed retry. Roster errors and other agent-reported
- * failures wait for the operator (ADR 0002).
+ * failures; capacity refusals and usage limits use a delayed retry. Roster errors and other
+ * agent-reported failures wait for the operator (ADR 0002).
  */
 export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
   Match.valueTags(error, {
@@ -455,7 +459,8 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
     PoolUnavailableError: ({ message }) => AgentFailure.make({ message }),
     UnsupportedEffortError: ({ message }) => AgentFailure.make({ message }),
     AgentResultError: ({ message }) => AgentFailure.make({ message }),
-    AgentCapacityError: ({ message }) => ProviderCapacityFailure.make({ message }),
+    AgentCapacityError: ({ message, resetsAt }) =>
+      ProviderCapacityFailure.make({ message, resetsAt }),
     AgentBlockedError: ({ message }) => BlockedFailure.make({ message }),
     AgentQuestionError: ({ message }) => QuestionFailure.make({ question: message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>

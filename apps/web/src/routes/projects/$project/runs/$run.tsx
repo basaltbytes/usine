@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
 import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
-import { ProjectNotFound } from "~/components/project-not-found";
+import { ProjectNotFound, runOutsideProjectDescription } from "~/components/project-not-found";
 import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
 import { RunId } from "@usine/core/run";
 import { runDetailQuery } from "~/lib/runs/queries";
@@ -10,6 +10,16 @@ import { RunPage } from "~/features/runs/run.page";
 const RunRoute = () => {
   const { run } = Route.useParams();
   return <RunPage key={run} runId={run} />;
+};
+
+const RunOutsideProject = () => {
+  const { project, run } = Route.useParams();
+  return (
+    <ProjectNotFound
+      title="Run not found"
+      description={runOutsideProjectDescription(run, project)}
+    />
+  );
 };
 
 export const Route = createFileRoute("/projects/$project/runs/$run")({
@@ -40,7 +50,7 @@ export const Route = createFileRoute("/projects/$project/runs/$run")({
     if (project === undefined || projectId(project) !== params.project) throw notFound();
     return detail;
   },
-  notFoundComponent: ProjectNotFound,
+  notFoundComponent: RunOutsideProject,
   pendingComponent: RoutePending,
   errorComponent: RouteError,
   component: RunRoute,

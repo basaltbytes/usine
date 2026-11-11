@@ -74,7 +74,7 @@ const executor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeedNone,
-  recover: () => Effect.void,
+  recover: () => Effect.succeed("found" as const),
   intervene: () => Effect.void,
   occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
   sweep: Effect.void,
@@ -94,7 +94,9 @@ const executor = Layer.succeed(StepExecutor)({
             sentAt: now,
             payload:
               sequence === 1
-                ? AttemptChannel.Started.make({ parentModel: ModelId.make("selected-parent") })
+                ? AttemptChannel.Started.make({
+                    parentModel: Option.some(ModelId.make("selected-parent")),
+                  })
                 : AttemptChannel.SessionEvent.make({
                     event: TextOutput.make({ session: parent, text: `row ${sequence}` }),
                   }),

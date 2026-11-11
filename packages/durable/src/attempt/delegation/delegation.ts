@@ -23,7 +23,18 @@ import {
   SessionStarted,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Schema, Stream } from "effect";
+import {
+  DateTime,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Match,
+  Option,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 import type { DurableHarnessError } from "../../harness.ts";
 import type { AttemptHub } from "../hubs.ts";
 import { childSessionId, parentSessionId } from "../parent.ts";
@@ -596,12 +607,25 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
             AgentBlockedError: () => "blocked" as const,
             AgentQuestionError: () => "question" as const,
           });
+          const resetsAt =
+            report._tag === "AgentCapacityError"
+              ? Option.map(report.resetsAt, DateTime.formatIso)
+              : Option.none<string>();
           yield* Effect.logInfo("Child session returned a reserved report to the Pi parent", {
             sessionId: session.id,
             kind,
+            resetsAt: Option.getOrUndefined(resetsAt),
           });
           const first = yield* journal.recordBlocker(
-            { sessionId: session.id, message: report.message, kind },
+            {
+              sessionId: session.id,
+              message: report.message,
+              kind,
+              ...Option.match(resetsAt, {
+                onNone: () => ({}),
+                onSome: (value) => ({ resetsAt: value }),
+              }),
+            },
             () => true,
           );
           if (!first) {

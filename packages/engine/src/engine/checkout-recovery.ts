@@ -1,7 +1,7 @@
 import { AttemptId, type StopReason } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
-import { type Brand, Array as EffectArray, Effect, Option, Ref, Result, Schema } from "effect";
+import { type Brand, Data, Effect, Option, Ref, Result, Schema } from "effect";
 import type { StepExecutor, WorkerLease } from "../step-executor.ts";
 import type { RunStore, SalvageCandidate } from "../store/store.ts";
 
@@ -17,6 +17,17 @@ class ParentStopUnconfirmedError extends Schema.TaggedError<
   worker: WorkerName,
   cause: Schema.Defect(),
 }) {}
+
+/** What startup reconciliation did with one persisted Attempt. */
+type StartupVisit = Data.TaggedEnum<{
+  /** The Attempt stays tracked, so the next startup visits it again. */
+  Kept: {};
+  /** The Attempt is closed and left nothing on its Worker, so later startups skip it. */
+  Discarded: {};
+  /** The closed Attempt's parent task isn't confirmed stopped; its checkout and a slot stay kept. */
+  Unstopped: { readonly attempt: SalvageCandidate };
+}>;
+const StartupVisit = Data.taggedEnum<StartupVisit>();
 
 /** Returns `map` without `key`. */
 export const without = <K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> => {
@@ -49,24 +60,51 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   // The slots of Attempts whose parent task may still run, by Attempt.
   const kept = yield* Ref.make<ReadonlyMap<AttemptId, Occupied>>(new Map());
 
-  /** Reconciles `attempt`'s checkout. On failure, logs an error and leaves the checkout on its Worker. */
-  const recover = (attempt: AttemptRecovery) =>
-    executor
+  /**
+   * Reconciles `attempt`'s checkout. Stops tracking a closed Attempt whose recovery found nothing
+   * left on its Worker, so later startups skip it, and returns whether it did. On failure, logs an
+   * error, leaves the checkout on its Worker, and keeps tracking the Attempt.
+   */
+  const recover = Effect.fn("CheckoutRecovery.recover")(function* (attempt: AttemptRecovery) {
+    const fields = { attemptId: attempt.attemptId, worker: attempt.worker, open: attempt.open };
+    yield* Effect.annotateCurrentSpan(fields);
+    const recovered = yield* executor
       .recover(attempt, {
         salvage: (salvage) => store.recordSalvage(attempt.attemptId, salvage),
         comments: (comments) => store.recordComments(attempt.attemptId, comments),
         windows: store.attemptWindows(attempt.attemptId),
       })
-      .pipe(
-        Effect.tapError((error) =>
-          Effect.logError("Attempt salvage reconciliation failed; work retained", {
-            attemptId: attempt.attemptId,
-            worker: attempt.worker,
-            message: String(error),
-          }),
-        ),
-        Effect.ignore,
+      .pipe(Effect.result);
+    if (Result.isFailure(recovered)) {
+      yield* Effect.logError("Attempt salvage reconciliation failed; work retained", {
+        ...fields,
+        message: String(recovered.failure),
+      });
+      return false;
+    }
+    if (recovered.success === "found" || attempt.open) {
+      yield* Effect.logDebug("The Attempt stays tracked for the next startup", {
+        ...fields,
+        leftovers: recovered.success,
+      });
+      return false;
+    }
+    const discarded = yield* store.discardClosedAttempt(attempt.attemptId).pipe(Effect.result);
+    if (Result.isFailure(discarded)) {
+      yield* Effect.logError(
+        "Could not stop tracking a closed Attempt that left nothing on its Worker; the next startup visits it again",
+        { ...fields, errorTag: discarded.failure._tag, message: discarded.failure.message },
       );
+      return false;
+    }
+    yield* Effect.logDebug(
+      discarded.success
+        ? "Stopped tracking a closed Attempt that left nothing on its Worker; later startups skip it"
+        : "The Attempt left nothing on its Worker and was already untracked",
+      fields,
+    );
+    return discarded.success;
+  });
 
   /**
    * Keeps `attempt`'s checkout and occupies a slot on its Worker, recording the lease in the same
@@ -92,7 +130,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
 
   /**
    * Keeps the checkout and a slot for an open Attempt whose parent task is live or whose liveness
-   * can't be read. Otherwise reconciles the checkout.
+   * can't be read. Otherwise reconciles the checkout. The Attempt stays tracked either way.
    */
   const recoverOpen = Effect.fn("CheckoutRecovery.recoverOpen")(function* (
     attempt: AttemptRecovery,
@@ -100,7 +138,10 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     const fields = { attemptId: attempt.attemptId, worker: attempt.worker };
     yield* Effect.annotateCurrentSpan(fields);
     const live = yield* executor.isLive(attempt.attemptId).pipe(Effect.result);
-    if (Result.isSuccess(live) && !live.success) return yield* recover(attempt);
+    if (Result.isSuccess(live) && !live.success) {
+      yield* recover(attempt);
+      return StartupVisit.Kept();
+    }
     if (Result.isFailure(live))
       yield* Effect.logWarning(
         "Could not read whether an open Attempt's parent task is live; its checkout stays for its Run to decide",
@@ -116,11 +157,12 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       "Occupied a slot on the Worker of an open Attempt kept for its Run to reattach",
       fields,
     );
+    return StartupVisit.Kept();
   });
 
   /**
    * Reconciles a closed Attempt's checkout if its parent task is confirmed stopped. Otherwise
-   * keeps the checkout and a slot, and returns the Attempt (#177).
+   * keeps the checkout and a slot, and returns `Unstopped` (#177).
    */
   const recoverClosed = Effect.fn("CheckoutRecovery.recoverClosed")(function* (
     attempt: SalvageCandidate,
@@ -130,21 +172,20 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     // `recover` also stops the task, but its failure doesn't distinguish an unconfirmed stop from
     // a failed salvage.
     const stopped = yield* executor.interrupt(attempt.attemptId, "startup").pipe(Effect.result);
-    if (Result.isSuccess(stopped)) {
-      yield* recover(attempt);
-      return Option.none<SalvageCandidate>();
-    }
+    if (Result.isSuccess(stopped))
+      return (yield* recover(attempt)) ? StartupVisit.Discarded() : StartupVisit.Kept();
     yield* Effect.logWarning(
       "Could not confirm that the parent task of a closed Attempt stopped; its checkout and a slot of its Worker stay kept, and no Attempt starts on its Item, until a reconcile confirms the stop",
       { ...fields, errorTag: stopped.failure._tag, message: stopped.failure.message },
     );
     yield* keep(attempt);
-    return Option.some(attempt);
+    return StartupVisit.Unstopped({ attempt });
   });
 
   /**
-   * Reconciles every persisted Attempt on a configured Worker. Returns the closed Attempts whose
-   * parent task isn't confirmed stopped.
+   * Reconciles every persisted Attempt on a configured Worker, then logs, per configured Worker,
+   * how many Attempts it visited, kept tracked, and stopped tracking. Returns the closed Attempts
+   * whose parent task isn't confirmed stopped.
    */
   const atStartup = Effect.fn("CheckoutRecovery.atStartup")(function* () {
     const configuredWorkers = yield* executor.workers;
@@ -167,11 +208,8 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       attempts: reconcilable.length,
     });
     let completed = 0;
-    const unstopped = yield* Effect.forEach(reconcilable, (attempt) =>
-      (attempt.open
-        ? recoverOpen(attempt).pipe(Effect.as(Option.none<SalvageCandidate>()))
-        : recoverClosed(attempt)
-      ).pipe(
+    const visits = yield* Effect.forEach(reconcilable, (attempt) =>
+      (attempt.open ? recoverOpen(attempt) : recoverClosed(attempt)).pipe(
         Effect.tap(() =>
           Effect.gen(function* () {
             completed += 1;
@@ -182,10 +220,20 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
               });
           }),
         ),
+        Effect.map((visit) => [attempt.worker, visit] as const),
       ),
     );
-    yield* Effect.logInfo("Startup checkout reconciliation finished", { completed });
-    return EffectArray.getSomes(unstopped);
+    for (const worker of [...configured].sort()) {
+      const onWorker = visits.filter(([visited]) => visited === worker);
+      const discarded = onWorker.filter(([, visit]) => visit._tag === "Discarded").length;
+      yield* Effect.logInfo("Startup checkout reconciliation finished on a Worker", {
+        worker,
+        visited: onWorker.length,
+        kept: onWorker.length - discarded,
+        discarded,
+      });
+    }
+    return visits.flatMap(([, visit]) => (visit._tag === "Unstopped" ? [visit.attempt] : []));
   });
 
   /**

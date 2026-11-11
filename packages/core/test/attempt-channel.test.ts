@@ -75,6 +75,27 @@ describe("attempt channel", () => {
       assert.deepStrictEqual(decodedValue7, forwarded);
     }),
   );
+  it.effect("reads a stored parent model and round-trips a start without a parent session", () =>
+    Effect.gen(function* () {
+      const decode = Schema.decodeUnknownEffect(AttemptChannel.Started);
+      const stored = yield* decode({ _tag: "Started", parentModel: "anthropic/claude-opus-4-6" });
+      assert.deepStrictEqual(stored.parentModel, Option.some(parentModel));
+      const absent = yield* decode({ _tag: "Started" });
+      assert.isTrue(Option.isNone(absent.parentModel));
+      const parentless = AttemptChannel.Started.make({});
+      assert.isTrue(Option.isNone(parentless.parentModel));
+      const json = Schema.fromJsonString(AttemptChannel.Started);
+      const encoded = yield* Schema.encodeEffect(json)(parentless);
+      const written = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(encoded);
+      assert.deepStrictEqual(written, {
+        _tag: "Started",
+        parentModel: null,
+        conflictingSalvage: null,
+      });
+      const roundTripped = yield* Schema.decodeEffect(json)(encoded);
+      assert.deepStrictEqual(roundTripped, parentless);
+    }),
+  );
   it.effect("preserves legacy worker recoveries and round-trips initial confirmations", () =>
     Effect.gen(function* () {
       const notice = {
@@ -471,7 +492,7 @@ describe("attempt channel", () => {
         sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
         payload,
       });
-    const started = AttemptChannel.Started.make({ parentModel });
+    const started = AttemptChannel.Started.make({ parentModel: Option.some(parentModel) });
     const sessionEvent = AttemptChannel.SessionEvent.make({
       event: SessionStarted.make({
         session: ParentSession.make({

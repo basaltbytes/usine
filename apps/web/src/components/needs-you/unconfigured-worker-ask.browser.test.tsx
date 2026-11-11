@@ -62,7 +62,7 @@ it("says how many attempts still run on a removed worker and offers no discard u
   await expect
     .element(
       needs().getByText(
-        "usine-worker-2 is not in usine.yaml. 2 attempts still running on it. Discard the leftovers after they end",
+        "usine-worker-2 is not in Configuration > Workers. 2 attempts still running on it. Discard the leftovers after they end",
         { exact: true },
       ),
     )

@@ -217,7 +217,7 @@ export const checkReads = ({
       workers: Effect.succeed([WorkerName.make("worker")]),
       isLive: () => Effect.succeed(false),
       outcome: () => Effect.succeedNone,
-      recover: () => Effect.void,
+      recover: () => Effect.succeed("found" as const),
       intervene: () => Effect.void,
       interrupt: () => Effect.void,
       reserve: () => Effect.succeed({ worker: WorkerName.make("worker"), release: Effect.void }),

@@ -46,9 +46,8 @@ const aborted = (context: ChordContext): Effect.Effect<void> =>
 type StoredBlocker = NonNullable<AttemptRecord["childBlocker"]>;
 
 /** A stored blocker without a `kind` predates the other kinds and is a blocker. */
-const childBlocker = ({ sessionId, message, kind }: StoredBlocker): ChildBlocker => ({
-  sessionId,
-  message,
+const childBlocker = ({ kind, ...blocker }: StoredBlocker): ChildBlocker => ({
+  ...blocker,
   kind: kind ?? "blocked",
 });
 

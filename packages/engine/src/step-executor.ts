@@ -1,4 +1,8 @@
-import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
+import type {
+  AttemptRecovery,
+  RecoveredLeftovers,
+  RecoverySink,
+} from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId, type StopReason } from "@usine/core/attempt";
@@ -98,12 +102,13 @@ export class StepExecutor extends Context.Service<
      * Reconciles the checkout of an Attempt that no Run reattaches, recording its salvage before
      * releasing it. Stops a live parent task first, and fails, leaving the checkout, if it can't
      * confirm the stop. For an open Attempt whose parent task failed before a launch recorded it,
-     * also records the comments the Attempt posted on the Run's Item.
+     * also records the comments the Attempt posted on the Run's Item. Returns `gone` if neither
+     * the Attempt's machine nor its checkout is left.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
-    ) => Effect.Effect<void, E | AttemptFailure>;
+    ) => Effect.Effect<RecoveredLeftovers, E | AttemptFailure>;
     /**
      * Stops the Attempt's work for `reason`, including a parent task that survived a restart. Fails
      * if the parent task can't be confirmed stopped. The engine also calls it after `execute`

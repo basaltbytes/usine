@@ -19,7 +19,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/attempt` | `Attempt`, `FailureResolution` (the time and operator of a failure resolution), `AttemptId`, `AttemptNumber`, `AttemptTask`, `MemoryKilledProcess` (a kernel task name and host PID), `OutOfMemoryKills` (the processes the kernel killed in an attempt's containers for memory), `ContainerOutOfMemoryKills` (those of one container, by `ContainerId`), `totalOutOfMemoryKills`, `shouldAutoRetry`, `MAX_AUTO_ATTEMPTS`, `ProviderRetry`, `pendingProviderRetry`, and `AttemptWindow`, `windowOf`, `windowHolds`, `windowsOverlap`, `AttemptWindows` |
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptAwaitingCi`, `AttemptHandedOff`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `GitHubPushFailure`, `InfraFailure`, `DefectFailure`, `ProviderCapacityFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
-| `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvagePartlyPushed` (pushed work whose checkout keeps the files that the push left out), `SalvageRetained`, `SalvageRejected` (a push that the remote refused for good), `AttemptSalvage`, `AttemptRecovery` (its `rejected` is the recorded `SalvageRejected`, whose commit recovery doesn't push again), `RecoverySink` (its `windows` reads the windows a recovered attempt's harvest needs) |
+| `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvagePartlyPushed` (pushed work whose checkout keeps the files that the push left out), `SalvageRetained`, `SalvageRejected` (a push that the remote refused for good), `AttemptSalvage`, `AttemptRecovery` (its `rejected` is the recorded `SalvageRejected`, whose commit recovery doesn't push again), `RecoveredLeftovers` (`gone` when recovery finds neither the attempt's machine nor its checkout), `RecoverySink` (its `windows` reads the windows a recovered attempt's harvest needs) |
 | `@usine/core/attempt/start` | Why an attempt started: `StartedByEvent`, `StartedByRetry`, `StartedByEditAndRetry` (with the operator login), `StartedByInfraRetry`, `StartedByProviderRetry`, `StartedAfterRestart`, `AttemptStart`, `OperatorRetryStart` |
 | `@usine/core/attempt/channel` | `RunSpec`, versioned envelopes, the `Sink` (stores envelopes, records the salvage, comments, and out-of-memory kills, reads the `transcript` and the harvest's `windows`), and the `admit` reducer. Import as a namespace (`AttemptChannel.Started`). |
 | `@usine/core/agent`, `/agent/brain`, `/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent model resolution, `githubSignature` (the last line of an agent's GitHub comments); `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
@@ -32,6 +32,8 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
 Parent and child sessions record the resolved `pool` at launch. API-key sessions can also record an `endpoint` provider name. Both keys are optional in serialized records, so older transcripts remain readable. `sessionPool` reads the recorded pool and applies the historical harness and model rule only when it is absent.
+
+`Started.parentModel` is the selected Pi parent model, or `None` for an attempt without a parent session. A stored `Started` without the key decodes as `None`.
 
 `SessionStarted.prompt` records the exact initial prompt sent to a child. It is `None` for parents and older transcripts.
 
@@ -90,7 +92,7 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 
 `ProvisionerTimings` in `/worker` validates provisioner waits and check intervals in seconds, including ordered creation backoff bounds. Defaults are 600 seconds for SSH, 30 to 600 seconds for backoff, and 86400 seconds between machine checks.
 
-`ProviderCapacityFailure` records a temporary model provider refusal. It permits an automatic retry under the same attempt cap as `InfraFailure`. `pendingProviderRetry` derives the next attempt number, provider message, and earliest start from a running run's last failed attempt: two minutes after attempt 1 and five after attempt 2. `StartedByProviderRetry` distinguishes these starts from infrastructure retries.
+`ProviderCapacityFailure` records a temporary model provider refusal. It permits an automatic retry under the same attempt cap as `InfraFailure`. `pendingProviderRetry` derives the next attempt number, provider message, and earliest start from a running run's last failed attempt: two minutes after attempt 1 and five after attempt 2, or the failure's `resetsAt`, the provider's usage-limit reset time, if that is later. `StartedByProviderRetry` distinguishes these starts from infrastructure retries.
 
 ## Project identities
 

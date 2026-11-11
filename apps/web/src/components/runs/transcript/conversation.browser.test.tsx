@@ -1053,7 +1053,7 @@ const resumeCases: ReadonlyArray<{
     access: null,
     facts: [
       "Worktree /worker/Philippe's repo",
-      "Worker retired-worker is no longer declared in usine.yaml",
+      "Worker retired-worker is no longer in Configuration > Workers",
     ],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
   },

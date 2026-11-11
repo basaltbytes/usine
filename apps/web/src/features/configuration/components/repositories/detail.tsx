@@ -28,7 +28,7 @@ export const RepositoryDetail = ({ owner, name, configuration }: RepositoryDetai
     return (
       <ConfigurationPage entity={entityKey("repository", full)} title={full}>
         <Missing title="Repository not registered">
-          {full} is not under <code>repos</code> in <code>usine.yaml</code>.{" "}
+          Configuration &gt; Repositories has no repository {full}.{" "}
           <Link to="/configuration/repositories" className="text-primary hover:underline">
             See all repositories
           </Link>
@@ -50,11 +50,9 @@ export const RepositoryDetail = ({ owner, name, configuration }: RepositoryDetai
           />
         }
       >
-        <DetailSection title="Labels usine creates" aside="From labels in usine.yaml">
+        <DetailSection title="Labels usine creates" aside="From Configuration > Labels">
           {repository.declaredLabels.length === 0 ? (
-            <p className="text-muted-foreground">
-              No labels under <code>labels</code> in <code>usine.yaml</code>.
-            </p>
+            <p className="text-muted-foreground">No labels in Configuration &gt; Labels</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {repository.declaredLabels.map((label) => (

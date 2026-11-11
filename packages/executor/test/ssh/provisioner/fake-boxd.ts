@@ -58,7 +58,10 @@ export const fakeBoxd = () => {
     readFails: Option.none<string>(),
     timerFails: Option.none<string>(),
     egressFails: Option.none<string>(),
-    /** Whether boxd answers `SetVmEgressAllow` with an empty list, leaving egress unrestricted. */
+    /**
+     * Whether boxd reports an empty list after a create or `SetVmEgressAllow`, leaving egress
+     * unrestricted.
+     */
     egressIgnored: false,
   };
   const failure = (operation: string, code: string) =>
@@ -111,7 +114,7 @@ export const fakeBoxd = () => {
             status: state.provisioningReads > 0 ? "starting" : "running",
             createdAt: Math.floor(now / 1000),
             labels: request.labels,
-            egressAllow: [],
+            egressAllow: state.egressIgnored ? [] : [...request.egress],
           };
           machines.set(id, machine);
           names.set(id, request.name);

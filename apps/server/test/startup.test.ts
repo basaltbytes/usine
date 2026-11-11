@@ -97,7 +97,7 @@ it.live(
             outcome: remote.outcome,
             recover: (attempt, sink) =>
               Effect.gen(function* () {
-                yield* remote
+                const leftovers = yield* remote
                   .recover(attempt, sink, Effect.succeed(COMMIT_AUTHOR))
                   .pipe(
                     Effect.catchIf(Schema.is(ExecutorError), (error) =>
@@ -110,6 +110,7 @@ it.live(
                   yield* Deferred.succeed(recovering, undefined);
                   yield* Deferred.await(finish);
                 }
+                return leftovers;
               }),
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             reserve: () => Effect.die("finished runs start no attempt"),

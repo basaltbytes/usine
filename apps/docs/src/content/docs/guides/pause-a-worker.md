@@ -19,4 +19,4 @@ To send new attempts to one worker, pause each worker listed before it in `worke
 
 ## Check the result
 
-The worker page shows **Paused**, the **Workers** line on **Overview** shows **Paused: takes no new attempts**, and **Needs attention** lists the worker until you resume it. Running attempts on the worker continue and finish. A run that reattaches an attempt already on the worker still takes a free slot there. Other runs wait for a slot on an unpaused worker. If every worker is paused, new runs wait until you resume one.
+The worker page shows **Paused**, the **Workers** line on **Overview** shows **Paused: takes no new attempts**, and **Needs attention** lists the worker until you resume it, with the instruction to clear **Paused** in **Configuration > Workers**. Running attempts on the worker continue and finish. A run that reattaches an attempt already on the worker still takes a free slot there. Other runs wait for a slot on an unpaused worker. If every worker is paused, new runs wait until you resume one.
