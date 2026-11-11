@@ -4,11 +4,12 @@ import { Agent } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AttemptId,
+  MAX_KILLED_PROCESSES,
   MemoryKilledProcess,
   type ContainerOutOfMemoryKills,
 } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
-import { ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
+import { ContainerId, ContainerMemoryMib, SshDestination, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
@@ -473,7 +474,7 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect.each(["readable", "unreadable"] as const)(
+  it.effect.each(["readable", "unreadable", "disconnects"] as const)(
     "reports a kernel log that the SSH user can't read as a preflight finding: %s",
     (kernelMemory) => {
       const machine = dockerMachine();
@@ -483,10 +484,17 @@ describe("SSH Worker with Docker", () => {
         const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         assert.isTrue(Option.isNone(report.degraded));
         if (kernelMemory === "readable") assert.deepStrictEqual(report.findings, []);
-        else {
+        else if (kernelMemory === "unreadable") {
           assert.strictEqual(report.findings.length, 1);
           assert.include(report.findings[0], "can't read the kernel journal or ring buffer");
           assert.include(report.findings[0], "systemd-journal");
+        } else {
+          assert.strictEqual(report.findings.length, 1);
+          assert.include(
+            report.findings[0],
+            `Could not check whether the SSH user can read the kernel log on ${DESTINATION}`,
+          );
+          assert.include(report.findings[0], "closed by remote host");
         }
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
     },
@@ -1232,6 +1240,100 @@ describe("SSH Worker with Docker", () => {
           ],
         );
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), killsThenStops)));
+    },
+  );
+
+  it.effect(
+    "records the first killed processes and the whole count when the kernel logs name more than the cap",
+    () => {
+      const machine = dockerMachine();
+      machine.state.kernelMemory = "readable";
+      machine.state.kernelVictims = MAX_KILLED_PROCESSES + 1;
+      const exceedsMemory: StubParent = (context) =>
+        killsInContainer(machine, MAX_KILLED_PROCESSES + 1).pipe(
+          Effect.andThen(completes(context)),
+        );
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const kills: Array<ContainerOutOfMemoryKills> = [];
+        yield* prepared.launch({
+          ...sink,
+          outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+        });
+        assert.strictEqual(kills.length, 1);
+        assert.strictEqual(kills[0]?.kills, MAX_KILLED_PROCESSES + 1);
+        assert.deepStrictEqual(
+          kills[0]?.processes,
+          Array.from({ length: MAX_KILLED_PROCESSES }, (_, index) =>
+            MemoryKilledProcess.make({ command: "vitest worker", pid: 1234 + index }),
+          ),
+        );
+        const capped = logs.warnings.filter((line) =>
+          line.includes("Recording only the first killed processes"),
+        );
+        assert.lengthOf(capped, 1);
+        const [, fields] = yield* Schema.decodeEffect(CapturedLog)(capped[0] ?? "").pipe(
+          Effect.orDie,
+        );
+        assert.deepInclude(fields, {
+          identified: MAX_KILLED_PROCESSES + 1,
+          kept: MAX_KILLED_PROCESSES,
+        });
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          runtime(machine, mintingProvider(), exceedsMemory).pipe(Layer.provideMerge(logs.layer)),
+        ),
+      );
+    },
+  );
+
+  it.effect(
+    "keeps the counted kills and names the container and host when SSH drops the kernel log read",
+    () => {
+      const machine = dockerMachine();
+      machine.state.kernelMemory = "disconnects";
+      let ran: string | undefined;
+      const exceedsMemory: StubParent = (context) =>
+        killsInContainer(machine, 2).pipe(
+          Effect.tap((id) => Effect.sync(() => void (ran = id))),
+          Effect.andThen(completes(context)),
+        );
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const kills: Array<ContainerOutOfMemoryKills> = [];
+        yield* prepared.launch({
+          ...sink,
+          outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+        });
+        assert.deepStrictEqual(
+          kills.map(({ container, kills, processes }) => ({ container, kills, processes })),
+          [{ container: ContainerId.make(ran ?? ""), kills: 2, processes: [] }],
+        );
+        const dropped = logs.warnings.filter((line) =>
+          line.includes("Could not collect kernel OOM process details"),
+        );
+        assert.lengthOf(dropped, 1);
+        const [, fields] = yield* Schema.decodeEffect(CapturedLog)(dropped[0] ?? "").pipe(
+          Effect.orDie,
+        );
+        assert.deepInclude(fields, { container: ran, host: DESTINATION });
+        assert.include(String(fields["message"]), "closed by remote host");
+        const { containerGone } = releaseSteps(machine);
+        assertInOrder([
+          ["the kills' read", killsRead(machine)],
+          ["the container's removal", containerGone],
+        ]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          runtime(machine, mintingProvider(), exceedsMemory).pipe(Layer.provideMerge(logs.layer)),
+        ),
+      );
     },
   );
 

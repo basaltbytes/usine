@@ -15,9 +15,13 @@ const diagnostic = (cgroup: string, command: string, pid: number) =>
   `oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=libpod-${container}.scope,mems_allowed=0,oom_memcg=/user.slice/libpod-${container}.scope,task_memcg=${cgroup},task=${command},pid=${pid},uid=1000`;
 
 describe("kernel OOM process attribution", () => {
-  it.live.each(["match", "no match", "unreadable"] as const)(
-    "reads the kernel through journalctl, falling back to dmesg filtered on the worker: journal %s",
-    (journal) =>
+  it.live.each(
+    (["match", "no match", "no match, failing", "unreadable"] as const).flatMap((journal) =>
+      [true, false].map((dmesg) => ({ journal, dmesg })),
+    ),
+  )(
+    "reads the kernel through journalctl, falling back to dmesg filtered on the worker: journal $journal, dmesg $dmesg",
+    ({ journal, dmesg }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -37,14 +41,20 @@ printf '"%s"\\n' '${created}'
         yield* fs.writeFileString(
           path.join(directory, "journalctl"),
           `#!/bin/sh
-[ "$1" = -k ] && [ "$2" = --since ] && [ "$3" = '${created}' ] || exit 2
+[ "$1" = -k ] || exit 2
+${journal === "unreadable" ? "exit 1" : ""}
+# The readability check reads the latest entry of the boot.
+[ "$2" = -b ] && echo 'Linux version 6.18.0' && exit 0
+[ "$2" = --since ] && [ "$3" = '${created}' ] || exit 2
 ${
   {
     match: "echo oom-kill:journal-diagnostic",
     // Like journalctl, prints a placeholder when nothing matches, unless quiet.
     "no match": `for arg in "$@"; do [ "$arg" = -q ] && exit 0; done
 echo '-- No entries --'`,
-    unreadable: "exit 1",
+    // journalctl 257 exits 1 when --grep matches nothing.
+    "no match, failing": "exit 1",
+    unreadable: "",
   }[journal]
 }
 `,
@@ -52,21 +62,35 @@ echo '-- No entries --'`,
         );
         yield* fs.writeFileString(
           path.join(directory, "dmesg"),
-          "#!/bin/sh\necho unrelated-diagnostic\necho oom-kill:ring-buffer-diagnostic\n",
+          dmesg
+            ? "#!/bin/sh\necho unrelated-diagnostic\necho oom-kill:ring-buffer-diagnostic\n"
+            : "#!/bin/sh\necho 'dmesg: read kernel buffer failed: Operation not permitted' >&2\nexit 1\n",
           {
             mode: 0o755,
           },
         );
-        const output = yield* spawner.string(
-          ChildProcess.make("/bin/sh", ["-c", KERNEL_MEMORY_SCRIPT, "sh", "runtime", "attempt"], {
+        const command = ChildProcess.make(
+          "/bin/sh",
+          ["-c", KERNEL_MEMORY_SCRIPT, "sh", "runtime", "attempt"],
+          {
             env: { PATH: `${directory}:/usr/bin:/bin` },
             extendEnv: false,
-          }),
+          },
         );
+        const exitCode = yield* spawner.exitCode(command);
+        if (journal === "unreadable" && !dmesg) {
+          expect(exitCode).toBe(1);
+          return;
+        }
+        expect(exitCode).toBe(0);
+        const output = yield* spawner.string(command);
         expect(output).toBe(
           journal === "match"
             ? "source journal\noom-kill:journal-diagnostic\n"
-            : "source dmesg\noom-kill:ring-buffer-diagnostic\n",
+            : dmesg
+              ? "source dmesg\noom-kill:ring-buffer-diagnostic\n"
+              : // The journal is readable and names no kill, so the record keeps the count alone.
+                "source journal\n",
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

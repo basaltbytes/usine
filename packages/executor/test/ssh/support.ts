@@ -224,8 +224,13 @@ interface FakeMachineState {
   limitsEnforced: boolean;
   runtimeExitCode: number;
   memoryEvents: "counted" | "unreadable" | "empty";
-  /** With `no-kills`, the kernel logs are readable and name no process killed for memory. */
-  kernelMemory: "readable" | "no-kills" | "unreadable";
+  /**
+   * With `no-kills`, the kernel logs are readable and name no process killed for memory; with
+   * `disconnects`, SSH loses the commands that read them.
+   */
+  kernelMemory: "readable" | "no-kills" | "unreadable" | "disconnects";
+  /** How many processes a readable kernel log names as killed in a container. */
+  kernelVictims: number;
   hostGroupId: string;
   imageGroupId: string;
   docker: "absent" | "running" | "unusable" | "socket-only";
@@ -394,6 +399,7 @@ export const fakeMachine = () => {
     runtimeExitCode: 0,
     memoryEvents: "counted",
     kernelMemory: "unreadable",
+    kernelVictims: 1,
     hostGroupId: "1000",
     imageGroupId: "1000",
     docker: "absent",
@@ -546,19 +552,26 @@ export const fakeMachine = () => {
         0,
       );
     }
-    if (line.includes("journalctl -k -b")) {
-      return oneShotHandle("", state.kernelMemory === "unreadable" ? 1 : 0);
-    }
-    if (line.includes("journalctl -k")) {
+    if (line.includes("journalctl -k") && state.kernelMemory === "disconnects")
+      return oneShotHandle("", 255, "Connection to 203.0.113.7 closed by remote host.\n");
+    // The collection script also checks the journal's readability, so it goes first.
+    if (line.includes("journalctl -k --since")) {
       if (state.kernelMemory === "unreadable")
         return oneShotHandle("", 1, "dmesg: read kernel buffer failed: Operation not permitted");
       const container = state.containers.get(words.at(-1) ?? "");
       return oneShotHandle(
         container === undefined || state.kernelMemory === "no-kills"
           ? "source dmesg\n"
-          : `source journal\noom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=1234,uid=1000\n`,
+          : `source journal\n${Array.from(
+              { length: state.kernelVictims },
+              (_, index) =>
+                `oom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=${1234 + index},uid=1000\n`,
+            ).join("")}`,
         0,
       );
+    }
+    if (line.includes("journalctl -k -b")) {
+      return oneShotHandle("", state.kernelMemory === "unreadable" ? 1 : 0);
     }
     if (line.includes("container inspect")) {
       const container = state.containers.get(words[5] ?? "");

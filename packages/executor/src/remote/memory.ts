@@ -8,7 +8,9 @@ import type { ContainerRuntime } from "./runtime.ts";
 /**
  * Prints `source journal` or `source dmesg`, then the host kernel's OOM diagnostics since the
  * creation of container `$2` from the journal, or every one in the ring buffer if the journal has
- * none. Run it before the container's removal; fails if neither source is readable.
+ * none. When the journal has none and the ring buffer is unreadable, prints `source journal` alone
+ * if the journal is readable. Run it before the container's removal; fails if neither source is
+ * readable.
  */
 export const KERNEL_MEMORY_SCRIPT = String.raw`
 set -eu
@@ -16,10 +18,13 @@ created=$("$1" container inspect --format '{{json .Created}}' "$2")
 created=$(printf '%s' "$created" | cut -d '"' -f 2)
 if logs=$(journalctl -k --since "$created" --no-pager -o cat -q --grep 'oom-kill:' 2>/dev/null) && [ -n "$logs" ]; then
   printf 'source journal\n%s\n' "$logs"
-else
-  logs=$(dmesg --color=never)
+elif logs=$(dmesg --color=never); then
   echo 'source dmesg'
   printf '%s\n' "$logs" | grep -F 'oom-kill:' || true
+elif [ -n "$(journalctl -k -b -n 1 --no-pager -o cat -q 2>/dev/null)" ]; then
+  echo 'source journal'
+else
+  exit 1
 fi
 `.trim();
 
