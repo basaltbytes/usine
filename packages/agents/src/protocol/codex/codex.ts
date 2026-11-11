@@ -42,26 +42,37 @@ type CommonValue<Lists extends ReadonlyArray<ReadonlyArray<string>>> = {
   ? Value
   : never;
 
-/** Returns a comparison whose expected value must be a member of every list. */
-const matchesKnownValue =
-  <Lists extends ReadonlyArray<ReadonlyArray<string>>>(..._lists: Lists) =>
-  (value: string | null | undefined, expected: CommonValue<Lists>) =>
-    value === expected;
+/**
+ * Returns a comparison whose expected value must be a member of every list. The comparison's
+ * `lists` property holds the lists in argument order.
+ */
+const matchesKnownValue = <Lists extends ReadonlyArray<ReadonlyArray<string>>>(...lists: Lists) =>
+  Object.assign(
+    (value: string | null | undefined, expected: CommonValue<Lists>) => value === expected,
+    { lists },
+  );
+
+interface ReplacedField<Replacement extends Schema.Top> {
+  readonly Encoded: Replacement["Encoded"];
+  readonly "~encoded.optionality": Replacement["~encoded.optionality"];
+}
 
 /**
- * Returns `replacement` for a generated field. Fails to compile unless `replacement` decodes every
- * encoded value of `field` and preserves its key optionality.
+ * Returns `replacement` for a generated field, or for the same field of each listed schema. Fails
+ * to compile unless `replacement` decodes every encoded value of each field and preserves its key
+ * optionality.
  */
 export const replaces = <Replacement extends Schema.Top>(
-  _field: {
-    readonly Encoded: Replacement["Encoded"];
-    readonly "~encoded.optionality": Replacement["~encoded.optionality"];
-  },
+  _field: ReplacedField<Replacement> | ReadonlyArray<ReplacedField<Replacement>>,
   replacement: Replacement,
 ): Replacement => replacement;
 
 export const isTurnStatus = matchesKnownValue(TurnStatusValues);
-/** Compares a status that every tool item kind with a status reports. */
+/**
+ * Compares a tool item status. Expected values must be members of the status lists of command,
+ * file-change, MCP, and dynamic tool items. Image generation items report a free-form status that
+ * upstream doesn't list.
+ */
 export const isToolStatus = matchesKnownValue(
   CommandExecutionStatusValues,
   PatchApplyStatusValues,
@@ -229,7 +240,18 @@ export const ToolItem = Schema.Struct({
     ImageViewThreadItem.fields.type,
     Schema.Literal("imageGeneration" satisfies (typeof ImageGenerationThreadItem.Type)["type"]),
   ]),
-  id: replaces(CommandExecutionThreadItem.fields.id, Schema.NonEmptyString),
+  id: replaces(
+    [
+      CommandExecutionThreadItem.fields.id,
+      FileChangeThreadItem.fields.id,
+      McpToolCallThreadItem.fields.id,
+      DynamicToolCallThreadItem.fields.id,
+      WebSearchThreadItem.fields.id,
+      ImageViewThreadItem.fields.id,
+      ...ImageGenerationThreadItem.members.map((member) => member.fields.id),
+    ],
+    Schema.NonEmptyString,
+  ),
   status: Schema.optionalKey(CommandExecutionThreadItem.fields.status),
   success: Schema.optionalKey(DynamicToolCallThreadItem.fields.success),
 });

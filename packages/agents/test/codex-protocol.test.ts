@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Option, Schema } from "effect";
+import { AgentSessionId } from "@usine/core/agent/session";
+import { Effect, Logger, Option, Schema } from "effect";
 import {
   AccountResponse,
   AgentMessageItem,
@@ -24,8 +25,13 @@ import packageJson from "../package.json" with { type: "json" };
 import { CODEX_PROTOCOL } from "../src/protocol/codex/version.ts";
 import { CODEX_CLI_VERSION } from "../src/harness/codex/descriptor.ts";
 import { unsupportedCodexVersion } from "../src/harness/codex/preflight.ts";
+import { decodeToolItem, resumedToolItems } from "../src/harness/codex/codec.ts";
 import {
+  CommandExecutionStatusValues,
+  DynamicToolCallStatusValues,
   ImageGenerationThreadItem,
+  McpToolCallStatusValues,
+  PatchApplyStatusValues,
   ThreadTokenUsageUpdatedNotification,
 } from "../src/protocol/codex/generated.ts";
 import { UsageCount } from "../src/protocol/count.ts";
@@ -79,6 +85,24 @@ describe("generated Codex protocol selections", () => {
     expect(isAuthMode("chatgpt", "chatgpt")).toBe(true);
   });
 
+  it("compares tool statuses against the status list of each compared tool kind", () => {
+    const expectLists = (
+      actual: ReadonlyArray<ReadonlyArray<string>>,
+      expected: ReadonlyArray<ReadonlyArray<string>>,
+    ) => {
+      expect(actual).toHaveLength(expected.length);
+      // Identity, not equality: the command and file-change lists have the same members.
+      expected.forEach((list, index) => expect(actual[index]).toBe(list));
+    };
+    expectLists(isToolStatus.lists, [
+      CommandExecutionStatusValues,
+      PatchApplyStatusValues,
+      McpToolCallStatusValues,
+      DynamicToolCallStatusValues,
+    ]);
+    expectLists(isApprovalToolStatus.lists, [CommandExecutionStatusValues, PatchApplyStatusValues]);
+  });
+
   it.effect("requires comparison inputs to be strings rather than whole protocol objects", () =>
     Effect.gen(function* () {
       const item = yield* Schema.decodeEffect(ToolItem)({
@@ -102,6 +126,13 @@ describe("generated Codex protocol selections", () => {
 
   it.effect("keeps common fields on generated image payload alternatives", () =>
     Effect.gen(function* () {
+      expectTypeOf<
+        Pick<typeof ImageGenerationThreadItem.Type, "id" | "type" | "status">
+      >().toEqualTypeOf<{
+        readonly id: string;
+        readonly type: "imageGeneration";
+        readonly status: string;
+      }>();
       for (const payload of [{ fileId: "file" }, { result: "image-data" }]) {
         const image = yield* Schema.decodeEffect(ImageGenerationThreadItem)({
           id: "image",
@@ -251,4 +282,69 @@ describe("generated Codex protocol selections", () => {
     );
     expect(Option.isSome(unsupportedCodexVersion("codex-cli 0.165.0"))).toBe(true);
   });
+});
+
+describe("Codex tool item decoding", () => {
+  const sessionId = AgentSessionId.make("session");
+
+  it.effect("logs a tool item that does not decode and skips other item kinds silently", () =>
+    Effect.gen(function* () {
+      const warnings: Array<unknown> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(message);
+      });
+      const decode = (item: Schema.Json) =>
+        decodeToolItem(sessionId, item).pipe(Effect.provide(Logger.layer([logger])));
+
+      const tool = yield* decode({ type: "mcpToolCall", id: "call", status: "completed" });
+      expect(Option.map(tool, ({ id }) => id)).toEqual(Option.some("call"));
+      const reasoning = yield* decode({ type: "reasoning", id: "thought" });
+      expect(reasoning).toEqual(Option.none());
+      expect(warnings).toEqual([]);
+
+      const malformed = yield* decode({ type: "mcpToolCall", status: "completed" });
+      expect(malformed).toEqual(Option.none());
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toEqual([
+        "Skipping an undecodable Codex tool item",
+        expect.objectContaining({ sessionId, itemType: "mcpToolCall" }),
+      ]);
+    }),
+  );
+
+  it.effect("logs the type of a resumed tool item that does not decode", () =>
+    Effect.gen(function* () {
+      const warnings: Array<unknown> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(message);
+      });
+      const response = yield* Schema.decodeUnknownEffect(ThreadResumeResponse)({
+        modelProvider: "openai",
+        thread: {
+          id: "saved-thread",
+          turns: [
+            {
+              id: "saved-turn",
+              status: "inProgress",
+              items: [
+                { type: "dynamicToolCall", id: "", status: "inProgress" },
+                { type: "commandExecution", id: "command", status: "inProgress" },
+                { type: "reasoning", id: "thought" },
+              ],
+            },
+          ],
+        },
+      });
+      const tools = yield* resumedToolItems(sessionId, response.thread.turns[0]?.items ?? []).pipe(
+        Effect.provide(Logger.layer([logger])),
+      );
+      expect(tools.map(({ id }) => id)).toEqual(["command"]);
+      expect(warnings).toEqual([
+        [
+          "Skipping an undecodable Codex tool item",
+          { sessionId, itemType: "dynamicToolCall", resumed: true },
+        ],
+      ]);
+    }),
+  );
 });

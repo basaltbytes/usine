@@ -43,7 +43,6 @@ import {
   ThreadResumeParams,
   ThreadResumeResponse,
   ThreadStartResponse,
-  ToolItem,
   TurnActivity,
   TurnCompleted,
   TurnStartParams,
@@ -56,7 +55,9 @@ import {
   userMessageText,
   decodeResponse,
   decodeNotification,
+  decodeToolItem,
   providerRetryMessage,
+  resumedToolItems,
   turnFailure,
   toolName,
   rateLimitWindow,
@@ -323,15 +324,14 @@ const makeCodexChild = Effect.gen(function* () {
       let turnId = Option.match(thread.activeTurn, { onNone: () => "", onSome: (turn) => turn.id });
       let turnActive = Option.isSome(thread.activeTurn);
       let interrupting = false;
+      const resumedTools = yield* resumedToolItems(
+        session.id,
+        Option.match(thread.activeTurn, { onNone: () => [], onSome: (turn) => turn.items }),
+      );
       const toolsInFlight = new Map<string, string>(
-        Option.match(thread.activeTurn, {
-          onNone: () => [],
-          onSome: (turn) =>
-            turn.items
-              .filter(Schema.is(ToolItem))
-              .filter((item) => isToolStatus(item.status, "inProgress"))
-              .map((item): [string, string] => [item.id, toolName(item)]),
-        }),
+        resumedTools
+          .filter((item) => isToolStatus(item.status, "inProgress"))
+          .map((item): [string, string] => [item.id, toolName(item)]),
       );
       const pendingMessages: Array<{ message: string; id: OperatorMessageId | undefined }> = [];
       const submitted: Array<{
@@ -613,14 +613,15 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: notification.value.turnId,
                 });
               }
-              if (!Schema.is(ToolItem)(notification.value.item)) return;
-              toolsInFlight.set(notification.value.item.id, toolName(notification.value.item));
+              const tool = yield* decodeToolItem(session.id, notification.value.item);
+              if (Option.isNone(tool)) return;
+              toolsInFlight.set(tool.value.id, toolName(tool.value));
               return yield* channel.emit(
                 ToolStarted.make({
                   session,
-                  callId: notification.value.item.id,
-                  tool: toolName(notification.value.item),
-                  input: notification.value.item,
+                  callId: tool.value.id,
+                  tool: toolName(tool.value),
+                  input: tool.value,
                 }),
               );
             }
@@ -646,18 +647,19 @@ const makeCodexChild = Effect.gen(function* () {
                 if (isMessagePhase(item.phase, "final_answer")) finalText = text;
                 return yield* channel.emit(TextOutput.make({ session, text }));
               }
-              if (!Schema.is(ToolItem)(item)) return;
-              toolsInFlight.delete(item.id);
+              const tool = yield* decodeToolItem(session.id, item);
+              if (Option.isNone(tool)) return;
+              toolsInFlight.delete(tool.value.id);
               yield* channel.emit(
                 ToolFinished.make({
                   session,
-                  callId: item.id,
-                  tool: toolName(item),
-                  output: item,
+                  callId: tool.value.id,
+                  tool: toolName(tool.value),
+                  output: tool.value,
                   isError:
-                    isToolStatus(item.status, "failed") ||
-                    isApprovalToolStatus(item.status, "declined") ||
-                    item.success === false,
+                    isToolStatus(tool.value.status, "failed") ||
+                    isApprovalToolStatus(tool.value.status, "declined") ||
+                    tool.value.success === false,
                 }),
               );
               if (toolsInFlight.size === 0 && (yield* conversation.isPaused))
