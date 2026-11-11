@@ -49,6 +49,12 @@ export const ProvisionerFields = (fields: FormFieldsProps) => {
             : provider === "boxd"
               ? [
                   {
+                    path: "provisioner.endpoint",
+                    label: copy.endpoint,
+                    description: copy.endpointHint,
+                    optional: true,
+                  },
+                  {
                     path: "provisioner.region",
                     label: copy.region,
                     description: copy.regionHint,

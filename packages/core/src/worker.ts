@@ -345,6 +345,32 @@ export const BoxdRegion = Schema.String.check(
 ).pipe(Schema.brand("BoxdRegion"));
 export type BoxdRegion = typeof BoxdRegion.Type;
 
+/**
+ * The account endpoint of a boxd cluster: a lowercase URL with a host, an optional port from 1 to
+ * 65535, and no path, such as `https://boxd.example.com:9443`. It is `https://`, or `http://` for a
+ * loopback host (`localhost`, `127.0.0.0/8`, or `[::1]`), because every call carries the API key.
+ */
+export const BoxdEndpoint = Schema.String.check(
+  Schema.isPattern(
+    /^(?:https:\/\/(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])|http:\/\/(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]))(?::\d{1,5})?$/u,
+    {
+      message:
+        "Expected a lowercase boxd endpoint URL without a path, such as https://boxd.example.com:9443, with http:// only for localhost, 127.0.0.0/8, or [::1]",
+    },
+  ),
+  Schema.makeFilter(
+    (endpoint: string) => {
+      const port = /:(\d+)$/u.exec(endpoint)?.[1];
+      return (
+        URL.canParse(endpoint) &&
+        (port === undefined || (Number(port) >= 1 && Number(port) <= 65_535))
+      );
+    },
+    { message: "Expected a boxd endpoint URL with a valid host and a port from 1 to 65535" },
+  ),
+).pipe(Schema.brand("BoxdEndpoint"));
+export type BoxdEndpoint = typeof BoxdEndpoint.Type;
+
 /** A lowercase boxd snapshot name of at most 63 characters. */
 export const BoxdSnapshotName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u),

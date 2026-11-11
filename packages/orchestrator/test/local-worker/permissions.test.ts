@@ -103,6 +103,7 @@ describe("local worker Loop permissions", () => {
         );
         const request = (permissions: LoopPermissions) =>
           CheckoutRequest.make({
+            requiresCi: false,
             attemptId: AttemptId.make(`review/run/${permissions}`),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),

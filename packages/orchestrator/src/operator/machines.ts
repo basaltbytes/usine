@@ -4,6 +4,7 @@ import { RunId } from "@usine/core/run";
 import {
   BoatSize,
   BoxdSize,
+  BoxdEndpoint,
   BoxdRegion,
   BoxdSnapshotName,
   BoxdEgressEntry,
@@ -142,7 +143,10 @@ export class BoxdProvisionerView extends Schema.TaggedClass<
   Brand.Brand<"@usine/orchestrator/operator/machines/BoxdProvisionerView">
 >("@usine/orchestrator/BoxdProvisionerView")("boxd", {
   tokenEnv: Schema.String,
-  region: BoxdRegion,
+  /** The account endpoint of the boxd cluster, or null for the hosted service. */
+  endpoint: Schema.NullOr(BoxdEndpoint),
+  /** The region of the machines, or null when they run where the endpoint runs them. */
+  region: Schema.NullOr(BoxdRegion),
   size: BoxdSize,
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean,
@@ -207,7 +211,8 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
         : settings.provider === "boxd"
           ? BoxdProvisionerView.make({
               tokenEnv: settings.tokenEnv,
-              region: settings.region,
+              endpoint: Option.getOrNull(settings.endpoint),
+              region: Option.getOrNull(settings.region),
               size: settings.size,
               snapshot: settings.snapshot,
               isolated: settings.isolated,

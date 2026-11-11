@@ -104,7 +104,7 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
         provisioner._tag === "hetzner"
           ? `hetzner ${provisioner.serverType} in ${provisioner.location}`
           : provisioner._tag === "boxd"
-            ? `boxd ${provisioner.size} ${provisioner.region}`
+            ? `boxd ${provisioner.size}${provisioner.region === null ? "" : ` ${provisioner.region}`}`
             : `boat ${provisioner.size}`;
       return `${machine}, one machine per attempt`;
     }
@@ -389,9 +389,12 @@ export const workerFormCopy = {
   sshKey: "SSH key name",
   sshUser: "SSH user",
   size: "Machine size",
+  endpoint: "Endpoint",
+  endpointHint:
+    "The account endpoint of a self-hosted or bring-your-own-cloud boxd cluster, such as https://boxd.example.com:9443. Leave empty for the hosted service.",
   region: "Region",
   regionHint:
-    "A region enabled for your boxd org, as listed by boxd manage regions. fra and nyc are the hosted regions.",
+    "A region enabled for your boxd org, as listed by boxd manage regions. fra and nyc are the hosted regions. Leave empty to create machines where the endpoint runs them.",
   isolated: "Isolated",
   egress: "Egress allowlist (comma-separated, empty for unrestricted)",
   domain: "Gateway domain",

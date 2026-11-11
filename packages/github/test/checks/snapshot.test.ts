@@ -77,7 +77,7 @@ it.effect.each([
     Effect.gen(function* () {
       const snapshot = yield* (yield* GitHubChecks).snapshot(repository, ItemNumber.make(815));
       assert.strictEqual(snapshot.head, head);
-      assert.strictEqual(snapshot.pullRequest, expected);
+      assert.strictEqual(snapshot.pullRequestState, expected);
       assert.strictEqual(snapshot.state, "success");
     }).pipe(
       Effect.provide(

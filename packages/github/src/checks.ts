@@ -29,7 +29,7 @@ export class CheckSnapshot extends Schema.Class<
   Brand.Brand<"@usine/github/checks/CheckSnapshot">
 >("CheckSnapshot")({
   head: CommitSha,
-  pullRequest: Schema.Literals(["open", "closed", "merged"]),
+  pullRequestState: Schema.Literals(["open", "closed", "merged"]),
   state: Schema.Literals(["pending", "success", "failure", "conflict"]),
 }) {}
 
@@ -581,7 +581,7 @@ export class GitHubChecks extends Context.Service<
               "The pull request awaiting CI is unavailable",
             );
           const state = pr.statusCheckRollup?.state;
-          const pullRequest =
+          const pullRequestState =
             pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed";
           // GitHub's schema makes both `headRef` and its `target` nullable.
           const branchHead = pr.headRef?.target?.oid ?? pr.headRefOid;
@@ -592,11 +592,11 @@ export class GitHubChecks extends Context.Service<
               branchHead,
               pullRequestHead: pr.headRefOid,
             });
-            return CheckSnapshot.make({ head: branchHead, pullRequest, state: "pending" });
+            return CheckSnapshot.make({ head: branchHead, pullRequestState, state: "pending" });
           }
           return CheckSnapshot.make({
             head: pr.headRefOid,
-            pullRequest,
+            pullRequestState,
             state:
               state === "SUCCESS"
                 ? "success"

@@ -11,6 +11,14 @@ The repository doesn't install `@boxd-sh/sdk`. usine has a projection of its 0.3
 `packages/executor/src/ssh/provisioner/boxd/proto/api.proto`; SDK behavior below comes from the
 `dist/` files of the npm tarball ([sdk]).
 
+**Follow-up.** [Issue #1112](https://github.com/basaltbytes/usine/issues/1112) implements drafts 1
+and 2. `packages/executor/src/ssh/provisioner/boxd/endpoint.ts` and `grpc-client.ts` port these
+rules from `@boxd-sh/sdk` 0.3.0: `deriveExchangeUrl` and `consoleBaseUrl` (`dist/utils.js`) for the
+exchange URL, `rawKeyAllowed` (`dist/utils.js`) and `refusesRawKey` (`dist/auth.js`) for the API key
+as the bearer, and the routing of `dist/_regions.js` for a region that the account endpoint serves
+and for a cluster that runs in one place. The "usine today" paragraphs below describe usine before
+that change.
+
 ## Deployment shapes
 
 boxd publishes three ways to run its machines:

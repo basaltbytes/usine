@@ -10,7 +10,8 @@
   },
   "files": [
     "dist",
-    "!dist/tsconfig.tsbuildinfo"
+    "!dist/tsconfig.tsbuildinfo",
+    "drizzle"
   ],
   "type": "module",
   "sideEffects": false,
@@ -42,6 +43,18 @@
     "./gateway": {
       "types": "./dist/gateway.d.ts",
       "default": "./dist/gateway.js"
+    },
+    "./coordinator/journal": {
+      "types": "./dist/coordinator/journal.d.ts",
+      "default": "./dist/coordinator/journal.js"
+    },
+    "./coordinator/memory": {
+      "types": "./dist/coordinator/memory.d.ts",
+      "default": "./dist/coordinator/memory.js"
+    },
+    "./coordinator/sqlite": {
+      "types": "./dist/coordinator/sqlite/store.d.ts",
+      "default": "./dist/coordinator/sqlite/store.js"
     }
   },
   "publishConfig": {
@@ -51,7 +64,8 @@
     "build": "tsc -b",
     "check": "effect-tsgo tsc -p tsconfig.check.json",
     "test": "vitest run --exclude 'test/integration/**'",
-    "test:integration": "vitest run test/integration/restart.test.ts"
+    "test:integration": "vitest run test/integration/restart.test.ts",
+    "db:generate": "drizzle-kit generate && node scripts/embed-migrations.mjs"
   },
   "dependencies": {
     "@earendil-works/chord": "1.4.0",
@@ -67,11 +81,14 @@
     "@effect/platform-node-shared": "catalog:",
     "@usine/agents": "workspace:*",
     "@usine/core": "workspace:*",
+    "drizzle-orm": "catalog:",
     "undici": "^8.12.2"
   },
   "devDependencies": {
+    "@effect/sql-sqlite-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
+    "drizzle-kit": "catalog:",
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

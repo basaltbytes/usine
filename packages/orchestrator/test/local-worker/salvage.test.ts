@@ -202,6 +202,7 @@ describe("local worker salvage", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const request = CheckoutRequest.make({
+            requiresCi: false,
             attemptId: AttemptId.make("r/run/2"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
@@ -408,6 +409,7 @@ describe("local worker salvage", () => {
         );
         const request = (number: number, resume: SalvagePushed) =>
           CheckoutRequest.make({
+            requiresCi: false,
             attemptId: AttemptId.make(`r/run/${number}`),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),

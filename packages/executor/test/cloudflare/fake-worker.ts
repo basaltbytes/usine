@@ -22,7 +22,7 @@ import { type WebSocket as ServerSocket, WebSocketServer } from "ws";
 
 export const ACCESS_CLIENT_ID = "0123abcd.access";
 export const ACCESS_CLIENT_SECRET = "service-token-secret";
-const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+export const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
 /** One sandbox of the fake Worker. */
 export interface FakeSandbox {
