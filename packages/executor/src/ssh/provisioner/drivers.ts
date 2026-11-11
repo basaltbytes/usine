@@ -86,7 +86,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
     const cluster = {
       endpoint: Option.getOrElse(
         value.endpoint,
-        (): string => settings.providerEndpoints?.boxd ?? BOXD_API,
+        () => settings.providerEndpoints?.boxd ?? BOXD_API,
       ),
       region: value.region,
     };

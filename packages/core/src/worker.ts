@@ -346,14 +346,15 @@ export const BoxdRegion = Schema.String.check(
 export type BoxdRegion = typeof BoxdRegion.Type;
 
 /**
- * The account endpoint of a boxd cluster: an `https://` or `http://` URL with a host and an
- * optional port, and no path, such as `https://boxd.example.com:9443`.
+ * The account endpoint of a boxd cluster: a lowercase `https://` or `http://` URL with a host and
+ * an optional port, and no path, such as `https://boxd.example.com:9443`.
  */
 export const BoxdEndpoint = Schema.String.check(
   Schema.isPattern(
-    /^https?:\/\/(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])(?::\d{1,5})?$/iu,
+    /^https?:\/\/(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])(?::\d{1,5})?$/u,
     {
-      message: "Expected a boxd endpoint URL without a path, such as https://boxd.example.com:9443",
+      message:
+        "Expected a lowercase boxd endpoint URL without a path, such as https://boxd.example.com:9443",
     },
   ),
 ).pipe(Schema.brand("BoxdEndpoint"));

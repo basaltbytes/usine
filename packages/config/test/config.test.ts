@@ -535,6 +535,8 @@ workers:
         yaml + "      endpoint: https://boxd.example.com:9443/api\n",
         yaml + "      endpoint: https://boxd.example.com:9443/\n",
         yaml + "      endpoint: ftp://boxd.example.com\n",
+        yaml + "      endpoint: HTTPS://boxd.example.com:9443\n",
+        yaml + "      endpoint: https://Boxd.example.com:9443\n",
         yaml + "      endpoint: https://user@boxd.example.com\n",
         yaml.replace("snapshot: usine-attempt", "snapshot: Bad_Name"),
         yaml.replace("      snapshot: usine-attempt\n", ""),
