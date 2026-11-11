@@ -75,6 +75,30 @@ describe("delegate", () => {
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 
+  it.effect("keeps the Attempt's first reserved report when a later child also reserves one", () =>
+    Effect.gen(function* () {
+      const first = {
+        sessionId: "parent:delegation/first-report:child:1",
+        message: "The repository is archived.",
+        kind: "blocked" as const,
+      };
+      const memory = memoryJournal();
+      memory.attempt.children = 1;
+      memory.attempt.blocker = Option.some(first);
+      const { fiber } = yield* start("delegation/first-report", memory);
+      const child = yield* (yield* StubChildren).next;
+      yield* child.ask("Which branch should I use?");
+      const outcome = yield* Fiber.join(fiber);
+
+      assert.strictEqual(outcome._tag, "Reserved");
+      if (outcome._tag !== "Reserved") return;
+      assert.strictEqual(outcome.sessionId, child.request.session.id);
+      assert.strictEqual(outcome.report._tag, "AgentQuestionError");
+      assert.strictEqual(outcome.report.message, "Which branch should I use?");
+      assert.deepStrictEqual(memory.attempt.blocker, Option.some(first));
+    }).pipe(Effect.provide(stubChildBackendLayer)),
+  );
+
   it.effect("returns Interrupted for a resumed delegation without a saved conversation", () =>
     Effect.gen(function* () {
       const sessionId = AgentSessionId.make("parent:delegation/interrupted:child:1");
