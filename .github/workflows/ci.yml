@@ -69,14 +69,15 @@ jobs:
       matrix:
         include:
           - leg: web
-            container:
-              image: mcr.microsoft.com/playwright:v1.64.1-noble
+            # Both browser legs use this container. Its tag matches the Playwright
+            # version in apps/web and apps/server, and Renovate updates the tag
+            # and digest together.
+            container: &playwright-container
+              image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
               options: --init
             filters: --filter=@usine/web
           - leg: server
-            container:
-              image: mcr.microsoft.com/playwright:v1.64.1-noble
-              options: --init
+            container: *playwright-container
             filters: --filter=@usine/server
             args: -- --project=server
           - leg: engine
@@ -100,7 +101,7 @@ jobs:
             turbo-${{ runner.os }}-ci-${{ matrix.leg }}-node${{ env.NODE_VERSION }}-
       - run: pnpm install --frozen-lockfile
       # A cache saved by a pull request run is scoped to that pull request, so the
-      # first main run on a new image tag misses and downloads from the mirror
+      # first main run on a new image misses and downloads from the mirror
       # with the bounded retries below. Running this workflow on main with
       # workflow_dispatch seeds the main cache.
       - name: Restore server test tools

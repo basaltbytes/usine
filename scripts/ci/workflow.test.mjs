@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 
-const workflow = parse(
-  readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8"),
+const workflowText = readFileSync(
+  new URL("../../.github/workflows/ci.yml", import.meta.url),
+  "utf8",
 );
+const workflow = parse(workflowText);
 const root = new URL("../../", import.meta.url);
 const testTasks = (plan) =>
   plan.tasks.filter(({ task }) => task === "test").map(({ taskId }) => taskId);
@@ -22,17 +24,30 @@ test("browser test jobs use preinstalled matching Playwright browsers and bounde
     const pkg = JSON.parse(
       readFileSync(new URL(`../../apps/${name}/package.json`, import.meta.url)),
     );
-    assert.equal(
+    const version = pkg.devDependencies.playwright.replaceAll(".", "\\.");
+    assert.match(
       leg.container.image,
-      `mcr.microsoft.com/playwright:v${pkg.devDependencies.playwright}-noble`,
+      new RegExp(`^mcr\\.microsoft\\.com/playwright:v${version}-noble@sha256:[0-9a-f]{64}$`, "u"),
+      `the ${name} container must pin the image matching its Playwright version by digest`,
     );
   }
+  assert.equal(
+    workflowText.match(/mcr\.microsoft\.com\/playwright:/gu).length,
+    1,
+    "the browser legs must share one container definition",
+  );
   for (const step of job.steps) {
     assert.doesNotMatch(
       step.run ?? "",
-      /playwright install.*(?:--with-deps|install-deps)|playwright install-deps/u,
+      /\bplaywright\b[^\n]*\binstall/u,
+      "browsers and their system dependencies come from the container image",
     );
-    if (step.run?.includes("turbo run test") || step.run?.includes("playwright install")) {
+    assert.doesNotMatch(
+      step.uses ?? "",
+      /playwright/iu,
+      "browsers and their system dependencies come from the container image",
+    );
+    if (step.run?.includes("turbo run test")) {
       assert.ok(step["timeout-minutes"] > 0 && step["timeout-minutes"] <= 10);
     }
   }
