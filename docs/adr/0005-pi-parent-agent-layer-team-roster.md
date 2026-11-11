@@ -67,3 +67,14 @@ Native `resume(request, reference)` reopens a saved conversation without sending
 Claude's session UUID comes from usine before SDK startup. Operator messages carry UUIDs, with delivery acknowledged through Claude's `user_message_uuids` or correlated Codex native user-message items. Claude typed-prompt turns do not stamp every mid-turn fold, so a successful result's pending-send count also settles submitted message IDs that have no UUID receipt. Codex retains unconsumed input across turn boundaries and restores pending receipt IDs when reattaching to an active turn. The shared conversation receives message IDs for every acknowledgement; continuation decisions remain independent of each adapter's delivery evidence.
 
 If Codex native history confirms that the saved thread is empty, the shared policy sends the original task as its first input. A thread with saved work receives the continuation instruction.
+
+## Amendment (2026-11-11, #1157): attempts without a Pi parent
+
+The reason for a model parent was in-run orchestration. In the run history read for [#1150](https://github.com/basaltbytes/usine/issues/1150), no parent split a task across children: every agent persona delegated the whole task once, and attempts with a second child were mostly reattached after a restart. A parent session also requires a Pi credential that the children may not need.
+
+An attempt with `RunSpec.parent: none` therefore runs without a parent session. The event-driven coordinator starts one child with the rendered task and turns the child's end into the attempt's outcome: a report completes the attempt, a reserved marker fails it with its typed failure, a provider capacity refusal keeps the time its usage limit resets, a launch or transport failure is an infrastructure failure, and a child that can't resume after a restart is replaced once within the child-session budget. Each event goes through one `WakeUp` seam; in this release every event takes its rule, so no model call and no coordinator credential are needed. `parent_model` and `parent_effort` don't apply to these attempts. They refuse operator input until the coordinator handles interventions.
+
+`RunSpec.parent` decodes as `pi` for stored attempts, and configuration doesn't set `none` yet ([#1158](https://github.com/basaltbytes/usine/issues/1158)), so the Pi parent still runs every configured attempt.
+
+Both coordinators run children through the same delegation core. The owner of a delegation numbers it and applies the child-session budget: the `subagent` tool counts each call, and the event-driven coordinator numbers each child in the transition that decided it. The child-blocker rules stay with the `subagent` tool, because only a model parent can leave a reserved report unrelayed; the event-driven coordinator turns the report into its next event, and its rules keep reserved markers over any decision.
+

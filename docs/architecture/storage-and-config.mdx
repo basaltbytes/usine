@@ -247,16 +247,16 @@ pi-durable opens `.usine/durable.sqlite` through its own connection and defines 
 
 ## Attempt journal
 
-The event-driven coordinator's journal ([#1162](https://github.com/basaltbytes/usine/issues/1162)) lives in the runtime database. Nothing runs an attempt on it yet. The `AttemptJournal` port ([journal.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/journal.ts)) has a memory adapter and a SQLite adapter on the application's `SqlClient`, with the `usine_attempt_journal_migrations` ledger:
+The event-driven coordinator's journal ([#1162](https://github.com/basaltbytes/usine/issues/1162), [#1157](https://github.com/basaltbytes/usine/issues/1157)) lives in the runtime database and stores every attempt whose `RunSpec.parent` is `none`. The `AttemptJournal` port ([journal.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/journal.ts)) has a memory adapter and a SQLite adapter on the application's `SqlClient`, with the `usine_attempt_journal_migrations` ledger:
 
-| Table                       | Rows                                                                                                                                                  |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `usine_attempt_coordination` | One per attempt: the stored request, the revision, the coordinator state, the status with its outcome, and the next outbound sequence.               |
-| `usine_attempt_events`      | The ledger: one row per event with its decision. A row without an event holds a decision recorded before its transition committed.                  |
-| `usine_attempt_delegations` | One per child the coordinator decided to run: its number in the child-session budget and its assignment.                                             |
-| `usine_attempt_outbox`      | Reserved channel envelopes that the sink hasn't acknowledged, by sequence.                                                                           |
+| Table                        | Rows                                                                                                                                                                                                 |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `usine_attempt_coordination` | One per attempt: the stored request, the revision, the coordinator state, the status with its outcome, the next outbound sequence, the harvested result, and the runaway guard's unsupervised time. |
+| `usine_attempt_events`       | The ledger: one row per event with its decision. A row without an event holds a decision recorded before its transition committed.                                                                  |
+| `usine_attempt_delegations`  | One per child the coordinator decided to run: its number in the child-session budget, its assignment, what the child saved, and the event that ended it.                                            |
+| `usine_attempt_outbox`       | Reserved channel envelopes that the sink hasn't acknowledged, by sequence.                                                                                                                           |
 
-A transition writes the event, its decision, the state, the delegations, and the reserved envelopes in one `BEGIN IMMEDIATE` transaction, and fails with `StaleRevision` when the expected revision is stale. `decide` keeps the first decision recorded for an event. `settle` keeps the outcome and outbox and advances the revision. The coordinator encodes the event, decision, and state; the journal stores them as JSON without reading them.
+A transition writes the event, its decision, the state, the delegations, and the reserved envelopes in one `BEGIN IMMEDIATE` transaction, and fails with `StaleRevision` when the expected revision is stale. `decide` keeps the first decision recorded for an event, and `settleDelegation` keeps the first event that ended a delegation. A delegation's progress (its saved child conversation, prompt receipt, continuation times, in-flight tool calls, idle report, and retained output) changes through typed operations. `settle` keeps the outcome and outbox and advances the revision. The coordinator encodes the event, decision, and state; the journal stores them as JSON without reading them.
 
 ## Configuration store
 

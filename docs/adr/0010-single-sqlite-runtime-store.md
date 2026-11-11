@@ -73,3 +73,10 @@ Runtime backups now use `VACUUM INTO`, replacing the runtime backup API in the e
 The event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) keeps its journal in the runtime database, not in `.usine/durable.sqlite`. The `AttemptJournal` port in `@usine/durable/coordinator/journal` has a memory adapter and a SQLite adapter on the application's `SqlClient`. The SQLite adapter owns four tables (`usine_attempt_coordination`, `usine_attempt_events`, `usine_attempt_delegations`, and `usine_attempt_outbox`) and their own `usine_attempt_journal_migrations` ledger, as the configuration store does. Each transition commits the event, its decision, the coordinator state, the delegations it decides, and its reserved envelopes in one `BEGIN IMMEDIATE` transaction, guarded by a revision.
 
 pi-durable storage stays for attempts run by the Pi parent. Once a coordinator attempt runs on the journal, its state shares the runtime database's backup, so one snapshot captures it. A Postgres adapter adds a sibling dialect module and passes the same contract suite.
+
+## Amendment (2026-11-11, #1157): attempts run on the journal
+
+The event-driven coordinator now runs attempts on the attempt journal. A second migration adds what a restart resumes from: each delegation's saved child conversation, prompt receipt, continuation times, in-flight tool calls, idle report, and retained output; the event that ended the delegation, recorded before its transition; and the attempt's harvested result and the runaway guard's unsupervised time. The outbox table replaces pi-durable's pending envelopes for these attempts: a batch is reserved in the journal before the sink receives it and is removed when the sink confirms it, so a restart sends unconfirmed envelopes again and the engine keeps the first copy.
+
+The Node attempt runtime takes the runtime database's `SqlClient` from the server, which shares one connection with the engine and the configuration store. An attempt without a parent session has no state in `.usine/durable.sqlite`, so a runtime database backup alone captures it.
+

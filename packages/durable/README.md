@@ -1,6 +1,6 @@
 # @usine/durable
 
-Runs an attempt's Pi parent in the orchestrator on [`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-works/pi-durable) storage. Each attempt is one durable task, `usine.attempt`, with one parent conversation. The parent's only tool, `subagent`, starts the agent's Claude Code, Codex, or Pi child in the attempt's checkout. After an orchestrator restart, unfinished attempts continue from their last committed step. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) covers the durable layer and live channel.
+Runs each attempt's coordinator in the orchestrator. By default, the coordinator is a Pi parent on [`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-works/pi-durable) storage: each attempt is one durable task, `usine.attempt`, with one parent conversation, and the parent's only tool, `subagent`, starts the agent's Claude Code, Codex, or Pi child in the attempt's checkout. An attempt whose `RunSpec.parent` is `none` runs on the [event-driven coordinator](#event-driven-coordinator) instead, with no parent session. After an orchestrator restart, unfinished attempts continue from their last committed step. [Attempt execution](https://github.com/basaltbytes/usine/blob/main/docs/architecture/execution.mdx) covers the durable layer and live channel.
 
 Brain specifications use the branded `Harness` ID from `@usine/core/agent/brain`. Configuration checks registered harnesses through the platform-free `@usine/agents/harness` catalog before an attempt starts.
 
@@ -13,15 +13,15 @@ Coordinator startup and `subagent` use the shared harness admission check. `/liv
 - `/harness`: the `DurableHarness` service, which manages the open pi-durable harness, and its platform-free `layer(options)`.
 - `/backup`: `backup(instanceDirectory, destination)`, an online copy of `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file. `usine backup` writes it next to the runtime database copy.
 - `/gateway`: `gatewayModelAccess(transport)` returns an Effect that builds Pi model access from a gateway transport. Parent admission checks the configured coordinator providers. It uses no local provider login.
-- `/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the child backends from `@usine/agents`.
+- `/live`: the Node composition: the router over the Pi runtime and the event-driven coordinator, the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, the attempt journal on the runtime database's `SqlClient`, and the child backends from `@usine/agents`.
 - `/coordinator/journal`: the `AttemptJournal` port of the event-driven coordinator, with its records and errors. `/coordinator/memory` and `/coordinator/sqlite` provide its adapters; see [Coordinator journal](#coordinator-journal).
-- `/testing`: a scripted parent model and stub children for whole-attempt tests, and a stub `AttemptRuntime` for executor tests.
+- `/testing`: a scripted parent model and stub children for whole-attempt tests, the routed runtime with an in-memory attempt journal, and a stub `AttemptRuntime` for executor tests.
 
 ```ts
 import { layer as durableLayer } from "@usine/durable/live";
 
 // Provides AttemptRuntime and DurableHarness; requires the Harnesses registry
-// shared with the executor.
+// shared with the executor and the runtime database's SqlClient.
 const attempts = durableLayer(instanceDirectory);
 ```
 
@@ -57,7 +57,13 @@ The task doesn't store the host or environment. It stores the run spec, worker, 
 
 Every child receives the stored rendered loop task unchanged. The parent supplies supplemental context through `subagent.task`. The child's `SessionStarted.prompt` records its exact initial prompt for the run page, including its persona, task, parent context, and completion instructions. Older transcripts leave this field absent.
 
-The `subagent` tool is an adapter over the delegation core in `src/attempt/delegation/`. `delegate` runs one child from launch or resume to a `DelegationOutcome`: `Reported`, `Reserved`, `Interrupted`, or `BudgetExceeded`. It stores state only through a `DelegationJournal`, a port in usine terms (the delegation's start, the child blocker, holds, pauses, queued operator input, the saved child session, and output). The tool implements the journal over its pi-durable tool call and maps the outcome to its tool result.
+The `subagent` tool and the event-driven coordinator both run children through the delegation core in `src/attempt/delegation/`. `delegate` runs one child from launch or resume to a `DelegationOutcome`: `Reported`, `Reserved`, `Interrupted`, or `BudgetExceeded`. It takes three ports, none of which loads a Pi package:
+
+- `DelegationJournal` stores the delegation: its start, holds, pauses, queued operator input, the saved child session, and the retained output. Its operations fail with `JournalError`. The journal's owner numbers each delegation and applies the child-session budget in `start`, which returns `Admitted` or `Refused`: the `subagent` tool counts each call, and the coordinator numbers each child in the transition that decided it.
+- `DelegationCall` is the call that owns the delegation: the running output, the published details, the abort, and what a reserved report or infrastructure failure means for the attempt. The `subagent` tool records them as the attempt's child blocker; the coordinator turns the delegation's outcome into its next event.
+- `DelegationHub` is the attempt's in-process state that delegations share.
+
+The tool implements the journal and the call over its pi-durable tool call and maps the outcome to its tool result.
 
 The `subagent` tool commits the child's continuation identity (session ID, harness, home, and Codex model provider ID), worker, cumulative usage, and partial output before relaying them. Saved child identity excludes credential routes and billing metadata. Each launch resolves the current credential kind and repeats admission, including after a restart. A changed harness, home, checkout, or Codex provider ID refuses continuation with a message identifying the mismatch. After a restart, it waits for the executor's host and environment, then continues the saved conversation in the same checkout and transcript. Recovery keeps the child ID, child-session budget slot, and persisted operator hold and pause. A held child that finished its turn stays idle after restart until Release returns its saved report or operator guidance starts another turn. A paused child stays idle until a steer or operator message starts its next turn; releasing its hold preserves the pause. Launch admission requires `resume-session` for the worker's placement and credential route. If the saved conversation is missing or cannot be decoded, the original worker, machine, or checkout is unavailable, admission refuses resume, or recovery fails, the parent receives an interrupted tool result with the committed output.
 
@@ -93,7 +99,7 @@ pi-durable has no cross-process locking: tasks and documents from a second write
 
 ## Coordinator rules
 
-`src/attempt/coordinator/rules.ts` holds the policy of the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) as three pure functions. It imports only `@usine/core` schemas and performs no IO. No attempt runs through it yet.
+`src/attempt/coordinator/rules.ts` holds the policy of the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) as three pure functions. It imports only `@usine/core` schemas and performs no IO.
 
 - `ruleFor(event, context)` returns the rule's `Decision` for a `CoordinatorEvent`.
 - `clamp(decision, context)` checks a decision from a rule or a model against the event and resolves its defaults.
@@ -106,9 +112,26 @@ The rules handle each lifecycle event as follows:
 - `AttemptStarted` delegates child 1 with a fixed context.
 - `ChildReported` with a reserved marker fails the Attempt with `BlockedFailure`, `QuestionFailure`, or `AgentFailure`. Without a marker, it completes the Attempt with the report.
 - `ChildInterrupted` delegates one replacement in the next child-session budget slot, with a context that tells the child to inspect the checkout and continue. With no slot left, the Attempt fails with `InfraFailure`.
-- `ChildAtCapacity` fails the Attempt with `ProviderCapacityFailure`, `ChildFailed` with `InfraFailure`, and `BudgetExceeded` with `ChildSessionBudgetFailure`.
+- `ChildAtCapacity` fails the Attempt with `ProviderCapacityFailure`, which keeps the time the provider's usage limit resets. `ChildFailed` fails it with `InfraFailure`, and `BudgetExceeded` with `ChildSessionBudgetFailure`.
 
 A model may answer only a report without a marker or an interruption. For every other event, `clamp` applies the rule, so a reserved marker always wins. `clamp` also applies the event's rule when it gets `StartChild` or `OverBudget` for a child event, and it turns a `RetryChild` past the budget into `Failed`. `apply` ignores a decision about a child other than the latest one, a decision about a child before the first child starts, a repeated start, and anything after the Attempt settles, so an interruption gets at most one replacement. For each of these, it returns one `Ignored` intent whose `reason` is `StaleChild`, `NotStarted`, `AlreadyStarted`, or `AttemptSettled`, so the coordinator can log why nothing happened.
+
+## Event-driven coordinator
+
+`CoordinatorRuntime` in `src/coordinator/runtime.ts` implements `AttemptRuntime` for an attempt without a parent session. It needs `AttemptJournal`, `ChildBackend`, and `WakeUp`, and no model credential. It handles each lifecycle event in four steps:
+
+1. `buildAttemptContext` reads the journal: the event, the first 4,000 characters of the rendered task, the outcome labels and CI policy, each delegation with the latest two reports up to 4,000 characters and earlier ones as one line, and the last 2,000 characters of the latest child's output. It shortens the task, output, and reports so the encoded context stays within 16,000 characters, and keeps the event whole.
+2. `WakeUp.handle(event, context)` returns a `RecordedDecision`, or `None` to apply the event's rule. `WakeUp.rules` sends every event to its rule.
+3. `AttemptJournal.decide` records the decision; the first one recorded for the event wins.
+4. `clamp` and `apply` from the rules check it and return the next state and intents, which one `transition` commits with the event and the envelopes they reserve.
+
+The first event starts child 1 with the rendered task, and the transition reserves `Started` without a parent model. A delegation runs after its transition commits, through the delegation core over the journal. The event that ends it is recorded with `settleDelegation` before the next transition, so a restart reads it instead of starting another child. A restart also applies a decision recorded before its transition instead of calling the handler again, and resumes a child that saved its session with the same child ID and budget slot. A child that stopped before it saved its session is replaced once within the child-session budget.
+
+The outbox relay in `src/coordinator/outbox.ts` reserves each envelope in the journal before the sink receives it and acknowledges it after, so the next `execute` sends unacknowledged envelopes again. Worker notices before `Started` wait for it, and notices after the terminal envelope are dropped.
+
+`intervene` refuses operator input with `AgentFailure`. `cancel` stops the running child, relays `Interrupted`, ends `execute` with `AgentFailure`, and settles the journal.
+
+`routerLayer` in `src/coordinator/router.ts` provides `AttemptRuntime` over `PiAttemptRuntime` and `CoordinatorRuntime`. `execute` sends an attempt to the coordinator if the journal has it, to the Pi runtime if pi-durable has it, and otherwise by `RunSpec.parent`, which decodes as `pi` for stored attempts. Every other operation looks the attempt up in the journal and falls back to the Pi runtime, so an attempt stays on the runtime that started it. A Worker notice for an attempt that neither runtime has waits for its `execute` call.
 
 ## Testing
 
@@ -121,7 +144,7 @@ const attempts = layer({
 });
 ```
 
-- `layer({ database, parent })` provides `AttemptRuntime`, `DurableHarness`, `ChildBackend`, and `StubChildren` on a SQLite file. To simulate a restart, build a second layer on the file with the remaining answers.
+- `layer({ database, parent })` provides `AttemptRuntime`, `DurableHarness`, `ChildBackend`, and `StubChildren` on a SQLite file. To simulate a restart, build a second layer on the file with the remaining answers. Attempts go through the router, with the event-driven coordinator on an in-memory journal; `routedRuntimeLayer` is that router without the harness and children.
 - `parent` lists the parent model's answers, one per request: `delegate(task)` calls `subagent`, `answer(text)` is a final answer, and a function gets the request's context and returns an answer.
 - `PARENT_MODEL`, `faux/faux-1`, is the scripted model. It accepts efforts up to `high`; an empty `RunSpec.parentModel` selects it.
 - `StubChildren.next` waits for the next child. A `StubChild` exposes `request`, `emit(event)`, `reply(message)`, `block(message)`, `crash(message)`, `interrupted`, and its `interventions`. `crash` ends the child without a result, as a Claude child whose output stream fails, so the parent's `subagent` call fails. A held child replies after `Release`.
@@ -148,12 +171,14 @@ A child's `SessionOperationError` is recorded as an infrastructure failure. This
 
 ## Coordinator journal
 
-`AttemptJournal` stores what the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) needs to resume an attempt: the stored request, an append-only ledger of events with their decisions, the coordinator state, the delegations it decided, and an outbox of channel envelopes that the sink hasn't acknowledged. Nothing runs an attempt on it yet. It doesn't use pi-durable.
+`AttemptJournal` stores what the event-driven coordinator from [#1150](https://github.com/basaltbytes/usine/issues/1150) needs to resume an attempt: the stored request, an append-only ledger of events with their decisions, the coordinator state, the delegations it decided with what each child saved and the event that ended it, an outbox of channel envelopes that the sink hasn't acknowledged, the harvested result, and the runaway guard's unsupervised time. It doesn't use pi-durable.
 
 - `open` creates the journal, or returns the existing one unchanged.
 - `decide` records the first decision for an event and returns it to every later caller, so a restarted coordinator applies the recorded decision instead of deciding again.
 - `transition` appends the event with that decision, replaces the state, records `Delegate` and `Finish` intents, and reserves envelopes in one transaction. It fails with `StaleRevision` if the expected revision isn't current.
 - `reserve` and `acknowledge` keep the outbox in sequence order across restarts.
+- `startDelegation` marks a decided delegation started, or returns the progress saved since an earlier run started it. `saveProgress` applies one typed `ProgressChange`, and `settleDelegation` keeps the first event that ended the delegation.
+- `recordResult` stores the harvested result, and `recordUnsupervised` keeps the longest unsupervised time.
 - `settle` keeps the outcome and the outbox, and advances the revision, so a late transition fails as stale.
 
 The coordinator encodes events, decisions, and state as JSON; the journal stores them without reading them. Breaking a ledger invariant is a defect: an operation on an attempt that was never opened, a transition after `Finish`, a decision other than the recorded one, or an envelope out of sequence.
