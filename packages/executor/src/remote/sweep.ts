@@ -1,5 +1,6 @@
 import type { RemoteHost } from "@usine/agents/child-host";
 import { AttemptId } from "@usine/core/attempt";
+import { safeSegment } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
@@ -70,12 +71,20 @@ export const attemptPathsOn = Effect.fn("RemoteExecutor.attemptPathsOn")(functio
 
 /**
  * Returns a sweep that prunes stale cache registrations once per Worker and keeps crash
- * leftovers. Only durable Attempt recovery removes an existing checkout.
+ * leftovers, and `reattaching`, which records an Attempt whose Run reattaches it after a restart.
+ * Only durable Attempt recovery removes an existing checkout. The sweep logs the paths it keeps,
+ * except the worktrees of the Attempt that triggered it and of the recorded Attempts.
  */
 export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWorktreeSweepFor")(
   function* (commands: RemoteCommands) {
     const locks = yield* keyedLockFor<WorkerName>();
     const swept = yield* Ref.make(new Set<WorkerName>());
+    // Attempts whose parent task outlived the restart and that haven't prepared yet.
+    const reattached = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
+
+    /** Records that `attemptId`'s Run reattaches it, so the sweep doesn't report its worktree. */
+    const reattaching = (attemptId: AttemptId) =>
+      Ref.update(reattached, (current) => new Set(current).add(attemptId));
 
     const sweep = Effect.fn("RemoteExecutor.sweepAbandonedWorktrees")(function* (
       attemptId: AttemptId,
@@ -109,19 +118,39 @@ export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWork
           yield* commands.run("prepare", shell, "mkdir", ["-p", reposRoot]);
 
           const attempts = yield* attemptPathsOn(commands, "prepare", shell, attemptsRoot);
+          const known = new Set(
+            [attemptId, ...(yield* Ref.get(reattached))].map(
+              (id) => `${attemptsRoot}/${safeSegment(id)}`,
+            ),
+          );
+          const reattachedPaths = attempts.filter((path) => known.has(path));
+          const abandoned = attempts.filter((path) => !known.has(path));
+          if (reattachedPaths.length > 0)
+            yield* Effect.logDebug("Keeping the worktrees of Attempts that are being reattached", {
+              attemptId,
+              worker,
+              host,
+              worktrees: reattachedPaths,
+            });
           // An unrecognized path can contain unsalvaged work from a crash; only recovery from the
           // durable Attempt record removes it.
-          yield* Effect.forEach(
-            attempts,
-            (worktree) =>
-              Effect.logWarning("Preserving abandoned remote path for salvage reconciliation", {
+          if (abandoned.length > 0) {
+            yield* Effect.logWarning(
+              "Preserving abandoned remote paths for salvage reconciliation",
+              {
                 attemptId,
                 worker,
                 host,
-                worktree,
-              }),
-            { discard: true },
-          );
+                paths: abandoned.length,
+              },
+            );
+            yield* Effect.logDebug("Abandoned remote paths preserved for salvage reconciliation", {
+              attemptId,
+              worker,
+              host,
+              worktrees: abandoned,
+            });
+          }
 
           const caches = yield* commands
             .run("prepare", shell, "find", [
@@ -159,7 +188,8 @@ export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWork
             attemptId,
             worker,
             host,
-            retained: attempts.length,
+            reattached: reattachedPaths.length,
+            abandoned: abandoned.length,
             caches: caches.length,
           });
         }).pipe(
@@ -174,8 +204,13 @@ export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWork
           Effect.ignore,
         ),
       );
+      yield* Ref.update(reattached, (current) => {
+        const remaining = new Set(current);
+        remaining.delete(attemptId);
+        return remaining;
+      });
     });
 
-    return sweep;
+    return { sweep, reattaching } as const;
   },
 );

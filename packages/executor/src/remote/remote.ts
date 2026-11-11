@@ -116,7 +116,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const { commands, label } = worker;
     const span = (name: string) => `${worker.spanPrefix}.${name}`;
     const fetches = yield* keyedLockFor<RepositoryName>();
-    const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
+    const abandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const workerLeftovers = yield* workerLeftoversFor(commands, worker.machineFor, worker.reclaim);
     const session = yield* durableSessionFor({ interruptGrace: worker.interruptGrace });
     const runtime = yield* AttemptRuntime;
@@ -821,7 +821,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           worktree,
         },
       );
-      yield* sweepAbandonedWorktrees(
+      yield* abandonedWorktrees.sweep(
         request.attemptId,
         request.worker,
         machine.shell,
@@ -1064,7 +1064,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       recover,
       cancel: session.cancel,
       intervene: session.intervene,
-      isLive: session.isLive,
+      isLive: (attemptId) =>
+        session
+          .isLive(attemptId)
+          .pipe(
+            Effect.tap((live) => (live ? abandonedWorktrees.reattaching(attemptId) : Effect.void)),
+          ),
       outcome: session.outcome,
       preflight: worker.preflight,
       prepare,
