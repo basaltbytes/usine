@@ -1,8 +1,9 @@
-import { addRepository } from "~/features/configuration/strings";
+import { emptyListCopy } from "~/features/configuration/strings";
 import type { ConfigurationView } from "@usine/orchestrator/operator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { RepositoryRow } from "~/features/configuration/components/repositories/row";
-import { ConfigurationPage, Missing } from "~/features/configuration/components/section";
+import { ListEmpty } from "~/features/configuration/components/list-empty";
+import { ConfigurationPage } from "~/features/configuration/components/section";
 
 type RepositoriesListProps = {
   readonly configuration: ConfigurationView;
@@ -12,10 +13,15 @@ export const RepositoriesList = ({ configuration }: RepositoriesListProps) => (
   <ConfigurationPage
     title="Repositories"
     createKind="repository"
-    counts={`${configuration.repositories.length} ${configuration.repositories.length === 1 ? "repository" : "repositories"}`}
+    empty={configuration.repositories.length === 0}
+    counts={
+      configuration.repositories.length === 1
+        ? "1 repository"
+        : `${configuration.repositories.length} repositories`
+    }
   >
     {configuration.repositories.length === 0 ? (
-      <Missing title="No repositories registered">{addRepository}</Missing>
+      <ListEmpty {...emptyListCopy.repository} />
     ) : (
       <div className="@container -mx-2">
         <Table>
