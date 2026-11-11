@@ -74,34 +74,47 @@ const runtimes = extended.ids.map((id): HarnessRuntime => ({
 }));
 
 describe("harness runtime registration", () => {
-  it.effect("removes other harnesses' host configuration before launch", () => {
+  it.effect("removes other harnesses' host configuration before launch and stop", () => {
     const original = request(claude.id);
+    const seen: Array<{
+      readonly operation: "open" | "stop";
+      readonly environment: Readonly<Record<string, string | undefined>>;
+    }> = [];
     const runtime: HarnessRuntime = {
       id: claude.id,
-      stop: () => Effect.void,
+      stop: (spec) =>
+        Effect.sync(() => {
+          seen.push({ operation: "stop", environment: spec.environment });
+        }),
       preflight: checkedPreflight(() => Effect.void),
       open: (spec, start, continuation) => {
-        assert.deepStrictEqual(spec.environment, {
-          HOME: "/home/worker",
-          PATH: "/usr/bin:/bin",
-          CLAUDE_CONFIG_DIR: "/worker/claude",
-        });
+        seen.push({ operation: "open", environment: spec.environment });
         return backend(claude.id).open(spec, start, continuation);
       },
     };
+    const child = ChildRequest.make({
+      ...original,
+      environment: {
+        ...original.environment,
+        CLAUDE_CONFIG_DIR: "/worker/claude",
+        CODEX_HOME: "/worker/codex",
+        USINE_GATEWAY_TOKEN: "other-harness-token",
+      },
+    });
+    const scopedEnvironment = {
+      HOME: "/home/worker",
+      PATH: "/usr/bin:/bin",
+      CLAUDE_CONFIG_DIR: "/worker/claude",
+    };
     return Effect.scoped(
       Effect.gen(function* () {
-        yield* (yield* ChildBackend).launch(
-          ChildRequest.make({
-            ...original,
-            environment: {
-              ...original.environment,
-              CLAUDE_CONFIG_DIR: "/worker/claude",
-              CODEX_HOME: "/worker/codex",
-              USINE_GATEWAY_TOKEN: "other-harness-token",
-            },
-          }),
-        );
+        const dispatcher = yield* ChildBackend;
+        yield* dispatcher.launch(child);
+        yield* dispatcher.stop(child);
+        assert.deepStrictEqual(seen, [
+          { operation: "open", environment: scopedEnvironment },
+          { operation: "stop", environment: scopedEnvironment },
+        ]);
       }),
     ).pipe(
       Effect.provide(

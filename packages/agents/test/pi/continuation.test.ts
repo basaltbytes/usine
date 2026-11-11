@@ -9,7 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { OperatorMessageId } from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Option, Result, Stream } from "effect";
+import { Array as Arr, Deferred, Effect, Option, Result, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
   childContinuation,
@@ -17,6 +17,9 @@ import {
   CONTINUATION_MESSAGE,
 } from "../../src/harness/continuation.ts";
 import { catalog } from "../../src/harness/catalog.ts";
+import { claude } from "../../src/harness/claude/descriptor.ts";
+import { CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
+import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { sessionConversation } from "../../src/harness/conversation.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
 import {
@@ -57,6 +60,50 @@ const request = ChildRequest.make({
 const working = { held: false, paused: false, idle: false };
 
 describe("shared continuation policy", () => {
+  it.effect("refuses to resume when the credential route lacks resume-session", () => {
+    const withoutResume = HarnessCatalog.make({
+      descriptors: [
+        HarnessDescriptor.make({
+          ...claude,
+          capabilities: Arr.map(claude.capabilities, (profile) =>
+            CapabilityProfile.make({
+              ...profile,
+              supported: profile.supported.filter((capability) => capability !== "resume-session"),
+              lacking: [
+                ...profile.lacking,
+                Lacking.make({ capability: "resume-session", reason: "No saved-session recovery" }),
+              ],
+            }),
+          ),
+        }),
+      ],
+    });
+    let opens = 0;
+    const adapter = childContinuation(withoutResume, {
+      stop: () => Effect.void,
+      open: () =>
+        Effect.sync(() => {
+          opens++;
+        }).pipe(Effect.andThen(Effect.die("a refused resume cannot open a session"))),
+    });
+    return Effect.gen(function* () {
+      const error = yield* adapter
+        .resume(ChildRequest.make({ ...request, resume: Option.none() }), reference)
+        .pipe(Effect.flip);
+      assert.strictEqual(error._tag, "AgentResultError");
+      assert.include(error.message, "resume-session");
+      assert.strictEqual(opens, 0);
+    }).pipe(
+      Effect.provideService(ChildSessionJournal, {
+        started: () => Effect.void,
+        prompted: Effect.void,
+        continued: () => Effect.void,
+        delivered: () => Effect.void,
+      }),
+      Effect.scoped,
+    );
+  });
+
   it("refuses the fourth continuation within ten minutes and ages out old entries", () => {
     const fourth = continuationPlan(session, working, [1, 2, 3], 4);
     assert(Result.isFailure(fourth));

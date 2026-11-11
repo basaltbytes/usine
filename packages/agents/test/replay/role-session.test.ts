@@ -70,7 +70,11 @@ describe("role-neutral harness runtimes", () => {
               started.session.pool,
               Option.some(provider === "claude" ? "claudePlan" : "chatgptPlan"),
             );
-            assert(events.every((event) => event.session._tag === "RoleSession"));
+            assert.isAbove(events.length, 2, "the replay emits content events after the start");
+            for (const event of events) {
+              assert(event.session._tag === "RoleSession", `${event._tag} keeps the role session`);
+              assert.deepStrictEqual(event.session.pool, started.session.pool, event._tag);
+            }
             assert.strictEqual(events.at(-1)?._tag, "SessionFinished");
             yield* fixture.save;
           }),

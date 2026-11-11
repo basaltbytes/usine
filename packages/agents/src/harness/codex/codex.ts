@@ -693,7 +693,7 @@ const makeCodexSessions = Effect.gen(function* () {
             }
             if (method === "account/updated") {
               if (Option.isSome(gatewayCredential(spec.route.credential)))
-                return yield* Effect.logDebug(
+                return yield* Effect.logInfo(
                   "Skipping a Codex account change: the Gateway holds the OpenAI credential",
                   { sessionId: session.id },
                 );
