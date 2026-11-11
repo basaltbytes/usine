@@ -4,6 +4,22 @@ usine runs loops against many repositories from one headless orchestrator. A loo
 
 Before you name a concept, read the glossary in `CONTEXT.md`.
 
+## Any provider, any harness
+
+usine must work with whichever model provider and login the operator has. Two facts pull against each other, and every design has to hold both:
+
+- Pi is the provider-agnostic harness. It reaches API keys and subscriptions across providers, so it's the default path for every role.
+- A Claude subscription works only inside Claude Code. That is the only reason usine runs a vendor harness, and the same applies to any other login that is tied to its vendor's client.
+
+Rules that follow:
+
+- Write every role (coordinator, orchestrator agent, attempt agent, and roles added later) against the harness and model seam in `@usine/agents`, never against one harness or provider. A role states the capabilities it needs; a harness descriptor states what it provides for a credential route.
+- Don't name a provider or harness in a role's interface, in an issue title for a generic feature, or in a prerequisite. A vendor harness is one adapter behind the seam.
+- When you add behavior for one harness, add it for Pi in the same change or state why Pi can't provide it.
+- Don't require a second credential for a feature when the one the attempt already uses can serve it.
+
+[ADR 0005](docs/adr/0005-pi-parent-agent-layer-team-roster.md) records the reasons.
+
 ## Agent skills
 
 ### Issue tracker
