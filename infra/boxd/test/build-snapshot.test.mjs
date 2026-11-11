@@ -31,6 +31,7 @@ case "$1 $2" in
         --size) echo "error: unexpected argument '--size' found" >&2; exit 2;;
         --json) json=true;;
         --vcpu) printf '%s\\n' "$2" >> "$BOXD_VCPU"; shift;;
+        --memory) printf '%s\\n' "$2" >> "$BOXD_MEMORY"; shift;;
       esac
       shift
     done
@@ -68,6 +69,7 @@ const setUp = async (t) => {
   const files = {
     calls: join(directory, "calls"),
     vcpu: join(directory, "vcpu"),
+    memory: join(directory, "memory"),
     removed: join(directory, "removed"),
   };
   const env = {
@@ -75,6 +77,7 @@ const setUp = async (t) => {
     PATH: `${directory}:${process.env.PATH}`,
     BOXD_CALLS: files.calls,
     BOXD_VCPU: files.vcpu,
+    BOXD_MEMORY: files.memory,
     BOXD_REMOVED: files.removed,
     ATTEMPT_IMAGE: "ghcr.io/example/attempt:test",
   };
@@ -82,15 +85,19 @@ const setUp = async (t) => {
   return { env, read };
 };
 
-test("snapshot setup sizes the machine by vCPU, bakes the image, and deletes its source", async (t) => {
+test("snapshot setup sizes the machine by vCPU and memory, bakes the image, and deletes its source", async (t) => {
   const { env, read } = await setUp(t);
   const result = await run(["--size", "2x8", "usine-attempt"], env);
   assert.equal(result.stdout, "usine-attempt\n");
   assert.match(result.stderr, /Created temporary machine usine-snapshot-/u);
   assert.doesNotMatch(result.stderr, /Delete temporary machine/u);
   assert.equal(await read("vcpu"), "2\n");
+  assert.equal(await read("memory"), "8\n");
   const calls = await read("calls");
-  assert.match(calls, /boxd machine new .* --vcpu 2 --isolated --auto-hibernate-timeout 0 --json/u);
+  assert.match(
+    calls,
+    /boxd machine new .* --vcpu 2 --memory 8 --isolated --auto-hibernate-timeout 0 --json/u,
+  );
   assert.match(calls, /sh -s -- 'docker' 'ghcr.io\/example\/attempt:test'/u);
   assert.match(calls, /boxd snapshots save usine-snapshot-\S+ usine-attempt\n/u);
   assert.match(calls, /boxd machine remove -y usine-snapshot-/u);
@@ -102,11 +109,37 @@ test("snapshot setup sizes the machine by vCPU, bakes the image, and deletes its
   );
 });
 
-test("snapshot setup maps the largest size to 8 vCPUs", async (t) => {
+test("snapshot setup passes any size that a self-hosted cluster lists", async (t) => {
   const { env, read } = await setUp(t);
-  const result = await run(["--size", "8x32", "usine-attempt"], env);
+  const result = await run(["--size", "1x32", "usine-attempt"], env);
   assert.equal(result.stdout, "usine-attempt\n");
-  assert.equal(await read("vcpu"), "8\n");
+  assert.equal(await read("vcpu"), "1\n");
+  assert.equal(await read("memory"), "32\n");
+});
+
+test("snapshot setup refuses a size that isn't <vcpu>x<GiB> before it calls boxd", async (t) => {
+  const { env, read } = await setUp(t);
+  for (const size of [
+    "small",
+    "0x4",
+    "2x0",
+    "02x8",
+    "2X8",
+    "2x8.5",
+    "2x8x1",
+    "x8",
+    "2x",
+    "28",
+    "2x8\n1x4",
+  ]) {
+    // The script exits before it reads stdin, so the test sends none.
+    await assert.rejects(exec(script, ["--size", size, "usine-attempt"], { env }), (error) => {
+      assert.equal(error.code, 2);
+      assert.match(error.stderr, /Usage: .* \[--size <vcpu>x<GiB>\]/u);
+      return true;
+    });
+  }
+  await assert.rejects(read("calls"), { code: "ENOENT" });
 });
 
 test("snapshot setup deletes its source machine when the save fails", async (t) => {
@@ -116,6 +149,7 @@ test("snapshot setup deletes its source machine when the save fails", async (t) 
     return true;
   });
   assert.equal(await read("vcpu"), "2\n");
+  assert.equal(await read("memory"), "8\n");
   assert.match(await read("calls"), /boxd machine remove -y usine-snapshot-.*\n$/u);
   assert.match(await read("removed"), /^usine-snapshot-\S+\n$/u);
 });

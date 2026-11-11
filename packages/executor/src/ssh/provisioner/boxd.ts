@@ -1,5 +1,6 @@
 import {
   type BoxdEgressAllowlist,
+  boxdSizeParts,
   isBoxdEgressAddress,
   MachineId,
   type WorkerName,
@@ -70,13 +71,6 @@ class BoxdEgressNotApplied extends Schema.TaggedError<
   machine: MachineId,
   requested: Schema.Int,
 }) {}
-
-const assignment = (tags: MachineTags) => ({
-  "usine.run": tagValue(tags.run),
-  "usine.process": tagValue(tags.process),
-  "usine.attempt": attemptTag(tags.attempt),
-  "usine.attempts": String(tags.attempts),
-});
 
 const transientMessage = (worker: WorkerName, failure: BoxdCallError): string =>
   `boxd didn't answer ${failure.operation} for worker "${worker}" at ${failure.url}: ${failure.code}: ${failure.message}. Check that this host reaches ${failure.url}, or wait for the boxd rate limit to reset.`;
@@ -175,11 +169,17 @@ export const boxdDriverFor = (
           return yield* capability(
             `boxd snapshot "${settings.snapshot}" is in ${placeOf(snapshot.region)}, but worker "${worker}" creates machines in ${placeOf(served)}. Set provisioner.region to the region of the snapshot, or rebuild the snapshot where the worker creates machines.`,
           );
-        const vcpu = Number(settings.size.split("x")[0]);
-        if (snapshot.vcpu !== vcpu || snapshot.memoryBytes !== vcpu * 4 * 1024 ** 3)
-          return yield* capability(
-            `boxd snapshot "${settings.snapshot}" captured ${snapshot.vcpu} vCPU and ${snapshot.memoryBytes / 1024 ** 3} GiB, but provisioner.size is ${settings.size}. Rebuild the snapshot at ${settings.size} or change size to match the captured size.`,
-          );
+        const captured = `${snapshot.vcpu}x${snapshot.memoryBytes / 1024 ** 3}`;
+        if (Option.isSome(settings.size)) {
+          const expected = boxdSizeParts(settings.size.value);
+          if (
+            snapshot.vcpu !== expected.vcpu ||
+            snapshot.memoryBytes !== expected.memoryGib * 1024 ** 3
+          )
+            return yield* capability(
+              `boxd snapshot "${settings.snapshot}" captured ${snapshot.vcpu} vCPU and ${snapshot.memoryBytes / 1024 ** 3} GiB, but provisioner.size is ${settings.size.value}. Rebuild the snapshot at ${settings.size.value}, set size to ${captured}, or remove size to accept the captured size.`,
+            );
+        }
         const limit = yield* api.orgMachineLimit;
         const addresses = Option.isSome(settings.tailnet)
           ? Option.getOrElse(settings.egress, () => []).filter(isBoxdEgressAddress)
@@ -211,6 +211,7 @@ export const boxdDriverFor = (
           worker,
           region: served,
           endpoint: api.endpoint,
+          size: captured,
           egress: Option.match(settings.egress, {
             onNone: () => "unrestricted",
             onSome: (entries) => `${entries.length} entries`,
@@ -226,24 +227,6 @@ export const boxdDriverFor = (
           ),
         ),
     );
-    /**
-     * Replaces the egress allowlist of reused machine `id` with `entries` and fails when boxd leaves
-     * a restricted machine unrestricted, so no attempt runs on it.
-     */
-    const restrictEgress = Effect.fn("BoxdDriver.restrictEgress")(function* (
-      id: MachineId,
-      entries: BoxdEgressAllowlist,
-    ) {
-      yield* Effect.annotateCurrentSpan({ worker, machine: id });
-      const inEffect = yield* api.setEgressAllow(id, entries);
-      if (inEffect.length === 0)
-        return yield* BoxdEgressNotApplied.make({ machine: id, requested: entries.length });
-      yield* Effect.logInfo("Restricted boxd machine egress", {
-        worker,
-        machine: id,
-        entries: inEffect.length,
-      });
-    });
     /**
      * Fails when boxd reports new machine `id`, created with `entries` in its spec, unrestricted.
      * Reads the machine when the create response, `machine`, omits it.
@@ -286,7 +269,10 @@ export const boxdDriverFor = (
           labels: {
             "usine.instance": tagValue(tags.instance),
             "usine.worker": tagValue(tags.worker),
-            ...assignment(tags),
+            "usine.run": tagValue(tags.run),
+            "usine.process": tagValue(tags.process),
+            "usine.attempt": attemptTag(tags.attempt),
+            "usine.attempts": String(tags.attempts),
           },
           egress: Option.getOrElse(settings.egress, () => []),
         });
@@ -406,33 +392,6 @@ export const boxdDriverFor = (
       }
       return Option.some(endpointOf(id));
     });
-    const assign = Effect.fn("BoxdDriver.assign")(function* (id: MachineId, tags: MachineTags) {
-      yield* Effect.annotateCurrentSpan({ worker, machine: id, attemptId: tags.attempt });
-      yield* Effect.gen(function* () {
-        yield* api.updateLabels(id, assignment(tags));
-        if (Option.isSome(settings.egress)) yield* restrictEgress(id, settings.egress.value);
-        yield* api.setAutoHibernateTimeout(id, 0);
-        yield* api.setAutoSuspendTimeout(id, 0);
-      }).pipe(
-        Effect.catchTags({
-          BoxdEgressNotApplied: (failure) =>
-            Effect.fail(
-              ProviderApiError.make({
-                provider: "boxd",
-                operation: "assign the machine",
-                status: Option.none(),
-                message: `boxd reported unrestricted egress after usine set ${failure.requested} provisioner.egress entries on machine ${failure.machine}`,
-              }),
-            ),
-          BoxdCallError: (failure) => Effect.fail(apiError("assign the machine")(failure)),
-        }),
-      );
-      yield* Effect.logInfo("Assigned boxd machine to attempt", {
-        worker,
-        machine: id,
-        attemptId: tags.attempt,
-      });
-    });
     const remove = Effect.fn("BoxdDriver.remove")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       created.delete(id);
@@ -483,7 +442,6 @@ export const boxdDriverFor = (
       create,
       endpoint,
       refreshEndpoint,
-      assign,
       remove,
       list,
     } satisfies MachineDriver;

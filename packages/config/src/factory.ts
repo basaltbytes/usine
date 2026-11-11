@@ -335,7 +335,10 @@ export class BoatProvisioner extends Schema.Class<
 /** @deprecated Use ProvisionerTailnet. */
 export { ProvisionerTailnet as BoatTailnet };
 
-/** Restores each boxd machine from a snapshot with a matching captured size. */
+/**
+ * Restores each boxd machine from a snapshot, which fixes the machine's size. Each attempt gets a
+ * new machine, so a boxd worker refuses `reuse`.
+ */
 export class BoxdProvisioner extends Schema.Class<
   BoxdProvisioner,
   Brand.Brand<"@usine/config/factory/BoxdProvisioner">
@@ -353,7 +356,11 @@ export class BoxdProvisioner extends Schema.Class<
    * runs in one place.
    */
   region: Schema.OptionFromOptionalKey(BoxdRegion),
-  size: BoxdSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("2x8"))),
+  /**
+   * The size that preflight expects the snapshot to have, or `None` to accept the snapshot's
+   * size.
+   */
+  size: Schema.OptionFromOptionalKey(BoxdSize),
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
   /**
@@ -364,6 +371,7 @@ export class BoxdProvisioner extends Schema.Class<
   tailnet: ProvisionerTailnetFromYaml,
   apiKeys: ProviderApiKeysFromYaml,
   timings: ProvisionerTimingsFromYaml,
+  /** Refused at load when set; it is decoded only to explain why. */
   reuse: ProvisionerReuseFromYaml,
 }) {}
 
@@ -505,6 +513,8 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
         ? `SSH worker "${worker.name}" has a gateway, so its provisioner needs the gateway's private network in network`
         : undefined;
     case "boxd":
+      if (Option.isSome(provisioner.reuse))
+        return `SSH worker "${worker.name}" sets provisioner.reuse, which a boxd worker doesn't support: boxd restores each attempt's machine from its snapshot in under a second, so every attempt gets a new machine. Remove provisioner.reuse`;
       if (Option.isSome(worker.gateway) && Option.isNone(provisioner.tailnet))
         return `SSH worker "${worker.name}" needs provisioner.tailnet to use a boxd gateway`;
       if (Option.isSome(provisioner.tailnet) && Option.isNone(worker.gateway))

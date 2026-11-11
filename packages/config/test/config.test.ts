@@ -498,11 +498,12 @@ workers:
       assert(settings.provider === "boxd");
       assert.deepStrictEqual(settings.region, Option.none());
       assert.deepStrictEqual(settings.endpoint, Option.none());
-      assert.strictEqual(settings.size, "2x8");
+      assert.deepStrictEqual(settings.size, Option.none());
       assert.isTrue(settings.isolated);
       const custom = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
-        yaml + "      region: eu-own-1\n      endpoint: https://boxd.example.com:9443\n",
+        yaml +
+          "      region: eu-own-1\n      endpoint: https://boxd.example.com:9443\n      size: 1x32\n",
       );
       const customWorker = custom.workers[0];
       assert(customWorker?.kind === "ssh" && Option.isSome(customWorker.provisioner));
@@ -512,6 +513,7 @@ workers:
         customWorker.provisioner.value.endpoint,
         Option.some("https://boxd.example.com:9443"),
       );
+      assert.deepStrictEqual(customWorker.provisioner.value.size, Option.some("1x32"));
       for (const config of [parsed, custom]) {
         const encoded = yield* Schema.encodeEffect(UsineConfig)(config);
         const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
@@ -536,6 +538,11 @@ workers:
       }
       for (const invalid of [
         yaml + "      size: small\n",
+        yaml + "      size: 0x4\n",
+        yaml + "      size: 2x0\n",
+        yaml + "      size: 02x8\n",
+        yaml + "      size: 2X8\n",
+        yaml + "      size: 2x8.5\n",
         yaml + "      region: FRA\n",
         yaml + '      region: ""\n',
         yaml + "      endpoint: boxd.example.com:9443\n",
@@ -563,6 +570,16 @@ workers:
           .pipe(Effect.result);
         assert.isTrue(Result.isFailure(result));
       }
+      const reused = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          yaml + "      reuse: { attempts: 5, max_age: 2h }\n",
+        )
+        .pipe(Effect.flip);
+      assert.include(
+        reused.message,
+        'SSH worker "boxd-pool" sets provisioner.reuse, which a boxd worker doesn\'t support',
+      );
       // Releases before boxd's Exec transport required identity_file; a boxd worker ignores it.
       const withKey = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),

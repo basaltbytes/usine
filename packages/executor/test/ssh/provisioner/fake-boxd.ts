@@ -18,8 +18,6 @@ export const fakeBoxd = () => {
   const creates: Array<BoxdCreate> = [];
   const selectors: Array<ReadonlyArray<string>> = [];
   const timers: Array<{ id: MachineId; kind: string; seconds: number }> = [];
-  /** Every `SetVmEgressAllow` call, in order, with the operations before it on the same machine. */
-  const egress: Array<{ id: MachineId; entries: ReadonlyArray<string>; after: Array<string> }> = [];
   const operations = new Map<MachineId, Array<string>>();
   const record = (id: MachineId, operation: string) =>
     operations.set(id, [...(operations.get(id) ?? []), operation]);
@@ -32,7 +30,6 @@ export const fakeBoxd = () => {
     creates,
     selectors,
     timers,
-    egress,
     operations,
     execs,
     connections,
@@ -57,11 +54,7 @@ export const fakeBoxd = () => {
     reservedNames: new Set<string>(),
     readFails: Option.none<string>(),
     timerFails: Option.none<string>(),
-    egressFails: Option.none<string>(),
-    /**
-     * Whether boxd reports an empty list after a create or `SetVmEgressAllow`, leaving egress
-     * unrestricted.
-     */
+    /** Whether boxd reports an empty list after a create, leaving egress unrestricted. */
     egressIgnored: false,
   };
   const failure = (operation: string, code: string) =>
@@ -159,33 +152,11 @@ export const fakeBoxd = () => {
           );
         }),
       ),
-    updateLabels: (id, set) =>
-      call("updateLabels", () =>
-        Effect.gen(function* () {
-          const machine = machines.get(id);
-          if (machine === undefined) return yield* failure("updateLabels", "NOT_FOUND");
-          machines.set(id, { ...machine, labels: { ...machine.labels, ...set } });
-        }),
-      ),
     destroy: (id) =>
       call("destroy", () => {
         names.delete(id);
         return machines.delete(id) ? Effect.void : failure("destroy", "NOT_FOUND");
       }),
-    setEgressAllow: (id, entries) =>
-      call("setEgressAllow", () =>
-        Effect.gen(function* () {
-          if (Option.isSome(state.egressFails))
-            return yield* failure("setEgressAllow", state.egressFails.value);
-          const machine = machines.get(id);
-          if (machine === undefined) return yield* failure("setEgressAllow", "NOT_FOUND");
-          egress.push({ id, entries, after: [...(operations.get(id) ?? [])] });
-          record(id, "egress");
-          const inEffect = state.egressIgnored ? [] : [...entries];
-          machines.set(id, { ...machine, egressAllow: inEffect });
-          return inEffect;
-        }),
-      ),
     setAutoHibernateTimeout: timer("hibernate"),
     setAutoSuspendTimeout: timer("suspend"),
   });
