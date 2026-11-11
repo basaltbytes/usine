@@ -1,7 +1,12 @@
 import { createFileRoute, notFound, Outlet } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
-import { ProjectNotFound } from "~/components/project-not-found";
+import { missingRepositoryDescription, ProjectNotFound } from "~/components/project-not-found";
 import { overviewQuery, projectForRepository, projectId } from "~/lib/overview";
+
+const MissingRepository = () => {
+  const { project, name } = Route.useParams();
+  return <ProjectNotFound description={missingRepositoryDescription(`${project}/${name}`)} />;
+};
 
 export const Route = createFileRoute("/projects/$project/$name")({
   beforeLoad: async ({ context, params }) => {
@@ -12,5 +17,5 @@ export const Route = createFileRoute("/projects/$project/$name")({
     return { legacyProject: projectId(project), legacyRepository: repository };
   },
   component: Outlet,
-  notFoundComponent: ProjectNotFound,
+  notFoundComponent: MissingRepository,
 });
