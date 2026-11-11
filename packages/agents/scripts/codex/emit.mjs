@@ -86,7 +86,10 @@ export function emitDeclarations(definitions, roots) {
   function assertDistinguishable(members) {
     const variants = members.flatMap((member) => leaves(member, new Set()));
     if (variants.length < 2) return;
-    const objects = variants.filter(({ target }) => isObjectSchema(target));
+    const objects = variants.filter(
+      ({ target }) => isObjectSchema(target) || acceptsEveryObject(target),
+    );
+    const fallback = objects.at(-1);
     const tagKeys = new Set(
       objects.flatMap(({ target }) =>
         Object.entries(target.properties ?? {})
@@ -108,13 +111,17 @@ export function emitDeclarations(definitions, roots) {
           const [first, second] = [earlier, later].map(({ target }) => target.properties?.[key]);
           return isTag(first) && isTag(second) && first.enum[0] !== second.enum[0];
         });
-        // A later variant without fields generates a record, which accepts every key.
+        // A later variant without fields generates a record or `Schema.Json`, which accepts every key.
         const fields = later.target.properties ?? {};
         const covered =
           Object.keys(fields).length === 0 ||
           (earlier.target.required ?? []).every((key) => key in fields);
+        // A last variant that accepts every object may catch the unknown variants of an externally
+        // tagged enum. Its earlier variants each declare one required key and no other key.
+        const tagsByKey =
+          later === fallback && acceptsEveryObject(later.target) && isKeyTagged(earlier.target);
         assert(
-          tagged || !covered,
+          tagged || tagsByKey || !covered,
           `Variant ${earlier.name} accepts the values of variant ${later.name}; they need distinct tags`,
         );
       }
@@ -251,6 +258,28 @@ function isTag(schema) {
 
 function isNull(schema) {
   return schema.type === "null" || (Array.isArray(schema.type) && schema.type.join() === "null");
+}
+
+/**
+ * Returns whether `schema` generates a record or `Schema.Json`: `true`, a schema without a type or
+ * an enum, or a schema whose types include `object` and that declares no fields.
+ */
+function acceptsEveryObject(schema) {
+  if (schema === true) return true;
+  if (!isJsonObject(schema) || Object.keys(schema.properties ?? {}).length > 0) return false;
+  if (schema.type === undefined) return schema.enum === undefined;
+  return [schema.type].flat().includes("object");
+}
+
+/** Returns whether `schema` is an object of one required key and no additional keys. */
+function isKeyTagged(schema) {
+  const keys = Object.keys(schema.properties ?? {});
+  return (
+    schema.additionalProperties === false &&
+    keys.length === 1 &&
+    schema.required?.length === 1 &&
+    schema.required[0] === keys[0]
+  );
 }
 
 function isObjectSchema(schema) {

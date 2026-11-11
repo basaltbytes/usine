@@ -417,13 +417,84 @@ describe("emitDeclarations", () => {
         { type: "object", properties: {} },
         { type: "object", additionalProperties: { type: "string" } },
         { type: "object", additionalProperties: true },
+        { type: ["string", "object"] },
+        { type: ["object", "null"] },
+        { description: "Any value" },
       ].map((bag) => [
         [untagged, { title: "BagItem", ...bag }],
         "Variant TextItem accepts the values of variant BagItem; they need distinct tags",
       ]),
+      [
+        [untagged, true],
+        "Variant TextItem accepts the values of variant without a title; they need distinct tags",
+      ],
+      [
+        [{ title: "BagItem", type: ["string", "object"] }, untagged],
+        "Variant BagItem accepts the values of variant TextItem; they need distinct tags",
+      ],
     ]) {
       const definitions = { Item: { anyOf: alternatives } };
       expect(() => emitDeclarations(definitions, ["Item"])).toThrow(message);
+    }
+  });
+
+  it("keeps a last variant that accepts every object after variants tagged by their only key", () => {
+    const keyed = (title, key) => ({
+      title,
+      type: "object",
+      additionalProperties: false,
+      properties: { [key]: { type: "object", properties: { code: { type: "integer" } } } },
+      required: [key],
+    });
+    for (const fallback of [{ type: ["string", "object"] }, { type: "object" }, true]) {
+      const definitions = {
+        ErrorInfo: {
+          anyOf: [
+            keyed("HttpFailed", "httpFailed"),
+            keyed("StreamFailed", "streamFailed"),
+            fallback,
+          ],
+        },
+      };
+      const { ErrorInfo } = compile(emitDeclarations(definitions, ["ErrorInfo"]));
+      const decode = Schema.decodeUnknownSync(ErrorInfo);
+      expect(decode({ httpFailed: { code: 502 } })).toEqual({ httpFailed: { code: 502 } });
+      expect(decode({ quotaExceeded: { limit: 3 } })).toEqual({ quotaExceeded: { limit: 3 } });
+    }
+  });
+
+  it("rejects a variant that accepts every object unless it follows variants tagged by their only key", () => {
+    const keyed = {
+      title: "HttpFailed",
+      type: "object",
+      additionalProperties: false,
+      properties: { httpFailed: { type: "object" } },
+      required: ["httpFailed"],
+    };
+    const fallback = { title: "UnknownInfo", type: ["string", "object"] };
+    const { additionalProperties: _closed, ...open } = keyed;
+    for (const [alternatives, message] of [
+      [
+        [open, fallback],
+        "Variant HttpFailed accepts the values of variant UnknownInfo; they need distinct tags",
+      ],
+      [
+        [
+          {
+            ...keyed,
+            properties: { ...keyed.properties, code: { type: "integer" } },
+          },
+          fallback,
+        ],
+        "Variant HttpFailed accepts the values of variant UnknownInfo; they need distinct tags",
+      ],
+      [
+        [keyed, fallback, { title: "OtherInfo", type: "object" }],
+        "Variant HttpFailed accepts the values of variant UnknownInfo; they need distinct tags",
+      ],
+    ]) {
+      const definitions = { ErrorInfo: { anyOf: alternatives } };
+      expect(() => emitDeclarations(definitions, ["ErrorInfo"])).toThrow(message);
     }
   });
 
