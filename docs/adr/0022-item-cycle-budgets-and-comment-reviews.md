@@ -50,7 +50,7 @@ When a CI fix and a trigger match wait on the same loop and item, candidates are
 
 A reset brings back CI fix events that were revoked or superseded. If the recheck failed open, a GitHub outage during the first reconcile after a reset could admit a fix for a head that a newer push had already replaced. A recheck that can't read the item now returns `Undetermined`, and a CI fix stays queued until a later reconcile reads the pull request. A trigger match still opens with its saved settings, because polling revokes it when the item stops matching.
 
-The recheck returns only the settings and task the run opens with, not a whole submission, so the engine keeps the event, item, revision, cycle generation, and CI evidence as recorded. Reconcile reads the admissible queues once and admits each one, whatever the kind of its newest event. The reread after a mismatch skips items with an open run. A reset whose repository is no longer configured is acknowledged by polling, so CI reconciliation stops admitting replayed fixes for it. Unpausing a loop admits its queued CI fixes at once.
+The recheck returns only the settings and task the run opens with, not a whole submission, so the engine keeps the event, item, revision, cycle generation, and CI evidence as recorded. Reconcile reads the admissible queues once and admits each one, whatever the kind of its newest event. The reread after a mismatch skips items with an open run. A reset whose repository is no longer configured is acknowledged by polling, so CI reconciliation stops admitting replayed fixes for it. Unpausing a loop admits the queued CI fixes at once, in the background.
 
 ## Amendment (2026-11-08, #1009): verified outcome labels
 

@@ -921,7 +921,7 @@ export class RunDriver extends Context.Service<
           openedRunIds: opened,
         };
         if (opened.length === 0) yield* Effect.logDebug("No queued CI fix opened a Run", fields);
-        else yield* Effect.logInfo("Queued CI fixes opened their Runs", fields);
+        else yield* Effect.logInfo("Admitting the queued CI fixes opened Runs", fields);
         return opened;
       }).pipe(Effect.withSpan("RunDriver.admitCiFixes"));
 

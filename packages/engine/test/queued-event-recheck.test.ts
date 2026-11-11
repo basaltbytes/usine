@@ -404,6 +404,96 @@ describe("queued Event trigger re-check", () => {
     ),
   );
 
+  it.live.each([false, true])(
+    "applies the fail-closed rule to the Event reread after a mismatch (CI fix newest: %s)",
+    (fixNewest) =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>();
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Deferred.await(gate).pipe(Effect.as(stepResult("first"))),
+            Effect.succeed(stepResult("admitted")),
+          ]);
+          const fix = Submission.make({
+            ...submission({ number: fixNewest ? 53 : 52 }),
+            ciFailureHead: Option.some(CommitSha.make("c".repeat(40))),
+          });
+          const triggerMatch = submission({ number: fixNewest ? 52 : 53 });
+          const [newest, reread] = fixNewest ? [fix, triggerMatch] : [triggerMatch, fix];
+          const rechecks = yield* Ref.make<ReadonlyArray<EventId>>([]);
+          const runtime = engineLayer(
+            directory,
+            executorLayer(plans),
+            conditionLayer((candidate) =>
+              Ref.updateAndGet(rechecks, (all) => [...all, candidate.event.id]).pipe(
+                Effect.flatMap((checked): Effect.Effect<TriggerRecheck> => {
+                  if (checked.length === 1) return Effect.succeed(TriggerRecheck.NoLongerMatches());
+                  if (checked.length === 2) return Effect.succeed(TriggerRecheck.Undetermined());
+                  return stillMatches(candidate);
+                }),
+              ),
+            ),
+          );
+          const path = yield* Path.Path;
+          const database = path.join(directory, ".usine", "runtime.sqlite");
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const first = yield* engine.submit(submission({ number: 51 }));
+            assert(first._tag === "Claimed");
+            yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Running");
+            assert.strictEqual((yield* engine.submit(reread))._tag, "Queued");
+            assert.strictEqual((yield* engine.submit(newest))._tag, "Queued");
+
+            yield* Deferred.succeed(gate, undefined);
+            yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
+            yield* Ref.get(rechecks).pipe(
+              Effect.repeat({
+                until: (checked) => checked.length === 2,
+                schedule: Schedule.spaced("10 millis"),
+                times: 500,
+              }),
+            );
+            const checked = yield* Ref.get(rechecks);
+            assert.deepStrictEqual(checked, [newest.event.id, reread.event.id]);
+            const newestReason = yield* ignoredReason(database, newest.event.id);
+            assert.deepStrictEqual(newestReason, [{ reason: "revoked" }]);
+            const newestRunId = yield* runIdFor(newest);
+            const newestMissing = yield* Effect.flip(engine.inspect(newestRunId));
+            assert.strictEqual(newestMissing._tag, "RunNotFoundError");
+            const rereadRunId = yield* runIdFor(reread);
+
+            if (fixNewest) {
+              // An undetermined trigger match opens with its saved settings, even after a CI fix
+              // mismatch.
+              yield* engine.inspect(rereadRunId).pipe(
+                Effect.retry({
+                  while: (error) => error._tag === "RunNotFoundError",
+                  times: 500,
+                  schedule: Schedule.spaced("10 millis"),
+                }),
+              );
+              yield* waitFor(engine, rereadRunId, ({ run }) => run.state._tag === "Succeeded");
+              return;
+            }
+
+            // An undetermined CI fix stays queued, even after a trigger match mismatch.
+            const rereadMissing = yield* Effect.flip(engine.inspect(rereadRunId));
+            assert.strictEqual(rereadMissing._tag, "RunNotFoundError");
+            const rereadReason = yield* ignoredReason(database, reread.event.id);
+            assert.deepStrictEqual(rereadReason, []);
+            yield* engine.reconcile;
+            yield* waitFor(engine, rereadRunId, ({ run }) => run.state._tag === "Succeeded");
+            const allRechecks = yield* Ref.get(rechecks);
+            assert.deepStrictEqual(allRechecks, [
+              newest.event.id,
+              reread.event.id,
+              reread.event.id,
+            ]);
+          }).pipe(Effect.provide(runtime));
+        }),
+      ),
+  );
+
   it.live(
     "opens a queued trigger match with its saved settings when its recheck is undetermined",
     () =>

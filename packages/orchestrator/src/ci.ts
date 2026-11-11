@@ -481,7 +481,7 @@ export class CiMonitor extends Context.Service<
         const resets = yield* budgets.pendingResets;
         if (resets.length === 0) return;
         const opened = yield* engine.admitCiFixes;
-        yield* Effect.logDebug("Admitted the CI fixes that pending cycle resets replayed", {
+        yield* Effect.logDebug("Admitted the queued CI fixes while cycle resets are pending", {
           itemKeys: resets.map(({ itemKey }) => itemKey),
           openedRunIds: opened,
         });

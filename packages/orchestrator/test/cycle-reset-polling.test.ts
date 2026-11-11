@@ -14,7 +14,7 @@ import type { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { RunEngine } from "@usine/engine/engine";
+import { EnginePersistenceError, RunEngine } from "@usine/engine/engine";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -44,6 +44,7 @@ import {
 } from "@usine/github/polling";
 
 import { PollingTriggers } from "../src/polling-triggers.ts";
+import { acknowledgeUnwatchedResets } from "../src/polling/reset-refresh.ts";
 import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
 import { CycleBudgetNeed } from "../src/operator/need.ts";
 import {
@@ -68,6 +69,13 @@ const instance = Effect.gen(function* () {
     warnings: [],
   });
 });
+
+const cycleBudgetReset = (name: string, number: number) =>
+  Schema.decodeEffect(CycleBudgetReset)({
+    itemKey: ItemKey.make(jsonKey(["github", name, number])),
+    repository: RepositoryName.make(name),
+    generation: 1,
+  });
 
 const issuePayload = (number: number, labels: ReadonlyArray<string> = []): IssuePayload => ({
   number,
@@ -320,6 +328,91 @@ describe("cycle reset polling", () => {
       assert.deepStrictEqual(cycle.failures, []);
       assert.deepStrictEqual(acknowledgements, [reset]);
       assert.deepStrictEqual(pending, []);
+    }).pipe(
+      Effect.provide(
+        pollingTestLayer(github, [], undefined, undefined, memoryCursorStore().store, budgets),
+      ),
+    );
+  });
+
+  it.effect("keeps the resets of a watched repository whose name differs in case", () => {
+    let pending: ReadonlyArray<CycleBudgetReset> = [];
+    const acknowledgements: Array<CycleBudgetReset> = [];
+    const budgets: CycleBudgets["Service"] = {
+      ...emptyCycleBudgets,
+      pendingResets: Effect.sync(() => pending),
+      acknowledgeReset: (value) =>
+        Effect.sync(() => {
+          acknowledgements.push(value);
+          pending = pending.filter((reset) => reset !== value);
+        }),
+    };
+    return Effect.gen(function* () {
+      const watchedReset = yield* cycleBudgetReset("BasaltBytes/Usine", 7);
+      const retiredReset = yield* cycleBudgetReset("basaltbytes/retired", 8);
+      pending = [watchedReset, retiredReset];
+
+      yield* acknowledgeUnwatchedResets([RepositoryName.make("basaltbytes/usine")]);
+
+      assert.deepStrictEqual(acknowledgements, [retiredReset]);
+      assert.deepStrictEqual(pending, [watchedReset]);
+
+      const lowerCaseReset = yield* cycleBudgetReset("basaltbytes/usine", 9);
+      pending = [lowerCaseReset];
+
+      yield* acknowledgeUnwatchedResets([RepositoryName.make("BasaltBytes/Usine")]);
+
+      assert.deepStrictEqual(acknowledgements, [retiredReset]);
+      assert.deepStrictEqual(pending, [lowerCaseReset]);
+    }).pipe(Effect.provideService(CycleBudgets, budgets));
+  });
+
+  it.effect("succeeds when the pending resets of unwatched repositories cannot be read", () =>
+    acknowledgeUnwatchedResets([repository]).pipe(
+      Effect.provideService(CycleBudgets, {
+        ...emptyCycleBudgets,
+        pendingResets: Effect.fail(
+          EnginePersistenceError.make({ operation: "list pending resets", cause: "locked" }),
+        ),
+      }),
+    ),
+  );
+
+  it.effect("keeps polling when acknowledging an unwatched repository's reset fails", () => {
+    let pending: ReadonlyArray<CycleBudgetReset> = [];
+    let attempts = 0;
+    const budgets: CycleBudgets["Service"] = {
+      ...emptyCycleBudgets,
+      pendingResets: Effect.sync(() => pending),
+      acknowledgeReset: () =>
+        Effect.suspend(() => {
+          attempts += 1;
+          return Effect.fail(
+            EnginePersistenceError.make({ operation: "acknowledge reset", cause: "locked" }),
+          );
+        }),
+    };
+    const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
+      baseRefHead: unmovedBaseRefHead,
+      missingIssues: () => Effect.succeed([]),
+      labels: () =>
+        Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
+      snapshot: () => Effect.die("no Item changed"),
+      changes: (_repository, cursor) =>
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
+    };
+    return Effect.gen(function* () {
+      const reset = yield* cycleBudgetReset("basaltbytes/retired", 7);
+      pending = [reset];
+      const fixtureInstance = yield* instance;
+      const polling = yield* PollingTriggers;
+
+      const cycle = yield* polling.poll(fixtureInstance);
+
+      assert.deepStrictEqual(cycle.failures, []);
+      assert.strictEqual(attempts, 1);
+      assert.deepStrictEqual(pending, [reset]);
     }).pipe(
       Effect.provide(
         pollingTestLayer(github, [], undefined, undefined, memoryCursorStore().store, budgets),

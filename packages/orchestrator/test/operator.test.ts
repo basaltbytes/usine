@@ -3529,27 +3529,38 @@ it.effect("filters cached project lists and refuses actions outside a project bi
   }),
 );
 
-it.effect("admits the queued CI fixes after unpausing a Loop", () =>
+it.live("admits the queued CI fixes after unpausing a Loop without waiting for them", () =>
   Effect.gen(function* () {
     const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
     const moved = yield* Ref.make<ItemLabelMutation | null>(null);
     const reads = yield* Ref.make(0);
     const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-    const admitted = yield* Deferred.make<void>();
+    const admitting = yield* Deferred.make<void>();
     yield* Effect.gen(function* () {
       const operator = yield* Operator;
 
-      const state = yield* operator.unpause(loopName);
+      const state = yield* operator.unpause(loopName).pipe(
+        Effect.timeoutOrElse({
+          duration: "2 seconds",
+          orElse: () => Effect.die("unpause waited for the CI fix admission"),
+        }),
+      );
 
       assert.isFalse(state.paused);
-      yield* Deferred.await(admitted).pipe(Effect.timeout("5 seconds"));
+      yield* Deferred.await(admitting).pipe(
+        Effect.timeoutOrElse({
+          duration: "5 seconds",
+          orElse: () => Effect.die("unpause did not admit the queued CI fixes"),
+        }),
+      );
     }).pipe(
       Effect.provide(
         testLayer(approved, moved, reads, revision, snapshot, noCycleBudgets, {
           retry: () => Effect.void,
           intervene: () => Effect.void,
           runAgain: () => Effect.die("unused"),
-          admitCiFixes: Deferred.succeed(admitted, undefined).pipe(Effect.as([])),
+          // Holds like a stalled GitHub recheck.
+          admitCiFixes: Deferred.succeed(admitting, undefined).pipe(Effect.andThen(Effect.never)),
         }),
       ),
     );
