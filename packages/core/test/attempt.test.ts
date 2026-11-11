@@ -4,6 +4,8 @@ import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
   ContainerOutOfMemoryKills,
+  MAX_KILLED_PROCESSES,
+  MemoryKilledProcess,
   OutOfMemoryKills,
   ProviderRetry,
   FailureResolution,
@@ -11,6 +13,7 @@ import {
   AttemptWindow,
   pendingProviderRetry,
   shouldAutoRetry,
+  totalOutOfMemoryKills,
   windowsOverlap,
 } from "../src/attempt/attempt.ts";
 import {
@@ -26,6 +29,7 @@ import {
 import { AttemptFailed } from "../src/attempt/outcome.ts";
 import { SalvageRetained } from "../src/attempt/salvage.ts";
 import { Running } from "../src/run/state.ts";
+import { ContainerId, ContainerMemoryMib } from "../src/worker.ts";
 import { RepositoryName } from "../src/repository.ts";
 import { Event, DedupKey, EventId } from "../src/event.ts";
 
@@ -242,4 +246,49 @@ describe("older OOM records", () => {
       expect(container.processes).toEqual([]);
     }),
   );
+});
+
+describe("killed process lists", () => {
+  const processes = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      MemoryKilledProcess.make({ command: "node", pid: index + 1 }),
+    );
+  const container = "a".repeat(64);
+
+  it("rejects a record with more processes than the cap", () => {
+    expect(() =>
+      ContainerOutOfMemoryKills.make({
+        container: ContainerId.make(container),
+        kills: MAX_KILLED_PROCESSES + 1,
+        memoryMib: ContainerMemoryMib.make(6656),
+        processes: processes(MAX_KILLED_PROCESSES + 1),
+      }),
+    ).toThrow();
+  });
+
+  it.effect("keeps the first processes of a record written before the cap", () =>
+    Effect.gen(function* () {
+      const decoded = yield* Schema.decodeEffect(ContainerOutOfMemoryKills)({
+        container,
+        kills: MAX_KILLED_PROCESSES + 5,
+        memoryMib: 6656,
+        processes: processes(MAX_KILLED_PROCESSES + 5),
+      });
+      expect(decoded.kills).toBe(MAX_KILLED_PROCESSES + 5);
+      expect(decoded.processes).toEqual(processes(MAX_KILLED_PROCESSES));
+    }),
+  );
+
+  it("caps the processes of the containers together and counts every kill", () => {
+    const record = (count: number) =>
+      ContainerOutOfMemoryKills.make({
+        container: ContainerId.make(container),
+        kills: count,
+        memoryMib: ContainerMemoryMib.make(6656),
+        processes: processes(count),
+      });
+    const total = totalOutOfMemoryKills([record(MAX_KILLED_PROCESSES), record(3)]);
+    expect(total.kills).toBe(MAX_KILLED_PROCESSES + 3);
+    expect(total.processes).toHaveLength(MAX_KILLED_PROCESSES);
+  });
 });
