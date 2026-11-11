@@ -185,6 +185,20 @@ for (const address of [hetznerAddress, boatAddress]) {
   });
 }
 
+// A boxd worker stored before reuse was ignored still carries the setting, which must not apply.
+const ignoredReuseAddress: SshWorkerAddress = (() => {
+  assert(boxdAddress.machine._tag === "Provisioned");
+  const { provisioner } = boxdAddress.machine;
+  assert(provisioner.provider === "boxd");
+  return {
+    ...boxdAddress,
+    machine: {
+      ...boxdAddress.machine,
+      provisioner: { ...provisioner, ignoredReuse: Option.some(policy) },
+    },
+  };
+})();
+
 it.live("deletes a released boxd machine and creates a new one for the next attempt", () => {
   const machine = machineFixture();
   const providers = fakeProviders();
@@ -198,7 +212,7 @@ it.live("deletes a released boxd machine and creates a new one for the next atte
     const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
     assert.notEqual(next.id, first.id);
     yield* machines.release(next.hold);
-  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boxdAddress)));
+  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
 });
 
 it.effect("retires an idle machine at its age limit without waiting for another attempt", () => {
