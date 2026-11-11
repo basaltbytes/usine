@@ -8,11 +8,8 @@ import type { WorkerSources } from "../../src/child-host/worker/program.ts";
 
 export const run = (sources: WorkerSources) =>
   runOwner(sources, (pid) => {
-    if (
-      process.env.WORKER_TEST_LIFELINE_IDENTITY === "missing" &&
-      process.argv[1] === "supervise" &&
-      pid !== process.pid
-    )
+    const role = pid === process.pid ? "owner" : "lifeline";
+    if (process.argv[1] === "supervise" && process.env.WORKER_TEST_MISSING_IDENTITY === role)
       return null;
     const status = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" });
     if (status.error !== undefined) throw status.error;

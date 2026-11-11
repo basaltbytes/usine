@@ -61,6 +61,8 @@ The supervisor and lifeline are TypeScript programs in `src/child-host/worker/`.
 
 Run `pnpm --filter @usine/agents test` for the direct worker tests and harness tests. The direct tests run real Node processes against temporary journals and inject a process identity reader that works on Linux and macOS. Production remote owners use Linux `/proc` boot IDs and process start times. The orchestrator relay keeps replay history and output checkpoints in Effect refs and separates connection, replay, streaming, and reattachment.
 
+A supervisor that fails during setup, for example because it cannot read its own or its lifeline's process identity, records the failure as the harness exit before it exits, so the relay reports it at once. By then the lifeline has usually started the harness; the supervisor's exit closes the lifeline pipe, which stops it. One window stays open: if the transport directory is removed between the lifeline starting the harness and recording its PID there, the lifeline fails and the harness runs on without an owner. Only a stop or cleanup of the same child removes that directory, so the window isn't expected to be reachable.
+
 `ChildRequest.host` (`/child-host`) sets where a child runs, and `ChildRequest.worker` names that machine's worker:
 
 - `LocalProcess`: on this machine, with `ChildRequest.environment` as the whole environment.

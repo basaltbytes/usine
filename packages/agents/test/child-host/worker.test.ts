@@ -493,7 +493,7 @@ describe("standalone worker owner", () => {
       pidFile,
       "attach",
       30_000,
-      { WORKER_TEST_LIFELINE_IDENTITY: "missing" },
+      { WORKER_TEST_MISSING_IDENTITY: "lifeline" },
       "setInterval(() => {}, 1000)",
     );
     await eventually(() => exited(relay.frames));
@@ -507,6 +507,26 @@ describe("standalone worker owner", () => {
     await eventually(() => existsSync(join(root, "exit")));
     await eventually(() => !existsSync(join(root, "process")));
     expect(JSON.parse(readFileSync(join(root, "exit"), "utf8"))).toMatchObject({ exitCode: 143 });
+  }, 15_000);
+
+  it("records an exit without starting the harness when the owner cannot identify itself", async () => {
+    const { pidFile, root } = temporary();
+    const relay = start(
+      pidFile,
+      "attach",
+      30_000,
+      { WORKER_TEST_MISSING_IDENTITY: "owner" },
+      "setInterval(() => {}, 1000)",
+    );
+    // The relay gives up on a supervisor that never becomes ready after 10 seconds.
+    await eventually(() => exited(relay.frames));
+    expect(relay.frames.find((frame) => "exitCode" in frame)).toMatchObject({
+      exitCode: 1,
+      stderrTail: "Could not identify the child process owner",
+    });
+    expect(await relay.closed, relay.stderr()).toBe(0);
+    expect(existsSync(pidFile)).toBe(false);
+    expect(existsSync(join(root, "process"))).toBe(false);
   }, 15_000);
 
   it.skipIf(process.platform !== "linux")(
