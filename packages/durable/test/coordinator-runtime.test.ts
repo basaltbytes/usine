@@ -1,6 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { HarnessSession, HarnessSessionId, SessionStarted } from "@usine/core/agent/session";
+import {
+  HarnessSession,
+  HarnessSessionId,
+  SessionStarted,
+  TextOutput,
+} from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
@@ -28,6 +33,7 @@ import {
 } from "effect";
 import { AttemptRequest, ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
 import {
+  type AttemptContext,
   Complete,
   FIRST_ASSIGNMENT,
   REPLACEMENT_ASSIGNMENT,
@@ -368,6 +374,52 @@ describe("event-driven coordinator runtime", () => {
       assertAdmitted(attemptId, outbound);
       assert.deepStrictEqual(trace(outbound).slice(0, 2), ["Started", "WorkerUnresponsive"]);
       assert.deepStrictEqual(unresponsiveReasons(outbound), ["while deciding"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("hands WakeUp the end of the child's output and the ended delegation", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/wake-up-context");
+      const recording = recordingSink();
+      const received: Array<AttemptContext> = [];
+      const recordingWakeUp = Layer.succeed(
+        WakeUp,
+        WakeUp.of({
+          handle: (_event, context) =>
+            Effect.sync(() => {
+              received.push(context);
+            }).pipe(Effect.as(Option.none())),
+        }),
+      );
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(coordinatorWith(recordingWakeUp)),
+      );
+      const execution = yield* process.execute(request, recording.sink);
+      const child = yield* process.nextChild;
+      // More than the 50,000 characters the delegation retains. Characters 48,000 to 50,000 differ
+      // from the last 2,000.
+      const written = ["s".repeat(30_000), "m".repeat(28_000), "e".repeat(2_000)];
+      for (const text of written)
+        yield* child.emit(TextOutput.make({ session: child.request.session, text }));
+      // The stub child also writes its report as output.
+      yield* child.reply("Opened #12.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      const reported = received.find(({ event }) => event._tag === "ChildReported");
+      assert.deepStrictEqual(
+        received.map(({ event }) => event._tag),
+        ["AttemptStarted", "ChildReported"],
+      );
+      assert(reported !== undefined);
+      // The delegation retains each text output with a line break.
+      const all = [...written, "Opened #12."].map((text) => `${text}\n`).join("");
+      assert.strictEqual(reported.output, all.slice(-2_000));
+      assert.deepStrictEqual(
+        reported.delegations.map(({ child, status }) => [Number(child), status]),
+        [[1, "ended"]],
+      );
     }).pipe(Effect.scoped),
   );
 

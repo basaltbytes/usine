@@ -623,9 +623,24 @@ const make = Effect.gen(function* () {
         yield* Effect.logInfo("Canceling the coordinated Attempt; its children stop");
         yield* Deferred.succeed(hub.canceled, undefined);
         yield* Deferred.await(detached);
+      } else yield* Effect.logInfo("No execute call relays the Attempt; nothing to stop");
+      const current = yield* journal.load(attemptId);
+      const status = Option.match(current, {
+        onNone: () => "none",
+        onSome: ({ status }) => status._tag,
+      });
+      // The coordinator has no canceled status, so an open journal is settled to end the Attempt.
+      if (status === "Open") {
+        yield* journal.settle(attemptId);
+        yield* Effect.logInfo("The canceled Attempt had no outcome; its journal is settled");
+        return;
       }
-      yield* journal.settle(attemptId);
-      yield* Effect.logInfo("The canceled Attempt is settled");
+      yield* Effect.logInfo(
+        "The canceled Attempt has an outcome; its caller decides to settle it",
+        {
+          status,
+        },
+      );
     },
     (effect, attemptId) =>
       effect.pipe(
