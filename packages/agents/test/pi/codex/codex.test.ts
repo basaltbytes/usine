@@ -58,6 +58,7 @@ import {
 } from "../../../src/harness/codex/app-server.ts";
 import { ChildProcessLost } from "../../../src/child-host/process.ts";
 import { codexChildLayer } from "../../../src/harness/codex/codex.ts";
+import { collectLogs } from "../../logs.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
 
@@ -157,6 +158,13 @@ describe("Codex child backend", () => {
         ];
         const delivered: string[] = [];
         const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+        const logs = collectLogs(["Info", "Warn"]);
+        const skips = [
+          "Skipping an undecodable Codex tool item",
+          "Skipping a Codex item without a transcript event",
+          "Skipping an undecodable Codex agent message",
+          "Skipping an undecodable Codex user message",
+        ];
         const server = connectionLayer(
           {
             ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
@@ -170,6 +178,8 @@ describe("Codex child backend", () => {
                     status: "inProgress",
                     items: [
                       { type: "commandExecution", id: "tool-1", status: "inProgress" },
+                      { type: "mcpToolCall", status: "inProgress" },
+                      { type: "agentMessage", id: "", text: "Saved without an id" },
                       ...(savedAnswer
                         ? [
                             {
@@ -199,12 +209,28 @@ describe("Codex child backend", () => {
                 },
               },
             })),
+            ...[
+              { type: "userMessage", id: "steer-3" },
+              { type: "fileChange", status: "inProgress" },
+              { type: "collabAgentToolCall", id: "agent-1" },
+            ].map((item) => ({
+              method: "item/started",
+              params: { threadId: "thread-1", turnId: "active-turn", item },
+            })),
             {
               method: "item/completed",
               params: {
                 threadId: "thread-1",
                 turnId: "active-turn",
                 item: { type: "commandExecution", id: "tool-1", status: "completed" },
+              },
+            },
+            {
+              method: "item/completed",
+              params: {
+                threadId: "thread-1",
+                turnId: "active-turn",
+                item: { type: "agentMessage", id: "broken", phase: "final_answer" },
               },
             },
             ...(!savedAnswer
@@ -250,9 +276,26 @@ describe("Codex child backend", () => {
               delivered,
               unread.map(({ id }) => id),
             );
+            assert.deepStrictEqual(
+              logs.records.flatMap(({ level, message, annotations }) =>
+                Array.isArray(message) && skips.includes(message[0])
+                  ? [{ level, message: message[0], itemType: annotations["itemType"] }]
+                  : [],
+              ),
+              [
+                { level: "Warn", message: skips[0], itemType: "mcpToolCall" },
+                { level: "Warn", message: skips[2], itemType: "agentMessage" },
+                { level: "Warn", message: skips[3], itemType: "userMessage" },
+                { level: "Warn", message: skips[0], itemType: "fileChange" },
+                { level: "Info", message: skips[1], itemType: "collabAgentToolCall" },
+                { level: "Warn", message: skips[2], itemType: "agentMessage" },
+              ],
+            );
           }),
         ).pipe(
-          Effect.provide(codexChildLayer.pipe(Layer.provide(server))),
+          Effect.provide(
+            codexChildLayer.pipe(Layer.provide(server), Layer.provideMerge(logs.layer)),
+          ),
           Effect.provideService(ChildSessionJournal, {
             started: () => Effect.void,
             prompted: Effect.void,
@@ -1179,6 +1222,19 @@ describe("Codex child backend", () => {
 
   it.effect("normalizes completed messages, tools, and ChatGPT rate windows", () => {
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+    const startedTool = {
+      type: "commandExecution",
+      id: "tool-1",
+      status: "inProgress",
+      command: "ls -la",
+      cwd: "/repo",
+    };
+    const finishedTool = {
+      ...startedTool,
+      status: "completed",
+      aggregatedOutput: "total 0",
+      exitCode: 0,
+    };
     const notifications: ReadonlyArray<CodexNotification> = [
       {
         method: "item/agentMessage/delta",
@@ -1186,19 +1242,11 @@ describe("Codex child backend", () => {
       },
       {
         method: "item/started",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: { type: "commandExecution", id: "tool-1", status: "inProgress" },
-        },
+        params: { threadId: "thread-1", turnId: "turn-1", item: startedTool },
       },
       {
         method: "item/completed",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: { type: "commandExecution", id: "tool-1", status: "completed" },
-        },
+        params: { threadId: "thread-1", turnId: "turn-1", item: finishedTool },
       },
       {
         method: "item/completed",
@@ -1259,6 +1307,12 @@ describe("Codex child backend", () => {
             "SessionFinished",
           ],
         );
+        const toolStarted = events.find((event) => event._tag === "ToolStarted");
+        assert(toolStarted?._tag === "ToolStarted");
+        assert.deepStrictEqual(toolStarted.input, startedTool);
+        const toolFinished = events.find((event) => event._tag === "ToolFinished");
+        assert(toolFinished?._tag === "ToolFinished");
+        assert.deepStrictEqual(toolFinished.output, finishedTool);
         const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
         assert(limits?._tag === "PoolRateLimitsUpdated");
         assert.strictEqual(Option.getOrNull(limits.login), "operator@example.com");

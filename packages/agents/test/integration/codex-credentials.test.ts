@@ -42,7 +42,7 @@ it.live(
               const auth = yield* connection
                 .request("launch", "account/read", { refreshToken: false })
                 .pipe(Effect.flatMap(Schema.decodeUnknownEffect(AccountResponse)));
-              if (auth.account !== null) {
+              if (auth.account !== undefined && auth.account !== null) {
                 const billing = yield* verifyCodexAccount(
                   connection,
                   ModelId.make("gpt-5.6-terra"),
