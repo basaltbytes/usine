@@ -9,7 +9,8 @@ import {
   TextOutput,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { DateTime, Deferred, Effect, Fiber, Option, Result } from "effect";
+import { jsonKey } from "@usine/core/json-key";
+import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
 import { type AttemptResult, AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { type AttemptHub, attemptHubs } from "../src/attempt/hubs.ts";
 import { childSessionId, parentSessionId } from "../src/attempt/parent.ts";
@@ -38,6 +39,10 @@ it.live(
         brain: request.spec.agent.brain,
       });
       const lastAnsweredAt = DateTime.makeUnsafe("2026-11-11T09:00:00Z");
+      const logs: Array<{ readonly level: string; readonly text: string }> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        logs.push({ level: logLevel, text: jsonKey(message) });
+      });
       yield* Effect.gen(function* () {
         const durable = yield* DurableHarness;
         const hubs = yield* attemptHubs;
@@ -128,6 +133,18 @@ it.live(
         const started = outbound[0]?.payload;
         assert(started?._tag === "Started");
         assert.isTrue(Option.isNone(started.parentModel));
-      }).pipe(Effect.scoped, Effect.provide(layer({ database, parent: [] })));
+        const waiting = logs.filter(({ text }) =>
+          /Waiting for the Attempt's task to start before sending Started/u.test(text),
+        );
+        assert.deepStrictEqual(
+          waiting.map(({ level }) => level),
+          ["Info"],
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          layer({ database, parent: [] }).pipe(Layer.provideMerge(Logger.layer([logger]))),
+        ),
+      );
     }).pipe(Effect.scoped),
 );

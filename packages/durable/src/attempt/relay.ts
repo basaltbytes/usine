@@ -595,6 +595,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
         })
       : Option.none();
   let start = startedOf(loaded);
+  let deferralLogged = false;
   if (loaded.parentConversation !== null) hubs.bindParent(hub, loaded.parentConversation);
 
   /** Sends `Started`, and the parent's `SessionStarted` if it has one, once the task started. */
@@ -603,7 +604,18 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const record = yield* readRecord(durable, hub.attemptId);
     if (record === undefined) return Option.none<StartedAttempt>();
     const started = startedOf(record);
-    if (Option.isNone(started)) return started;
+    if (Option.isNone(started)) {
+      if (!deferralLogged && progress().outbound.state === "AwaitingStarted") {
+        deferralLogged = true;
+        yield* Effect.logInfo("Waiting for the Attempt's task to start before sending Started", {
+          taskId: hub.taskId,
+          started: record.started ?? null,
+          parentModel: record.parentModel,
+          kept: hub.early.map(({ _tag }) => _tag),
+        });
+      }
+      return started;
+    }
     if (record.parentConversation !== null) hubs.bindParent(hub, record.parentConversation);
     start = started;
     const { parent } = started.value;
@@ -735,7 +747,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const started = yield* ensureStarted;
     if (Option.isNone(started)) {
       hub.early = keepNotice(hub.early, notice);
-      return yield* Effect.logDebug("Kept a Worker notice until the Attempt starts", {
+      return yield* Effect.logInfo("Kept a Worker notice until the Attempt starts", {
         notice: notice._tag,
         worker: notice.worker,
         kept: hub.early.map(({ _tag }) => _tag),
