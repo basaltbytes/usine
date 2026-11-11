@@ -39,6 +39,13 @@ export class Agent extends Schema.Class<Agent, Brand.Brand<"@usine/core/agent/ag
   persona: AgentPersona,
 }) {}
 
+/**
+ * What coordinates an Attempt's children: a Pi parent session (`pi`), or the event-driven
+ * coordinator, which has no parent session (`none`).
+ */
+export const ParentKind = Schema.Literals(["pi", "none"]);
+export type ParentKind = typeof ParentKind.Type;
+
 /** Returns the Agent's `parentModel`, else the instance default. Returns `None` if neither is set, so Pi selects the model. */
 export const resolveParentModel = (
   agent: Agent,
