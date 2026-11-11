@@ -20,6 +20,7 @@ import {
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
+  DateTime,
   Deferred,
   Effect,
   Exit,
@@ -1559,6 +1560,175 @@ describe("Claude child backend", () => {
       );
     },
   );
+
+  // Claude Code ends a turn on an API error with a `success` result that has `is_error` (#1147).
+  const LIMIT_TEXT = "You've hit your limit · resets 5am (UTC)";
+  const rejected = {
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status: "rejected",
+      rateLimitType: "five_hour",
+      utilization: 1,
+      resetsAt: 1_794_373_200,
+    },
+  };
+  const limitError = {
+    type: "assistant",
+    error: "rate_limit",
+    message: { content: [{ type: "text", text: LIMIT_TEXT }] },
+  };
+  const overloadError = {
+    type: "assistant",
+    error: "overloaded",
+    message: { content: [{ type: "text", text: LIMIT_TEXT }] },
+  };
+  const rateLimitRetry = {
+    type: "system",
+    subtype: "api_retry",
+    attempt: 1,
+    max_retries: 10,
+    retry_delay_ms: 5_000,
+    error_status: 429,
+    error: "rate_limit",
+  };
+  const OVERLOAD_TEXT = "Repeated server overload; giving up";
+  const UNAVAILABLE_TEXT = "API Error: 503 Service Unavailable. Please try again later.";
+  const limitResult = {
+    type: "result",
+    subtype: "success",
+    is_error: true,
+    api_error_status: 429,
+    result: LIMIT_TEXT,
+  };
+  it.effect.each([
+    {
+      name: "a rejected usage limit",
+      messages: [rejected, limitError, limitResult],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "an HTTP 429 result",
+      messages: [rejected, limitResult],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rate limit without a reported reset time",
+      messages: [limitError, limitResult],
+      resetsAt: Option.none(),
+    },
+    {
+      name: "a rate limit on a result without an HTTP status",
+      messages: [rejected, limitError, { ...limitResult, api_error_status: null }],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+    },
+    {
+      name: "a rate-limited API retry with HTTP 429 that ends the turn",
+      messages: [
+        rejected,
+        { ...rateLimitRetry, error: "unknown" },
+        { type: "result", subtype: "error_during_execution", errors: ["API failed"] },
+      ],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+      message: "API request failed with HTTP 429 (unknown); retry 1 of 10 in 5s",
+    },
+    {
+      name: "a rate-limited API retry without a response that ends the turn",
+      messages: [
+        rejected,
+        { ...rateLimitRetry, error_status: null },
+        { type: "result", subtype: "error_during_execution", errors: ["API failed"] },
+      ],
+      resetsAt: Option.some("2026-11-11T05:00:00.000Z"),
+      message: "API request failed without a response (rate_limit); retry 1 of 10 in 5s",
+    },
+    {
+      name: "an overload that ends the turn",
+      messages: [overloadError, { ...limitResult, api_error_status: 529 }],
+      resetsAt: Option.none(),
+    },
+    {
+      name: "an overload during a usage-limit warning",
+      messages: [
+        {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            rateLimitType: "five_hour",
+            utilization: 0.9,
+            resetsAt: 1_794_373_200,
+          },
+        },
+        overloadError,
+        { ...limitResult, api_error_status: 529 },
+      ],
+      resetsAt: Option.none(),
+    },
+    {
+      name: "an HTTP 529 result without an overload error",
+      messages: [{ ...limitResult, api_error_status: 529, result: OVERLOAD_TEXT }],
+      resetsAt: Option.none(),
+      message: OVERLOAD_TEXT,
+    },
+    {
+      name: "an HTTP 503 result that asks to retry",
+      messages: [{ ...limitResult, api_error_status: 503, result: UNAVAILABLE_TEXT }],
+      resetsAt: Option.none(),
+      message: UNAVAILABLE_TEXT,
+    },
+  ])("fails the session with a capacity refusal after $name", (testCase) => {
+    const { messages, resetsAt } = testCase;
+    const sdk = Layer.succeed(ClaudeSdk)({ open: () => scripted(messages) });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        const error = yield* Effect.flip(session.result);
+        const matchesError = Schema.is(AgentCapacityError)(error);
+        assert(matchesError);
+        assert.strictEqual(error.message, "message" in testCase ? testCase.message : LIMIT_TEXT);
+        assert.deepStrictEqual(error.resetsAt.pipe(Option.map(DateTime.formatIso)), resetsAt);
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
+    );
+  });
+
+  it.effect("returns the text of an API error that is not a provider refusal", () => {
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () =>
+        scripted([
+          {
+            type: "rate_limit_event",
+            rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.2 },
+          },
+          {
+            type: "assistant",
+            error: "invalid_request",
+            message: { content: [{ type: "text", text: "Prompt is too long" }] },
+          },
+          { ...limitResult, api_error_status: 400, result: "Prompt is too long" },
+        ]),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        assert.strictEqual((yield* session.result).message, "Prompt is too long");
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
+    );
+  });
+
+  it.effect.each([
+    { name: "without is_error", flags: {} },
+    { name: "with is_error false", flags: { is_error: false } },
+  ])("returns an answer that describes a provider error $name", ({ flags }) => {
+    const answer = "The run failed with HTTP 529 overloaded_error; I posted the review";
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () => scripted([{ type: "result", subtype: "success", ...flags, result: answer }]),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        assert.strictEqual((yield* session.result).message, answer);
+      }).pipe(Effect.provide(claudeChild.pipe(Layer.provideMerge(sdk)))),
+    );
+  });
 
   it.effect("fails the session as infrastructure when the output closes without a result", () => {
     const sdk = Layer.succeed(ClaudeSdk)({

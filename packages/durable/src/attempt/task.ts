@@ -44,7 +44,7 @@ import {
   SessionIdle,
   SessionResumed,
 } from "@usine/core/agent/session";
-import { Effect, Option, Result, Schema } from "effect";
+import { DateTime, Effect, Option, Result, Schema } from "effect";
 import { durableError } from "../harness.ts";
 import {
   type AttemptRecord,
@@ -97,10 +97,15 @@ const commit = (
 const childReportFailure = ({
   message,
   kind,
+  resetsAt,
 }: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure => {
   if (kind === "infra") return InfraFailure.make({ message, cause: message });
   if (kind === "question") return QuestionFailure.make({ question: message });
-  if (kind === "capacity") return ProviderCapacityFailure.make({ message });
+  if (kind === "capacity")
+    return ProviderCapacityFailure.make({
+      message,
+      resetsAt: Option.flatMap(Option.fromUndefinedOr(resetsAt), DateTime.make),
+    });
   if (kind === "failed") return AgentFailure.make({ message });
   return BlockedFailure.make({ message });
 };
@@ -408,10 +413,21 @@ export const attemptTask = (
           kind: relayed.value.kind ?? "blocked",
         });
       }
-      const outcome =
-        Option.isSome(relayed) && relayed.value.kind === "infra"
-          ? Option.some(childReportFailure(relayed.value))
-          : Option.orElse(own, () => Option.map(relayed, childReportFailure));
+      // A child's infrastructure failure or provider refusal outranks the parent's report, which
+      // can describe the refusal as a blocker.
+      const overriding = Option.filter(
+        relayed,
+        ({ kind }) => kind === "infra" || kind === "capacity",
+      );
+      if (Option.isSome(overriding) && Option.isSome(own))
+        yield* Effect.logInfo("Child's report replaces the Pi parent's own report", {
+          childSessionId: overriding.value.sessionId,
+          kind: overriding.value.kind,
+          parentReport: own.value._tag,
+        });
+      const outcome = Option.isSome(overriding)
+        ? Option.some(childReportFailure(overriding.value))
+        : Option.orElse(own, () => Option.map(relayed, childReportFailure));
       const terminal = Option.match(outcome, {
         onNone: () => completedOutcome(answer, answeredOperator),
         onSome: failedOutcome,

@@ -11,6 +11,7 @@ import type { ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
   AgentBlockedError,
+  AgentCapacityError,
   AgentQuestionError,
   type AgentReport,
   harnessFailure,
@@ -121,6 +122,11 @@ export interface StubChild {
    */
   readonly fail: (message: string) => Effect.Effect<void>;
   /**
+   * Finishes with a provider usage limit that resets at `resetsAt`, which fails the Attempt with
+   * `ProviderCapacityFailure` even if the parent reports a blocker.
+   */
+  readonly limit: (message: string, resetsAt: DateTime.Utc) => Effect.Effect<void>;
+  /**
    * Ends without a result, as a Claude child whose output stream fails: the parent's `subagent`
    * call fails with a `stream` `SessionOperationError` whose message is `message`.
    */
@@ -196,6 +202,14 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const ask = (question: string) =>
     report(AgentQuestionError.make({ sessionId: Option.some(session.id), message: question }));
   const fail = (message: string) => report(harnessFailure(Option.some(session.id), message));
+  const limit = (message: string, resetsAt: DateTime.Utc) =>
+    report(
+      AgentCapacityError.make({
+        sessionId: Option.some(session.id),
+        message,
+        resetsAt: Option.some(resetsAt),
+      }),
+    );
   const crash = (message: string) =>
     Effect.gen(function* () {
       const error = SessionOperationError.make({
@@ -250,6 +264,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     block,
     ask,
     fail,
+    limit,
     crash,
     interrupted: Deferred.await(interrupted),
     interventions: Effect.sync(() => [...interventions]),
