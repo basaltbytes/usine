@@ -164,7 +164,7 @@ export const boxdExecLayer = (
         const message = failure.rawMessage.replaceAll(secret, "[redacted]");
         return code === "NOT_FOUND" || (code === "UNAVAILABLE" && message.includes(DESTROYED))
           ? BoxdMachineGone.make({ machine, message })
-          : BoxdCallError.make({ operation: "exec", code, message });
+          : BoxdCallError.make({ operation: "exec", url: endpoint, code, message });
       };
 
       const exec = Effect.fn("BoxdExec.exec")(function* (
@@ -185,6 +185,7 @@ export const boxdExecLayer = (
             Exit.fail(
               BoxdCallError.make({
                 operation: "exec",
+                url: endpoint,
                 code: "CANCELLED",
                 message: "the call's scope closed before the command exited",
               }),
@@ -226,6 +227,7 @@ export const boxdExecLayer = (
           if (exited === undefined)
             return yield* BoxdCallError.make({
               operation: "exec",
+              url: endpoint,
               code: "UNAVAILABLE",
               message: "boxd ended the exec stream without an exit code",
             });

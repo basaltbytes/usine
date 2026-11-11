@@ -1,7 +1,7 @@
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { assert, it } from "@effect/vitest";
-import { BoxdRegion, MachineId, WorkerName } from "@usine/core/worker";
+import { BoxdEndpoint, BoxdRegion, MachineId, WorkerName } from "@usine/core/worker";
 import { Clock, Deferred, Effect, Fiber, Layer, Option, Predicate, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { createServer } from "node:http2";
@@ -21,13 +21,24 @@ import {
   type BoxdCreate,
 } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
+import {
+  BOXD_API,
+  exchangeUrl,
+  rawKeyAllowed,
+  refusesRawKey,
+} from "../../../src/ssh/provisioner/boxd/endpoint.ts";
 import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
 import { failureCode } from "../../../src/ssh/provisioner/boxd/status.ts";
 
-/** An endpoint override that skips region discovery; the tests fail before any gRPC call. */
-const UNUSED_ENDPOINT = "http://127.0.0.1:1";
+/**
+ * An account endpoint over plain HTTP, where every call carries a session, without a region, so
+ * that building the layer calls nothing; the tests fail before any gRPC call.
+ */
+const UNUSED_CLUSTER = { endpoint: "http://boxd.invalid:1", region: Option.none() };
+/** The token exchange URL that `UNUSED_CLUSTER` derives. */
+const UNUSED_EXCHANGE = "https://app.boxd.invalid/api/v1/auth/token";
 
-it.effect("decodes real gRPC responses, shares authentication, and sanitizes refusals", () =>
+it.effect("decodes real gRPC responses, exchanges a refused key once, and sanitizes refusals", () =>
   Effect.gen(function* () {
     const key = "bxd_test_transport_key";
     let jwt = "test-jwt";
@@ -42,28 +53,45 @@ it.effect("decodes real gRPC responses, shares authentication, and sanitizes ref
     const calls: Array<string> = [];
     let refused = false;
     let region = "fra";
+    /** Refuses the API key as a bearer, as a boxd release from before raw keys does. */
+    const authorize = (context: { requestHeader: Headers }) => {
+      const authorization = context.requestHeader.get("authorization");
+      if (authorization === `Bearer ${key}`)
+        throw new ConnectError("invalid token: malformed session", Code.Unauthenticated);
+      assert.strictEqual(authorization, `Bearer ${jwt}`);
+    };
     const server = createServer(
       connectNodeAdapter({
         routes: (router) =>
           router.service(BoxdService, {
             whoami: (_request, context) => {
-              assert.strictEqual(context.requestHeader.get("authorization"), `Bearer ${jwt}`);
+              authorize(context);
               const timeout = context.timeoutMs();
               assert.isDefined(timeout);
               assert.isAtMost(timeout ?? Infinity, 30_000);
               return { userId: "member" };
             },
-            getOrgMachineLimit: () => ({ maxVms: 50, vmCount: 2 }),
-            getSnapshot: () => ({
-              snapshot: {
-                status: "ready",
-                region,
-                vcpu: 2,
-                memoryBytes: 8n * 1024n ** 3n,
-                storage: "archived",
-              },
-            }),
-            listRegions: () => ({ thisRegion: region }),
+            getOrgMachineLimit: (_request, context) => {
+              authorize(context);
+              return { maxVms: 50, vmCount: 2 };
+            },
+            getSnapshot: (_request, context) => {
+              authorize(context);
+              return {
+                snapshot: {
+                  status: "ready",
+                  region,
+                  vcpu: 2,
+                  memoryBytes: 8n * 1024n ** 3n,
+                  storage: "archived",
+                },
+              };
+            },
+            // The account endpoint serves the region, which needs no API endpoint of its own.
+            listRegions: (_request, context) => {
+              authorize(context);
+              return { regions: [{ id: region, apiEndpoint: "" }], thisRegion: region };
+            },
             createVmFromSnapshot: (request) => {
               assert.strictEqual(request.config?.network?.ssh, true);
               assert.strictEqual(request.isolated, true);
@@ -120,7 +148,7 @@ it.effect("decodes real gRPC responses, shares authentication, and sanitizes ref
         Effect.gen(function* () {
           exchanges++;
           jwt = `test-jwt-${exchanges}`;
-          assert.strictEqual(request.url, "https://app.boxd.sh/api/v1/auth/token");
+          assert.strictEqual(request.url, `http://127.0.0.1:${address.port}/api/v1/auth/token`);
           assert(request.body._tag === "Uint8Array");
           assert.strictEqual(
             new TextDecoder().decode(request.body.body),
@@ -136,11 +164,10 @@ it.effect("decodes real gRPC responses, shares authentication, and sanitizes ref
         }),
       ),
     );
-    const layer = boxdApiLayer(
-      Redacted.make(key),
-      BoxdRegion.make("fra"),
-      `http://127.0.0.1:${address.port}`,
-    ).pipe(Layer.provide(http));
+    const layer = boxdApiLayer(Redacted.make(key), {
+      endpoint: `http://127.0.0.1:${address.port}`,
+      region: Option.some(BoxdRegion.make("fra")),
+    }).pipe(Layer.provide(http));
     yield* Effect.gen(function* () {
       const api = yield* BoxdApi;
       const [identity, served, snapshot, limit] = yield* Effect.all(
@@ -204,10 +231,11 @@ it.effect("decodes real gRPC responses, shares authentication, and sanitizes ref
       region = selectedRegion;
       yield* Effect.gen(function* () {
         const settings = { providerEndpoints: { boxd: `http://127.0.0.1:${address.port}` } };
-        const boxdClient = ((token, region, endpoint) => {
-          assert.strictEqual(region, selectedRegion);
+        const boxdClient = ((token, cluster) => {
+          assert.deepStrictEqual(cluster.region, Option.some(selectedRegion));
+          assert.strictEqual(cluster.endpoint, `http://127.0.0.1:${address.port}`);
           assert.strictEqual(Redacted.value(token), key);
-          return boxdApiLayer(token, region, endpoint);
+          return boxdApiLayer(token, cluster);
         }) satisfies BoxdApiLayer;
         const drivers = yield* machineDriversFor({
           instance: "transport-test",
@@ -218,7 +246,10 @@ it.effect("decodes real gRPC responses, shares authentication, and sanitizes ref
             ...boxdAddress,
             machine: {
               _tag: "Provisioned",
-              provisioner: boxdSettings({ token: Redacted.make(key), region: selectedRegion }),
+              provisioner: boxdSettings({
+                token: Redacted.make(key),
+                region: Option.some(selectedRegion),
+              }),
             },
           },
           gateway: Option.none(),
@@ -264,11 +295,7 @@ it.effect("times out a stalled token exchange and releases the lock for waiting 
       assert.strictEqual(failure.operation, "authenticate");
       assert.strictEqual(failure.code, "UNAUTHENTICATED");
     }).pipe(
-      Effect.provide(
-        boxdApiLayer(Redacted.make("key"), BoxdRegion.make("fra"), UNUSED_ENDPOINT).pipe(
-          Layer.provide(http),
-        ),
-      ),
+      Effect.provide(boxdApiLayer(Redacted.make("key"), UNUSED_CLUSTER).pipe(Layer.provide(http))),
     );
   }).pipe(Effect.scoped),
 );
@@ -301,7 +328,7 @@ it.effect("exchanges the key again and retries once when boxd refuses a session 
             return { userId: "member" };
           },
         });
-      })) satisfies Parameters<typeof boxdApiLayer>[3];
+      })) satisfies Parameters<typeof boxdApiLayer>[2];
     yield* Effect.gen(function* () {
       const api = yield* BoxdApi;
       assert.strictEqual((yield* api.whoami).userId, "member");
@@ -318,9 +345,7 @@ it.effect("exchanges the key again and retries once when boxd refuses a session 
       assert.strictEqual(exchanges, 3);
     }).pipe(
       Effect.provide(
-        boxdApiLayer(Redacted.make("key"), BoxdRegion.make("fra"), UNUSED_ENDPOINT, transport).pipe(
-          Layer.provide(http),
-        ),
+        boxdApiLayer(Redacted.make("key"), UNUSED_CLUSTER, transport).pipe(Layer.provide(http)),
       ),
     );
   }).pipe(Effect.scoped),
@@ -377,7 +402,7 @@ it.effect("keeps a newer session when a late call reports an older session refus
               }),
             ),
         });
-      })) satisfies Parameters<typeof boxdApiLayer>[3];
+      })) satisfies Parameters<typeof boxdApiLayer>[2];
     yield* Effect.gen(function* () {
       const api = yield* BoxdApi;
       yield* api.whoami;
@@ -395,9 +420,7 @@ it.effect("keeps a newer session when a late call reports an older session refus
       assert.strictEqual(exchanges, 2, "the late refusal keeps the newer session");
     }).pipe(
       Effect.provide(
-        boxdApiLayer(Redacted.make("key"), BoxdRegion.make("fra"), UNUSED_ENDPOINT, transport).pipe(
-          Layer.provide(http),
-        ),
+        boxdApiLayer(Redacted.make("key"), UNUSED_CLUSTER, transport).pipe(Layer.provide(http)),
       ),
     );
   }).pipe(Effect.scoped),
@@ -430,12 +453,12 @@ for (const [status, code] of [
       );
       assert.notInclude(preflight.message, "snapshots save");
       if (code === "RESOURCE_EXHAUSTED" || code === "UNAVAILABLE")
-        assert.include(preflight.message, "app.boxd.sh");
-      else assert.notInclude(preflight.message, "app.boxd.sh");
+        assert.include(preflight.message, `Check that this host reaches ${UNUSED_EXCHANGE}`);
+      else assert.notInclude(preflight.message, UNUSED_EXCHANGE);
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        boxdApiLayer(Redacted.make("key"), BoxdRegion.make("fra"), UNUSED_ENDPOINT).pipe(
+        boxdApiLayer(Redacted.make("key"), UNUSED_CLUSTER).pipe(
           Layer.provide(
             Layer.succeed(
               HttpClient.HttpClient,
@@ -487,11 +510,10 @@ it.live("classifies a reset gRPC connection as unavailable", () =>
       assert.strictEqual(failure.code, "UNAVAILABLE");
     }).pipe(
       Effect.provide(
-        boxdApiLayer(
-          Redacted.make("key"),
-          BoxdRegion.make("fra"),
-          `http://127.0.0.1:${address.port}`,
-        ).pipe(Layer.provide(http)),
+        boxdApiLayer(Redacted.make("key"), {
+          endpoint: `http://127.0.0.1:${address.port}`,
+          region: Option.none(),
+        }).pipe(Layer.provide(http)),
       ),
     );
   }).pipe(Effect.scoped),
@@ -522,30 +544,59 @@ const sessionHttp = Layer.succeed(
   ),
 );
 
+/** A token exchange that the test must not reach, because boxd accepts the API key itself. */
+const noExchange = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.die(new Error(`unexpected token exchange at ${request.url}`)),
+  ),
+);
+
+/** A token exchange that refuses the key, which a call reaches only when it carries a session. */
+const refusedExchange = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 401 }))),
+  ),
+);
+
 const listedRegions = [
   { id: "fra", apiEndpoint: "https://boxd.sh:9443" },
   { id: "nyc", apiEndpoint: "https://nyc.boxd.sh:9443" },
   { id: "eu-own-1", apiEndpoint: "boxd.eu-own-1.example.test:9443" },
 ];
 
-/** Returns a transport factory that records each RPC with the endpoint that served it. */
+interface RoutedCall {
+  readonly method: string;
+  readonly baseUrl: string;
+}
+
+/**
+ * Returns a transport factory that records each RPC with the endpoint that served it, and the
+ * bearer of each call in `bearers`.
+ */
 const routedTransport = (
-  calls: Array<{ method: string; baseUrl: string }>,
+  calls: Array<RoutedCall>,
   regions: ReadonlyArray<{ id: string; apiEndpoint: string }> = listedRegions,
+  bearers: Array<string> = [],
 ) =>
   (({ baseUrl }) =>
     createRouterTransport((router) => {
+      const record = (method: string, context: { requestHeader: Headers }) => {
+        calls.push({ method, baseUrl });
+        bearers.push(context.requestHeader.get("authorization") ?? "");
+      };
       router.service(BoxdService, {
-        whoami: () => {
-          calls.push({ method: "whoami", baseUrl });
+        whoami: (_request, context) => {
+          record("whoami", context);
           return { userId: "member" };
         },
-        getOrgMachineLimit: () => {
-          calls.push({ method: "getOrgMachineLimit", baseUrl });
+        getOrgMachineLimit: (_request, context) => {
+          record("getOrgMachineLimit", context);
           return { maxVms: 50, vmCount: 0 };
         },
-        listRegions: () => {
-          calls.push({ method: "listRegions", baseUrl });
+        listRegions: (_request, context) => {
+          record("listRegions", context);
           const served = regions.find(
             ({ apiEndpoint }) =>
               (apiEndpoint.includes("://") ? apiEndpoint : `https://${apiEndpoint}`) === baseUrl,
@@ -553,16 +604,18 @@ const routedTransport = (
           return { regions: [...regions], thisRegion: served?.id ?? "" };
         },
       });
-    })) satisfies Parameters<typeof boxdApiLayer>[3];
+    })) satisfies Parameters<typeof boxdApiLayer>[2];
 
-it.effect("routes account RPCs to boxd and machine RPCs to the endpoint ListRegions lists", () =>
+it.effect("sends the API key to the default endpoint and machine RPCs to the listed region", () =>
   Effect.gen(function* () {
     for (const [region, endpoint] of [
       ["fra", "https://boxd.sh:9443"],
       ["nyc", "https://nyc.boxd.sh:9443"],
       ["eu-own-1", "https://boxd.eu-own-1.example.test:9443"],
     ] as const) {
-      const calls: Array<{ method: string; baseUrl: string }> = [];
+      const calls: Array<RoutedCall> = [];
+      const bearers: Array<string> = [];
+      const cluster = { endpoint: BOXD_API, region: Option.some(BoxdRegion.make(region)) };
       const servedRegion = yield* Effect.gen(function* () {
         const api = yield* BoxdApi;
         yield* api.whoami;
@@ -572,22 +625,18 @@ it.effect("routes account RPCs to boxd and machine RPCs to the endpoint ListRegi
         Effect.provide(
           boxdApiLayer(
             Redacted.make("key"),
-            BoxdRegion.make(region),
-            undefined,
-            routedTransport(calls),
-          ).pipe(Layer.provide(sessionHttp)),
+            cluster,
+            routedTransport(calls, listedRegions, bearers),
+          ).pipe(Layer.provide(noExchange)),
         ),
       );
       assert.strictEqual(servedRegion, region, "the listing resolved the endpoint of the region");
       const served = yield* BoxdApi.pipe(
         Effect.map((api) => api.endpoint),
         Effect.provide(
-          boxdApiLayer(
-            Redacted.make("key"),
-            BoxdRegion.make(region),
-            undefined,
-            routedTransport([]),
-          ).pipe(Layer.provide(sessionHttp)),
+          boxdApiLayer(Redacted.make("key"), cluster, routedTransport([])).pipe(
+            Layer.provide(noExchange),
+          ),
         ),
       );
       assert.strictEqual(served, endpoint, "Exec calls go to the region's endpoint");
@@ -596,123 +645,260 @@ it.effect("routes account RPCs to boxd and machine RPCs to the endpoint ListRegi
         { method: "whoami", baseUrl: "https://boxd.sh:9443" },
         { method: "getOrgMachineLimit", baseUrl: "https://boxd.sh:9443" },
       ]);
+      assert.deepStrictEqual(bearers, ["Bearer key", "Bearer key", "Bearer key"]);
     }
   }).pipe(Effect.scoped),
 );
 
-it.effect("sends every call to the endpoint override without listing regions", () =>
+it("derives the token exchange URL from the account endpoint as the boxd SDK does", () => {
+  for (const [endpoint, exchange] of [
+    [BOXD_API, "https://app.boxd.sh/api/v1/auth/token"],
+    ["https://boxd.example.com:9443", "https://app.boxd.example.com/api/v1/auth/token"],
+    ["https://boxd.example.com:9443/", "https://app.boxd.example.com/api/v1/auth/token"],
+    ["https://boxd.example.com:9443/v1/api", "https://app.boxd.example.com/api/v1/auth/token"],
+    ["http://boxd.example.com:9443", "https://app.boxd.example.com/api/v1/auth/token"],
+    ["boxd.example.com:9443", "https://app.boxd.example.com/api/v1/auth/token"],
+    ["https://app.boxd.example.com:8443", "https://app.boxd.example.com:8443/api/v1/auth/token"],
+    ["http://localhost:9443", "http://localhost:9443/api/v1/auth/token"],
+    ["localhost:9443", "http://localhost:9443/api/v1/auth/token"],
+    ["https://10.0.0.5:9443", "https://10.0.0.5:9443/api/v1/auth/token"],
+    ["127.0.0.1:9443", "http://127.0.0.1:9443/api/v1/auth/token"],
+    ["https://[fd00::1]:9443", "https://[fd00::1]:9443/api/v1/auth/token"],
+    ["https://300.1.1.1:9443", "https://app.300.1.1.1/api/v1/auth/token"],
+  ] as const)
+    assert.strictEqual(exchangeUrl(endpoint), exchange, endpoint);
+});
+
+it("sends the API key as the bearer only over TLS or to a loopback address", () => {
+  for (const [endpoint, allowed] of [
+    [BOXD_API, true],
+    ["https://10.0.0.5:9443", true],
+    ["boxd.example.com:9443", true],
+    ["http://boxd.example.com:9443", false],
+    ["http://10.0.0.5:9443", false],
+    ["http://localhost:9443", true],
+    ["localhost:9443", true],
+    ["http://127.0.0.1:9443", true],
+    ["http://[::1]:9443", true],
+  ] as const)
+    assert.strictEqual(rawKeyAllowed(endpoint), allowed, endpoint);
+  assert.isTrue(refusesRawKey("invalid token: token is malformed"));
+  assert.isTrue(refusesRawKey("API keys are accepted over TLS only"));
+  assert.isFalse(refusesRawKey("API key not recognized"));
+  assert.isFalse(refusesRawKey("session revoked: invalid token"));
+});
+
+it.effect("exchanges a refused key at the derived URL and sends every call to the endpoint", () =>
   Effect.gen(function* () {
-    const calls: Array<{ method: string; baseUrl: string }> = [];
-    yield* Effect.gen(function* () {
+    const key = "bxd_custom_key";
+    const calls: Array<RoutedCall> = [];
+    const bearers: Array<string> = [];
+    const exchanges: Array<string> = [];
+    const transport = (({ baseUrl }) =>
+      createRouterTransport((router) => {
+        const authorize = (method: string, context: { requestHeader: Headers }) => {
+          calls.push({ method, baseUrl });
+          const bearer = context.requestHeader.get("authorization") ?? "";
+          bearers.push(bearer);
+          if (bearer === `Bearer ${key}`)
+            throw new ConnectError(`invalid token: ${key} is not a session`, Code.Unauthenticated);
+        };
+        router.service(BoxdService, {
+          whoami: (_request, context) => {
+            authorize("whoami", context);
+            return { userId: "member" };
+          },
+          getSnapshot: (_request, context) => {
+            authorize("getSnapshot", context);
+            return {
+              snapshot: {
+                status: "ready",
+                region: "",
+                vcpu: 2,
+                memoryBytes: 8n * 1024n ** 3n,
+                storage: "local",
+              },
+            };
+          },
+          // A cluster that runs in one place lists no regions.
+          listRegions: (_request, context) => {
+            authorize("listRegions", context);
+            return { regions: [], thisRegion: "" };
+          },
+          getOrgMachineLimit: (_request, context) => {
+            authorize("getOrgMachineLimit", context);
+            return { maxVms: 50, vmCount: 0 };
+          },
+        });
+      })) satisfies Parameters<typeof boxdApiLayer>[2];
+    const http = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.gen(function* () {
+          exchanges.push(request.url);
+          const now = yield* Clock.currentTimeMillis;
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(jsonKey({ token: "custom-jwt", expires_at: now / 1000 + 3600 })),
+          );
+        }),
+      ),
+    );
+    const drivers = yield* machineDriversFor({
+      instance: "endpoint-test",
+      settings: {
+        providerEndpoints: { boxd: UNUSED_CLUSTER.endpoint },
+        boxdClient: (token, cluster) => {
+          assert.deepStrictEqual(cluster, {
+            endpoint: "https://boxd.example.com:9443",
+            region: Option.none(),
+          });
+          return boxdApiLayer(token, cluster, transport);
+        },
+      },
+    }).pipe(Effect.provide(http));
+    const driver = yield* drivers.forPreflight({
+      address: {
+        ...boxdAddress,
+        machine: {
+          _tag: "Provisioned",
+          provisioner: boxdSettings({
+            token: Redacted.make(key),
+            endpoint: Option.some(BoxdEndpoint.make("https://boxd.example.com:9443")),
+            region: Option.none(),
+          }),
+        },
+      },
+      gateway: Option.none(),
+      machine: Option.none(),
+    });
+    const { warnings } = yield* driver.verify(WORKER, 2);
+    assert.deepStrictEqual(warnings, []);
+    assert.deepStrictEqual(exchanges, ["https://app.boxd.example.com/api/v1/auth/token"]);
+    assert.isTrue(
+      calls.every(({ baseUrl }) => baseUrl === "https://boxd.example.com:9443"),
+      "every call goes to the endpoint",
+    );
+    assert.deepStrictEqual(
+      calls.map(({ method }) => method),
+      ["whoami", "whoami", "getSnapshot", "listRegions", "getOrgMachineLimit"],
+    );
+    assert.deepStrictEqual(bearers, [
+      `Bearer ${key}`,
+      "Bearer custom-jwt",
+      "Bearer custom-jwt",
+      "Bearer custom-jwt",
+      "Bearer custom-jwt",
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(fakeMachine().layer)),
+);
+
+it.effect("sends every call to the account endpoint without a region", () =>
+  Effect.gen(function* () {
+    const calls: Array<RoutedCall> = [];
+    const served = yield* Effect.gen(function* () {
       const api = yield* BoxdApi;
+      assert.strictEqual(api.endpoint, "https://boxd.example.com:9443");
       yield* api.whoami;
-      yield* api.servedRegion;
+      return yield* api.servedRegion;
     }).pipe(
       Effect.provide(
         boxdApiLayer(
           Redacted.make("key"),
-          BoxdRegion.make("eu-own-1"),
-          "http://127.0.0.1:9443",
-          routedTransport(calls),
-        ).pipe(Layer.provide(sessionHttp)),
+          { endpoint: "https://boxd.example.com:9443", region: Option.none() },
+          routedTransport(calls, []),
+        ).pipe(Layer.provide(noExchange)),
       ),
     );
+    assert.strictEqual(served, "", "boxd runs in one place");
     assert.deepStrictEqual(calls, [
-      { method: "whoami", baseUrl: "http://127.0.0.1:9443" },
-      { method: "listRegions", baseUrl: "http://127.0.0.1:9443" },
+      { method: "whoami", baseUrl: "https://boxd.example.com:9443" },
+      { method: "listRegions", baseUrl: "https://boxd.example.com:9443" },
     ]);
   }).pipe(Effect.scoped),
 );
 
+/** Returns the boxd Worker entry with the region `region`. */
+const boxdIn = (region: string) => ({
+  address: {
+    ...boxdAddress,
+    machine: {
+      _tag: "Provisioned" as const,
+      provisioner: boxdSettings({ region: Option.some(BoxdRegion.make(region)) }),
+    },
+  },
+  gateway: Option.none(),
+  machine: Option.none(),
+});
+
 it.effect("fails preflight with the listed region ids when boxd lists no configured region", () =>
   Effect.gen(function* () {
-    const calls: Array<{ method: string; baseUrl: string }> = [];
+    const calls: Array<RoutedCall> = [];
     const drivers = yield* machineDriversFor({
       instance: "regions-test",
       settings: {
-        boxdClient: (token, region, endpoint) =>
-          boxdApiLayer(token, region, endpoint, routedTransport(calls)),
+        boxdClient: (token, cluster) => boxdApiLayer(token, cluster, routedTransport(calls)),
       },
     });
-    const failure = yield* drivers
-      .forEntry({
-        address: {
-          ...boxdAddress,
-          machine: {
-            _tag: "Provisioned",
-            provisioner: boxdSettings({ region: BoxdRegion.make("lax") }),
-          },
-        },
-        gateway: Option.none(),
-        machine: Option.none(),
-      })
-      .pipe(Effect.flip);
+    const failure = yield* drivers.forEntry(boxdIn("lax")).pipe(Effect.flip);
     assert.strictEqual(failure._tag, "WorkerCapabilityError");
     assert.include(failure.message, 'boxd has no region "lax"');
     assert.include(failure.message, "fra, nyc, eu-own-1");
     assert.deepStrictEqual(calls, [{ method: "listRegions", baseUrl: "https://boxd.sh:9443" }]);
-  }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
+  }).pipe(Effect.scoped, Effect.provide([noExchange, fakeMachine().layer])),
+);
+
+it.effect("fails preflight when a cluster that runs in one place gets a region", () =>
+  Effect.gen(function* () {
+    const drivers = yield* machineDriversFor({
+      instance: "regions-test",
+      settings: {
+        boxdClient: (token, cluster) => boxdApiLayer(token, cluster, routedTransport([], [])),
+      },
+    });
+    const failure = yield* drivers.forPreflight(boxdIn("fra")).pipe(Effect.flip);
+    assert.strictEqual(failure._tag, "WorkerCapabilityError");
+    assert.include(failure.message, "runs in one place");
+    assert.include(failure.message, "Remove provisioner.region");
+  }).pipe(Effect.scoped, Effect.provide([noExchange, fakeMachine().layer])),
 );
 
 it.effect("fails preflight when boxd lists the configured region without an API endpoint", () =>
   Effect.gen(function* () {
-    const calls: Array<{ method: string; baseUrl: string }> = [];
+    const calls: Array<RoutedCall> = [];
     const drivers = yield* machineDriversFor({
       instance: "regions-test",
       settings: {
-        boxdClient: (token, region, endpoint) =>
+        boxdClient: (token, cluster) =>
           boxdApiLayer(
             token,
-            region,
-            endpoint,
+            cluster,
             routedTransport(calls, [...listedRegions, { id: "lax", apiEndpoint: "" }]),
           ),
       },
     });
-    const failure = yield* drivers
-      .forEntry({
-        address: {
-          ...boxdAddress,
-          machine: {
-            _tag: "Provisioned",
-            provisioner: boxdSettings({ region: BoxdRegion.make("lax") }),
-          },
-        },
-        gateway: Option.none(),
-        machine: Option.none(),
-      })
-      .pipe(Effect.flip);
+    const failure = yield* drivers.forEntry(boxdIn("lax")).pipe(Effect.flip);
     assert.strictEqual(failure._tag, "WorkerCapabilityError");
     assert.include(failure.message, 'boxd has no region "lax" with an API endpoint');
     assert.include(failure.message, "regions boxd lists: fra, nyc, eu-own-1.");
     assert.deepStrictEqual(calls, [{ method: "listRegions", baseUrl: "https://boxd.sh:9443" }]);
-  }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
+  }).pipe(Effect.scoped, Effect.provide([noExchange, fakeMachine().layer])),
 );
 
 it.effect(
   "fails preflight with the key advice when boxd refuses the key while listing regions",
   () =>
     Effect.gen(function* () {
-      const drivers = yield* machineDriversFor({ instance: "regions-test", settings: {} });
+      const drivers = yield* machineDriversFor({
+        instance: "regions-test",
+        settings: { providerEndpoints: { boxd: UNUSED_CLUSTER.endpoint } },
+      });
       const failure = yield* drivers
         .forEntry({ address: boxdAddress, gateway: Option.none(), machine: Option.none() })
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "WorkerCapabilityError");
       assert.include(failure.message, "boxd refused the API key");
-    }).pipe(
-      Effect.scoped,
-      Effect.provide([
-        Layer.succeed(
-          HttpClient.HttpClient,
-          HttpClient.make((request) =>
-            Effect.succeed(
-              HttpClientResponse.fromWeb(request, new Response(null, { status: 401 })),
-            ),
-          ),
-        ),
-        fakeMachine().layer,
-      ]),
-    ),
+    }).pipe(Effect.scoped, Effect.provide([refusedExchange, fakeMachine().layer])),
 );
 
 for (const [status, reason] of [
@@ -723,7 +909,10 @@ for (const [status, reason] of [
     `fails the launch with a retryable ${reason} unavailability when the token exchange returns HTTP ${status}`,
     () =>
       Effect.gen(function* () {
-        const drivers = yield* machineDriversFor({ instance: "regions-test", settings: {} });
+        const drivers = yield* machineDriversFor({
+          instance: "regions-test",
+          settings: { providerEndpoints: { boxd: UNUSED_CLUSTER.endpoint } },
+        });
         const failure = yield* drivers
           .forEntry({ address: boxdAddress, gateway: Option.none(), machine: Option.none() })
           .pipe(Effect.flip);
@@ -731,6 +920,7 @@ for (const [status, reason] of [
         assert.strictEqual(failure.provider, "boxd");
         assert.strictEqual(failure.reason, reason);
         assert.include(failure.message, "authenticate");
+        assert.include(failure.message, UNUSED_EXCHANGE);
         assert.notInclude(failure.message, "snapshots save");
       }).pipe(
         Effect.scoped,
@@ -827,6 +1017,7 @@ it.effect("fails concurrent callers together when a boxd build fails, and builds
               yield* Deferred.await(release);
               return yield* BoxdCallError.make({
                 operation: "listRegions",
+                url: BOXD_API,
                 code: "UNAVAILABLE",
                 message: "boxd is down",
               });
@@ -862,8 +1053,10 @@ it.effect("shares one boxd client among Worker revisions with the same key and r
     const drivers = yield* machineDriversFor({
       instance: "regions-test",
       settings: {
-        boxdClient: (token, region) => {
-          clients.push(`${Redacted.value(token)} ${region}`);
+        boxdClient: (token, cluster) => {
+          clients.push(
+            `${Redacted.value(token)} ${cluster.endpoint} ${Option.getOrElse(cluster.region, () => "")}`,
+          );
           return Layer.succeed(BoxdApi, boxd.api);
         },
         boxdExec: (endpoint) => {
@@ -886,10 +1079,10 @@ it.effect("shares one boxd client among Worker revisions with the same key and r
     const first = yield* drivers.forEntry(revision("bxd_one"));
     const second = yield* drivers.forEntry(revision("bxd_one"));
     assert.notStrictEqual(first, second, "each revision has its own driver");
-    assert.deepStrictEqual(clients, ["bxd_one fra"]);
+    assert.deepStrictEqual(clients, [`bxd_one ${BOXD_API} fra`]);
     assert.lengthOf(execs, 1);
     yield* drivers.forEntry(revision("bxd_two"));
-    assert.deepStrictEqual(clients, ["bxd_one fra", "bxd_two fra"]);
+    assert.deepStrictEqual(clients, [`bxd_one ${BOXD_API} fra`, `bxd_two ${BOXD_API} fra`]);
     assert.lengthOf(execs, 2);
   }).pipe(Effect.scoped, Effect.provide([sessionHttp, fakeMachine().layer])),
 );

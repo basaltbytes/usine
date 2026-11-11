@@ -62,7 +62,12 @@ export const fakeBoxd = () => {
     egressIgnored: false,
   };
   const failure = (operation: string, code: string) =>
-    BoxdCallError.make({ operation, code, message: `boxd ${operation}: ${code}` });
+    BoxdCallError.make({
+      operation,
+      url: BOXD_ENDPOINT,
+      code,
+      message: `boxd ${operation}: ${code}`,
+    });
   const call = <A>(operation: string, run: () => Effect.Effect<A, BoxdCallError>) =>
     Effect.suspend(() =>
       state.unreachable
@@ -96,6 +101,7 @@ export const fakeBoxd = () => {
           if (state.reservedNames.has(request.name))
             return yield* BoxdCallError.make({
               operation: "createFromSnapshot",
+              url: BOXD_ENDPOINT,
               code: "INVALID_ARGUMENT",
               message: `name '${request.name}' is reserved`,
             });

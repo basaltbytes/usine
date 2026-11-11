@@ -19,6 +19,7 @@ import type { ProvisionedMachinesOptions } from "./machines.ts";
 import { boxdConnectError, boxdDriverFor, boxdPreflightError, execCredential } from "./boxd.ts";
 import { BoxdApi, type BoxdCallError, type BoxdUnknownRegion } from "./boxd/client.ts";
 import { BoxdExec, boxdExecLayer } from "./boxd/exec.ts";
+import { BOXD_API } from "./boxd/endpoint.ts";
 import { boxdApiLayer } from "./boxd/grpc-client.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
 import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
@@ -74,7 +75,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
   const http = yield* HttpClient.HttpClient;
   const { settings, instance } = options;
   /**
-   * The boxd API and `Exec` clients by API key, region, and endpoint, which every revision of a
+   * The boxd API and `Exec` clients by API key, endpoint, and region, which every revision of a
    * Worker with the same three shares. A failed build closes what it opened.
    */
   const boxdClients = sharedBuilds(
@@ -82,15 +83,25 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
     new Map<string, Deferred.Deferred<Context.Context<BoxdApi | BoxdExec>, BoxdConnectFailure>>(),
   );
   const boxdClientsFor = (value: BoxdProvisioner) => {
-    const endpoint = settings.providerEndpoints?.boxd;
+    const cluster = {
+      endpoint: Option.getOrElse(
+        value.endpoint,
+        (): string => settings.providerEndpoints?.boxd ?? BOXD_API,
+      ),
+      region: value.region,
+    };
     return boxdClients(
       // None of the three contains a line break.
-      [Redacted.value(value.token), value.region, endpoint ?? ""].join("\n"),
+      [
+        Redacted.value(value.token),
+        cluster.endpoint,
+        Option.getOrElse(value.region, () => ""),
+      ].join("\n"),
       Effect.gen(function* () {
         const clients = yield* Scope.fork(scope);
         return yield* Effect.gen(function* () {
           const client = yield* Layer.buildWithScope(
-            (settings.boxdClient ?? boxdApiLayer)(value.token, value.region, endpoint),
+            (settings.boxdClient ?? boxdApiLayer)(value.token, cluster),
             clients,
           );
           const api = Context.get(client, BoxdApi);
@@ -154,7 +165,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
           Effect.tapError((failure) =>
             Effect.logWarning("Could not connect to the boxd region", {
               worker,
-              region: value.region,
+              region: Option.getOrElse(value.region, () => "none"),
               ...(failure._tag === "BoxdUnknownRegion"
                 ? { failure: "unknown region", available: failure.available }
                 : { failure: failure.operation, code: failure.code, message: failure.message }),

@@ -525,9 +525,9 @@ export const fakeProviders = () => {
     hetzner,
     boat,
     boxd: boxd.state,
-    boxdClient: ((token, region) => {
+    boxdClient: ((token, cluster) => {
       assert.strictEqual(Redacted.value(token), boxd.state.token);
-      assert.strictEqual(region, boxd.state.region);
+      assert.deepStrictEqual(cluster.region, Option.some(boxd.state.region));
       return boxd.layer;
     }) satisfies BoxdApiLayer,
     /**

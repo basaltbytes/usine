@@ -10,6 +10,7 @@ import {
 } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
 import { BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
+import { BOXD_ENDPOINT } from "./fake-boxd.ts";
 
 type ExecReply = Partial<Pick<ExecChunk, "data" | "isStderr" | "exitCode">>;
 
@@ -159,7 +160,12 @@ export const spawnedBoxdExec = (spawner: ChildProcessSpawner.ChildProcessSpawner
                 ? Ref.get(stderr).pipe(
                     Effect.flatMap((message) =>
                       Effect.fail(
-                        BoxdCallError.make({ operation: "exec", code: "UNAVAILABLE", message }),
+                        BoxdCallError.make({
+                          operation: "exec",
+                          url: BOXD_ENDPOINT,
+                          code: "UNAVAILABLE",
+                          message,
+                        }),
                       ),
                     ),
                   )

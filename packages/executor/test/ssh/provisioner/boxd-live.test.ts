@@ -9,6 +9,7 @@ import { FetchHttpClient } from "effect/http";
 import { remoteCommandsFor, sendingShell } from "../../../src/remote/commands.ts";
 import { boxdDriverFor, execCredential } from "../../../src/ssh/provisioner/boxd.ts";
 import { BoxdApi } from "../../../src/ssh/provisioner/boxd/client.ts";
+import { BOXD_API } from "../../../src/ssh/provisioner/boxd/endpoint.ts";
 import { boxdExecLayer } from "../../../src/ssh/provisioner/boxd/exec.ts";
 import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
 import { boxdSettings } from "./support.ts";
@@ -79,7 +80,11 @@ it.live.skipIf(
             }),
           ({ id }) => driver.remove(id).pipe(Effect.orDie),
         );
-      }).pipe(Effect.provide(boxdApiLayer(settings.token, settings.region)));
+      }).pipe(
+        Effect.provide(
+          boxdApiLayer(settings.token, { endpoint: BOXD_API, region: settings.region }),
+        ),
+      );
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer))),
   180_000,
 );

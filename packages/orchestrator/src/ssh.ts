@@ -140,6 +140,7 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
             ...(settings.provider === "boxd"
               ? {
                   provider: settings.provider,
+                  endpoint: settings.endpoint,
                   region: settings.region,
                   isolated: settings.isolated,
                   egress: settings.egress,

@@ -44856,9 +44856,26 @@
           "tokenEnv": {
             "type": "string"
           },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "region": {
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "size": {
             "type": "string",
@@ -44914,6 +44931,7 @@
         "required": [
           "_tag",
           "tokenEnv",
+          "endpoint",
           "region",
           "size",
           "snapshot",

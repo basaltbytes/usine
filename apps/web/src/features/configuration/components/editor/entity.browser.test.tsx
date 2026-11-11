@@ -855,6 +855,27 @@ it("suggests the hosted boxd regions and saves another region id", async () => {
   });
 });
 
+it("saves the account endpoint of a boxd cluster without a region", async () => {
+  await mount();
+  await editText();
+  await page
+    .getByRole("textbox", { name: "Configuration text" })
+    .fill(
+      "name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n",
+    );
+  await button("Edit as form").click();
+  await page
+    .getByRole("textbox", { name: "Endpoint", exact: true })
+    .fill("https://boxd.example.com:9443");
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  const [request] = await commands.configurationEditorRequests();
+  expect(request?.payload).toMatchObject({
+    value: { provisioner: { provider: "boxd", endpoint: "https://boxd.example.com:9443" } },
+  });
+  expect(JSON.stringify(request?.payload)).not.toContain("region");
+});
+
 const boxdEgressSource = (egress: string) =>
   `name: local\nkind: ssh\nroot: /home/boxd/.usine\nprovisioner:\n  provider: boxd\n  token_env: BOXD_TOKEN\n  snapshot: usine-attempt\n${egress}`;
 const editBoxdEgress = async (source: string) => {

@@ -8,6 +8,7 @@ import type {
   ProvisionerReuse,
   BoatSize,
   BoxdSize,
+  BoxdEndpoint,
   BoxdRegion,
   BoxdSnapshotName,
   BoxdEgressAllowlist,
@@ -134,7 +135,13 @@ export type BoatTailnet = ProvisionerTailnet;
 export interface BoxdProvisioner {
   readonly provider: "boxd";
   readonly token: Redacted.Redacted<string>;
-  readonly region: BoxdRegion;
+  /**
+   * The account endpoint of the boxd cluster, or `None` for `providerEndpoints.boxd`, which
+   * defaults to the hosted service.
+   */
+  readonly endpoint: Option.Option<BoxdEndpoint>;
+  /** The region of the machines, or `None` to create them where the account endpoint runs them. */
+  readonly region: Option.Option<BoxdRegion>;
   readonly size: BoxdSize;
   readonly snapshot: BoxdSnapshotName;
   readonly isolated: boolean;
@@ -220,7 +227,10 @@ export interface SshExecutorOptions {
     endpoint: string,
     credential: Redacted.Redacted<string>,
   ) => ReturnType<typeof boxdExecLayer>;
-  /** The provider API endpoints, which tests replace. Defaults to the providers' own. */
+  /**
+   * The provider API endpoints, which tests replace. Defaults to the providers' own. A boxd
+   * Worker's `endpoint` takes precedence over `boxd`.
+   */
   readonly providerEndpoints?: Partial<Record<MachineProvider, string>>;
   /** The longest wait for a created machine to answer over SSH. Defaults to 10 minutes. */
   readonly machineReadyTimeout?: Duration.Input;
