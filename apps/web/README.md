@@ -262,7 +262,7 @@ Wheel, touch, and scroll keys change whether the reader follows new activity onl
 
 To recover a saved row, the run page loads up to 20 earlier pages. If the row is unavailable, a request fails, or the limit is reached, a notice says the reader shows the nearest activity, and **Load earlier** stays available. Restoring a place, fallback included, keeps unread activity unread. The update count includes, once, each loaded row changed since the last acknowledged tail, such as a tool result that arrives after its start was read; earlier pages can reveal more. **Jump to latest**, or scrolling to the latest activity, acknowledges them; error and outline navigation don't.
 
-Bookmarks expire after 30 days. Each browser origin keeps up to 20 runs, the 200 most recent disclosure choices per run, and at most 512,000 characters of bookmark data: identities, preferences, a row-relative position, and the acknowledged transcript sequence, but no transcript text or tool payloads. If browser storage is disabled or full, the conversation still works, but can't restore a saved place. See [ADR 0025](../../docs/adr/0025-run-conversation-reader-bookmarks.md).
+Bookmarks expire after 30 days. Each browser origin keeps up to 20 runs, the 200 most recent disclosure choices per run, and at most 512,000 characters of bookmark data: identities, preferences, a row-relative position, and the acknowledged transcript sequence, but no transcript text or tool payloads. If browser storage is disabled or full, the conversation still works, but can't restore a saved place.
 
 ## Commands and refresh status
 
@@ -312,7 +312,7 @@ Attempt outcomes list available kernel task names and host PIDs for processes ki
 
 ## Stack
 
-React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, GitHub Octicons for issue and pull request marks, and shadcn/typeset over react-markdown for prose. The visual system (ADR 0015) is dark-only on Catppuccin Mocha; [`DESIGN.md`](DESIGN.md) defines its colors, type, and components.
+React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, GitHub Octicons for issue and pull request marks, and shadcn/typeset over react-markdown for prose. The visual system is dark-only on Catppuccin Mocha; [`DESIGN.md`](DESIGN.md) defines its colors, type, and components.
 
 ## Role bindings
 
