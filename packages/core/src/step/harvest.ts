@@ -1127,7 +1127,7 @@ export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   spec: HarvestSpec,
   run: HarvestCommand<E>,
   windows: AttemptWindowsRead<W>,
-  handoff: Option.Option<CiHandoff> = Option.none(),
+  handoff: Option.Option<CiHandoff>,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const commits = yield* harvestCommits(spec, run);

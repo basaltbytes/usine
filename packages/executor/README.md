@@ -41,7 +41,7 @@ Claude Code children receive `ENABLE_CLAUDEAI_MCP_SERVERS=0` and `CLAUDE_CODE_DI
 
 ### Harvest
 
-After a successful parent report, every worker adapter harvests the checkout with `harvestFacts` from `@usine/core/step/harvest`, running `git` and `gh` in the attempt's environment. It passes the report's CI handoff, and the run spec carries `CheckoutRequest.requiresCi`, so harvesting verifies the pull request that CI waits on against origin, as the core README describes. The durable session records the harvest's `unverifiedHandoff` in the step result, and the engine fails the attempt with it.
+After a successful parent report, every worker adapter harvests the checkout with `harvestFacts` from `@usine/core/step/harvest`, running `git` and `gh` in the attempt's environment. It passes the report's CI handoff, and the run spec carries `CheckoutRequest.requiresCi`, which each request names because it has no default, so harvesting verifies the pull request that CI waits on against origin, as the core README describes. The durable session records the harvest's `unverifiedHandoff` in the step result, and the engine fails the attempt with it.
 
 ### Salvage
 

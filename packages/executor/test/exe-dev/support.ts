@@ -67,7 +67,7 @@ const REPOSITORY = RepositoryName.make("acme/demo");
 // The brand rejects whitespace and a leading dash; the characters it allows ($, ;, quotes) must
 // be neutralized by shell quoting.
 const REVISION = RepositoryRevision.make("main;$(touch$IFS/tmp/usine-injected)");
-const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
+export const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 export const SALVAGE_COMMIT = CommitSha.make("fedcba9876543210fedcba9876543210fedcba98");
 const TASK = AttemptTask.make("Complete the remote task");
 export const WORKTREE = "/home/exedev/.usine/workers/remote-one/attempts/remote-run_execute_1";
@@ -350,6 +350,7 @@ export const request = CheckoutRequest.make({
   parentEffort: "high",
   salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
   resume: Option.none(),
+  requiresCi: false,
   commitAuthor: COMMIT_AUTHOR,
 });
 

@@ -6,6 +6,8 @@ import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { PullRequestNotFound } from "@usine/core/ci";
+import { ItemNumber } from "@usine/core/item";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { BotLogin } from "@usine/core/worker";
 import { type AttemptRequest, AttemptRuntime, ParentFailed } from "@usine/durable/attempt-runtime";
@@ -17,6 +19,7 @@ import {
   aloneOnItem,
   ATTEMPT_ID,
   BOT_COMMITS,
+  COMMIT,
   COMMIT_AUTHOR,
   SSH_ENVIRONMENT_ALLOWLIST,
   TEST_AGENT,
@@ -306,6 +309,39 @@ describe("exe.dev launch", () => {
           "the checkout stays while its parent task may still write to it",
         );
       });
+    },
+  );
+
+  it.effect(
+    "harvests with the parent's CI handoff and keeps why its pull request isn't verified",
+    () => {
+      const ssh = fakeSsh();
+      const { sink } = recording();
+      const handsOff: StubParent = () =>
+        Effect.succeed(
+          `[usine:awaiting-ci]\n${jsonKey({ pull_request: 71, head: COMMIT, fix_loop: "fix", timeout_seconds: 1800, on_green: [] })}`,
+        );
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const { result } = yield* prepared.launch(sink);
+        // Origin has no `refs/pull/71/head`, so the handoff's pull request isn't found.
+        assert.deepStrictEqual(
+          result.unverifiedHandoff,
+          Option.some(
+            PullRequestNotFound.make({
+              pullRequest: Option.some(ItemNumber.make(71)),
+              branch: Option.none(),
+              head: COMMIT,
+            }),
+          ),
+        );
+        assert.isTrue(
+          ssh.state.commands
+            .map(remoteLine)
+            .some((line) => line.includes("exec 'gh' 'api' 'repos/acme/demo/pulls/71'")),
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, handsOff)));
     },
   );
 
