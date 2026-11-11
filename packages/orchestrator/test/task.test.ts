@@ -633,9 +633,21 @@ describe("Task view", () => {
                 ? Effect.succeed([`${head}\trefs/heads/feature`])
                 : git(...args).pipe(Effect.map((text) => text.split("\n")))
               : Effect.succeed([
-                  jsonKey([[{ number: 41, html_url: pullUrl(41), head: { sha: head } }]]),
+                  jsonKey([
+                    [
+                      {
+                        number: 41,
+                        html_url: pullUrl(41),
+                        state: "open",
+                        merged_at: null,
+                        head: { sha: head, ref: "feature", repo: { id: 1, full_name: repository } },
+                        base: { repo: { id: 1 } },
+                      },
+                    ],
+                  ]),
                 ]),
           Effect.succeed(AttemptWindows.make({ own: Option.none(), overlapping: [] })),
+          Option.none(),
         );
         assert.deepStrictEqual(
           facts.flatMap((fact) => (fact._tag === "Commit" ? [fact.sha] : [])).slice(0, 1),

@@ -40,6 +40,7 @@ import { hostLoginLockLayer } from "@usine/executor";
 const freshExecution = (runId: RunId, attemptId: AttemptId) => {
   const selected = submission(5);
   return StepExecution.make({
+    requiresCi: false,
     attempt: Attempt.make({
       task: selected.task,
       agent: selected.agent.name,

@@ -1,6 +1,17 @@
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha, RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { type Brand, Clock, Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import {
+  type Brand,
+  Clock,
+  Context,
+  DateTime,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema,
+} from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
 import type { GitHubAppError } from "./error.ts";
@@ -18,7 +29,7 @@ export class CheckSnapshot extends Schema.Class<
   Brand.Brand<"@usine/github/checks/CheckSnapshot">
 >("CheckSnapshot")({
   head: CommitSha,
-  pullRequest: Schema.Literals(["open", "closed", "merged"]),
+  pullRequestState: Schema.Literals(["open", "closed", "merged"]),
   state: Schema.Literals(["pending", "success", "failure", "conflict"]),
 }) {}
 
@@ -31,6 +42,7 @@ export class CheckFailureEvidence extends Schema.Class<
   excerpt: Schema.String.check(Schema.isMaxLength(12000)),
 }) {}
 
+/** A check run or legacy commit status on a head that has not completed. */
 export class PendingCheck extends Schema.Class<
   PendingCheck,
   Brand.Brand<"@usine/github/checks/PendingCheck">
@@ -42,6 +54,15 @@ export class PendingCheck extends Schema.Class<
   previousDurationMilliseconds: Schema.Option(
     Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
   ),
+}) {}
+
+/** The pending checks on a head, running jobs first, and the number of checks beyond the first ten. */
+export class PendingCheckReport extends Schema.Class<
+  PendingCheckReport,
+  Brand.Brand<"@usine/github/checks/PendingCheckReport">
+>("PendingCheckReport")({
+  checks: Schema.Array(PendingCheck).check(Schema.isMaxLength(10)),
+  omitted: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
 /** The latest run of a workflow on a head that failed or was canceled although none of its jobs failed. */
@@ -121,7 +142,7 @@ const Statuses = Schema.Struct({
   ),
 });
 
-const PendingChecks = Schema.Struct({
+const PendingCheckRuns = Schema.Struct({
   total_count: Schema.Int,
   check_runs: Schema.Array(
     Schema.Struct({
@@ -132,7 +153,10 @@ const PendingChecks = Schema.Struct({
     }),
   ),
 });
-const WorkflowRun = Schema.Struct({ workflow_id: Schema.Int.check(Schema.isGreaterThan(0)) });
+const WorkflowRun = Schema.Struct({
+  workflow_id: Schema.Int.check(Schema.isGreaterThan(0)),
+  event: Schema.NonEmptyString,
+});
 const WorkflowRuns = Schema.Struct({
   workflow_runs: Schema.Array(Schema.Struct({ id: Schema.Int.check(Schema.isGreaterThan(0)) })),
 });
@@ -147,6 +171,19 @@ const CompletedJobs = Schema.Struct({
     }),
   ),
 });
+type CompletedJob = (typeof CompletedJobs.Type)["jobs"][number];
+type PendingCheckRun = (typeof PendingCheckRuns.Type)["check_runs"][number];
+
+const PENDING_CHECK_LIMIT = 10;
+const jobDuration = (job: CompletedJob) =>
+  job.started_at !== null && job.completed_at !== null
+    ? Option.some(
+        Math.max(
+          0,
+          DateTime.toEpochMillis(job.completed_at) - DateTime.toEpochMillis(job.started_at),
+        ),
+      )
+    : Option.none();
 
 const HeadWorkflowRuns = Schema.Struct({
   total_count: Schema.Int,
@@ -163,6 +200,7 @@ const HeadWorkflowRuns = Schema.Struct({
     }),
   ),
 });
+type HeadWorkflowRun = (typeof HeadWorkflowRuns.Type)["workflow_runs"][number];
 
 /** Reads aggregate CI and failure diagnostics without starting an agent. */
 export class GitHubChecks extends Context.Service<
@@ -176,10 +214,18 @@ export class GitHubChecks extends Context.Service<
       repository: RepositoryName,
       head: CommitSha,
     ) => Effect.Effect<CheckFailureEvidence, GitHubAppError>;
+    /**
+     * Reads the check runs on `head` that have not completed, or its pending commit statuses
+     * when it has no such check run. The report lists running jobs first. For each running
+     * Actions job, it adds the job's duration in the latest successful run of the same workflow
+     * and event. Duration history reads stop at `historyDeadline` or at a rate limit; jobs
+     * without a history read report no previous duration.
+     */
     readonly pendingDetails: (
       repository: RepositoryName,
       head: CommitSha,
-    ) => Effect.Effect<ReadonlyArray<PendingCheck>, GitHubAppError>;
+      historyDeadline: DateTime.Utc,
+    ) => Effect.Effect<PendingCheckReport, GitHubAppError>;
     /**
      * Reads the latest run of each workflow and event on `head`. `incomplete` holds runs that
      * concluded `failure` or `cancelled` although none of their jobs failed, such as a run whose
@@ -320,17 +366,14 @@ export class GitHubChecks extends Context.Service<
       const previousSuccessfulJobs = Effect.fn("GitHubChecks.previousSuccessfulJobs")(function* (
         prefix: string,
         run: string,
-        histories: Map<string, ReadonlyArray<(typeof CompletedJobs.Type)["jobs"][number]>>,
       ) {
         yield* Effect.annotateCurrentSpan({ prefix, run });
-        const cached = histories.get(run);
-        if (cached !== undefined) return cached;
         const metadata = yield* get(`${prefix}/actions/runs/${run}`);
         const workflow = yield* HttpClientResponse.schemaBodyJson(WorkflowRun)(metadata).pipe(
           Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
         );
         const response = yield* get(
-          `${prefix}/actions/workflows/${workflow.workflow_id}/runs?status=success&per_page=1`,
+          `${prefix}/actions/workflows/${workflow.workflow_id}/runs?status=success&event=${encodeURIComponent(workflow.event)}&per_page=1`,
         );
         const previous = yield* HttpClientResponse.schemaBodyJson(WorkflowRuns)(response).pipe(
           Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
@@ -338,6 +381,29 @@ export class GitHubChecks extends Context.Service<
         const previousRun = previous.workflow_runs[0];
         return previousRun === undefined ? [] : yield* runJobs(prefix, previousRun.id);
       });
+      const commitStatuses = Effect.fn("GitHubChecks.commitStatuses")(function* (
+        prefix: string,
+        head: CommitSha,
+      ) {
+        const response = yield* get(`${prefix}/commits/${head}/status?per_page=100`);
+        const { statuses } = yield* HttpClientResponse.schemaBodyJson(Statuses)(response).pipe(
+          Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
+        );
+        return statuses;
+      });
+      const pendingStatuses = (prefix: string, head: CommitSha) =>
+        commitStatuses(prefix, head).pipe(
+          Effect.map((statuses) =>
+            statuses
+              .filter(({ state }) => state === "pending")
+              .map(({ context }): PendingCheckRun => ({
+                name: context,
+                status: "pending",
+                started_at: null,
+                details_url: null,
+              })),
+          ),
+        );
       return {
         workflowRuns: Effect.fn("GitHubChecks.workflowRuns")(function* (
           repository: RepositoryName,
@@ -346,7 +412,7 @@ export class GitHubChecks extends Context.Service<
           yield* Effect.annotateCurrentSpan({ repository, head });
           const { owner, name } = splitRepositoryName(repository);
           const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-          const latest = new Map<string, (typeof HeadWorkflowRuns.Type)["workflow_runs"][number]>();
+          const latest = new Map<string, HeadWorkflowRun>();
           for (const run of yield* paginate(
             `${prefix}/actions/runs?head_sha=${head}`,
             HeadWorkflowRuns,
@@ -357,7 +423,7 @@ export class GitHubChecks extends Context.Service<
             if (previous === undefined || previous.run_number < run.run_number)
               latest.set(key, run);
           }
-          const workflow = (run: (typeof HeadWorkflowRuns.Type)["workflow_runs"][number]) =>
+          const workflow = (run: HeadWorkflowRun) =>
             run.name === null || run.name === "" ? `workflow ${run.workflow_id}` : run.name;
           const incomplete: Array<IncompleteWorkflowRun> = [];
           const running: Array<RunningWorkflowRun> = [];
@@ -402,60 +468,96 @@ export class GitHubChecks extends Context.Service<
         pendingDetails: Effect.fn("GitHubChecks.pendingDetails")(function* (
           repository: RepositoryName,
           head: CommitSha,
+          historyDeadline: DateTime.Utc,
         ) {
           yield* Effect.annotateCurrentSpan({ repository, head });
           const { owner, name } = splitRepositoryName(repository);
           const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-          const pending = (yield* checkRuns(prefix, head, PendingChecks)).filter(
+          const runs = (yield* checkRuns(prefix, head, PendingCheckRuns)).filter(
             ({ status }) => status !== "completed",
           );
-          const histories = new Map<
-            string,
-            ReadonlyArray<(typeof CompletedJobs.Type)["jobs"][number]>
-          >();
+          const pending: ReadonlyArray<PendingCheckRun> =
+            runs.length > 0 ? runs : yield* pendingStatuses(prefix, head);
+          const shown = [
+            ...pending.filter(({ status }) => status === "in_progress"),
+            ...pending.filter(({ status }) => status !== "in_progress"),
+          ].slice(0, PENDING_CHECK_LIMIT);
+          const jobRun = (check: PendingCheckRun) =>
+            check.status === "in_progress"
+              ? Option.fromNullishOr(
+                  check.details_url?.match(/\/actions\/runs\/(\d+)\/job\/\d+(?:\?|$)/u)?.[1],
+                )
+              : Option.none();
+          const historyRuns = [...new Set(shown.flatMap((check) => Option.toArray(jobRun(check))))];
+          const histories = new Map<string, ReadonlyArray<CompletedJob>>();
           const now = yield* Clock.currentTimeMillis;
-          return yield* Effect.forEach(pending.slice(0, 10), (check) =>
-            Effect.gen(function* () {
-              const run = check.details_url?.match(
-                /\/actions\/runs\/(\d+)\/job\/\d+(?:\?|$)/u,
-              )?.[1];
-              const history =
-                run === undefined || check.status !== "in_progress"
-                  ? []
-                  : yield* previousSuccessfulJobs(prefix, run, histories).pipe(
-                      Effect.catch((error) =>
-                        Effect.logWarning("CI duration history unavailable", {
-                          repository,
-                          head,
-                          job: check.name,
-                          errorTag: error._tag,
-                        }).pipe(Effect.as([])),
-                      ),
-                    );
-              if (run !== undefined && check.status === "in_progress") histories.set(run, history);
-              const previous = history.find(
-                ({ name, conclusion }) => name === check.name && conclusion === "success",
-              );
-              return PendingCheck.make({
-                name: check.name,
-                status: check.status,
-                startedAt: Option.fromNullOr(check.started_at),
-                elapsedMilliseconds: Option.fromNullOr(check.started_at).pipe(
-                  Option.map((startedAt) => Math.max(0, now - DateTime.toEpochMillis(startedAt))),
-                ),
-                previousDurationMilliseconds:
-                  previous?.started_at != null && previous.completed_at !== null
-                    ? Option.some(
-                        Math.max(
-                          0,
-                          DateTime.toEpochMillis(previous.completed_at) -
-                            DateTime.toEpochMillis(previous.started_at),
-                        ),
-                      )
-                    : Option.none(),
+          // Each history read records its result at once, so the deadline keeps the reads that ended.
+          const readHistories = Effect.gen(function* () {
+            for (const run of historyRuns) {
+              const result = yield* previousSuccessfulJobs(prefix, run).pipe(Effect.result);
+              if (Result.isSuccess(result)) {
+                histories.set(run, result.success);
+                continue;
+              }
+              const error = result.failure;
+              if (error._tag === "GitHubRateLimitError") {
+                yield* Effect.logWarning(
+                  "GitHub rate limit reached; the remaining CI duration history reads are skipped",
+                  { repository, head, run, retryAt: error.retryAt },
+                );
+                return;
+              }
+              yield* Effect.logWarning("CI duration history unavailable", {
+                repository,
+                head,
+                run,
+                errorTag: error._tag,
+                message: error.message,
               });
+            }
+          });
+          if (historyRuns.length > 0) {
+            const remaining = DateTime.toEpochMillis(historyDeadline) - now;
+            const read =
+              remaining > 0
+                ? yield* readHistories.pipe(Effect.timeoutOption(Duration.millis(remaining)))
+                : Option.none();
+            if (Option.isNone(read))
+              yield* Effect.logWarning(
+                "CI duration history reads reached their deadline; the remaining jobs report no previous duration",
+                { repository, head, read: histories.size, runs: historyRuns.length },
+              );
+          }
+          const checks = shown.map((check) =>
+            PendingCheck.make({
+              name: check.name,
+              status: check.status,
+              startedAt: Option.fromNullOr(check.started_at),
+              elapsedMilliseconds: Option.fromNullOr(check.started_at).pipe(
+                Option.map((startedAt) => Math.max(0, now - DateTime.toEpochMillis(startedAt))),
+              ),
+              previousDurationMilliseconds: jobRun(check).pipe(
+                Option.flatMap((run) =>
+                  Option.fromNullishOr(
+                    histories
+                      .get(run)
+                      ?.find(
+                        ({ name, conclusion }) => name === check.name && conclusion === "success",
+                      ),
+                  ),
+                ),
+                Option.flatMap(jobDuration),
+              ),
             }),
           );
+          yield* Effect.logInfo("Read pending CI checks", {
+            repository,
+            head,
+            source: runs.length > 0 ? "check-runs" : "commit-statuses",
+            pending: pending.length,
+            histories: histories.size,
+          });
+          return PendingCheckReport.make({ checks, omitted: pending.length - shown.length });
         }),
         snapshot: Effect.fn("GitHubChecks.snapshot")(function* (
           repository: RepositoryName,
@@ -479,7 +581,7 @@ export class GitHubChecks extends Context.Service<
               "The pull request awaiting CI is unavailable",
             );
           const state = pr.statusCheckRollup?.state;
-          const pullRequest =
+          const pullRequestState =
             pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed";
           // GitHub's schema makes both `headRef` and its `target` nullable.
           const branchHead = pr.headRef?.target?.oid ?? pr.headRefOid;
@@ -490,11 +592,11 @@ export class GitHubChecks extends Context.Service<
               branchHead,
               pullRequestHead: pr.headRefOid,
             });
-            return CheckSnapshot.make({ head: branchHead, pullRequest, state: "pending" });
+            return CheckSnapshot.make({ head: branchHead, pullRequestState, state: "pending" });
           }
           return CheckSnapshot.make({
             head: pr.headRefOid,
-            pullRequest,
+            pullRequestState,
             state:
               state === "SUCCESS"
                 ? "success"
@@ -538,11 +640,8 @@ export class GitHubChecks extends Context.Service<
             excerpts.push(`${check.name}\n${output.slice(-2800)}`);
           }
           if (failed.length === 0) {
-            const response = yield* get(`${prefix}/commits/${head}/status?per_page=100`);
-            const statuses = yield* HttpClientResponse.schemaBodyJson(Statuses)(response).pipe(
-              Effect.mapError((error) => invalidResponse("read-ci-checks", error.message)),
-            );
-            const failures = statuses.statuses.filter(
+            const statuses = yield* commitStatuses(prefix, head);
+            const failures = statuses.filter(
               ({ state }) => state === "failure" || state === "error",
             );
             return CheckFailureEvidence.make({

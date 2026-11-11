@@ -8,8 +8,9 @@ name: Release
 # generated once the repository is public.
 #
 # The release job runs when a changeset lands or the version PR merges, which
-# changes package manifests and changelogs. The next job publishes every push to
-# main that changes package code as a prerelease under the `next` dist-tag. Both
+# changes package manifests and changelogs. The next job publishes main as a
+# prerelease under the `next` dist-tag, only when the workflow is started by hand
+# (`gh workflow run release.yml`), so prereleases collect several changes. Both
 # jobs are in this file because npm accepts one trusted publisher per package.
 on:
   push:
@@ -24,7 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.paths.outputs.release }}
-      next: ${{ steps.paths.outputs.next }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,13 +36,11 @@ jobs:
         run: |
           if [ "$EVENT" != push ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "next=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
           matches() { if printf '%s\n' "$changed" | grep -qE "$1"; then echo true; else echo false; fi; }
           echo "release=$(matches '^\.changeset/|(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.github/workflows/release\.yml$')" >> "$GITHUB_OUTPUT"
-          echo "next=$(matches '^(packages|apps/server|apps/web)/|^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$|^scripts/release/|^\.github/workflows/release\.yml$')" >> "$GITHUB_OUTPUT"
 
   release:
     needs: changes
@@ -78,7 +76,7 @@ jobs:
   # Waits for the release job, so a release and a prerelease of the same commit never publish at once.
   next:
     needs: [changes, release]
-    if: ${{ !cancelled() && needs.changes.outputs.next == 'true' && needs.release.result != 'failure' }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.release.result != 'failure' }}
     runs-on: ubuntu-latest
     concurrency:
       group: next-${{ github.ref }}

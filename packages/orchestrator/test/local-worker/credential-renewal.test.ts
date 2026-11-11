@@ -99,6 +99,7 @@ it.effect(
         const prepared = yield* executor
           .prepare(
             CheckoutRequest.make({
+              requiresCi: false,
               attemptId: AttemptId.make("renew/work/1"),
               worker: WorkerName.make("local"),
               repository: RepositoryName.make("acme/demo"),

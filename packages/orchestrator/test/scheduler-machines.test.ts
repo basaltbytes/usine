@@ -176,6 +176,7 @@ const scheduler = (
 const executionOf = (runId: RunId, attemptId: AttemptId, reattach = false) => {
   const selected = submission(1);
   return StepExecution.make({
+    requiresCi: false,
     attempt: Attempt.make({
       task: selected.task,
       agent: selected.agent.name,

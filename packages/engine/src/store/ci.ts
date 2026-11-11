@@ -87,10 +87,20 @@ export const ciQueries = (
           CiHandedOff: () => AttemptHandedOff.make(),
           CiFailed: ({ message }) =>
             AttemptFailed.make({ failure: AgentFailure.make({ message }) }),
-          CiTimedOut: ({ message }) =>
-            AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
-          CiIncomplete: ({ message }) =>
-            AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
+          CiTimedOut: ({ _tag, message }) =>
+            AttemptFailed.make({
+              failure: InfraFailure.make({
+                message,
+                cause: { resolution: _tag, pullRequest: handoff.pullRequest, head },
+              }),
+            }),
+          CiIncomplete: ({ _tag, message }) =>
+            AttemptFailed.make({
+              failure: InfraFailure.make({
+                message,
+                cause: { resolution: _tag, pullRequest: handoff.pullRequest, head },
+              }),
+            }),
           CiSuperseded: () => AttemptCanceled.make(),
           CiPullRequestClosed: () => AttemptCanceled.make(),
         });

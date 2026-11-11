@@ -68,6 +68,14 @@ Claude's session UUID comes from usine before SDK startup. Operator messages car
 
 If Codex native history confirms that the saved thread is empty, the shared policy sends the original task as its first input. A thread with saved work receives the continuation instruction.
 
+## Amendment (2026-11-11, #1150): the tension behind the agent layer
+
+The options above were weighed against a tension that the ADR never stated. The operator wants usine to work with any provider: OpenAI, Anthropic, OpenRouter, OpenCode subscriptions, and whichever comes next. Pi alone would deliver that, because it's provider-agnostic. Anthropic is the one provider whose subscription can't be used outside its own client, so a Claude subscription requires Claude Code. That is why usine can't be Pi alone.
+
+The Pi parent served the first half and broke the second: the parent needs a model credential of its own, and a Claude subscription can't supply one, so an instance with only a Claude subscription couldn't start a run ([#1149](https://github.com/basaltbytes/usine/issues/1149)). The event-driven coordinator ([#1150](https://github.com/basaltbytes/usine/issues/1150)) removes the parent model, so the attempt's own credential is the only one a run needs, on Pi or on a vendor harness.
+
+The same reasoning applies to every role that runs a model. Roles are written against the harness and model seam and admitted by capability ([#953](https://github.com/basaltbytes/usine/issues/953)). usine maintains three harnesses, Pi, Claude Code, and Codex, and doesn't plan to fold them into one: Pi covers providers by API key and the subscriptions it supports, Claude Code covers the Claude subscription, and Codex covers the ChatGPT subscription with its own client.
+
 ## Amendment (2026-11-11, #1157): attempts without a Pi parent
 
 The reason for a model parent was in-run orchestration. In the run history read for [#1150](https://github.com/basaltbytes/usine/issues/1150), no parent split a task across children: every agent persona delegated the whole task once, and attempts with a second child were mostly reattached after a restart. A parent session also requires a Pi credential that the children may not need.
@@ -77,4 +85,3 @@ An attempt with `RunSpec.parent: none` therefore runs without a parent session. 
 `RunSpec.parent` decodes as `pi` for stored attempts, and configuration doesn't set `none` yet ([#1158](https://github.com/basaltbytes/usine/issues/1158)), so the Pi parent still runs every configured attempt.
 
 Both coordinators run children through the same delegation core. The owner of a delegation numbers it and applies the child-session budget: the `subagent` tool counts each call, and the event-driven coordinator numbers each child in the transition that decided it. The child-blocker rules stay with the `subagent` tool, because only a model parent can leave a reserved report unrelayed; the event-driven coordinator turns the report into its next event, and its rules keep reserved markers over any decision.
-

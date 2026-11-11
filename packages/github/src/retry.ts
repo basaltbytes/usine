@@ -32,13 +32,11 @@ export const retryTransientRequest = <A, E extends RequestFailure, R>(
 ) =>
   request.pipe(
     retryTransient(isTransientFailure, ({ error, retry, delay }) =>
-      isTransientFailure(error)
-        ? Effect.logWarning("Transient GitHub request failed; retrying", {
-            ...transientFailureLogFields(error),
-            errorTag: error._tag,
-            retry,
-            delayMs: Duration.toMillis(delay),
-          })
-        : Effect.void,
+      Effect.logWarning("Transient GitHub request failed; retrying", {
+        ...transientFailureLogFields(error),
+        errorTag: error._tag,
+        retry,
+        delayMs: Duration.toMillis(delay),
+      }),
     ),
   );
