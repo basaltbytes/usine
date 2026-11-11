@@ -27,6 +27,7 @@ import {
   ModelDecision,
   Question,
   REPLACEMENT_ASSIGNMENT,
+  REPORTED_REPLACEMENT_ASSIGNMENT,
   type ReservedKind,
   ReservedReport,
   RetryChild,
@@ -264,6 +265,53 @@ describe("coordinator rules", () => {
       }
     }),
   );
+
+  it.effect("clamp fills a model's missing free text from the event it answers", () =>
+    Effect.gen(function* () {
+      const cases: ReadonlyArray<readonly [CoordinatorEvent, Decision, object]> = [
+        [
+          reported("API Error: Request rejected (429)\n"),
+          RetryChild.make({}),
+          {
+            delegate: 2,
+            assignment: `${REPORTED_REPLACEMENT_ASSIGNMENT}\n\nAPI Error: Request rejected (429)`,
+          },
+        ],
+        [
+          reported(" \n"),
+          RetryChild.make({}),
+          {
+            delegate: 2,
+            assignment: `${REPORTED_REPLACEMENT_ASSIGNMENT}\n\n${BLANK_REPORT_MESSAGE}`,
+          },
+        ],
+        [
+          ChildInterrupted.make({ child: child(1), reason: "worker gone" }),
+          RetryChild.make({}),
+          { delegate: 2, assignment: REPLACEMENT_ASSIGNMENT },
+        ],
+      ];
+      for (const [event, decision, expected] of cases) {
+        const [, intents] = handle(startedState(), event, { decision });
+        const intent = yield* intentOf(intents);
+        assert.deepStrictEqual(intent, expected, event._tag);
+      }
+    }),
+  );
+
+  it("clamp applies an interruption's rule to a Complete without a message", () => {
+    const event = ChildInterrupted.make({ child: child(1), reason: "worker gone" });
+    for (const maxChildren of [1, 3]) {
+      const context = contextFor(event, maxChildren);
+      const resolved = clamp(Complete.make({}), context);
+      assert.deepStrictEqual(resolved, clamp(ruleFor(event, context), context), `${maxChildren}`);
+      assert.notStrictEqual(
+        resolved._tag === "Settle" && resolved.outcome._tag,
+        "AttemptCompleted",
+        `${maxChildren}`,
+      );
+    }
+  });
 
   it("clamp applies the event's rule to a rule-only tag about a child", () => {
     const ruleOnly = [

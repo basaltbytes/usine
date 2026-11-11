@@ -14,9 +14,16 @@ import { type Brand, Match, Option, Schema } from "effect";
 export const FIRST_ASSIGNMENT =
   "Complete the delegated task in this checkout and give the result as your final answer.";
 
-/** The default supplemental context of a child that replaces the previous one. */
+/** The default supplemental context of a child that replaces an interrupted one. */
 export const REPLACEMENT_ASSIGNMENT =
   "The previous child session stopped before it finished, and it couldn't resume. The checkout keeps everything it did: inspect the checkout and continue the task from its current state.";
+
+/**
+ * The default supplemental context of a child that replaces one that reported, before the
+ * previous child's report.
+ */
+export const REPORTED_REPLACEMENT_ASSIGNMENT =
+  "The previous child session finished, but its work isn't done. The checkout keeps everything it did: read its final report below, inspect the checkout, and continue the task from its current state.";
 
 /** The Attempt's message when its child finished with a blank report. */
 export const BLANK_REPORT_MESSAGE = "The child session finished without a report";
@@ -117,12 +124,18 @@ export class AttemptContext extends Schema.Class<
 /** Starts the Attempt's first child. */
 const StartChild = Schema.TaggedStruct("StartChild", {});
 
-/** Completes the Attempt; `message` defaults to the child's report. */
+/**
+ * Completes the Attempt; `message` defaults to the child's report. Without `message`, an event
+ * other than a report takes its rule, because it has no report to complete with.
+ */
 export const Complete = Schema.TaggedStruct("Complete", {
   message: Schema.optionalKey(Schema.NonEmptyString),
 });
 
-/** Replaces the child; `assignment` defaults to `REPLACEMENT_ASSIGNMENT`. */
+/**
+ * Replaces the child; `assignment` defaults to `REPORTED_REPLACEMENT_ASSIGNMENT` with the child's
+ * report, or to `REPLACEMENT_ASSIGNMENT` for an interruption.
+ */
 export const RetryChild = Schema.TaggedStruct("RetryChild", {
   assignment: Schema.optionalKey(Schema.NonEmptyString),
 });
@@ -284,15 +297,23 @@ const modelEligible = (event: ChildEvent): boolean =>
   event._tag === "ChildInterrupted" ||
   (event._tag === "ChildReported" && Option.isNone(event.reserved));
 
+const reportText = (event: ChildReported): string =>
+  event.report.trim() === "" ? BLANK_REPORT_MESSAGE : event.report;
+
 const defaultMessage = (event: ChildEvent): string => {
-  if (event._tag === "ChildReported")
-    return event.report.trim() === "" ? BLANK_REPORT_MESSAGE : event.report;
+  if (event._tag === "ChildReported") return reportText(event);
   if (event._tag === "ChildInterrupted")
     return `Child ${event.child} was interrupted: ${event.reason}`;
   if (event._tag === "BudgetExceeded")
     return `Admission refused child ${event.child} over the child-session budget`;
   return event.message;
 };
+
+/** The replacement's context: a reported child's report, or the interruption's default. */
+const defaultAssignment = (event: ChildEvent): string =>
+  event._tag === "ChildReported"
+    ? `${REPORTED_REPLACEMENT_ASSIGNMENT}\n\n${reportText(event).trim()}`
+    : REPLACEMENT_ASSIGNMENT;
 
 const resolve = (
   decision: Decision,
@@ -316,19 +337,25 @@ const resolve = (
         : byRule(),
     RetryChild: ({ assignment }): ClampedDecision =>
       event.child < context.maxChildren
-        ? Replace.make({ replaces: event.child, assignment: assignment ?? REPLACEMENT_ASSIGNMENT })
+        ? Replace.make({
+            replaces: event.child,
+            assignment: assignment ?? defaultAssignment(event),
+          })
         : fail(
             AgentFailure.make({
               message: `Child ${event.child} needed a replacement, but the Attempt has used its ${context.maxChildren}-child budget`,
             }),
           ),
-    Complete: ({ message }) =>
-      settle(
-        AttemptCompleted.make({
-          message: message ?? defaultMessage(event),
-          answeredOperator: event._tag === "ChildReported" && event.answeredOperator,
-        }),
-      ),
+    Complete: ({ message }): ClampedDecision =>
+      message === undefined && event._tag !== "ChildReported"
+        ? // Only a report supplies a success message; no rule for another event completes.
+          byRule()
+        : settle(
+            AttemptCompleted.make({
+              message: message ?? defaultMessage(event),
+              answeredOperator: event._tag === "ChildReported" && event.answeredOperator,
+            }),
+          ),
     Blocked: ({ message }) =>
       fail(BlockedFailure.make({ message: message ?? defaultMessage(event) })),
     Question: ({ question }) => fail(QuestionFailure.make({ question })),

@@ -96,7 +96,7 @@ pi-durable has no cross-process locking: tasks and documents from a second write
 - `clamp(decision, context)` checks a decision from a rule or a model against the event and resolves its defaults.
 - `apply(state, decision)` returns the next `CoordinatorState` and the effect intents: `Delegate` starts a child, `Finish` ends the Attempt, and `Ignored` gives the reason a decision changed nothing.
 
-`ModelDecision` is the contract that a model handler answers with. `Schema.toJsonSchemaDocument(ModelDecision)` has one branch per tag, and its free-text fields are optional wherever the event supplies the text. A rule's `Decision` adds two tags that a model can't choose: `StartChild` and `OverBudget`.
+`ModelDecision` is the contract that a model handler answers with. `Schema.toJsonSchemaDocument(ModelDecision)` has one branch per tag, and its free-text fields are optional wherever the event supplies the text. A `RetryChild` without an assignment tells the replacement to continue from the checkout, with the previous child's report when it answers a report. A `Complete` without a message completes with the report, and for an interruption it takes the event's rule, because an interruption has no report to complete with. A rule's `Decision` adds two tags that a model can't choose: `StartChild` and `OverBudget`.
 
 The rules handle each lifecycle event as follows:
 
