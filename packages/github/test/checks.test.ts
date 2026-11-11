@@ -799,12 +799,18 @@ for (const status of [403, 429, 503]) {
 
 const workflowRun = (
   id: number,
-  fields: { name: string; workflow: number; number: number; conclusion: string | null },
+  fields: {
+    name: string;
+    workflow: number;
+    number: number;
+    conclusion: string | null;
+    event?: string;
+  },
 ) => ({
   id,
   name: fields.name,
   workflow_id: fields.workflow,
-  event: "pull_request",
+  event: fields.event ?? "pull_request",
   run_number: fields.number,
   status: fields.conclusion === null ? "in_progress" : "completed",
   conclusion: fields.conclusion,
@@ -837,14 +843,22 @@ it.effect("reports the latest failed workflow runs on a head whose jobs never fa
     assert.include(requested[0] ?? "", `/actions/runs?head_sha=${head}&per_page=100&page=1`);
     assert.notInclude(requested.join("\n"), "/runs/30/jobs");
     assert.notInclude(requested.join("\n"), "/runs/40/jobs");
+    assert.notInclude(requested.join("\n"), "/runs/60/jobs");
   }).pipe(
     Effect.provide(
       withClient((url) => {
         requested.push(url);
         if (url.includes("/actions/runs?"))
           return json({
-            total_count: 5,
+            total_count: 6,
             workflow_runs: [
+              workflowRun(60, {
+                name: "CI",
+                workflow: 1,
+                number: 10,
+                conclusion: "success",
+                event: "push",
+              }),
               workflowRun(42672750451, {
                 name: "CI",
                 workflow: 1,

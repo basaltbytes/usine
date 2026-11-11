@@ -193,8 +193,19 @@ export class CiMonitor extends Context.Service<
           });
           return;
         }
+        const evidence =
+          observed.state === "failure"
+            ? yield* checks.failures(wait.repository, head).pipe(Effect.asSome)
+            : Option.none();
+        const failedJob = Option.exists(evidence, ({ jobs }) => jobs.length > 0);
+        if (failedJob) {
+          yield* Effect.logInfo(
+            "A check failed on the head; the workflow runs on it are not read",
+            { runId, head },
+          );
+        }
         const { incomplete, running } =
-          observed.state === "conflict"
+          observed.state === "conflict" || failedJob
             ? noWorkflowRuns
             : yield* checks.workflowRuns(wait.repository, head).pipe(
                 Effect.catchIf(
@@ -227,14 +238,7 @@ export class CiMonitor extends Context.Service<
           );
           return;
         }
-        const evidence =
-          observed.state === "failure"
-            ? yield* checks.failures(wait.repository, head).pipe(Effect.asSome)
-            : Option.none();
-        if (
-          incomplete.length > 0 &&
-          Option.match(evidence, { onNone: () => true, onSome: ({ jobs }) => jobs.length === 0 })
-        ) {
+        if (incomplete.length > 0) {
           const details = incompleteRunDetails(incomplete);
           yield* Effect.logWarning(
             "CI ran only in part; operator attention is required and no fix starts",

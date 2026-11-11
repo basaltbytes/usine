@@ -691,6 +691,53 @@ it.live("a failed job routes CI to the fix loop even beside a partially created 
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.live("a failed job routes CI to the fix loop while another workflow run is still running", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
+        );
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        const source = yield* (yield* RunEngine).inspect(runId);
+        assert(source.run.state._tag === "HandedOff");
+        assert.include(source.run.state.reason, "CI failed: ci.");
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a red rollup without a failed job waits for workflow runs that have not concluded", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ incomplete: [], running: [runningRun] })),
+        );
+        yield* Ref.set(setup.failedJobs, []);
+        yield* Ref.set(setup.observed, CheckSnapshot.make({ head, state: "failure" }));
+
+        yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "AwaitingCi");
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live("unreadable workflow runs leave green CI to the check rollup", () =>
   Effect.scoped(
     Effect.gen(function* () {
