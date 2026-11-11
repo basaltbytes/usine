@@ -1,5 +1,7 @@
 import { assert, describe, expect, it } from "@effect/vitest";
+import { AgentName } from "@usine/core/agent";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import { RepositoryName } from "@usine/core/repository";
 import { AttemptFailure } from "@usine/core/attempt/failure";
 import { DateTime, Effect, Exit, Option, Schema } from "effect";
 import {
@@ -37,7 +39,17 @@ import {
 const child = ChildSessionCount.make;
 
 const contextFor = (event: CoordinatorEvent, maxChildren = 3) =>
-  AttemptContext.make({ event, maxChildren: ChildSessionBudget.make(maxChildren) });
+  AttemptContext.make({
+    event,
+    maxChildren: ChildSessionBudget.make(maxChildren),
+    repository: RepositoryName.make("basaltbytes/usine"),
+    agent: AgentName.make("developer"),
+    task: "Fix the flaky durable test.",
+    outcomeLabels: [],
+    requiresCi: false,
+    delegations: [],
+    output: "",
+  });
 
 /** Handles `event` as the coordinator does: the rule unless `decision` is given, then clamp and apply. */
 const handle = (

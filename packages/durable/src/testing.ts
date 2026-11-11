@@ -61,7 +61,7 @@ import {
   ResultRecorded,
   StoredRequest,
 } from "./attempt-runtime.ts";
-import { keepNotice } from "./attempt/hubs.ts";
+import { keepNotice } from "./attempt/notices.ts";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "./attempt/subagent.ts";
 import { durableError, layer as durableHarnessLayer } from "./harness.ts";

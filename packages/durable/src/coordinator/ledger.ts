@@ -1,6 +1,6 @@
 import type { ChildSessionCount } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Duration, Effect, Equal, Match, Option } from "effect";
+import { Duration, Effect, Equal, Match, Option, Schema } from "effect";
 
 import type { StoredRequest } from "../attempt-runtime.ts";
 
@@ -233,8 +233,7 @@ export const startedDelegation = (record: DelegationRecord) =>
     },
   });
 
-const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const decodeSavedObject = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json));
 
 const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress =>
   ChildProgress.make({
@@ -248,7 +247,10 @@ const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress
       ContinuationsSaved: ({ timestamps }) => ({ continuations: timestamps }),
       UsageSaved: ({ usage }) => ({
         saved: Option.map(progress.saved, (saved) =>
-          isObject(saved) ? { ...saved, usage } : saved,
+          Option.match(decodeSavedObject(saved), {
+            onNone: () => saved,
+            onSome: (object) => ({ ...object, usage }),
+          }),
         ),
       }),
       ToolStarted: ({ callId, tool }) => ({

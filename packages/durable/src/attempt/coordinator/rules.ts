@@ -1,3 +1,4 @@
+import { AgentName } from "@usine/core/agent";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import {
   AgentFailure,
@@ -8,6 +9,8 @@ import {
   ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
+import { OutcomeLabels } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
 import { type Brand, Match, Option, Schema } from "effect";
 
 /** The supplemental context of an Attempt's first child. */
@@ -113,7 +116,35 @@ export type CoordinatorEvent = typeof CoordinatorEvent.Type;
 
 type ChildEvent = Exclude<CoordinatorEvent, AttemptStarted>;
 
-/** What a handler knows when it decides about `event`. */
+/** How a delegation ended, read from the event that ended it. */
+export const DelegationEnd = Schema.Literals([
+  "reported",
+  "blocked",
+  "question",
+  "failed",
+  "interrupted",
+  "capacity",
+  "infrastructure",
+  "over-budget",
+]);
+export type DelegationEnd = typeof DelegationEnd.Type;
+
+/** One delegation of the Attempt as a handler sees it. */
+export class DelegationSummary extends Schema.Class<
+  DelegationSummary,
+  Brand.Brand<"@usine/durable/attempt/coordinator/rules/DelegationSummary">
+>("@usine/durable/coordinator/DelegationSummary")({
+  child: ChildSessionCount,
+  status: Schema.Literals(["intended", "running", "ended"]),
+  end: Schema.OptionFromNullOr(DelegationEnd),
+  /** The child's final report or the reason it ended, shortened. */
+  report: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
+/**
+ * What a handler knows when it decides about `event`, read from the attempt journal. Every field
+ * other than `event` is bounded; see `buildAttemptContext`.
+ */
 export class AttemptContext extends Schema.Class<
   AttemptContext,
   Brand.Brand<"@usine/durable/attempt/coordinator/rules/AttemptContext">
@@ -121,6 +152,18 @@ export class AttemptContext extends Schema.Class<
   /** The event being handled, always about the Attempt's latest child. */
   event: CoordinatorEvent,
   maxChildren: ChildSessionBudget,
+  repository: RepositoryName,
+  agent: AgentName,
+  /** The start of the rendered task. */
+  task: Schema.String,
+  /** The labels the engine verifies on the Item after a success. */
+  outcomeLabels: OutcomeLabels,
+  /** Whether the engine verifies the Attempt's pull request against the Loop's CI policy. */
+  requiresCi: Schema.Boolean,
+  /** The Attempt's delegations in child order, without the report that `event` carries. */
+  delegations: Schema.Array(DelegationSummary),
+  /** The end of the latest child's retained output. */
+  output: Schema.String,
 }) {}
 
 /** Starts the Attempt's first child. */

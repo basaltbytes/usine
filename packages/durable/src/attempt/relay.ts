@@ -29,13 +29,8 @@ import type { DurableHarness, DurableHarnessError } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, hasStarted, HoldDoc } from "./documents.ts";
 import { entryEvents, ledgerUsage } from "./events.ts";
 import type { ChildDelivery } from "./delegation/journal.ts";
-import {
-  type AttemptHub,
-  type AttemptHubs,
-  keepNotice,
-  type RelayItem,
-  type RelayProgress,
-} from "./hubs.ts";
+import { keepNotice } from "./notices.ts";
+import { type AttemptHub, type AttemptHubs, type RelayItem, type RelayProgress } from "./hubs.ts";
 import { SubagentDoc } from "./child.ts";
 import { settledOf } from "./outcome.ts";
 import { parentSession } from "./parent.ts";
