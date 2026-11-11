@@ -76,10 +76,14 @@ it.effect("cancels only the control request with the matching request ID", () =>
     assert.strictEqual(pending, 0);
     const ignored = yield* checkpoint.read(unknown).pipe(Effect.provide(Logger.layer([logger])));
     assert.strictEqual(ignored, 0);
-    assert.deepStrictEqual(logs, []);
+    assert.deepStrictEqual(logs, [
+      ["Claude cancelled a control request that is not pending", { requestId: "unknown" }],
+    ]);
     const cancelled = yield* checkpoint.read(cancel).pipe(Effect.provide(Logger.layer([logger])));
     assert.strictEqual(cancelled, 0);
-    assert.deepStrictEqual(logs, [["Claude cancelled a control request", { requestId: "other" }]]);
+    assert.deepStrictEqual(logs.slice(1), [
+      ["Claude cancelled a control request", { requestId: "other" }],
+    ]);
     const response = yield* hookResponse;
     const answered = yield* checkpoint.inputAcknowledged(response);
     assert.strictEqual(answered, hook.length + other.length + unknown.length + cancel.length);
@@ -244,6 +248,25 @@ it.effect("splits stdout lines the same way whatever the read boundaries", () =>
   }),
 );
 
+it.effect("splits input lines the same way whatever the acknowledgement boundaries", () =>
+  Effect.gen(function* () {
+    const hook = yield* hookRequest;
+    const response = yield* hookResponse;
+    const message = { type: "assistant", uuid: "partial", message: { content: "x".repeat(200) } };
+    const partial = (yield* jsonLine(message)).subarray(0, -1);
+    assert.isAbove(partial.length, response.length);
+    for (let size = 1; size <= response.length; size++) {
+      const checkpoint = yield* claudeOutputCheckpoint();
+      const read = yield* checkpoint.read(Buffer.concat([hook, partial]));
+      assert.strictEqual(read, 0);
+      let acknowledged = 0;
+      for (let start = 0; start < response.length; start += size)
+        acknowledged += yield* checkpoint.inputAcknowledged(response.subarray(start, start + size));
+      assert.strictEqual(acknowledged, hook.length, `acknowledged in chunks of ${size} bytes`);
+    }
+  }),
+);
+
 for (const order of ["response-first", "request-first"] as const)
   it.effect(
     `does not let a cancelled request's late response answer a later request (${order})`,
@@ -323,7 +346,10 @@ it.effect(
       const cancelled = yield* checkpoint.read(cancel).pipe(Effect.provide(layer));
       assert.strictEqual(cancelled, 0);
       assert.deepStrictEqual(logs, [
-        ["Debug", ["Claude cancelled a control request", { requestId: "behind" }]],
+        [
+          "Info",
+          ["Claude cancelled a control request that is not pending", { requestId: "behind" }],
+        ],
       ]);
       const reused = yield* checkpoint.read(behind);
       assert.strictEqual(reused, 0);

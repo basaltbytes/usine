@@ -442,9 +442,12 @@ export const claudeOutputCheckpoint = Effect.fn("ClaudeOutputCheckpoint.make")(f
           yield* Match.valueTags(note, {
             NonJson: ({ bytes }) => Effect.logDebug("Ignoring non-JSON Claude stdout", { bytes }),
             Cancelled: ({ requestId, released }) =>
-              (released ? Effect.logInfo : Effect.logDebug)("Claude cancelled a control request", {
-                requestId,
-              }),
+              Effect.logInfo(
+                released
+                  ? "Claude cancelled a control request"
+                  : "Claude cancelled a control request that is not pending",
+                { requestId },
+              ),
           });
         return read.bytes;
       }),
