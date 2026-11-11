@@ -172,21 +172,53 @@ export class BranchNotAtHead extends Schema.TaggedClass<
   head: CommitSha,
 }) {}
 
-/** A GitHub API read failed after retries, a git read failed, or verification timed out. */
+/** The handoff's pull request is closed or merged, so CI on it would never settle. */
+export class PullRequestNotOpen extends Schema.TaggedClass<
+  PullRequestNotOpen,
+  Brand.Brand<"@usine/core/ci/PullRequestNotOpen">
+>()("PullRequestNotOpen", {
+  pullRequest: ItemNumber,
+  /** The pull request's state on GitHub, such as `closed`. */
+  state: Schema.NonEmptyString,
+}) {}
+
+/** A GitHub API read failed after retries or returned invalid output after retries. */
 export class GitHubReadFailed extends Schema.TaggedClass<
   GitHubReadFailed,
   Brand.Brand<"@usine/core/ci/GitHubReadFailed">
 >()("GitHubReadFailed", {
   message: Schema.NonEmptyString,
+  /** The failed read's error; absent from reasons recorded before it was kept. */
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {}
+
+/** A `git` read of the checkout or of origin failed or returned invalid output. */
+export class GitReadFailed extends Schema.TaggedClass<
+  GitReadFailed,
+  Brand.Brand<"@usine/core/ci/GitReadFailed">
+>()("GitReadFailed", {
+  message: Schema.NonEmptyString,
+  cause: Schema.Defect(),
+}) {}
+
+/** The `git` and GitHub reads that verify the pull request didn't finish within their budget. */
+export class VerificationTimedOut extends Schema.TaggedClass<
+  VerificationTimedOut,
+  Brand.Brand<"@usine/core/ci/VerificationTimedOut">
+>()("VerificationTimedOut", {
+  seconds: Schema.Int.check(Schema.isGreaterThan(0)),
 }) {}
 
 /** The reason harvesting couldn't verify the pull request that CI waits on. */
 export const UnverifiedHandoff = Schema.Union([
   HeadMismatch,
   PullRequestNotFound,
+  PullRequestNotOpen,
   RepositoryMismatch,
   BranchNotAtHead,
   GitHubReadFailed,
+  GitReadFailed,
+  VerificationTimedOut,
 ]);
 export type UnverifiedHandoff = typeof UnverifiedHandoff.Type;
 
@@ -207,6 +239,7 @@ export const describeUnverifiedHandoff = (reason: UnverifiedHandoff): string =>
         : Option.isSome(branch)
           ? `no open pull request has branch ${branch.value} as its head`
           : `no open pull request has the checkout's HEAD ${head} as its head`,
+    PullRequestNotOpen: ({ pullRequest, state }) => `pull request #${pullRequest} is ${state}`,
     RepositoryMismatch: ({ pullRequest, headRepository }) =>
       `pull request #${pullRequest} comes from ${Option.getOrElse(headRepository, () => "a deleted repository")}, not from the Run's repository`,
     BranchNotAtHead: ({ pullRequest, branch, branchHead, head }) =>
@@ -216,17 +249,25 @@ export const describeUnverifiedHandoff = (reason: UnverifiedHandoff): string =>
           `branch ${branch}${ofPullRequest(pullRequest)} is at ${commit} on origin, not at the checkout's HEAD ${head}`,
       }),
     GitHubReadFailed: ({ message }) => `GitHub couldn't be read: ${message}`,
+    GitReadFailed: ({ message }) => `git couldn't read the checkout or origin: ${message}`,
+    VerificationTimedOut: ({ seconds }) =>
+      `the git and GitHub reads didn't finish within ${seconds} seconds`,
   });
 
+const isReadFailure = Schema.is(
+  Schema.Union([GitHubReadFailed, GitReadFailed, VerificationTimedOut]),
+);
+
 /**
- * Returns the Attempt failure for `reason`. A GitHub read failure is a retryable `InfraFailure`.
- * The other reasons are agent mistakes that a new Attempt would repeat, so they're `AgentFailure`s.
+ * Returns the Attempt failure for `reason`. A failed or timed-out `git` or GitHub read is a
+ * retryable `InfraFailure`. The other reasons are agent mistakes that a new Attempt would repeat,
+ * so they're `AgentFailure`s.
  */
 export const unverifiedHandoffFailure = (
   reason: UnverifiedHandoff,
 ): AgentFailure | InfraFailure => {
   const message = `CI can't wait on the pushed pull request: ${describeUnverifiedHandoff(reason)}`;
-  return reason._tag === "GitHubReadFailed"
+  return isReadFailure(reason)
     ? InfraFailure.make({ message, cause: reason })
     : AgentFailure.make({ message });
 };

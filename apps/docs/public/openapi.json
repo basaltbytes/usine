@@ -49304,6 +49304,9 @@
                 "$ref": "#/components/schemas/PullRequestNotFoundEncoded"
               },
               {
+                "$ref": "#/components/schemas/PullRequestNotOpenEncoded"
+              },
+              {
                 "$ref": "#/components/schemas/RepositoryMismatchEncoded"
               },
               {
@@ -49311,6 +49314,12 @@
               },
               {
                 "$ref": "#/components/schemas/GitHubReadFailedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/GitReadFailedEncoded"
+              },
+              {
+                "$ref": "#/components/schemas/VerificationTimedOutEncoded"
               }
             ]
           },
@@ -49358,6 +49367,49 @@
         ],
         "additionalProperties": false
       },
+      "VerificationTimedOutEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "VerificationTimedOut"
+            ]
+          },
+          "seconds": {
+            "type": "integer",
+            "maximum": 9007199254740991,
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "_tag",
+          "seconds"
+        ],
+        "additionalProperties": false
+      },
+      "GitReadFailedEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "GitReadFailed"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cause": {}
+        },
+        "required": [
+          "_tag",
+          "message",
+          "cause"
+        ],
+        "additionalProperties": false
+      },
       "GitHubReadFailedEncoded": {
         "type": "object",
         "properties": {
@@ -49370,7 +49422,8 @@
           "message": {
             "type": "string",
             "minLength": 1
-          }
+          },
+          "cause": {}
         },
         "required": [
           "_tag",
@@ -49434,6 +49487,32 @@
         "required": [
           "_tag",
           "pullRequest"
+        ],
+        "additionalProperties": false
+      },
+      "PullRequestNotOpenEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "PullRequestNotOpen"
+            ]
+          },
+          "pullRequest": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "_tag",
+          "pullRequest",
+          "state"
         ],
         "additionalProperties": false
       },
