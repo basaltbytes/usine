@@ -1,411 +1,516 @@
-# Coordinating an attempt from lifecycle events
+# Coordinating an attempt from lifecycle events, version 2
 
-Research for [#1150](https://github.com/basaltbytes/usine/issues/1150) and [#1149](https://github.com/basaltbytes/usine/issues/1149). Read on 2026-11-11 against usine `origin/main` at `658c8c444ded5141ca71c76fe5e360f862d40a20`, with `@earendil-works/pi-durable` 1.4.0, `@anthropic-ai/claude-agent-sdk` 0.3.311 (type declarations read from an installed copy of that exact version), and the Codex app-server schema generated at 0.164.0 (`packages/agents/src/protocol/codex/upstream-schema.json`). The dogfood instance's operator API was read with GET requests only. Claims that this note couldn't check against a pinned source are marked **unverified**.
+Second version of the design for [#1150](https://github.com/basaltbytes/usine/issues/1150) and [#1149](https://github.com/basaltbytes/usine/issues/1149). [Version 1](./attempt-coordination-from-events-v1.md) kept pi-durable as the coordinator's store. This version removes it from the coordinator, makes the wake-up seam a core part of the design, and admits three handler kinds behind that seam.
+
+Read on 2026-11-11 against usine `origin/main` at `658c8c444ded5141ca71c76fe5e360f862d40a20`. Pinned sources: `@earendil-works/pi-durable` 1.4.0, `effect` 4.0.6, `@anthropic-ai/claude-agent-sdk` 0.3.311 (type declarations), and the Codex app-server schema generated at 0.164.0. CLI flags were checked on the locally installed Claude Code 2.1.322 and Codex CLI 0.153.4, which differ from the pins (Claude Code 2.1.311 in worker images, Codex 0.164.0); those checks are marked. Claims not checked against a pinned source are marked **unverified**.
+
+The goal is a quickstart that requires no subscription from a specific model provider. A new instance must start and complete runs with whichever single harness login or key the person has for the children (Claude subscription, ChatGPT subscription, API key, or local endpoint), with no separate coordinator credential.
 
 ## Recommendation
 
-Accept #1150. Coordinate each attempt with a rules-driven durable task that starts one child with the rendered task, maps the child's typed result to the attempt outcome, and routes operator input to the live child; keep pi-durable as the store for that task and its delegations, and keep the Pi parent beside it, selected per agent with `parent: pi` or `parent: none`. Every decision point seen in the run history can be a rule, so the first release has no model call at all and an instance with only a Claude subscription runs from the first slice that exposes `parent: none`. Deliver in this order: extract the delegation core, the pure rules module, and a parent-optional attempt channel in parallel; then the event-driven attempt task; then configuration and replay tests in parallel; then the quickstart on a Claude subscription (seven pull requests, three of them parallel, before #1149 closes). Build the stateless decision call afterwards, only if classifying reports without a marker shows rules mislabel outcomes, and remove the Pi parent once `parent: none` is the default and nothing needs multi-child orchestration.
+Build the event-driven coordinator without pi-durable. It implements the existing `AttemptRuntime` port and keeps the attempt journal in usine tables, behind an `AttemptJournal` port with an in-memory adapter, a SQLite adapter in the runtime database, and a contract suite; Postgres follows with the other ports. The Pi parent stays on pi-durable beside it, and pi-durable leaves with the Pi parent. Each lifecycle event wakes one handler behind one seam: the handler receives the event and an attempt context rebuilt from the journal, and records one `Decision`. A handler is a rule, a direct API call to a small JSON model, or a short Claude Code session with decision tools. Rules handle every event in the first release, so the quickstart goal holds after issue 8 (configure `parent: none`), with the quickstart rewritten in issue 9. A model-handled event then takes one follow-up pull request per handler kind, with no redesign.
 
-## Evidence
+## Version 1 and version 2
 
-### Run history
-
-From #1149's comment and #1150: 1,034 attempts in 991 runs, 2026-10-28 to 2026-11-11. 990 attempts had one child, 24 had two, 1 had three, and 19 had none (17 failed). 22 of the 25 multi-child attempts were reattached after a restart. Parent sessions used 7.9M of 155M tokens.
-
-Read for this note:
-
-- **Run `2c33c58d` (review-pr, reviewer).** Attempt 1's parent wrote its own paraphrase of the task as the `subagent` argument (about 600 characters restating the rendered task). The child's only output after its first sentence was `API Error: Request rejected (429) · This request would exceed your account's rate limit.` and then `SessionFinished`; the child's result reached the parent as an ordinary report, not as `AgentCapacityError`. The parent delegated again, got the same text, and ended with `[usine:blocked]`, so the attempt failed with `BlockedFailure` and `providerRetry` stayed null. Attempt 2, after a manual retry, succeeded with one child. The misclassification starts in the Claude adapter, not the parent: the parent only wrapped a report it was given (#1147, in progress).
-- **The dogfood personas encode a pass-through parent.** `developer` and `finisher`: "If and only if a tool literally named `subagent` is available, delegate the full task to it once, passing the task text word for word, and return its result unchanged." `reviewer`: "If the subagent tool is available, delegate the full review to one child and return its result." Children read the persona too (`assembleChildPrompt`), and the reviewer's child in `2c33c58d` began with "I'll delegate the full review to one child agent", so it used Claude Code's own subagent tool: one usine child plus one nested Claude subagent for a task one session can do.
-- **Settings.** `max_children: 4`, `parent_model: openai-codex/gpt-5.6-terra`, `parent_effort: medium`.
-
-### Code
-
-- **The rendered task already reaches the child unchanged** (`assembleChildPrompt` in `packages/agents/src/prompt.ts`; ADR 0005 amendment of 2026-11-02). The parent's `task` argument is "supplemental context".
-- **The parent's whole instruction set** (`parentGuidance` in `packages/durable/src/attempt/extension.ts`) is: delegate, relay a reserved report verbatim, delegate again after an interrupted call with "inspect the checkout and continue", answer an operator message and wait, and act on a steer that couldn't be forwarded. Each is a rule.
-- **Restart durability lives outside the parent conversation.** `subagent` is `replay: "safe"` (`subagent.ts:803`): a replay reuses the delegation's count and saved child session, restores holds, pauses, idle reports, unread operator input, and continuation history, and resumes the child through the shared continuation policy (`packages/agents/src/harness/continuation.ts`). The documents are `AttemptRecordDoc`, `HoldDoc`, and the task-scoped `SubagentDoc` (`attempt/documents.ts`, `attempt/child.ts`).
-- **Outcome mapping already prefers the child.** `run` in `attempt/task.ts` fails the attempt with the child's stored report (`childBlocker`: blocked, question, failed, capacity, infra) when the parent relays none, and an infrastructure failure always wins.
-- **Operator input to the parent is already forwarded** to the single live child for a steer (`routeParent`, `runtime.ts:374-397`). Operator messages, interrupts, and releases to the parent act on the Pi conversation and the parent's hold.
-- **pi-durable tasks can own tasks.** `TaskRuntime` in pi-durable 1.4.0 has `waitForTask`, `ownedTasks`, `abortOwned`, and `outcomes`, and `TaskOptions.ownership` accepts a task owner (`dist/types.d.ts:235-262`, `:341`). A coordinator task can create one delegation task per child and wait on it, and both resume after a restart. Whether aborting an owner cascades to task-owned tasks is **unverified**; `abortOwned` covers it explicitly.
-- **The relay is coupled to the parent session.** `relayAttempt` emits `Started` only once `record.parentModel` is set and holds early worker notices until then (`relay.ts:587-628`). `Started.parentModel` is a required `ModelId` (`core/src/attempt/channel.ts:95`).
-- **The engine already handles the rest.** `ProviderCapacityFailure` and `InfraFailure` are the retryable failures (`core/src/attempt/failure.ts:126`), and the engine waits for a provider limit through `providerRetry`. `CompletionCheck` verifies outcome labels after a successful attempt and fails the run with `AgentFailure` when they're missing (`engine/src/completion-check.ts`).
-
-## Answers to the questions in #1150
-
-### 1. Which decision points need a model?
-
-None of the observed ones. Each row below is a rule, and the table names what the rule reuses.
-
-| Decision point | Rule | Reuses |
+| | Version 1 | Version 2 |
 | --- | --- | --- |
-| Attempt starts | Delegate with the rendered task and a fixed one-line context. | `assembleChildPrompt` |
-| Child returns a report with a reserved marker | Fail with the mapped failure. | `childReportFailure` |
-| Child returns a report without a marker | Complete with the report as the attempt's message. The engine's `CompletionCheck` still verifies outcome labels. | `completedOutcome`, `CompletionCheck` |
-| Child hits a provider limit | Fail with `ProviderCapacityFailure`; the engine waits and retries. Requires the adapter to classify the limit (#1147). | `AgentCapacityError`, `providerRetry` |
-| Child fails to launch or loses its transport | Fail with `InfraFailure`; the engine retries from salvage. | `recordInfrastructureFailure` |
-| Restart while a child runs | Resume the saved child session. | `subagent` replay path |
-| Restart, and the child can't resume (no saved session, other worker or checkout, resume refused) | Delegate one replacement within the child-session budget, with the context the parent prompt prescribes today: inspect the checkout and continue. Otherwise fail with `InfraFailure`. | Child-session budget, `childBlocker` precedence |
-| Budget exceeded | Fail with `ChildSessionBudgetFailure`. | `childBudgetExceeded` |
-| The run ends without its outcome label | Unchanged: the engine fails the run. A follow-up child here is an option (owner question 3), not a requirement. | `CompletionCheck` |
+| Coordinator store | New pi-durable tasks (`usine.coordinator`, `usine.delegation`) in `.usine/durable.sqlite` | `AttemptJournal` tables in the runtime database |
+| Postgres | Not reachable, except by implementing pi-durable's 16-method `Storage` interface | Reachable through the same port pattern as the engine |
+| Backup and restore | Two files, copied one after the other, not one snapshot (ADR 0010 amendments of 2026-10-08 and 2026-10-12) | One file for every `parent: none` attempt |
+| Pull requests to the quickstart goal | 7 (critical path of 4) | 9 (critical path of 5: one of 1 to 4, then 5, 6, 8, 9) |
+| Model at decision points | Deferred | Seam and context builder land with the coordinator; first model handler is one follow-up pull request |
+| When the Pi parent is removed | pi-durable stays for the coordinator | pi-durable and `@earendil-works/chord` leave the dependency tree |
+| Critical-path risk | Medium: new tasks over tested documents | Higher: a new journal adapter and a new outbox on the critical path, mitigated by the contract suite and the existing replay fixtures |
 
-The only point where a model could add judgement is a report without a marker whose text contradicts success, like the `API Error … (429)` report in `2c33c58d`. The right fix for that case is in the adapter (#1147), because a classifier can be wrong in the same way a parent was. A decision call stays useful for free-text reports that no adapter can classify; whether those occur is the classification below.
+Version 2 costs two more pull requests, mainly the journal port and splitting the runtime in two. In return, the coordinator never has to be migrated off pi-durable, and the instance returns to one runtime file.
 
-**Classification still to do.** The operator API has no list of runs, so the 19 attempts without a child and the two uninspected multi-child runs (`d35305c2`, `f74f34a7`; only short IDs were available) couldn't be fetched by ID. The classification needs, per attempt: the attempt ID, its outcome and failure tag, the number of child `SessionStarted` events, and the parent's last `TextOutput`. A read-only query on `usine_attempts` joined with `usine_attempt_transcripts` on the dogfood host gives all four. For the 19, the expected classes are a parent start failure (unknown model, refused credential, ChatGPT window exhausted), a parent that answered without delegating, and a cancellation before the first delegation; all three disappear or become a child failure under `parent: none`.
+## 1. What pi-durable provides once there is no Pi conversation
 
-### 2. Is planned multi-child work a use case to keep?
+Counted from `packages/durable/src` on `origin/main` (6,155 lines): 37 `tx.doc`, 30 `durable.use`, 16 `harness.commit`, 14 `api.commit`, and a few `watchDoc`, `waitForTask`, `abortTask`, `submissionByRequest`, and conversation calls.
 
-Not in one attempt. No attempt split a task, and all three personas tell the parent not to. Multi-agent work already exists between loops: review hands to act-on-findings through labels, and step outputs ([ADR 0034](../adr/0034-step-outputs.md)) carry typed results from one run to the next. Keep `parent: pi` as the opt-in for in-attempt orchestration during migration, and remove it unless a loop shows a need that a handoff can't serve (owner question 2).
+| Capability used today | Used for | What provides it in version 2 |
+| --- | --- | --- |
+| Task store and checkpoints (`defineTask`, phases, `NextTaskState`) | The `usine.attempt` task, its `prepare` and `run` phases, and the terminal outcome | The coordinator's state row and the event ledger in `AttemptJournal`. The engine's run fiber is the driver: it already restarts each open run at startup and calls `StepExecutor.execute` with `reattach` (ADR 0003 amendment of 2026-10-11). |
+| Documents in one transaction (`AttemptRecordDoc`, `HoldDoc`, `SubagentDoc`) | Children count, child blocker, budget, relay cursor, pending outbound envelopes, queued inputs, holds, pauses, each delegation's saved session, output, idle report, continuations, and in-flight tools | Journal tables, written through `SqlClient` transactions (table list below) |
+| Document watches (`watchDoc` with `firstAccepted`) | Waiting for a hold to end, guidance to arrive, and the budget flag | An in-process `SubscriptionRef` per attempt in the hub, signalled after each commit. One orchestrator process owns the runtime database (ADR 0010), so an in-process signal is enough; a multi-process Postgres deployment would need a notification channel (out of scope). |
+| Task ownership (`createTask`, `waitForTask`, `abortOwned`) | Version 1's delegation tasks | The delegation row and its intent, resumed by the coordinator's own fiber |
+| Restart resume (`durable.resume`, `repairUnreadableConversations`, `abortEndedAttempts`) | Re-running unfinished tasks at layer build; repairing unreadable pi-durable conversations | `AttemptRuntime.execute` with `reattach`, called by the engine as today. Repair has no equivalent: it exists for pi-durable's own storage. |
+| Idempotent submission (`requestId`, `submissionByRequest`) | Exactly one parent turn per guidance; queued operator input to the parent | Not needed without a parent conversation. Operator input to children is already acknowledged by ID (ADR 0005 amendment of 2026-11-06). |
+| The `subagent` tool's replay path (`replay: "safe"`, `ToolExecutionApi`) | Resuming the saved child after a restart | The delegation core behind a `DelegationJournal` of domain operations (issue 1), with a journal adapter in version 2 and a pi-durable adapter for the Pi parent |
+| Outbox for channel envelopes (`pendingOutbound`, `nextOutbound`) | Relaying to the sink exactly once in order across restarts | An outbox table in the journal. The engine keeps the first copy of a resent envelope by attempt, direction, and sequence (ADR 0010 amendment of 2026-10-08). |
 
-### 3. Typed contract of a decision call
+Can pi-durable's storage meet the storage direction of 2026-11-03? Only partly. pi-durable 1.4.0 defines a pluggable `Storage` interface (`dist/types.d.ts:982`: 16 methods, including `mintId`, `findLatestHeadMarker`, and scans of conversations, entries, submissions, tasks, and documents) and ships `testing/storage-conformance`. Its adapters are memory, IndexedDB, JSONL, Node SQLite, and Cloudflare SQLite; there is no Postgres adapter. usine could write one against the conformance suite, but the schema, migrations, and semantics would be pi-durable's, not usine's dialect module, and pi-durable "controls its format, assumes one writer, and commits through its own connection" (ADR 0010 amendment of 2026-10-08). That doesn't meet "usine's own ports, dialect SQL in one module per adapter".
 
-The call is optional and never on the path that keeps an instance running.
+### Where the attempt journal lives
 
-- **Input** (`DecisionRequest`): the attempt ID, the question tag (`UnclearReport` first), the rendered task truncated to a fixed size, the child's final report truncated to a fixed size, the reserved markers and their meanings, children used and the budget, and the loop's outcome labels.
-- **Output** (`Decision`, decoded with Schema from the model's structured output): `Accept`, `Fail { kind: "blocked" | "question" | "failed", message }`, or `Delegate { context }`. The rules clamp it: `Delegate` past the budget becomes `Fail { kind: "failed" }` with the budget in the message.
-- **Failure mode**: every failure is `DecisionUnavailable { reason }`, never an attempt failure. No admitted route, a refused credential, a provider limit, a timeout, or output that doesn't decode all fall back to the rule for that point, which for `UnclearReport` is `Accept`, today's behavior when the Pi parent returns plain text. An instance with no decision route behaves exactly like rules-only.
-- **Durability**: the coordinator commits `Decide` as its checkpoint before the call and commits the decision with the next transition. A restart reruns the call; it is at least once and costs tokens only.
+It goes in the runtime database, owned by the coordinator module, with its own migrations, as `@usine/config` does in `configuration/sqlite/migrations.ts`. The port is platform-free; adapters use `SqlClient` only, following the #637 reference and the engine's contract suites (`packages/engine/test/contracts/`).
 
-### 4. A stateless call on a Claude subscription
+| Table | Rows |
+| --- | --- |
+| `usine_attempt_coordination` | One per attempt: stored request, coordinator state, status (`open`, `terminal`, `settled`), terminal outcome, harvested result, unsupervised time, outbound and inbound sequences, and a revision for optimistic writes |
+| `usine_attempt_events` | Append-only ledger: attempt, sequence, event, and the decision recorded for it |
+| `usine_attempt_delegations` | One per child: number, session ID, assignment, saved session, prompted flag, idle report, continuation history, in-flight tools, retained output, outcome, and status (`intended`, `running`, `settled`) |
+| `usine_attempt_supervision` | Holds and pauses per session |
+| `usine_attempt_inputs` | Queued operator input per target session, with its delivery state |
+| `usine_attempt_outbox` | Reserved channel envelopes not yet acknowledged by the sink |
 
-Run it through the agent's own harness, on the attempt's worker, with the attempt's credential route, as one tool-less turn. For Claude Code that is the Agent SDK `query()` driving the unmodified Claude Code binary, which is the same client path the children use today and the one [model-access.md](./model-access.md) requires. Verified in SDK 0.3.311 `sdk.d.ts`: `tools: []` disables every built-in tool (`:1680-1689`), `outputFormat: { type: "json_schema", schema }` constrains the result (`:2005-2021`, `OutputFormat` at `:2528`), the result carries `structured_output` (`:6097`) or fails with `error_max_structured_output_retries` (`:5943`), and `persistSession: false` keeps no transcript (`:1863`). `maxTurns` limits the call (`:1973`).
-
-For Codex, `thread/start` accepts `ephemeral` and `turn/start` accepts `outputSchema` in the 0.164.0 schema. Disabling Codex's shell and edit tools for that turn is **unverified**, so Codex doesn't declare the capability until a probe shows a tool-less turn. Pi calls a pi-ai provider directly, which is stateless by construction; its structured output is **unverified** in pi-ai 1.4.0.
-
-Terms: this adds no route. The call uses the credential that already pays for the child, through the client already admitted for it ([ADR 0027](../adr/0027-gateway-credential-proxy.md), amendment of 2026-10-26). The Agent SDK overview's restriction on third-party products offering claude.ai login applies to it exactly as it applies to the children today, no more.
-
-### 5. Operator input with more than one live child
-
-The event-driven coordinator runs children one at a time, so at most one is live. A parent-addressed message, steer, interrupt, or release goes to that child, with the child's hold and pause semantics. When no child is live (between a finished child and the outcome commit, or during a decision call), the coordinator refuses the input with "No session is working on this attempt", recorded as `InterventionRejected`. Concurrent children exist only under `parent: pi`, where today's rule stays: a steer is forwarded only when exactly one child is live, and other input goes to the Pi parent.
-
-### 6. Migration beside the Pi parent
-
-Yes. `RunSpec` gains a `parent` field that decodes as `pi` for older attempts, and `createOrFind` creates either the existing `usine.attempt` task or the new `usine.coordinator` task. The choice is stored in the task input, so an attempt keeps its coordinator across a configuration change and a restart. Configuration selects it per agent with an instance default. Both tasks share `AttemptRuntime`, the hubs, the relay, the documents, and the delegation core.
-
-### 7. What remains of `packages/durable` and pi-durable
-
-pi-durable stays: it is the transactional store, the task scheduler, document watches, and restart resume for the coordinator and delegation tasks. After the Pi parent is removed, `packages/durable` keeps `harness.ts` (storage and resume), `attempt-runtime.ts`, `attempt/runtime.ts` without `routeParent`'s conversation branches, `hubs.ts`, `relay.ts` without parent entries and parent usage, `documents.ts`, `child.ts`, `repair.ts`, `request.ts`, `outcome.ts`, `watch.ts`, the delegation core, and `coordinator/`. It deletes `attempt/parent.ts`, `attempt/task.ts`, `attempt/extension.ts`, `attempt/steering.ts`, `attempt/events.ts`, `gateway.ts`, the parent half of `live.ts`, and `fauxParent` in `testing.ts`. `@earendil-works/pi-ai` and `pi-coding-agent` stay only while Pi is a child harness. A later move off pi-durable, for example to Durable Objects, gets easier: a rules coordinator waits on events and can hibernate, which a model parent couldn't ([event-driven-orchestrator.md](./event-driven-orchestrator.md), "Consequences for an Attempt").
-
-## Decision
-
-Coordinate attempts from lifecycle events with rules, as #1150 proposes. The model parent's recorded reason, in-run orchestration ([ADR 0005](../adr/0005-pi-parent-agent-layer-team-roster.md), "Considered options"), isn't used: one child per attempt in 96% of attempts, no split in any, and personas that forbid it. The durable state is the delegation journal, which this design keeps. The decision call is deferred until the classification in answer 1 shows a need. Step 11 of [harness-adapters.md](./harness-adapters.md) (the journaled vendor coordinator) is dropped.
-
-## Options compared
-
-| | A. Journaled vendor coordinator | B. Event-driven coordinator (#1150) | C. Wider Pi routes | D. t3code practices |
-| --- | --- | --- | --- | --- |
-| Claude-subscription-only user | Gets a Claude Code parent on the orchestrator host, billed to the plan | Gets every loop with no parent; optional decision calls bill the plan through Claude Code | Nothing: Anthropic's terms exclude Pi from the Claude plan | Not an option on its own; informs B |
-| Restart recovery versus pi-durable today | Weaker: the in-flight parent turn and its tool call are lost and reconciled by message; duplicate delegation needs single-flight guards | Equal for children (same replay path); stronger for the coordinator, which has no turn to lose: each transition is one commit | Unchanged | — |
-| Critical-path risk | High: second coordinator implementation, per-vendor restart matrix | Medium: one new task over existing documents; relay decoupling | Low per provider, but pools are a core schema change | — |
-| Pull requests to the quickstart goal | 4 to 6 on the critical path, plus configuration | 7, three in parallel | Not reachable | — |
-| Maintenance | Two coordinators, vendor transcript reconciliation | One coordinator; the Pi parent is deleted later | One pool per provider, terms tracking per OAuth client | — |
-
-**A.** Claude SDK 0.3.311 has what A needs: `createSdkMcpServer` (`sdk.d.ts:633`), `sessionId` and `resume` (`:2133-2139`), and an alpha `sessionStore` that mirrors transcripts to external storage (`:1875`, `:6867`). Codex 0.164.0 has the `item/tool/call` server request and `DynamicToolSpec`, but `dynamicTools` isn't in the stable `ThreadStartParams`; it sits behind `experimentalApi`, and MCP is the stable path. None of this removes the need for usine's journal and a reconciliation step after resume, which is the cost #1150 avoids. Replaced if this design is accepted.
-
-**C.** Pi 1.4.0 has subscription OAuth for `github-copilot`, `openai-chatgpt`, `anthropic`, `meta`, `kimi-coding`, `openai-codex`, and `xai` (`isSubscription: true` in `dist/auth/oauth/*.js`), and API-key providers such as OpenRouter, DeepSeek, Z.ai, Groq, and the token-plan providers. On the orchestrator host, `resolvePiPool` already admits every API-key provider into `apiKeys`, including OpenAI-compatible endpoints and local models through `models.json`; only the gateway path (`gatewayModelAccess`) restricts the parent to `anthropic`, `openai`, and `openai-codex`. Adding a subscription OAuth provider needs a new `BillingPool` literal (core, accounting, web) and a terms review per OAuth client; GitHub's and xAI's terms for third-party clients are **unverified**. None of it helps a Claude-only user. Not worth a slice. One sentence in #1148 can say that any Pi API-key provider, including OpenRouter and a local OpenAI-compatible endpoint, already runs the parent.
-
-**D.** t3code has no parent session either: delegation is an app-owned durable record, and recovery and continuation are harness-neutral policies above the adapters ([t3code-harness-encapsulation.md](./t3code-harness-encapsulation.md)). usine has adopted the continuation policy, the process owner, usine-assigned IDs, and replay tests. Two points apply here: each t3code driver instance carries a text-generation service next to its orchestration adapter (`driver.ts:35-117`), which is the shape of the `decide` primitive below; and finalization replays from persisted events after a restart (`orchestrator-mcp-server.md:510-513`), which is what committing each coordinator transition gives.
-
-## Design
+## 2. Target design
 
 ### Seam
 
-The coordinator is a pi-durable task whose phases react to one event each and commit the resulting action with the next checkpoint. Events are the typed results that already exist: the attempt start, a delegation's outcome, and a decision's outcome. Operator input doesn't pass through the coordinator; `AttemptRuntime.intervene` routes it to the live child. No new event bus: the delegation task's terminal receipt (`waitForTask`) is the event, and the task checkpoint is the journal.
-
 ```text
-engine run fiber ─ AttemptRuntime.execute ─ relay ─ attempt channel ─ transcript
-                         │
-           usine.coordinator task (parent: none)        usine.attempt task (parent: pi)
-             start ─▶ delegate ─▶ [decide] ─▶ terminal       Pi conversation + subagent tool
-                         │                                          │
-                 usine.delegation task ◀── delegation core ──▶ subagent tool
-                         │
-                 ChildBackend.launch / resume (Harnesses, continuation policy)
+engine run fiber ─▶ StepExecutor.execute ─▶ AttemptRuntime (router)
+                                              ├─ parent: pi   ─▶ pi-durable runtime (unchanged)
+                                              └─ parent: none ─▶ coordinator runtime
+                                                                    │
+            event ─▶ AttemptContext.build(journal) ─▶ WakeUp handler ─▶ Decision
+                                                     (rule | small JSON model | harness session)
+                                                                    │
+                            clamp ─▶ apply ─▶ one transaction: event, decision, state, effect intents, outbox
+                                                                    │
+                                              effects after commit: delegate (launch or resume a child),
+                                                                    flush outbox, finish
 ```
 
-### Modules
+`AttemptRuntime` (`packages/durable/src/attempt-runtime.ts`) stays the seam to the executor; `packages/executor/src/durable-session.ts` doesn't change. A router implements it: `execute` dispatches on `RunSpec.parent`, and every other operation looks the attempt up in the journal first and falls back to the Pi runtime.
 
-```text
-packages/durable/src/attempt/
-  delegation/
-    delegation.ts   delegate(): one child from launch or resume to a typed outcome (moved from subagent.ts)
-    journal.ts      DelegationJournal: the commits, reads, watches, and output a delegation needs
-  coordinator/
-    rules.ts        platform-free and pure: next(state, event) -> [state, action]
-    task.ts         usine.coordinator and usine.delegation pi-durable tasks
-    decision.ts     DecisionCalls service; rulesOnly layer (added with the decision slice)
-  subagent.ts       the Pi tool: a DelegationJournal over ToolExecutionApi, then delegate()
-```
-
-### Interface sketch
+### Ports
 
 ```ts
-// delegation/delegation.ts
-export const DelegationOutcome = Schema.Union([
-  Schema.TaggedStruct("Reported", { sessionId: AgentSessionId, report: Schema.String, answeredOperator: Schema.Boolean }),
-  Schema.TaggedStruct("Reserved", { sessionId: AgentSessionId, kind: ReservedKind, message: Schema.NonEmptyString }),
-  Schema.TaggedStruct("Interrupted", { sessionId: AgentSessionId, reason: Schema.NonEmptyString, output: Schema.String }),
-  Schema.TaggedStruct("BudgetExceeded", { attempted: ChildSessionCount, max: ChildSessionBudget }),
-]);
-export type DelegationOutcome = typeof DelegationOutcome.Type;
-
-/** Runs one delegation; fails with `AgentSessionError` only for a launch failure on a fresh delegation. */
-export const delegate: (
-  journal: DelegationJournal,
-  assignment: string,
-) => Effect.Effect<DelegationOutcome, AgentSessionError | DurableHarnessError, ExtensionServices | Scope.Scope>;
-
-// delegation/journal.ts: one value per delegation, built by the tool or the delegation task.
-export interface DelegationJournal {
-  readonly attemptTaskId: TaskId;
-  readonly delegationId: TaskId; // keys SubagentDoc
-  readonly commit: <A>(change: (tx: Tx) => A | Promise<A>) => Effect.Effect<A, DurableHarnessError>;
-  readonly snapshot: <D>(doc: DocDefinition<D>, id: string) => Effect.Effect<D | undefined, DurableHarnessError>;
-  readonly watch: <D>(doc: DocDefinition<D>, id: string, accept: (value: D) => boolean) => Effect.Effect<D, DurableHarnessError>;
-  readonly output: (text: string) => Effect.Effect<void, DurableHarnessError>;
-  readonly aborted: Effect.Effect<void>; // completes when the owning call or task aborts
+// coordinator/journal.ts: platform-free.
+export class AttemptJournal extends Context.Service<
+  AttemptJournal,
+  {
+    readonly open: (request: StoredRequest) => Effect.Effect<CoordinatorSnapshot, JournalError>;
+    readonly load: (attemptId: AttemptId) => Effect.Effect<Option.Option<CoordinatorSnapshot>, JournalError>;
+    /** Appends the event, records its decision, and applies the transition in one transaction. */
+    readonly transition: (
+      attemptId: AttemptId,
+      expected: JournalRevision,
+      step: Transition,
+    ) => Effect.Effect<CoordinatorSnapshot, JournalError | StaleRevision>;
+    /** Records the first decision for an event; returns the recorded one if another came first. */
+    readonly decide: (
+      attemptId: AttemptId,
+      event: EventSequence,
+      decision: RecordedDecision,
+    ) => Effect.Effect<RecordedDecision, JournalError>;
+    readonly delegation: (attemptId: AttemptId, number: ChildSessionCount) => DelegationJournal["Service"];
+    readonly supervise: (attemptId: AttemptId, change: SupervisionChange) => Effect.Effect<Supervision, JournalError>;
+    readonly queueInput: (attemptId: AttemptId, input: QueuedInput) => Effect.Effect<void, JournalError>;
+    readonly reserve: (attemptId: AttemptId, envelopes: ReadonlyArray<AttemptChannel.Outbound>) => Effect.Effect<void, JournalError>;
+    readonly acknowledge: (attemptId: AttemptId, through: AttemptChannel.Sequence) => Effect.Effect<void, JournalError>;
+    readonly settle: (attemptId: AttemptId) => Effect.Effect<void, JournalError>;
+  }
+>()("@usine/durable/coordinator/journal/AttemptJournal") {
+  static readonly memory: Layer.Layer<AttemptJournal>;
 }
 
-// coordinator/rules.ts
-export const CoordinatorEvent = Schema.Union([
-  Schema.TaggedStruct("AttemptStarted", {}),
-  Schema.TaggedStruct("Delegated", { outcome: DelegationOutcome }),
-  Schema.TaggedStruct("DelegationFailed", { message: Schema.NonEmptyString }),
-  Schema.TaggedStruct("Decided", { decision: Decision }),
-  Schema.TaggedStruct("DecisionUnavailable", { reason: Schema.NonEmptyString }),
-]);
-export const CoordinatorAction = Schema.Union([
-  Schema.TaggedStruct("Delegate", { assignment: Schema.String }),
-  Schema.TaggedStruct("Decide", { request: DecisionRequest }),
-  Schema.TaggedStruct("Complete", { message: Schema.NonEmptyString, answeredOperator: Schema.Boolean }),
-  Schema.TaggedStruct("Fail", { failure: AttemptFailure }),
-]);
-export class CoordinatorState extends Schema.Class<CoordinatorState>("@usine/durable/CoordinatorState")({
-  delegations: Schema.Int,
-  replacements: Schema.Int,
-  maxChildren: ChildSessionBudget,
-}) {}
+// delegation/journal.ts: domain operations only, no storage types.
+export class DelegationJournal extends Context.Service<
+  DelegationJournal,
+  {
+    readonly admit: Effect.Effect<Admission, JournalError>; // count, replayed state, budget, superseded infra failure
+    readonly restoredInputs: (session: AgentSessionId) => Effect.Effect<ReadonlyArray<QueuedInput>, JournalError>;
+    readonly supervision: (session: AgentSessionId) => Effect.Effect<Supervision, JournalError>;
+    readonly awaitRelease: (session: AgentSessionId) => Effect.Effect<void, JournalError>;
+    readonly saveSession: (saved: SavedChild) => Effect.Effect<void, JournalError>;
+    readonly markPrompted: Effect.Effect<void, JournalError>;
+    readonly saveContinuations: (at: ReadonlyArray<number>) => Effect.Effect<void, JournalError>;
+    readonly saveProgress: (progress: DelegationProgress) => Effect.Effect<void, JournalError>; // in-flight tools, idle report, output, usage
+    readonly recordReport: (report: ChildReport) => Effect.Effect<boolean, JournalError>; // first report wins
+    readonly recordInfraFailure: (session: AgentSessionId, message: string) => Effect.Effect<void, JournalError>;
+    readonly clearRecoveredInfraFailure: (session: AgentSessionId) => Effect.Effect<boolean, JournalError>;
+  }
+>()("@usine/durable/delegation/journal/DelegationJournal") {}
+```
 
-/** Returns the next state and action; the only place coordinator policy lives. */
-export const next: (
-  state: CoordinatorState,
-  event: typeof CoordinatorEvent.Type,
-) => readonly [CoordinatorState, typeof CoordinatorAction.Type];
+The SQLite adapter puts its dialect SQL in one module (`coordinator/sqlite/`), as the engine does in `database/dialect.ts`; the Postgres adapter adds a sibling module. One contract suite runs against memory and SQLite in CI.
 
-// coordinator/decision.ts (decision slice)
-export class DecisionCalls extends Context.Service<
-  DecisionCalls,
-  { readonly decide: (request: DecisionRequest) => Effect.Effect<Decision, DecisionUnavailable> }
->()("@usine/durable/attempt/coordinator/DecisionCalls") {
-  static readonly rulesOnly: Layer.Layer<DecisionCalls>;
+### The wake-up seam
+
+```ts
+// coordinator/wake-up.ts
+export class WakeUp extends Context.Service<
+  WakeUp,
+  {
+    /** Returns one decision for `event`, or `None` to apply the rule. Never fails the attempt. */
+    readonly handle: (
+      event: CoordinatorEvent,
+      context: AttemptContext,
+    ) => Effect.Effect<Option.Option<RecordedDecision>>;
+  }
+>()("@usine/durable/coordinator/wake-up/WakeUp") {
+  /** Every event goes to its rule. */
+  static readonly rules: Layer.Layer<WakeUp>;
 }
 ```
 
-The `usine.coordinator` task has three phases. `start` commits `CoordinatorState` and the first `Delegate`. `delegate` creates the `usine.delegation` task in the same commit as its checkpoint (so a restart finds it), waits for it with `waitForTask`, applies `next`, and commits the following checkpoint or the terminal outcome. `decide` exists only with the decision slice. A terminal `Complete` or `Fail` waits under `hub.routing`, like `run` in `task.ts` today, until no forwarded steer is pending.
+A rule is a pure function, `ruleFor(event, context): Decision`. A model handler returns `None` on any failure, so the rule applies. The coordinator then runs `clamp(decision, context)` and `apply(state, decision)` from the rules module, whatever the handler kind.
 
-`answeredOperator` comes from the child: the shared conversation (`packages/agents/src/harness/conversation.ts`) already knows whether the turn that produced the final report started from an operator message, and `RunningSession.result` gains that flag. This keeps ADR 0018's rule that an answer to the operator with no commit, pull request, comment, or step output fails the attempt.
+### Does `rules.ts` from version 1 (#1155) survive?
 
-### Configuration
+Mostly. Its state, events, and outcome mapping carry over. Its single `next(state, event)` becomes three pure functions: `ruleFor` (the rule handler), `clamp` (budget, reserved markers that rules always honor, and the at-most-one replacement), and `apply` (state and effect intents). If #1155 has already merged as `next`, the split is a small change inside the coordinator issue.
 
-| Key | Where | Values | Default |
+### Lifecycle events
+
+| Event | Source | Rule | Model-eligible |
 | --- | --- | --- | --- |
-| `parent` | `settings` and agent frontmatter | `pi`, `none` | `pi` until the default flips (owner question 1) |
-| `parent_model`, `parent_effort` | unchanged | Pi model and effort | Used only with `parent: pi`; set with `parent: none` is a configuration error |
-| `decision_model`, `decision_effort` | added by the decision slice | a model of the agent's harness | the agent's model at `low` effort |
+| `AttemptStarted` | `execute` on a new attempt | `Delegate` with the rendered task | No |
+| `ChildReported` with a reserved marker | Delegation outcome | `Fail` with the mapped failure, or `Question` | No; markers are typed facts |
+| `ChildReported` without a marker | Delegation outcome | `Complete` with the report; the engine's `CompletionCheck` verifies outcome labels | Yes, the only one with evidence of value (version 1, answer 1) |
+| `ChildInterrupted` (resume refused, no saved session, worker or checkout gone) | Delegation outcome after a restart | `RetryChild` once within budget, else `Fail` with `InfraFailure` | Later, if needed |
+| `ChildAtCapacity` | `AgentCapacityError` | `Fail` with `ProviderCapacityFailure`; the engine waits and retries | No |
+| `ChildFailed` (launch or transport) | `AgentSessionError` | `Fail` with `InfraFailure` | No |
+| `BudgetExceeded` | Admission | `Fail` with `ChildSessionBudgetFailure` | No |
 
-`parent_harness` from decision 3 of the harness-adapters study isn't added: no second harness fills the coordinator role.
+Some inputs are deliberately not coordinator events:
 
-### Admission
+- **Restart.** The coordinator resumes its open intents from the journal; a resume that fails becomes `ChildInterrupted`.
+- **Operator input.** Messages, steers, interrupts, and releases go to the live child through `intervene`, as interventions do today, never as events (ADR 0018). With no live child, the input is refused.
+- **A provider limit on a decision call.** It makes that handler return `None`, so the rule applies.
 
-- With `parent: none`, configuration load, reload, and startup skip the coordinator admission (`packages/orchestrator/src/parent-admission.ts`), so an instance without a Pi credential starts and quarantines no agent. The child brain is still admitted as `coding-agent` on every worker.
-- The decision call runs as the agent's harness on the attempt's worker with the child's admitted route. It needs one new capability, `structured-output`, declared by Claude Code; Pi and Codex declare it after their probes.
-- `durable-coordination` and the `coordinator` role stay for `parent: pi` and are removed with the Pi parent.
+### Atomic transitions
+
+Each event is handled in four steps:
+
+1. Build the context from the journal.
+2. Call the handler.
+3. Record the decision with `AttemptJournal.decide`, keyed by attempt and event sequence; the first decision wins.
+4. In one transaction, run `transition`: append the event, store the decision, update the state, insert the effect intents (a delegation row with status `intended`, or the terminal outcome), and reserve the outbound envelopes.
+
+Effects run only after the commit. On restart, `execute` loads the snapshot. If the event's decision is recorded but its transition isn't, the coordinator applies the recorded decision instead of calling the handler again. It then resumes `intended` and `running` delegations through the delegation core's replay path and flushes the outbox.
 
 ### Restart matrix
 
 | Restart point | Expected | Test |
 | --- | --- | --- |
-| Before `start` commits | `start` reruns; one delegation | Unit test with SQLite storage and a scripted `ChildBackend` (`packages/durable/test/support.ts`) |
-| After the delegation task commits, before the child saves its session | The delegation returns `Interrupted`; one replacement child within budget; the replacement clears the earlier infrastructure failure | Unit test, interrupting the `execute` fiber at the journal's `started` |
-| While the child works | The saved child resumes with one continuation instruction; same child ID and budget slot | `packages/durable/test/replay.ts` `restart` scenario for Claude and Codex, without `fauxParent` |
-| After the child finished, before the coordinator's transition commits | The delegation task's terminal receipt is read; no second child | Unit test, interrupting between `waitForTask` and the transition commit |
-| While the child is held or paused | Hold and pause restored before any turn; Release returns the saved report | `held-child-recovery.test.ts` cases run under `parent: none` |
-| While releasing | One terminal outcome | Unit test |
-| With queued operator input | Unread input delivered to the resumed child | `child-recovery-inputs.test.ts` cases under `parent: none` |
-| Credential kind changed | The resumed child uses the current route | `replay.ts` `credential-changed` scenario |
-| Configuration changed from `pi` to `none` during the attempt | The attempt keeps `usine.attempt` | Unit test on `createOrFind` |
-| During a decision call (decision slice) | The call reruns; one transition | Unit test with a scripted `DecisionCalls` |
+| Before `open` commits | `execute` starts the attempt again; one delegation | Contract suite plus a coordinator unit test on SQLite |
+| After a decision is recorded, before its transition | The recorded decision is applied; the handler isn't called again | Unit test with a counting handler |
+| After the transition, before the child saves its session | `ChildInterrupted`; one replacement within budget | Unit test interrupting at `saveSession` |
+| While the child works | Saved child resumes; same child ID and budget slot | Replay fixtures `restart` (Claude, Codex) through the coordinator runtime |
+| After the child finished, before `ChildReported` commits | The delegation's settled outcome is read; no second child | Unit test interrupting after `recordReport` |
+| Held or paused child | Supervision restored before any turn | `held-child-recovery` cases ported to the coordinator |
+| Queued operator input | Delivered to the resumed child | `child-recovery-inputs` cases ported |
+| Outbox pending | Flushed in order; the engine keeps the first copy | Unit test with a duplicating sink |
+| Credential kind changed | The resumed child uses the current route | Replay fixture `credential-changed` |
+| `parent` changed during the attempt | The attempt stays on the runtime it started with | Router unit test |
+| During a model decision | The handler is called again unless a decision was recorded; one transition | Unit test with a scripted handler |
 
-### Docs, glossary, and ADR amendments
+Compared with pi-durable today:
 
-- **ADR 0005**: amendment. The attempt coordinator is a durable task driven by child outcomes, with no model unless a decision point asks for one. The original reason for a model parent, in-run orchestration, isn't used (run history above). `parent: pi` keeps the Pi parent during migration.
-- **ADR 0003**: the amendment of 2026-10-11 says an attempt is the pi-durable task running its Pi parent. Amend: with `parent: none`, the attempt task owns delegation tasks instead of a conversation.
-- **ADR 0018**: "message the parent" addresses the live child under `parent: none`; the answered-operator rule reads the child's final turn.
-- **ADR 0021**: an attempt with `parent: none` has no parent pool; decision calls record the child route's pool.
-- **harness-adapters.md**: decisions 2 and 3 superseded; step 11 dropped.
-- **CONTEXT.md**: Reattach ("if its Pi parent's durable task is still live") becomes "if its durable task is still live"; Hold, Worker, and Child-session budget drop "Pi parent" where it no longer holds. No new term is needed until the decision slice, which adds **Decision call** if the owner keeps it.
-- **Docs**: `reference/configuration/agents.md` ("Parent selection"), `reference/configuration/settings.md`, `guides/message-an-agent.md`, `guides/answer-an-agent.md`, `get-started/quickstart.mdx`, and the README feature list.
+- **Stronger:** one database, so a backup is one snapshot for `parent: none` attempts; no class of unreadable conversations to repair; transitions and their intents commit together in usine's own schema.
+- **Equal:** child resume, holds, inputs, and continuation, which are the same delegation code.
+- **Weaker until proven:** pi-durable's commit and watch semantics have run in production for a month; the journal adapter and outbox are new critical-path code. The contract suite and the existing replay fixtures are the mitigation.
 
-## Implementation issues, in order
+### What gets deleted when the Pi parent goes
 
-Parallel groups touch no common file: **{1, 2, 3}**, then 4, then **{5, 6}**, then 7. Issue 8 can run in parallel with any of 4 to 7. Each issue amends the ADRs and docs its behavior change touches, in the same pull request.
+`packages/durable/src` has 6,155 lines. With the Pi parent removed, these go: `harness.ts` (509), `attempt/task.ts` (541), `attempt/runtime.ts` (699, replaced by the coordinator runtime), `attempt/relay.ts` (812, replaced by the outbox), `attempt/subagent.ts` (807, whose policy has moved into the delegation core), `testing.ts` (578), `attempt/repair.ts` (248), `attempt/parent.ts` (236), `gateway.ts` (217), `attempt/documents.ts` (158), `attempt/events.ts` (145), `backup.ts` (120), `live.ts` (98), `http-dispatcher.ts` (97), `attempt/steering.ts` (83), `attempt/extension.ts` (42), and the small helpers. That is about 5,900 lines deleted against an estimated 2,500 to 3,000 lines of coordinator, journal, adapters, and delegation core. Dependencies leaving `packages/durable` are `@earendil-works/pi-durable`, `@earendil-works/chord`, `pi-agent-core`, `pi-ai`, `pi-codemode`, `pi-coding-agent`, `pi-mcp`, `pi-telemetry`, and `pi-tui`. Pi children keep the `pi-*` packages in `packages/agents`, which has no pi-durable dependency (checked in `packages/agents/package.json`). `apps/server/src/backup.ts` drops its durable copy.
 
-### 1. Extract the delegation core from the `subagent` tool
+## 3. Migration
 
-**Context.** The `subagent` tool in `packages/durable/src/attempt/subagent.ts` holds the whole delegation: budget accounting, saved-session resume, hold and input restoration, event forwarding, and report mapping. A coordinator without a Pi conversation needs the same logic outside a tool call. See the design note for #1150.
+The coordinator is built beside the Pi parent with no shared state. The router sends new `parent: none` attempts to the coordinator and everything else to the Pi runtime, which keeps `.usine/durable.sqlite` until it is removed. They share code, not storage: the delegation core, the continuation policy, `ChildBackend`, and the hub's in-memory child map. The Pi runtime's `subagent` tool calls the delegation core through a pi-durable adapter of `DelegationJournal`.
 
-**Scope.** Move the delegation into `attempt/delegation/delegation.ts` behind a `DelegationJournal` interface and return a `DelegationOutcome` tagged union (`Reported`, `Reserved`, `Interrupted`, `BudgetExceeded`). The tool builds a journal over `ToolExecutionApi` and maps the outcome to its `ToolExecutionResult`. No behavior change.
+Fastest order to "a Claude-subscription-only instance runs":
+
+1. In parallel: the delegation core behind a domain journal (issue 1), the rules split (issue 2), the parent-optional channel (issue 3), and the journal port with its adapters (issue 4).
+2. The coordinator runtime with rules-only wake-up and the context builder (issue 5).
+3. Interventions (issue 6), with the restart replays (issue 7) in parallel.
+4. Configuration (issue 8). The goal holds here: an instance with `parent: none` needs no Pi credential.
+5. The quickstart rewrite (issue 9).
+
+Pi as a child harness needs nothing from pi-durable. It runs `pi-coding-agent` sessions from `packages/agents`, which has no pi-durable dependency.
+
+## 4. The decision step
+
+### One contract, two transports
+
+`Decision` is a Schema union. From it come the JSON Schema for the API model (`Schema.toJsonSchemaDocument`, `effect` 4.0.6 `Schema.d.ts:11630`) and the tool definitions for the harness session (`effect/ai` `Tool` and `Toolkit`, served with `McpServer.toolkit`; all three exist in `effect` 4.0.6 `dist/ai/`). Both transports decode into the same value, and `clamp` validates it.
+
+```ts
+export const Decision = Schema.Union([
+  Schema.TaggedStruct("Complete", { message: Schema.optional(Schema.NonEmptyString) }), // default: the child's report
+  Schema.TaggedStruct("RetryChild", { assignment: Schema.optional(Schema.NonEmptyString) }), // default: the continuation instruction
+  Schema.TaggedStruct("Blocked", { message: Schema.optional(Schema.NonEmptyString) }),
+  Schema.TaggedStruct("Question", { question: Schema.NonEmptyString }),
+  Schema.TaggedStruct("Failed", { message: Schema.NonEmptyString }),
+]);
+
+export class RecordedDecision extends Schema.Class<RecordedDecision>("@usine/durable/RecordedDecision")({
+  decision: Decision,
+  handler: Schema.Literals(["rule", "endpoint", "harness"]),
+  session: Schema.OptionFromNullOr(HandlerSession), // model, route, pool, usage
+}) {}
+```
+
+Free-text fields are optional wherever a rule can supply them, so a model that only picks a label still produces a full decision.
+
+### The context builder
+
+`AttemptContext.build(journal, attemptId, event)` reads only the journal and the stored request. A small model gets no read tools, so this context must be enough on its own:
+
+| Field | Source | Bound |
+| --- | --- | --- |
+| Event | The ledger row | Whole |
+| Loop, agent name, repository, item kind and number | Stored `RunSpec` | Whole |
+| Rendered task | `RunSpec.task` | First 4,000 characters |
+| Expected outcome labels and CI policy | `RunSpec`; issue 5 adds `outcomeLabels`, which the engine has on `Submission` | Whole |
+| Delegations so far | `usine_attempt_delegations`: number, status, outcome kind, and final report | The last two reports up to 4,000 characters each; earlier ones as one line |
+| Last child output | Retained output of the current delegation | Last 2,000 characters |
+| Budget | State and `maxChildren` | Whole |
+| Supervision and pending input | Supervision and input tables | Counts and the newest message, up to 500 characters |
+
+The total cap is 16,000 characters, about 4,000 tokens. Run `2c33c58d` gives typical sizes: a child prompt of 10,700 to 11,900 characters (mostly the rendered task), final reports of 112 and 3,413 characters, and a payload of 14,700 characters that the context leaves out because the task is already rendered from it. A typical context is 6,000 to 8,000 characters.
+
+Without read tools, a small model can't check GitHub state (labels, pull request head, review), read files in the checkout, or see child tool calls. Those facts stay with rules and the engine's `CompletionCheck`.
+
+### Handler kinds
+
+**Rule.** Always available, and the fallback for every failure below.
+
+**Small JSON model over an API.** No harness, no tools, no conversation. `effect` 4.0.6 ships `effect/ai` `DecisionModel` and `Decision` (`dist/ai/DecisionModel.d.ts`, `Decision.d.ts`). A definition pairs one JSON input schema with named `classify`, `rate`, or `probability` decisions, answered in one provider call. Answers are validated, and refusals and missing answers are typed (`decideSettled`). That matches the class the owner describes; I didn't assume a product. The handler classifies the event into a `Decision` tag with probabilities, applies a confidence threshold (below it the rule applies), and lets rules fill the text fields. For a model that writes text, the same handler can use `LanguageModel.generateObject` with the `Decision` schema. No `effect/ai` provider package is installed; the handler implements `DecisionModel.make({ decide })` over an OpenAI-compatible chat completions endpoint with `effect` `HttpClient`. Whether `@effect/ai-openai` exists for `effect` 4 is **unverified**.
+
+- **Configuration:** an instance-level `decision_endpoint` with a base URL, a model, and the name of the environment variable that holds the key, or a key saved under Provider connections. A local endpoint may have no key.
+- **Pool:** `apiKeys`, with the endpoint name recorded, as decision 4 of the harness-adapters study set for endpoints. A local model records no cost.
+- **Admission:** configuration load checks only the shape. The endpoint is never required; an unreachable or refusing endpoint makes the handler return `None`.
+
+**Harness session through the unmodified client.** This is the subscription route. For Claude Code it is the Agent SDK `query()`, which drives the same binary the children use, with these options:
+
+| Option | Value |
+| --- | --- |
+| `tools` | `[]`, which disables every built-in tool (`sdk.d.ts:1680-1689`) |
+| `mcpServers` | `{ usine: createSdkMcpServer(...) }`: the decision tools for this attempt and event, plus `attempt_context`, `child_report(number)`, and `child_output(number, characters)` |
+| `allowedTools` | `mcp__usine__*` |
+| `permissionMode` | `"dontAsk"` ("deny if not pre-approved", `:2028-2039`) |
+| `strictMcpConfig` | `true` |
+| `settingSources` | `[]` |
+| `persistSession` | `false` |
+| `maxTurns` | 4 |
+| `outputFormat` | The `Decision` JSON Schema, used only as a fallback when no tool was called |
+
+Constraints:
+
+- **Replay-safe recording.** Each decision tool calls `AttemptJournal.decide`, and the runtime applies the decision.
+- **One decision per wake-up.** A second decision tool call gets "already decided" as its result, and the handler interrupts the query after the first recorded decision. A session that ends with none returns `None`, so the rule applies.
+- **The MCP server exposes only this attempt's tools**, because it is built per wake-up in the orchestrator process.
+- **A 429 or any SDK error** returns `None`.
+
+The `claude -p` form has the same shape with `--tools ""`, `--mcp-config` and `--strict-mcp-config`, `--allowedTools`, `--permission-mode dontAsk`, `--no-session-persistence`, `--output-format json`, and `--json-schema` (flags checked on Claude Code 2.1.322; the 2.1.311 pin is **unverified**). The SDK is preferred because it serves the tools in process.
+
+For Codex, `codex exec` has `--output-schema` and `--ephemeral` (checked on CLI 0.153.4), and the app-server has `turn/start.outputSchema` and `thread/start.ephemeral` (0.164.0 schema). Turning off Codex's shell and edit tools for one turn is **unverified**, and the tools need an MCP server that Codex can reach. So the Codex handler starts with structured output only, and gains tools once #879's `/api/mcp` can be reached from the worker with an attempt-scoped token. Pi's in-process `pi-ai` call can take the API-model path.
+
+### Placement: the attempt's worker, with the child's route
+
+The decision session runs where the child runs, through the Claude adapter's existing spawner, with the attempt's environment and credential route. The decision tools stay in the orchestrator: SDK MCP servers answer `tools/call` as `mcp_message` control frames over the CLI's stdio (`sdk.d.ts:4695`), so they work over the SSH spawner the adapter already uses.
+
+Reasons:
+
+- It needs no coordinator credential, which is the goal.
+- It uses the child's admitted route and pool, so terms and accounting are the children's.
+- It needs no network path from the worker to the orchestrator.
+- It runs in the attempt container.
+
+The alternative, the orchestrator host behind the gateway with its own caller scope, needs a new gateway scope and, without a gateway, a Claude login on the orchestrator host. It belongs to the supervisor (#799, decision 10 of the harness-adapters study) and can be shared later.
+
+### Relation to #879
+
+#879 serves the operator API as MCP tools with permission filtering, using `effect/ai` `McpServer`. The decision tools reuse the same machinery but not the operator toolkit: a decision session must not hold operator powers such as approve, cancel, or edit. Claude doesn't depend on #879. Codex tools and GitHub read tools do.
+
+### Does the version 1 finding still hold?
+
+Yes. No event observed in the run history needs a model in the first release. The one model-eligible point with evidence, a report without a marker, is better fixed in the Claude adapter (#1147) for the 429 case. The seam lands with the coordinator, so routing that event to a model later is a configuration change plus one handler pull request.
+
+## 5. Fate of the filed issues
+
+| Issue | Fate |
+| --- | --- |
+| #1154 delegation core | **Reword.** `DelegationJournal` must expose domain operations, not pi-durable's `Tx` or `DocDefinition`. If the in-progress branch already exposes them, change the interface before merge. |
+| #1155 rules | **Survives with a small change**: split `next` into `ruleFor`, `clamp`, and `apply`, and add `Decision`. If it merges as `next`, issue 5 does the split. |
+| #1156 relay without a parent session | **Survives for core and web.** The `relay.ts` change isn't needed by version 2, because the Pi parent always has a model; it is harmless if already done. |
+| #1157 run attempts without a parent | **Replaced** by issues 4, 5, and 6 below. |
+| #1158 configure `parent: none` | **Survives**, with blocked-by changed to issue 6. |
+| #1159 replay restart scenarios | **Reword**: run against the coordinator runtime over the SQLite journal. |
+| #1160 quickstart | **Survives**; blocked by #1158. |
+
+## 6. Implementation issues, in order
+
+Parallel groups share no files: **{1, 2, 3, 4}**, then 5, then **{6, 7, 10, 11}**, then 8, then 9. Issue 12 is the Pi removal. Each issue amends the ADRs and docs that its behavior change touches.
+
+### 1. Extract the delegation core behind a domain journal (rewords #1154)
+
+**Context.** The `subagent` tool holds the delegation policy: budget accounting, saved-session resume, restored supervision and input, event forwarding, and report mapping. The event-driven coordinator needs the same policy over usine's own tables, and the Pi parent keeps it over pi-durable.
+
+**Scope.** Move the policy into `attempt/delegation/delegation.ts` and return a `DelegationOutcome` (`Reported`, `Reserved`, `Interrupted`, `BudgetExceeded`). Define `DelegationJournal` as a `Context.Service` of domain operations: `admit`, `restoredInputs`, `supervision`, `awaitRelease`, `saveSession`, `markPrompted`, `saveContinuations`, `saveProgress`, `recordReport`, `recordInfraFailure`, and `clearRecoveredInfraFailure`. No pi-durable type appears in its interface. The `subagent` tool provides a pi-durable adapter. No behavior change.
 
 **Acceptance criteria.**
-- The existing durable tests pass unchanged, including `subagent-recovery`, `subagent-progress`, `held-child-recovery`, `child-recovery-inputs`, `continuation-limit`, and the replay tests.
-- New unit tests cover each `DelegationOutcome` variant through `delegate` with an in-memory journal.
-- `subagent.ts` contains no delegation policy, only the journal adapter and result mapping.
+- The existing durable suite passes unchanged, including the replay tests.
+- An in-memory `DelegationJournal` drives unit tests for every `DelegationOutcome`.
+- `delegation/` imports nothing from `@earendil-works/*`.
 
-**Files.** `packages/durable/src/attempt/subagent.ts`, new `attempt/delegation/{delegation,journal}.ts`, `attempt/child.ts`, `packages/durable/test/`.
+**Files.** `packages/durable/src/attempt/subagent.ts`, new `attempt/delegation/{delegation,journal}.ts`, `attempt/child.ts`, tests.
 
 **Blocked by.** None.
 
-### 2. Add the coordinator rules as a pure module
+### 2. Coordinator rules and the `Decision` contract (rewords #1155)
 
-**Context.** #1150 coordinates an attempt from lifecycle events. Its policy (delegate, map the outcome, replace an interrupted child within budget) must live in one testable place.
+**Context.** Version 2 handles each event with a rule or a model behind one seam, and validates both the same way.
 
-**Scope.** Add `packages/durable/src/attempt/coordinator/rules.ts` with `CoordinatorState`, `CoordinatorEvent`, `CoordinatorAction`, and `next`. It imports only `@usine/core` schemas and has no IO. Not wired yet.
+**Scope.** In `packages/durable/src/attempt/coordinator/rules.ts`, define `CoordinatorState`, `CoordinatorEvent`, `Decision`, `ruleFor`, `clamp`, and `apply`, all pure. `apply` returns the next state and the effect intents (`Delegate`, `Finish`).
 
 **Acceptance criteria.**
-- Unit tests cover every row of the rules table in the design note: start, reported, each reserved kind, capacity, infrastructure failure, interrupted with and without budget, budget exceeded.
-- A replacement after an interruption happens at most once per interruption and never past `maxChildren`.
-- The module has no dependency on pi-durable or `@usine/agents` runtime code.
+- Unit tests cover each row of the lifecycle-events table.
+- `clamp` turns `RetryChild` past the budget into `Failed`, keeps a reserved marker over any decision, and allows at most one replacement per interruption.
+- `Schema.toJsonSchemaDocument(Decision)` produces a schema with one branch per tag, checked by a snapshot test.
+- No IO; no pi-durable or harness runtime import.
 
-**Files.** New `packages/durable/src/attempt/coordinator/rules.ts`, new `packages/durable/test/coordinator-rules.test.ts`.
+**Files.** New `attempt/coordinator/rules.ts`, `packages/durable/test/coordinator-rules.test.ts`.
 
 **Blocked by.** None.
 
-### 3. Relay an attempt whose parent has no session
+### 3. Make the parent model optional in the channel (narrows #1156)
 
-**Context.** `relayAttempt` emits `Started` and releases early worker notices only after the Pi parent's model is recorded, and `Started.parentModel` is required. An attempt without a parent session can't start its channel.
+**Scope.** Make `Started.parentModel` optional with a decoding default, and show "No parent session" on the run page. Regenerate the operator API schema. The `relay.ts` change is optional.
 
-**Scope.** Make `Started.parentModel` optional with a decoding default for stored transcripts. Emit `Started` when the attempt task starts, independent of the parent session; keep the parent session and its usage relay when one exists. Show "No parent session" on the run page's attempt details when the model is absent. Regenerate the operator API schema.
+**Acceptance criteria.** Stored transcripts decode unchanged; the web transcript tests pass with and without a parent model.
 
-**Acceptance criteria.**
-- Stored transcripts with `parentModel` decode unchanged; the web transcript model tests pass.
-- A relay test with no parent model emits `Started`, then early worker notices, then child events.
-- Pi-parent attempts emit the same envelopes in the same order as before.
-
-**Files.** `packages/core/src/attempt/channel.ts`, `packages/durable/src/attempt/relay.ts`, `apps/web/src/components/runs/transcript/attempt-meta.tsx`, `apps/web/src/lib/runs/transcript/model.ts`, `apps/web/src/lib/runs/transcript/document/model.ts`, `apps/docs/public/openapi.json`, tests.
+**Files.** `packages/core/src/attempt/channel.ts`, `apps/web/src/components/runs/transcript/attempt-meta.tsx`, `apps/web/src/lib/runs/transcript/{model,document/model}.ts`, `apps/docs/public/openapi.json`.
 
 **Blocked by.** None.
 
-### 4. Run attempts without a parent session
+### 4. Add the attempt journal port with memory and SQLite adapters
 
-**Context.** With the delegation core (1), the rules (2), and a parent-optional channel (3), an attempt can run as a durable task that starts one child and maps its outcome, with no model. See the design note for #1150.
+**Context.** The event-driven coordinator keeps its journal in usine tables, so pi-durable can leave with the Pi parent and a Postgres adapter can follow the engine's.
+
+**Scope.** Add `AttemptJournal` as a `Context.Service` in `packages/durable/src/coordinator/journal.ts`, with `memory` and SQLite adapters. The SQLite adapter puts its dialect SQL in one module, `coordinator/sqlite/`, and its migrations live in the runtime database under their own migration table. Add a contract suite run against both adapters. Add `DelegationJournal` adapters over the journal.
+
+**Acceptance criteria.**
+- The contract suite covers: `open` is idempotent; `transition` applies the event, decision, state, intents, and outbox in one transaction or not at all; a stale revision fails; `decide` keeps the first decision; outbox order and acknowledgement survive reopen; settle.
+- An injected write failure leaves no partial transition.
+- No `@earendil-works/*` import.
+
+**Files.** New `packages/durable/src/coordinator/{journal,memory}.ts`, `coordinator/sqlite/{schema,migrations,store}.ts`, `packages/durable/test/contracts/`, `packages/durable/package.json` (`@effect/sql-sqlite-node`).
+
+**Blocked by.** None.
+
+### 5. Run attempts with the event-driven coordinator (replaces #1157, part 1)
+
+**Context.** Issues 1, 2, and 4 give the policy, the decisions, and the store. This issue runs an attempt from them, with the wake-up seam in place.
 
 **Scope.**
-- Add the `usine.coordinator` and `usine.delegation` pi-durable tasks in `attempt/coordinator/task.ts`, driven by `next`.
-- Add `parent: "pi" | "none"` to `RunSpec`, decoding as `pi`; `createOrFind` picks the task from it.
-- Route parent-addressed operator input to the live child under `parent: none`, and refuse it when no child is live.
-- Add `answeredOperator` to the child's result from the shared conversation and use it for the attempt report.
-- Amend ADRs 0003, 0005, and 0018.
+- Add the coordinator runtime implementing `AttemptRuntime` in `coordinator/runtime.ts`: `execute`, `isLive`, `finished`, `recordResult`, `recordUnsupervised`, `unsupervised`, `request`, `attached`, `cancel`, `settle`, and `notify`. `intervene` refuses all input until issue 6.
+- Add `WakeUp` with its `rules` layer, and `AttemptContext.build` with the bounds in the design.
+- Add the router `AttemptRuntime` that dispatches on `RunSpec.parent` and on journal lookup.
+- Add `parent: "pi" | "none"` (decoding as `pi`) and `outcomeLabels` to `RunSpec`.
+- Add the outbox relay, which emits `Started` without a parent session.
+- Amend ADRs 0003, 0005, and 0010.
 
 **Acceptance criteria.**
-- With `parent: none`, an attempt with a scripted child completes, fails with each reserved kind, fails with `ProviderCapacityFailure` on `AgentCapacityError`, and fails with `InfraFailure` on a launch failure.
-- Each unit-test row of the restart matrix in the design note passes against SQLite storage.
-- Steer, operator message, interrupt, and release addressed to the parent act on the live child, and the transcript records them as applied or rejected.
-- `parent: pi` attempts behave as before; the existing durable suite passes.
-- Cancel stops the delegation task and its child.
+- With `parent: none` and a scripted child, an attempt completes, fails with each reserved kind, fails with `ProviderCapacityFailure` and `InfraFailure`, and replaces an interrupted child once.
+- Every unit-test row of the restart matrix passes on SQLite.
+- `AttemptContext.build` stays within 16,000 characters for a context built from the `2c33c58d` sizes.
+- `parent: pi` attempts behave as before, and the executor is unchanged.
 
-**Files.** `packages/durable/src/attempt/{runtime,request,outcome,documents}.ts`, new `attempt/coordinator/task.ts`, `packages/core/src/attempt/channel.ts`, `packages/agents/src/harness/conversation.ts`, `packages/agents/src/runtime.ts`, `packages/executor/src/durable-session.ts`, `docs/adr/0003-*.md`, `0005-*.md`, `0018-*.md`, tests.
+**Files.** New `packages/durable/src/coordinator/{runtime,wake-up,context,router,outbox}.ts`, `packages/durable/src/live.ts`, `packages/core/src/attempt/channel.ts`, `packages/engine/src/engine/submission.ts`, `docs/adr/0003-*.md`, `0005-*.md`, `0010-*.md`, tests.
 
-**Blocked by.** 1, 2, 3.
+**Blocked by.** 1, 2, 3, 4.
 
-### 5. Configure `parent: none` per agent and instance
+### 6. Operator input to the event-driven coordinator (replaces #1157, part 2)
 
-**Context.** Issue 4 runs attempts without a parent when `RunSpec.parent` is `none`. Operators need to select it, and an instance without a Pi credential must start.
-
-**Scope.** Add `parent` to instance settings and agent frontmatter (snake_case key, encoded at the parse boundary), resolve it like `parent_model`, and pass it to `RunSpec`. Skip coordinator admission for `parent: none` at load, reload, and startup. Refuse `parent_model` or `parent_effort` together with `parent: none`. Add the field to the configuration forms and views. Update the agents and settings reference pages, CONTEXT.md, and the harness-adapters decisions.
-
-**Acceptance criteria.**
-- An instance with `parent: none` and no Pi credential starts, quarantines no agent, and runs a loop.
-- Import, reload, and saved edits accept `parent: none` and refuse it with `parent_model` set, with a field path in the problem.
-- An agent override wins over the instance setting.
-- The web configuration pages show and edit the setting.
-
-**Files.** `packages/config/src/{factory,parser,agent}.ts`, `packages/core/src/agent/agent.ts`, `packages/orchestrator/src/parent-admission.ts`, `packages/orchestrator/src/parent-models.ts`, `packages/engine/src/engine/submission.ts`, `apps/web/src/features/configuration/`, `apps/docs/src/content/docs/reference/configuration/{agents,settings}.md`, `CONTEXT.md`, `docs/research/harness-adapters.md`.
-
-**Blocked by.** 4.
-
-### 6. Replay restart scenarios through the event-driven coordinator
-
-**Context.** The durable replay tests (#1005) run recorded Claude and Codex traffic through a scripted Pi parent. The event-driven coordinator needs the same evidence without one.
-
-**Scope.** Run the `restart` and `credential-changed` scenarios in `packages/durable/test/replay.ts` with `parent: none`, using the existing fixtures in replay mode.
+**Scope.**
+- Route parent-addressed steers, operator messages, interrupts, and releases to the live child.
+- Persist supervision and queued input in the journal, and refuse input when no child is live.
+- Add `answeredOperator` to the child's result from the shared conversation, for ADR 0018's rule.
+- Apply the runaway guard's warning steer the same way. Amend ADR 0018.
 
 **Acceptance criteria.**
-- Both scenarios pass for Claude and Codex in CI with `parent: none`: one interrupted native tool call closed, two `SessionStarted` events for the same child ID, one terminal outcome.
-- The existing `parent: pi` replay cases still pass.
+- Each action is applied or rejected with the existing transcript envelopes.
+- Holds and pauses survive a restart.
+- An answer to the operator with no commit, pull request, comment, or output fails the attempt.
+
+**Files.** `coordinator/runtime.ts`, `attempt/hubs.ts`, `packages/agents/src/harness/conversation.ts`, `packages/agents/src/runtime.ts`, `docs/adr/0018-*.md`, tests.
+
+**Blocked by.** 5.
+
+### 7. Replay restart scenarios through the coordinator (rewords #1159)
+
+**Scope.** Run the recorded `restart` and `credential-changed` scenarios for Claude and Codex through the coordinator runtime over the SQLite journal, with no scripted parent.
+
+**Acceptance criteria.** Both scenarios pass in CI: one interrupted native tool call closed, two `SessionStarted` for the same child ID, one terminal outcome. The `parent: pi` replays still pass.
 
 **Files.** `packages/durable/test/replay.ts`, `packages/durable/test/support.ts`.
 
-**Blocked by.** 4.
+**Blocked by.** 5.
 
-### 7. Run the quickstart on a Claude subscription
+### 8. Configure `parent: none` (#1158, unchanged except blocked-by)
 
-**Context.** #1149: an instance with only a Claude subscription can't start a run. After issue 5, it can.
+**Blocked by.** 6.
 
-**Scope.** Rewrite the quickstart prerequisites and bootstrap files so the path works with either a Claude or a ChatGPT subscription: `parent: none` in `usine.yaml`, and the developer agent's harness chosen to match the connected provider. Update the README feature list and replace the parent limit that #1148 documents.
+### 9. Run the quickstart on whichever single login or key the person has (#1160, broadened)
+
+**Scope.** As #1160. Also cover the API-key and local-endpoint paths in one prerequisites paragraph: the children's harness credential is the only one needed.
+
+**Blocked by.** 8. Closes #1149.
+
+### 10. Handle a report without a marker with a Claude Code decision session
+
+**Context.** The wake-up seam from issue 5 sends every event to a rule. This adds the subscription-route handler.
+
+**Scope.**
+- Add a harness handler for Claude Code: the Agent SDK `query()` on the attempt's worker with the child's route and the options in the design.
+- Add an in-process SDK MCP server per wake-up with the decision tools and three read tools.
+- Handle `ChildReported` without a marker when `decision_model` is set for the agent (a model of the agent's harness; unset means rules).
+- Record usage under the child route's pool.
+- Add **Decision call** to CONTEXT.md.
 
 **Acceptance criteria.**
-- The quickstart lists a Claude or ChatGPT subscription as the requirement and needs no API key.
-- The bootstrap `usine.yaml` sets no `parent_model`.
-- `pnpm` docs checks pass; the README no longer says the coordinating session needs a ChatGPT login or an API key.
+- A replay fixture records one decision tool call, and the runtime applies it.
+- A second decision call is refused.
+- A session with no decision, a 429, a timeout, or an SDK error falls back to the rule.
+- A restart after the decision is recorded applies it without a second session.
+- The MCP server lists only this attempt's tools.
 
-**Files.** `apps/docs/src/content/docs/get-started/quickstart.mdx`, `apps/docs/quickstart/usine.yaml`, `apps/docs/quickstart/agents/developer.md`, `README.md`.
+**Files.** New `coordinator/handlers/claude.ts`, `packages/agents/src/harness/claude/{sdk,claude}.ts`, `packages/agents/test/replay/`, configuration and docs.
 
-**Blocked by.** 5. Closes #1149.
+**Blocked by.** 5.
 
-### 8. Add a structured-output call to harness runtimes (after owner question 4)
+### 11. Handle a report without a marker with a small JSON model over an API
 
-**Context.** A stateless decision call needs one tool-less turn with a JSON Schema result, through the agent's harness and route.
-
-**Scope.** Add `structured-output` to `Capability` and an optional `structured` operation to the harness runtime: Claude Code through `query()` with `tools: []`, `outputFormat`, `persistSession: false`, and `maxTurns`; Pi through a pi-ai provider call if a probe shows structured output. Codex declares the capability only if a probe shows a turn without shell or edit tools. Record replay fixtures for Claude.
+**Scope.**
+- Add an endpoint handler over `effect/ai` `DecisionModel`, with a provider implementation for OpenAI-compatible chat completions using structured output.
+- Add the instance-level `decision_endpoint` (base URL, model, key variable or saved key), a confidence threshold, and rule-filled text fields.
+- Record usage under `apiKeys` with the endpoint name.
 
 **Acceptance criteria.**
-- A Claude replay test returns a decoded value and maps `error_max_structured_output_retries` to a typed error.
-- Admission refuses `structured-output` with a reason for harnesses that don't declare it.
-- No tool call appears in the recorded Claude traffic.
+- A refused, missing, invalid, or low-confidence answer falls back to the rule.
+- A missing endpoint changes nothing.
+- A test server returning a malformed body produces the rule's decision and a logged reason.
 
-**Files.** `packages/agents/src/harness/{capability,harness,runtime}.ts`, `packages/agents/src/harness/claude/{claude,descriptor,sdk}.ts`, `packages/agents/src/harness/pi/`, `packages/agents/test/replay/`.
+**Files.** New `coordinator/handlers/endpoint.ts`, configuration, settings docs.
 
-**Blocked by.** None for the code; the owner's answer to question 4.
+**Blocked by.** 5. Can run in parallel with 10.
 
-### 9. Ask a decision model about reports without a marker (after issue 8 and the classification)
+### 12. Remove the Pi parent
 
-**Scope.** Add `DecisionCalls` with a `rulesOnly` layer and a harness-backed layer, the `decide` phase, `decision_model` and `decision_effort`, and the `UnclearReport` point. Record decision usage on the attempt's parent session with the child route's pool. Add **Decision call** to CONTEXT.md.
+**Scope.** Delete the Pi runtime, the router's Pi branch, `parent_model`, `parent_effort`, the `coordinator` role, `durable-coordination`, the pi-durable adapter of `DelegationJournal`, and the durable backup. Remove `@earendil-works/pi-durable` and `@earendil-works/chord`. Amend ADRs 0005, 0010, and 0021.
 
-**Acceptance criteria.** `DecisionUnavailable` for every failure falls back to the rule; a restart during a call reruns it once; usage appears under the recorded pool.
+**Blocked by.** 9 and the owner's decision on multi-child orchestration. Two pull requests: runtime, then configuration and docs.
 
-**Blocked by.** 4, 8.
+## How each choice serves the goal
 
-### 10. Default new instances to `parent: none`
+| Choice | Effect on "no separate coordinator credential" |
+| --- | --- |
+| Rules handle every event | No model call, so no credential beyond the children's |
+| Harness handler on the attempt's worker with the child's route | A model-handled event uses the same login or key as the child |
+| Endpoint handler | Opt-in; never required; absent means rules |
+| `parent: none` written by new bootstrap files | A new instance never needs a Pi credential |
 
-**Scope.** Setup and `usine init` bootstrap files write `parent: none`; the settings default changes only after the owner decides (question 1).
-
-**Blocked by.** 7.
-
-### 11. Remove the Pi parent
-
-**Scope.** Delete the files listed in answer 7, `parent_model`, `parent_effort`, the `coordinator` role, and `durable-coordination`; configuration import warns about and drops the removed keys. Amend ADRs 0005 and 0021.
-
-**Blocked by.** 10 and owner question 2. Likely two pull requests: runtime, then configuration and docs.
+The goal holds after issue 8 for any configuration that sets `parent: none`, and for the documented quickstart after issue 9.
 
 ## Questions for the owner
 
-1. **Key and default.** Use `parent: pi | none` in settings and agent frontmatter? Recommended: yes, with `pi` as the default for existing instances, `none` written by new bootstrap files (issue 10), and the default flipped after a month of dogfood on `none`.
-2. **Keep in-attempt multi-child orchestration?** Recommended: no. Keep `parent: pi` until the default flips, then remove it (issue 11); multi-agent work stays in loop handoffs.
-3. **A missing outcome label.** Start one follow-up child that is told which label is missing, or keep failing the run as today? Recommended: keep today's behavior, and decide after classifying the runs that failed this way (`d35305c2` is one).
-4. **Build the decision call now?** Recommended: not yet. Run the classification in answer 1 first; build issues 8 and 9 only if reports without a marker mislabel outcomes after #1147 lands.
-5. **Interrupted child with no saved session.** Replace it in the same checkout within the budget, or fail with `InfraFailure` so the engine retries from salvage? Recommended: replace once in the same checkout, which is what the Pi parent is told to do today and keeps the work without a salvage round trip.
-6. **Dogfood personas.** The three personas carry "if the subagent tool is available, delegate once" clauses, and the reviewer's wording led its child to start a nested Claude subagent. Recommended: remove the clauses when the dogfood agents switch to `parent: none`, and stop documenting the pattern.
-
-## Rough edges found
-
-- `2c33c58d`: a Claude child that printed `API Error: Request rejected (429)` finished as an ordinary report instead of `AgentCapacityError`. Tracked by #1147.
-- The `reviewer` persona's delegation clause lacks the "literally named `subagent`" guard that `developer` and `finisher` have, so its Claude child delegates to a nested Claude subagent.
-- The operator API has no list of runs or attempts, so run-history classification needs host SQL access.
+1. **Default.** New bootstrap files write `parent: none`, and existing instances keep `pi` until the default flips. Recommended: yes, and flip the default after a month of dogfood on `none`.
+2. **Removing pi-durable now versus later.** Recommended: now, as version 2 does. Building the coordinator on pi-durable first and moving it later costs about four more pull requests (a second store, a migration of in-flight attempts, and two sets of tests) and keeps the two-file backup in the meantime.
+3. **Which events a model may handle.** Recommended: a code table of model-eligible events (`ChildReported` without a marker first), enabled per agent by setting `decision_model` or by an instance `decision_endpoint`. No per-event configuration until a second eligible event exists.
+4. **Endpoint handler interface.** `DecisionModel` (labels with probabilities and a threshold; rules fill the text) or `LanguageModel.generateObject` (the full `Decision`, including text)? Recommended: `DecisionModel` first, because it suits very small models and keeps all text in rules.
+5. **Codex decision sessions.** Structured output only until #879 provides an MCP endpoint that workers can reach. Recommended: yes.
+6. **Multi-child orchestration.** Recommended: remove it with the Pi parent; multi-agent work stays in loop handoffs.
