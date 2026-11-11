@@ -17,7 +17,7 @@ const diagnostic = (cgroup: string, command: string, pid: number) =>
 describe("kernel OOM process attribution", () => {
   it.live.each(
     (["match", "no match", "no match, failing", "unreadable"] as const).flatMap((journal) =>
-      [true, false].map((dmesg) => ({ journal, dmesg })),
+      (["match", "no match", "failing"] as const).map((dmesg) => ({ journal, dmesg })),
     ),
   )(
     "reads the kernel through journalctl, falling back to dmesg filtered on the worker: journal $journal, dmesg $dmesg",
@@ -73,9 +73,12 @@ echo '-- No entries --'`,
         );
         yield* fs.writeFileString(
           path.join(directory, "dmesg"),
-          dmesg
-            ? "#!/bin/sh\necho unrelated-diagnostic\necho oom-kill:ring-buffer-diagnostic\n"
-            : "#!/bin/sh\necho 'dmesg: read kernel buffer failed: Operation not permitted' >&2\nexit 1\n",
+          {
+            match: "#!/bin/sh\necho unrelated-diagnostic\necho oom-kill:ring-buffer-diagnostic\n",
+            "no match": "#!/bin/sh\necho unrelated-diagnostic\n",
+            failing:
+              "#!/bin/sh\necho 'dmesg: read kernel buffer failed: Operation not permitted' >&2\nexit 1\n",
+          }[dmesg],
           {
             mode: 0o755,
           },
@@ -89,7 +92,7 @@ echo '-- No entries --'`,
           },
         );
         const exitCode = yield* spawner.exitCode(command);
-        if (journal === "unreadable" && !dmesg) {
+        if (journal === "unreadable" && dmesg === "failing") {
           expect(exitCode).toBe(1);
           return;
         }
@@ -98,10 +101,13 @@ echo '-- No entries --'`,
         expect(output).toBe(
           journal === "match"
             ? "source journal\noom-kill:journal-diagnostic\n"
-            : dmesg
-              ? "source dmesg\noom-kill:ring-buffer-diagnostic\n"
-              : // The journal is readable and names no kill, so the record keeps the count alone.
-                "source journal\n",
+            : {
+                match: "source dmesg\noom-kill:ring-buffer-diagnostic\n",
+                // The ring buffer is readable and names no kill, so the record keeps the count alone.
+                "no match": "source dmesg\n",
+                // The journal is readable and names no kill, so the record keeps the count alone.
+                failing: "source journal\n",
+              }[dmesg],
         );
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

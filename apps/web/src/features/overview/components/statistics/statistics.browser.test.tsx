@@ -110,7 +110,15 @@ const runFixtures = {
 it("leads the Overview with the tasks done and reads the run statistics only behind Details", async () => {
   await renderOverview(
     {
-      "7d": encode(statisticsFixture(now, "7d")),
+      // Kills without a repeat still show the memory line.
+      "7d": encode(
+        StatisticsView.make({
+          ...statisticsFixture(now, "7d"),
+          memoryKills: 1,
+          memoryKillAttempts: 1,
+          repeatedMemoryKillAttempts: 0,
+        }),
+      ),
       "30d": encode(statisticsFixture(now, "30d")),
       all: encode(weeklyStatisticsFixture(now)),
     },
@@ -217,6 +225,9 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
   await commands.releaseStatistics();
   await expect.element(statistics.getByText("4 tasks", { exact: true })).toBeVisible();
   expect(statistics.getByText("median price", { exact: true }).elements()).toHaveLength(0);
+  await expect
+    .element(statistics.getByText("1 memory kill across 1 attempt; 0 with repeated kills"))
+    .toBeVisible();
   await expect
     .element(statistics.getByRole("definition").filter({ hasText: /^12$/u }))
     .toBeVisible();

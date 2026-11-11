@@ -1243,14 +1243,21 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect.each([MAX_KILLED_PROCESSES, MAX_KILLED_PROCESSES + 1])(
-    "records at most the cap of killed processes and the whole count when the kernel logs name %i",
-    (victims) => {
+  it.effect.each([
+    { counted: MAX_KILLED_PROCESSES, victims: MAX_KILLED_PROCESSES },
+    { counted: MAX_KILLED_PROCESSES + 1, victims: MAX_KILLED_PROCESSES + 1 },
+    // The counter exceeds the cap, but the kernel logs name fewer processes, so none is dropped.
+    { counted: MAX_KILLED_PROCESSES + 5, victims: 3 },
+    // The kernel logs name kills written after the counter's read, past the cap.
+    { counted: 2, victims: MAX_KILLED_PROCESSES + 1 },
+  ])(
+    "records at most the cap of killed processes and the whole count when the counter reads $counted and the kernel logs name $victims",
+    ({ counted, victims }) => {
       const machine = dockerMachine();
       machine.state.kernelMemory = "readable";
       machine.state.kernelVictims = victims;
       const exceedsMemory: StubParent = (context) =>
-        killsInContainer(machine, victims).pipe(Effect.andThen(completes(context)));
+        killsInContainer(machine, counted).pipe(Effect.andThen(completes(context)));
       const logs = capturedLogs();
       return Effect.gen(function* () {
         const executor = yield* Executor;
@@ -1261,10 +1268,10 @@ describe("SSH Worker with Docker", () => {
           outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
         });
         assert.strictEqual(kills.length, 1);
-        assert.strictEqual(kills[0]?.kills, victims);
+        assert.strictEqual(kills[0]?.kills, Math.max(counted, victims));
         assert.deepStrictEqual(
           kills[0]?.processes,
-          Array.from({ length: MAX_KILLED_PROCESSES }, (_, index) =>
+          Array.from({ length: Math.min(victims, MAX_KILLED_PROCESSES) }, (_, index) =>
             MemoryKilledProcess.make({ command: "vitest worker", pid: 1234 + index }),
           ),
         );
