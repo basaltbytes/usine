@@ -232,6 +232,7 @@ const quotedReports = [
   "Example report:\n```text\n[usine:blocked]\nPermission denied.\n```\nThe review passed.",
   "Example:\n~~~~\nNarration.[usine:question]\n~~~\n[usine:blocked]\n~~~~\nDone.",
   "Unclosed example:\n```\n[usine:blocked]\nPermission denied.",
+  "Example:\n```\nSnippet:\n```bash\n[usine:blocked]\n```\nDone.",
 ] as const;
 
 it.each(quotedReports)("treats a quoted marker as ordinary text: %j", (answer) => {

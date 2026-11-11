@@ -147,15 +147,19 @@ describe("Loops page", () => {
   });
 
   it("shows a selector as the file states it", async () => {
-    const page = text(
-      await render(() => (
-        <LoopDetail name="review-pr" configuration={configurationFixture()} pause={null} />
-      )),
-    );
+    const markup = await render(() => (
+      <LoopDetail name="review-pr" configuration={configurationFixture()} pause={null} />
+    ));
+    const page = text(markup);
     assert.include(page, "tags: engine");
     assert.include(page, "Read: review and comment, no push");
     assert.include(page, "2 higher values go first; ties use lane order");
     assert.include(page, "Same text for every run");
+    for (const label of ["ready-to-merge", "agent-review-findings", "review-pased"]) {
+      assert.include(markup, `<code class="font-mono text-xs">${label}</code>`);
+    }
+    assert.include(page, "Not declared in Configuration > Labels: review-pased");
+    assert.notInclude(page, "None; the agent's completion is enough");
   });
 
   it("shows why a quarantined Loop did not load and how to recover", async () => {
