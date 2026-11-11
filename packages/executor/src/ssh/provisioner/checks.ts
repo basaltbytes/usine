@@ -112,9 +112,10 @@ export const machineChecksFor = (
       last !== undefined &&
       now - last < provisioner.provisioner.timings.machineCheckInterval * 1000
     ) {
-      yield* Effect.logDebug("Machine check interval has not elapsed", {
+      yield* Effect.logInfo("Skipping the machine check: its interval has not elapsed", {
         worker,
         lastCheckedAt: last,
+        machineCheckInterval: provisioner.provisioner.timings.machineCheckInterval,
       });
       return Option.none<MachineCheck>();
     }

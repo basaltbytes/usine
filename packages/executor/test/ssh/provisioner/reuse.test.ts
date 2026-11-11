@@ -230,6 +230,28 @@ it.live(
   },
 );
 
+it.live(
+  "checks a new boxd machine only after the check interval although the worker stores reuse",
+  () => {
+    const machine = machineFixture();
+    const providers = fakeProviders();
+    const memoryChecks = () =>
+      machine.state.calls.filter(({ line }) => line === "exec 'cat' '/proc/meminfo'").length;
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
+      assert.isTrue(Option.isSome(first.checked));
+      assert.strictEqual(memoryChecks(), 1);
+      yield* machines.release(first.hold);
+      const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
+      assert.notEqual(next.id, first.id);
+      assert.isTrue(Option.isNone(next.checked), "the second machine is within the check interval");
+      assert.strictEqual(memoryChecks(), 1);
+      yield* machines.release(next.hold);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
+  },
+);
+
 it.effect("retires an idle machine at its age limit without waiting for another attempt", () => {
   const machine = machineFixture();
   const providers = fakeProviders();

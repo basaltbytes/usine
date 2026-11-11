@@ -857,7 +857,7 @@ describe("boxd driver", () => {
     },
   );
   it.effect(
-    "accepts any snapshot size without provisioner.size and compares memory with the GiB in it",
+    "accepts any snapshot size without provisioner.size and compares the vCPU count and the GiB in it",
     () => {
       const boxd = fakeBoxd();
       const host = fakeMachine();
@@ -877,6 +877,13 @@ describe("boxd driver", () => {
         assert.include(mismatch.message, "captured 1 vCPU and 4 GiB");
         assert.include(mismatch.message, "provisioner.size is 1x32");
         assert.include(mismatch.message, "set size to 1x4");
+        boxd.state.snapshot.vcpu = 8;
+        boxd.state.snapshot.memoryBytes = 32 * 1024 ** 3;
+        const vcpuMismatch = yield* large.verify(WORKER, 1).pipe(Effect.flip);
+        assert.strictEqual(vcpuMismatch.capability, "provider");
+        assert.include(vcpuMismatch.message, "captured 8 vCPU and 32 GiB");
+        assert.include(vcpuMismatch.message, "provisioner.size is 1x32");
+        assert.include(vcpuMismatch.message, "set size to 8x32");
         assert.deepStrictEqual((yield* unsized.verify(WORKER, 1)).warnings, []);
       }).pipe(Effect.provide([boxd.layer, host.layer]));
     },
