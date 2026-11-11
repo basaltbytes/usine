@@ -19,15 +19,17 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
    boxd auth keys create usine --kind member
    ```
 
-   Store the key as `BOXD_API_KEY` in the instance's private `.env`. Restart usine to read new variables. The snapshot builder uses the CLI's own signed-in session for setup.
+   Store the key as `BOXD_API_KEY` in the instance's private `.env`. Restart usine to read new variables. The snapshot builder needs only this key: it calls boxd's API and runs its setup through `Exec`, without SSH or the CLI's signed-in session.
 
-2. From the usine source checkout, build a snapshot in the intended region using the CLI's regional configuration:
+2. From the usine source checkout, after `pnpm install`, build a snapshot in the intended region:
 
    ```sh
-   infra/boxd/build-snapshot.sh --size 2x8 usine-attempt
+   BOXD_API_KEY=bxd_... node infra/boxd/build-snapshot.mjs --size 2x8 --region fra usine-attempt
    ```
 
-   The script creates a temporary Ubuntu machine at the requested size, prepares Docker, pulls the release's attempt image, installs Tailscale, and saves the snapshot. It deletes the temporary machine and prints the snapshot name. Set `USINE_CONTAINER_RUNTIME=podman` to install Podman instead. Set `ATTEMPT_IMAGE` to bake a custom attempt image.
+   The script creates a temporary Ubuntu machine from a machine spec: isolated, shared with the key's org, at the requested size, and with the egress allowlist that `infra/boxd/egress.mjs` prints for the gateway's checked-in list. It prepares Docker, pulls the release's attempt image, installs Tailscale, and saves the snapshot, which keeps the spec's allowlist. The setup downloads from hosts outside the allowlist, so the script lifts the machine's allowlist while the setup runs, then sets it again and checks that boxd records it in the machine's spec before it saves. It waits until the new snapshot version is ready and prints the snapshot name. It deletes the temporary machine when the build ends, fails, or is interrupted, and names the machine if the deletion fails.
+
+   Without `--region`, the machine and the snapshot are in the region that the endpoint serves, `fra` on the hosted service. A self-hosted cluster or a boxd deployment in your own cloud account passes its API endpoint with `--endpoint https://<api endpoint>`. Set `USINE_CONTAINER_RUNTIME=podman` to install Podman instead of Docker. Set `ATTEMPT_IMAGE` to bake a custom attempt image.
 
 ## Create the worker
 
@@ -41,14 +43,14 @@ Use a gateway for subscription credentials. Without a gateway, configure API key
 
 ## Restrict egress
 
-A restored boxd machine reaches the whole internet unless `provisioner.egress` lists what it may reach. The gateway's forward proxy enforces the same kind of list for Hetzner workers, so both come from one file: `infra/hetzner/gateway/egress-allowlist`, or the copy you maintain on the gateway at `/etc/usine-gateway/egress-allowlist`. Print it as a boxd allowlist from the usine source checkout:
+A machine restored from the builder's snapshot starts with the snapshot's allowlist, the gateway's checked-in list. `provisioner.egress` replaces it with the list you configure. A snapshot without an allowlist leaves restored machines unrestricted unless `provisioner.egress` lists what they may reach. The gateway's forward proxy enforces the same kind of list for Hetzner workers, so both come from one file: `infra/hetzner/gateway/egress-allowlist`, or the copy you maintain on the gateway at `/etc/usine-gateway/egress-allowlist`. Print it as a boxd allowlist from the usine source checkout:
 
 ```sh
 node infra/boxd/egress.mjs                                      # the checked-in list
 node infra/boxd/egress.mjs /path/to/egress-allowlist            # a copy of the gateway's list
 ```
 
-The script prints an `egress:` block for `provisioner`, with `*.tailscale.com` first. It refuses a rule with a port, which a boxd allowlist can't express. Paste the block under `provisioner`, or enter the entries in the worker form's **Egress allowlist** field, separated by commas. Leave the field empty for unrestricted egress.
+The script prints an `egress:` block for `provisioner`, with `*.tailscale.com` first. It refuses a rule with a port, which a boxd allowlist can't express. Paste the block under `provisioner`, or enter the entries in the worker form's **Egress allowlist** field, separated by commas. Leave the field empty to keep the snapshot's allowlist.
 
 Remove the API and login hosts of each provider whose credential the gateway holds: `api.anthropic.com` and `platform.claude.com` for `anthropic-messages`, `api.openai.com`, `chatgpt.com`, and `auth.openai.com` for `openai-responses`. Attempts reach those providers at `llm.<domain>`, and a direct connection would carry the caller token. usine refuses a configuration that admits them, or `github.com` or `api.github.com`, and names the host.
 
@@ -58,7 +60,7 @@ What each entry is for:
 - **Packages.** The package hosts that attempts download from over the machine's direct connection, and `ghcr.io` with `pkg-containers.githubusercontent.com`, from which preflight pulls an attempt image the snapshot lacks.
 - **Harness hosts.** A harness whose provider credential the gateway doesn't hold calls its provider directly with the key from `provisioner.api_keys`. Keep that provider's API host, `api.anthropic.com` or `api.openai.com`; the gateway's list doesn't include `api.openai.com`.
 
-usine applies the list right after boxd restores the machine, then waits one second, the time boxd states the list takes to come into force, before it connects to the machine or starts anything on it. Processes that the snapshot resumes, such as `tailscaled` and the container runtime, run without the list during that second. If boxd refuses the list or reports the machine's egress unrestricted afterwards, usine deletes the machine and retries creation later. When usine reuses a machine for another attempt, it applies the list again.
+usine applies the list right after boxd restores the machine, then waits one second, the time boxd states the list takes to come into force, before it connects to the machine or starts anything on it. Processes that the snapshot resumes, such as `tailscaled` and the container runtime, run under the snapshot's allowlist, not yet under yours, during that second. If boxd refuses the list or reports the machine's egress unrestricted afterwards, usine deletes the machine and retries creation later. When usine reuses a machine for another attempt, it applies the list again.
 
 An address entry admits all traffic to that address, and usine can't tell whose address it is. The gateway check therefore covers host names only: behind a gateway, preflight logs a warning that names the address entries. Make sure none of them belongs to GitHub or to a provider the gateway serves. Like boxd, usine refuses an address or range with host bits set, one that overlaps a private, CGNAT, loopback, link-local, multicast, or reserved range, and a range wider than `/8`.
 
