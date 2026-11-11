@@ -61,7 +61,12 @@ export const ProvisionerFields = (fields: FormFieldsProps) => {
                     suggestions: ["fra", "nyc"],
                     optional: true,
                   },
-                  { path: "provisioner.size", label: copy.size, optional: true },
+                  {
+                    path: "provisioner.size",
+                    label: copy.size,
+                    description: copy.boxdSizeHint,
+                    optional: true,
+                  },
                   { path: "provisioner.snapshot", label: copy.snapshot },
                 ]
               : [

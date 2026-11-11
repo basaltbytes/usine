@@ -10,7 +10,7 @@ import {
   ExecutorOperationError,
   type WorkerCapabilityError,
 } from "../../executor.ts";
-import type { SshMachine, SshWorkerAddress } from "../model.ts";
+import { machineReuseOf, type SshMachine, type SshWorkerAddress } from "../model.ts";
 import type { SshWorkerEntry } from "../workers.ts";
 import type { Held, machineHolds } from "./holds.ts";
 import type { MachineDriver } from "./model.ts";
@@ -32,7 +32,7 @@ interface ReuseOptions {
 
 const policyOf = (machine: SshMachine) =>
   machine.address.machine._tag === "Provisioned"
-    ? machine.address.machine.provisioner.reuse
+    ? machineReuseOf(machine.address.machine.provisioner)
     : Option.none();
 const age = (held: Held, now: DateTime.Utc) =>
   DateTime.toEpochMillis(now) - DateTime.toEpochMillis(held.since);
@@ -61,7 +61,9 @@ export const machineReuseFor = (options: ReuseOptions) => {
             return yield* Effect.die(new Error("Idle machine has no endpoint"));
           const [id, machine] = available.value;
           const policy = policyOf(machine);
-          const limitReached = Option.isNone(policy) || candidate.uses > policy.value.attempts;
+          const { assign } = driver;
+          const limitReached =
+            Option.isNone(policy) || assign === undefined || candidate.uses > policy.value.attempts;
           let expired = false;
           if (!limitReached) {
             const now = yield* DateTime.now;
@@ -73,25 +75,23 @@ export const machineReuseFor = (options: ReuseOptions) => {
           }
           const checked = yield* restore(
             Effect.gen(function* () {
-              yield* driver
-                .assign(id, {
-                  instance: options.instance,
-                  worker,
-                  run: runId,
-                  process: options.process,
-                  attempt: attemptId,
-                  attempts: candidate.uses,
-                })
-                .pipe(
-                  Effect.mapError((error) =>
-                    MachineUnavailableError.make({
-                      worker,
-                      provider: driver.provider,
-                      reason: "provider",
-                      message: error.message,
-                    }),
-                  ),
-                );
+              yield* assign(id, {
+                instance: options.instance,
+                worker,
+                run: runId,
+                process: options.process,
+                attempt: attemptId,
+                attempts: candidate.uses,
+              }).pipe(
+                Effect.mapError((error) =>
+                  MachineUnavailableError.make({
+                    worker,
+                    provider: driver.provider,
+                    reason: "provider",
+                    message: error.message,
+                  }),
+                ),
+              );
               yield* holds.update(candidate.hold, (current) => ({
                 ...current,
                 state: "preparing",

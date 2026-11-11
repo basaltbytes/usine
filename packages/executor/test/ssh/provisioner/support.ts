@@ -49,15 +49,18 @@ export const boatSettings = (overrides: Partial<BoatProvisioner> = {}): BoatProv
 });
 
 export const boxdSettings = (overrides: Partial<BoxdProvisioner> = {}): BoxdProvisioner => ({
-  ...boatSettings(),
   provider: "boxd",
   token: Redacted.make("bxd_test_key"),
   endpoint: Option.none(),
   region: Option.some(BoxdRegion.make("fra")),
-  size: "2x8",
+  size: Option.none(),
   snapshot: BoxdSnapshotName.make("usine-attempt"),
   isolated: true,
   egress: Option.none(),
+  tailnet: Option.none(),
+  apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
+  timings: ProvisionerTimings.make({}),
+  ignoredReuse: Option.none(),
   ...overrides,
 });
 

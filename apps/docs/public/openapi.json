@@ -45287,12 +45287,14 @@
             ]
           },
           "size": {
-            "type": "string",
-            "enum": [
-              "1x4",
-              "2x8",
-              "4x16",
-              "8x32"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,3}x[1-9][0-9]{0,5}$"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "snapshot": {

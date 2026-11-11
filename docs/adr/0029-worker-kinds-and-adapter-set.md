@@ -2,12 +2,12 @@
 
 Isolated workers take one of two shapes:
 
-- **A long-lived machine** that the operator provides, reached over SSH (the `ssh` kind). Any Linux host works, so no provider gets a kind of its own. With Podman or Docker, each attempt runs in its own container, which mounts no other attempt's checkout or credentials. Attempts still share the kernel, the cached clone read-only, package caches, and any harness login on the machine, read-write. Without a container runtime, attempts share one user, and preflight reports the worker degraded.
-- **A machine per attempt**, created for one attempt in the operator's account, or reused within limits: a provisioner on the `ssh` kind with Hetzner Cloud, Boat, and boxd drivers, or the `cloudflare` kind. A hypervisor separates concurrent attempts.
+- **A long-lived machine** that the operator provides, reached over SSH (the `ssh` kind). Any Linux host works, so no provider gets its own kind. With Podman or Docker, each attempt runs in its own container, which mounts no other attempt's checkout or credentials. Attempts still share the kernel, the cached clone read-only, package caches, and any harness login on the machine, read-write. Without a container runtime, attempts share one user, and preflight reports the worker degraded.
+- **A machine per attempt**, created for one attempt in the operator's account, or reused within limits on Hetzner and Boat: a provisioner on the `ssh` kind with Hetzner Cloud, Boat, and boxd drivers, or the `cloudflare` kind. A hypervisor separates concurrent attempts.
 
 The `local` kind suits trusted agents only.
 
-**Platform tools first.** An adapter starts from what an attempt needs and uses the platform's own transport, snapshots, and network rules, even when an existing interface has to change. boxd machines run commands over boxd's `Exec` stream, restore from snapshots that keep the attempt image, and can get an egress allowlist, sent in the restore request, that boxd enforces. boxd may become the main provider.
+**Platform tools first.** An adapter starts from what an attempt needs and uses the platform's own transport, snapshots, and network rules, even when an existing interface has to change. boxd machines run commands over boxd's `Exec` stream with SSH off, restore from snapshots that keep the attempt image, and can get an egress allowlist, sent in the restore request, that boxd enforces. boxd may become the main provider.
 
 **Residency per adapter.** Customers need EU residency, so the operator picks the adapter and region: Hetzner's EU locations, a boxd region, or Boat's EU machines, whose snapshot copies can leave the EU.
 

@@ -4,6 +4,7 @@ import { RunId } from "@usine/core/run";
 import {
   BoatSnapshotName,
   BoxdEgressEntry,
+  BoxdSize,
   HetznerImage,
   HetznerLocation,
   HetznerResourceName,
@@ -15,7 +16,7 @@ import {
 import { Clock, Effect, Fiber, Option, Redacted, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
-import { fakeMachine } from "../support.ts";
+import { CapturedLog, capturedLogs, fakeMachine } from "../support.ts";
 import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
@@ -455,13 +456,7 @@ describe("boxd driver", () => {
         assert.strictEqual(ran, 0);
         assert.deepStrictEqual(boxd.state.execs, [{ machine: first.id, command: "true" }]);
         assert.strictEqual(boxd.state.reads, 0, "the create response contains the endpoint");
-        boxd.state.timers.length = 0;
-        yield* driver.assign(first.id, { ...tags, attempts: 2 });
-        assert.deepStrictEqual(boxd.state.timers, [
-          { id: first.id, kind: "hibernate", seconds: 0 },
-          { id: first.id, kind: "suspend", seconds: 0 },
-        ]);
-        assert.strictEqual(boxd.state.machines.get(first.id)?.labels["usine.attempts"], "2");
+        assert.notProperty(driver, "assign", "boxd machines are single-use");
         yield* driver.remove(first.id);
         yield* driver.remove(first.id);
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
@@ -581,7 +576,7 @@ describe("boxd driver", () => {
     },
   );
   it.live(
-    "creates a machine with its egress allowlist, waits for it, reapplies it on reuse, and leaves an unset setting alone",
+    "creates a machine with its egress allowlist, waits for it, and leaves an unset setting alone",
     () => {
       const boxd = fakeBoxd();
       const entries = ["*.tailscale.com", "registry.npmjs.org"].map((entry) =>
@@ -597,27 +592,12 @@ describe("boxd driver", () => {
         assert.deepStrictEqual(boxd.state.creates[0]?.egress, entries);
         assert.deepStrictEqual(boxd.state.operations.get(id), ["create", "hibernate", "suspend"]);
         assert.deepStrictEqual(boxd.state.machines.get(id)?.egressAllow, entries);
-        assert.lengthOf(boxd.state.egress, 0, "the create request carries the allowlist");
-        yield* driver.assign(id, { ...tags, attempts: 2 });
-        assert.deepStrictEqual(
-          boxd.state.egress.map((call) => call.entries),
-          [entries],
-        );
 
         const unrestricted = yield* boxdDriverFor(WORKER, boxdSettings());
         const other = yield* unrestricted.create("pool-bbbbbbbb", tags);
         assert.deepStrictEqual(boxd.state.creates[1]?.egress, []);
         assert.deepStrictEqual(boxd.state.operations.get(other.id), [
           "create",
-          "hibernate",
-          "suspend",
-        ]);
-        yield* unrestricted.assign(other.id, { ...tags, attempts: 2 });
-        assert.lengthOf(boxd.state.egress, 1, "an unset egress leaves the machine's list as is");
-        assert.deepStrictEqual(boxd.state.operations.get(other.id), [
-          "create",
-          "hibernate",
-          "suspend",
           "hibernate",
           "suspend",
         ]);
@@ -736,7 +716,6 @@ describe("boxd driver", () => {
         }
         assert.strictEqual(boxd.state.reads, 1, "reads only the machine the response omits");
         assert.lengthOf(boxd.state.timers, 0);
-        assert.lengthOf(boxd.state.egress, 0);
 
         boxd.state.egressIgnored = false;
         const creating = yield* Effect.forkChild(driver.create("pool-cccccccc", tags));
@@ -748,42 +727,6 @@ describe("boxd driver", () => {
       }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
     },
   );
-  it.effect("refuses to reuse a machine whose egress allowlist boxd ignores or refuses", () => {
-    const boxd = fakeBoxd();
-    const egress = Option.some([BoxdEgressEntry.make("*.tailscale.com")]);
-    return Effect.gen(function* () {
-      const driver = yield* boxdDriverFor(WORKER, boxdSettings({ egress }));
-      const creating = yield* Effect.forkChild(driver.create("pool-aaaaaaaa", tags));
-      while (boxd.state.timers.length < 2) yield* Effect.yieldNow;
-      yield* TestClock.adjust("1 second");
-      const { id } = yield* Fiber.join(creating);
-      const created = ["create", "hibernate", "suspend"];
-      assert.deepStrictEqual(boxd.state.operations.get(id), created);
-
-      boxd.state.egressIgnored = true;
-      const ignored = yield* driver.assign(id, { ...tags, attempts: 2 }).pipe(Effect.flip);
-      assert.strictEqual(ignored._tag, "ProviderApiError");
-      assert.include(ignored.message, "unrestricted egress");
-      assert.include(ignored.message, id);
-      assert.deepStrictEqual(
-        boxd.state.operations.get(id),
-        [...created, "egress"],
-        "no idle timer call follows the ignored allowlist",
-      );
-
-      boxd.state.egressIgnored = false;
-      boxd.state.egressFails = Option.some("INVALID_ARGUMENT");
-      const refused = yield* driver.assign(id, { ...tags, attempts: 3 }).pipe(Effect.flip);
-      assert.strictEqual(refused._tag, "ProviderApiError");
-      assert.include(refused.message, "INVALID_ARGUMENT");
-      assert.deepStrictEqual(
-        boxd.state.operations.get(id),
-        [...created, "egress"],
-        "no idle timer call follows the refused allowlist",
-      );
-      assert.lengthOf(boxd.state.timers, 2);
-    }).pipe(Effect.provide([boxd.layer, fakeMachine().layer]));
-  });
   it.effect("deletes a new machine when disabling its idle timers fails", () => {
     const boxd = fakeBoxd();
     boxd.state.timerFails = Option.some("UNAVAILABLE");
@@ -844,7 +787,10 @@ describe("boxd driver", () => {
       const boxd = fakeBoxd();
       const host = fakeMachine();
       return Effect.gen(function* () {
-        const driver = yield* boxdDriverFor(WORKER, boxdSettings());
+        const driver = yield* boxdDriverFor(
+          WORKER,
+          boxdSettings({ size: Option.some(BoxdSize.make("2x8")) }),
+        );
         assert.deepStrictEqual((yield* driver.verify(WORKER, 2)).warnings, []);
         boxd.state.maxVms = 2;
         boxd.state.vmCount = 0;
@@ -864,7 +810,7 @@ describe("boxd driver", () => {
         boxd.state.snapshot.memoryBytes = 16 * 1024 ** 3;
         const mismatch = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
         assert.include(mismatch.message, "4 vCPU and 16 GiB");
-        assert.include(mismatch.message, "Rebuild the snapshot at 2x8 or change size");
+        assert.include(mismatch.message, "Rebuild the snapshot at 2x8, set size to 4x16");
         boxd.state.snapshot.vcpu = 2;
         const memoryMismatch = yield* driver.verify(WORKER, 1).pipe(Effect.flip);
         assert.include(memoryMismatch.message, "2 vCPU and 16 GiB");
@@ -908,6 +854,48 @@ describe("boxd driver", () => {
           "a snapshot without a reported storage state passes",
         );
       }).pipe(Effect.provide([boxd.layer, host.layer]));
+    },
+  );
+  it.effect(
+    "accepts any snapshot size without provisioner.size and compares the vCPU count and the GiB in it",
+    () => {
+      const boxd = fakeBoxd();
+      const host = fakeMachine();
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        boxd.state.snapshot.vcpu = 1;
+        boxd.state.snapshot.memoryBytes = 32 * 1024 ** 3;
+        const unsized = yield* boxdDriverFor(WORKER, boxdSettings({ size: Option.none() }));
+        assert.deepStrictEqual((yield* unsized.verify(WORKER, 1)).warnings, []);
+        const large = yield* boxdDriverFor(
+          WORKER,
+          boxdSettings({ size: Option.some(BoxdSize.make("1x32")) }),
+        );
+        assert.deepStrictEqual((yield* large.verify(WORKER, 1)).warnings, []);
+        const verified = yield* Effect.forEach(
+          logs.infos.filter((line) => line.includes("boxd provisioner verified")),
+          (line) => Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie),
+        );
+        assert.deepStrictEqual(
+          verified.map(([, fields]) => fields["size"]),
+          ["1x32", "1x32"],
+          "preflight logs the snapshot's size with and without provisioner.size",
+        );
+        boxd.state.snapshot.memoryBytes = 4 * 1024 ** 3;
+        const mismatch = yield* large.verify(WORKER, 1).pipe(Effect.flip);
+        assert.strictEqual(mismatch.capability, "provider");
+        assert.include(mismatch.message, "captured 1 vCPU and 4 GiB");
+        assert.include(mismatch.message, "provisioner.size is 1x32");
+        assert.include(mismatch.message, "set size to 1x4");
+        boxd.state.snapshot.vcpu = 8;
+        boxd.state.snapshot.memoryBytes = 32 * 1024 ** 3;
+        const vcpuMismatch = yield* large.verify(WORKER, 1).pipe(Effect.flip);
+        assert.strictEqual(vcpuMismatch.capability, "provider");
+        assert.include(vcpuMismatch.message, "captured 8 vCPU and 32 GiB");
+        assert.include(vcpuMismatch.message, "provisioner.size is 1x32");
+        assert.include(vcpuMismatch.message, "set size to 8x32");
+        assert.deepStrictEqual((yield* unsized.verify(WORKER, 1)).warnings, []);
+      }).pipe(Effect.provide([boxd.layer, host.layer, logs.layer]));
     },
   );
 });

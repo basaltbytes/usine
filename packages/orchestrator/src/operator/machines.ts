@@ -147,7 +147,8 @@ export class BoxdProvisionerView extends Schema.TaggedClass<
   endpoint: Schema.NullOr(BoxdEndpoint),
   /** The region of the machines, or null when they run where the endpoint runs them. */
   region: Schema.NullOr(BoxdRegion),
-  size: BoxdSize,
+  /** The size that preflight expects the snapshot to have, or null to accept the snapshot's size. */
+  size: Schema.NullOr(BoxdSize),
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean,
   /** The egress allowlist each machine gets, or null when egress is unrestricted. */
@@ -213,7 +214,7 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
               tokenEnv: settings.tokenEnv,
               endpoint: Option.getOrNull(settings.endpoint),
               region: Option.getOrNull(settings.region),
-              size: settings.size,
+              size: Option.getOrNull(settings.size),
               snapshot: settings.snapshot,
               isolated: settings.isolated,
               egress: Option.getOrNull(settings.egress),

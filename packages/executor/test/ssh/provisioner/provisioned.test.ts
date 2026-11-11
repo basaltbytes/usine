@@ -7,6 +7,7 @@ import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
   ProvisionerReuse,
+  ProvisionerSeconds,
   MachineAttemptLimit,
   MachineMaxAge,
   ContainerCpus,
@@ -1075,6 +1076,44 @@ describe("Provisioned SSH Worker", () => {
       Effect.provide(runtimeOf(machine, providers, keyed).pipe(Layer.provideMerge(logs.layer))),
     );
   });
+
+  it.live(
+    "warns at preflight that a boxd Worker ignores its provisioner.reuse and defers checks as without reuse",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const logs = capturedLogs();
+      const reused: SshWorkerAddress = {
+        ...boxdAddress,
+        machine: {
+          _tag: "Provisioned",
+          provisioner: boxdSettings({
+            timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
+            ignoredReuse: Option.some(
+              ProvisionerReuse.make({
+                attempts: MachineAttemptLimit.make(5),
+                maxAge: MachineMaxAge.make("2h"),
+              }),
+            ),
+          }),
+        },
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        assert.isTrue(
+          logs.warnings.some((line) =>
+            line.includes(`Worker \\"${WORKER}\\" sets provisioner.reuse, which usine ignores`),
+          ),
+        );
+        assert(Option.isSome(report.deferred));
+        assert.match(report.deferred.value, /^Checked on the first machine/);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtimeOf(machine, providers, reused).pipe(Layer.provideMerge(logs.layer))),
+      );
+    },
+  );
 
   it.live("refuses a Boat Worker whose identity file has no public key", () => {
     const machine = fakeMachine();
