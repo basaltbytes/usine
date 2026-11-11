@@ -73,6 +73,7 @@ import {
   delegate,
   fauxParent,
   layer,
+  PARENT_MODEL,
   type ParentStep,
   stubChildBackendLayer,
   StubChildren,
@@ -307,6 +308,9 @@ describe("durable AttemptRuntime", () => {
           "parent.SessionStarted",
           "WorkerUnresponsive",
         ]);
+        const started = outbound[0]?.payload;
+        assert(started?._tag === "Started");
+        assert.deepStrictEqual(started.parentModel, Option.some(PARENT_MODEL));
         assert.deepStrictEqual(
           trace(outbound).filter((tag) => !tag.startsWith("Worker")),
           [
@@ -525,6 +529,10 @@ describe("durable AttemptRuntime", () => {
                   const record = await tx.doc(AttemptRecordDoc, request.spec.attemptId, null);
                   assert.deepStrictEqual(record.pendingOutbound, []);
                   delete record.pendingOutbound;
+                  // A record written before the `started` marker started once it has a model.
+                  assert.isTrue(record.started);
+                  assert.isNotNull(record.parentModel);
+                  delete record.started;
                 }, context),
             );
             return { child, found };
