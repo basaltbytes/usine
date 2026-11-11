@@ -1,7 +1,8 @@
 import type { ChildHost } from "../child-host/child-host.ts";
-import { AgentResultError, type ChildRequest } from "../runtime.ts";
-import { Effect, Option } from "effect";
+import { AgentResultError, type ChildRequest, RestartState } from "../runtime.ts";
+import { Effect, Option, Struct } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
+import { SessionSpec } from "./contract.ts";
 import type { HarnessCatalog } from "./harness.ts";
 import type { Placement } from "./capability.ts";
 
@@ -72,3 +73,30 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
     ),
   );
 });
+
+/** Builds the session spec of `request` for the credential route that admission resolved. */
+export const childSpec = (request: ChildRequest, route: AdmissionContext): SessionSpec =>
+  SessionSpec.make({
+    session: request.session,
+    route,
+    host: request.host,
+    worker: request.worker,
+    machine: request.machine,
+    cwd: request.cwd,
+    environment: request.environment,
+  });
+
+/** The conversation state that `request` restores. */
+export const childRestart = (request: ChildRequest): RestartState =>
+  RestartState.make(
+    Struct.pick(request, [
+      "prompted",
+      "continuations",
+      "inFlight",
+      "unread",
+      "usage",
+      "held",
+      "paused",
+      "idle",
+    ]),
+  );

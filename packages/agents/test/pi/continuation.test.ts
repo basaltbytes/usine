@@ -16,6 +16,7 @@ import {
   continuationPlan,
   CONTINUATION_MESSAGE,
 } from "../../src/harness/continuation.ts";
+import { catalog } from "../../src/harness/catalog.ts";
 import { sessionConversation } from "../../src/harness/conversation.ts";
 import { sessionChannel } from "../../src/harness/session.ts";
 import {
@@ -87,12 +88,15 @@ describe("shared continuation policy", () => {
         const events: Array<AgentSessionEvent> = [];
         let opens = 0;
         let closed = 0;
-        const adapter = childContinuation({
+        const adapter = childContinuation(catalog, {
           stop: () => Effect.void,
-          open: (input, prompt, policy) =>
+          open: (_spec, start, policy) =>
             Effect.gen(function* () {
               opens++;
-              assert(Option.isNone(prompt), "native reopening never sends the original task");
+              assert(
+                start._tag === "StartResume",
+                "native reopening never sends the original task",
+              );
               yield* Effect.addFinalizer(() =>
                 Effect.sync(() => {
                   closed++;
@@ -116,10 +120,10 @@ describe("shared continuation policy", () => {
               const conversation = yield* sessionConversation({
                 session,
                 channel,
-                held: input.held,
-                paused: input.paused,
-                idle: input.idle,
-                unread: input.unread,
+                held: policy.restored.held,
+                paused: policy.restored.paused,
+                idle: policy.restored.idle,
+                unread: policy.restored.unread,
                 send: (message, _activity, id) =>
                   steer(message, id).pipe(Effect.as("queued" as const)),
                 pause: Effect.void,

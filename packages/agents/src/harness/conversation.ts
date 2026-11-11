@@ -1,4 +1,4 @@
-import { ChildSession, SessionIdle, SessionResumed } from "@usine/core/agent/session";
+import { type AgentSession, SessionIdle, SessionResumed } from "@usine/core/agent/session";
 import {
   InterventionState,
   type OperatorMessageId,
@@ -23,7 +23,7 @@ import type { SessionChannel } from "./session.ts";
 export type MessageTaken = "read" | "queued";
 
 interface ConversationOptions {
-  readonly session: ChildSession;
+  readonly session: AgentSession;
   readonly channel: SessionChannel;
   readonly held: boolean;
   readonly paused: boolean;

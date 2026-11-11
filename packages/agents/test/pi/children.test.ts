@@ -19,13 +19,7 @@ import { preflight } from "../../src/preflight/preflight.ts";
 import { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Layer, Option, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
-import {
-  type ChildBackendService,
-  ChildRequest,
-  ChildBackend,
-  SessionResult,
-  WorkingDirectory,
-} from "../../src/runtime.ts";
+import { ChildRequest, ChildBackend, SessionResult, WorkingDirectory } from "../../src/runtime.ts";
 import { childDispatcherLayer } from "../../src/harness/children.ts";
 
 const request = (harness: Harness) =>
@@ -48,18 +42,21 @@ const request = (harness: Harness) =>
     prompt: "Implement the focused task.",
   });
 
-const backend = (selected: Harness): ChildBackendService & Pick<HarnessRuntime, "resume"> => ({
-  resume: () => Effect.succeedNone,
+const backend = (selected: Harness): Pick<HarnessRuntime, "open" | "stop"> => ({
   stop: () => Effect.void,
-  launch: (found) =>
+  open: (spec) =>
     Effect.succeed({
-      session: found.session,
-      events: Stream.empty,
-      result: Effect.succeed(SessionResult.make({ message: selected })),
-      steer: () => Effect.void,
-      interrupt: Effect.void,
-      intervene: () =>
-        Effect.succeed(AttemptChannel.InterventionState.make({ held: false, paused: false })),
+      running: {
+        session: spec.session,
+        events: Stream.empty,
+        result: Effect.succeed(SessionResult.make({ message: selected })),
+        steer: () => Effect.void,
+        interrupt: Effect.void,
+        intervene: () =>
+          Effect.succeed(AttemptChannel.InterventionState.make({ held: false, paused: false })),
+      },
+      active: false,
+      recover: () => Effect.void,
     }),
 });
 
@@ -82,15 +79,14 @@ describe("harness runtime registration", () => {
     const runtime: HarnessRuntime = {
       id: claude.id,
       stop: () => Effect.void,
-      resume: () => Effect.succeedNone,
       preflight: checkedPreflight(() => Effect.void),
-      launch: (found) => {
-        assert.deepStrictEqual(found.environment, {
+      open: (spec, start, continuation) => {
+        assert.deepStrictEqual(spec.environment, {
           HOME: "/home/worker",
           PATH: "/usr/bin:/bin",
           CLAUDE_CONFIG_DIR: "/worker/claude",
         });
-        return backend(claude.id).launch(found);
+        return backend(claude.id).open(spec, start, continuation);
       },
     };
     return Effect.scoped(

@@ -2,8 +2,7 @@ import { Harness } from "@usine/core/agent/brain";
 import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
 import { HarnessCatalog } from "./harness.ts";
 import { admitPreflight, type HarnessRuntime } from "./runtime.ts";
-import { ChildRequest } from "../runtime.ts";
-import { admitChild } from "./launch.ts";
+import { SessionSpec } from "./contract.ts";
 
 /** A descriptor and its runtime cannot be registered together. */
 export class HarnessRegistrationError extends Schema.TaggedError<
@@ -23,7 +22,11 @@ export class UnknownHarnessError extends Schema.TaggedError<
   message: Schema.NonEmptyString,
 }) {}
 
-/** A complete catalog of harness descriptors and their runtimes. */
+/**
+ * A complete catalog of harness descriptors and their runtimes. Each registered runtime opens and
+ * stops sessions with only its own harness's host variables, and admits preflight brains with the
+ * catalog.
+ */
 export class Harnesses extends Context.Service<
   Harnesses,
   {
@@ -46,32 +49,15 @@ export class Harnesses extends Context.Service<
         yield* Effect.logError("Harness registration failed", { harness: runtime.id, message });
         return yield* HarnessRegistrationError.make({ harness: runtime.id, message });
       }
+      const scoped = (spec: SessionSpec) =>
+        SessionSpec.make({
+          ...spec,
+          environment: catalog.environmentFor(runtime.id, spec.environment),
+        });
       registered.set(runtime.id, {
         id: runtime.id,
-        stop: (request) =>
-          runtime.stop(
-            ChildRequest.make({
-              ...request,
-              environment: catalog.environmentFor(runtime.id, request.environment),
-            }),
-          ),
-        launch: (request) => {
-          const scoped = ChildRequest.make({
-            ...request,
-            environment: catalog.environmentFor(runtime.id, request.environment),
-          });
-          return admitChild(catalog, scoped).pipe(Effect.andThen(() => runtime.launch(scoped)));
-        },
-        resume: (request, reference) => {
-          const scoped = ChildRequest.make({
-            ...request,
-            resume: Option.some(reference),
-            environment: catalog.environmentFor(runtime.id, request.environment),
-          });
-          return admitChild(catalog, scoped).pipe(
-            Effect.andThen(() => runtime.resume(scoped, reference)),
-          );
-        },
+        stop: (spec) => runtime.stop(scoped(spec)),
+        open: (spec, start, continuation) => runtime.open(scoped(spec), start, continuation),
         preflight: (brain, target) =>
           admitPreflight(catalog, brain, target).pipe(
             Effect.andThen(() => runtime.preflight(brain, target)),

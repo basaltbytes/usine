@@ -1,7 +1,6 @@
 import type { OperatorMessageId } from "@usine/core/attempt/channel";
 import {
   childContinuation,
-  type ChildAdapter,
   checkContinuation,
   checkContinuationHome,
   environmentHome,
@@ -9,9 +8,17 @@ import {
 import { codexPreflight } from "./preflight.ts";
 import { codex } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
+import { type SessionSpec } from "../contract.ts";
+import {
+  gatewayCredential,
+  parentFields,
+  resolvedSession,
+  startPrompt,
+  startReference,
+} from "../adapter.ts";
+import { HarnessCatalog } from "../harness.ts";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
-  ChildSession,
   PoolRateLimitsUpdated,
   ProviderRecovered,
   ProviderRetries,
@@ -68,7 +75,6 @@ import {
 import {
   type AgentSessionError,
   ChildBackend,
-  type ChildRequest,
   type InterruptedTool,
   ChildSessionLifecycle,
   ChildSessionJournal,
@@ -112,13 +118,13 @@ const isTurnActivity = Schema.is(TurnActivity);
 const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
   connection: CodexConnection,
   client: CodexClient,
-  request: ChildRequest,
+  spec: SessionSpec,
   saved: HarnessSession,
 ) {
   const params: ThreadResumeParams = {
     threadId: saved.id,
-    model: request.session.brain.model,
-    cwd: request.cwd,
+    model: spec.session.brain.model,
+    cwd: spec.cwd,
     approvalPolicy: "never",
     sandbox: "danger-full-access",
     excludeTurns: false,
@@ -143,19 +149,19 @@ const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
     );
   if (Option.isSome(saved.modelProvider))
     yield* checkContinuation(
-      request,
+      spec,
       "model_provider",
       saved.modelProvider,
       Option.some(restored.modelProvider),
     );
   yield* Effect.logInfo("Resumed the saved Codex thread", {
-    sessionId: request.session.id,
+    sessionId: spec.session.id,
     threadId: saved.id,
   });
   return {
     id: saved.id,
     empty: restored.thread.turns.length === 0,
-    model: request.session.brain.model,
+    model: spec.session.brain.model,
     endpoint: Option.some(restored.modelProvider),
     activeTurn: Option.fromUndefinedOr(
       restored.thread.turns.find((turn) => isTurnStatus(turn.status, "inProgress")),
@@ -163,36 +169,37 @@ const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
   };
 });
 
-const makeCodexChild = Effect.gen(function* () {
+const makeCodexSessions = Effect.gen(function* () {
   const appServer = yield* CodexAppServer;
 
-  const open: ChildAdapter["open"] = Effect.fn("CodexRuntime.open")(
-    function* (request, prompt, policy) {
+  const open: HarnessRuntime["open"] = Effect.fn("CodexRuntime.open")(
+    function* (spec, start, policy) {
+      const prompt = startPrompt(start);
       yield* Effect.annotateCurrentSpan({
-        agent: request.session.agent,
-        effort: request.session.brain.effort,
-        harness: request.session.brain.harness,
-        model: request.session.brain.model,
-        parentSessionId: request.session.parentId,
-        sessionId: request.session.id,
+        agent: spec.session.agent,
+        effort: spec.session.brain.effort,
+        harness: spec.session.brain.harness,
+        model: spec.session.brain.model,
+        ...parentFields(spec.session),
+        sessionId: spec.session.id,
       });
       yield* Effect.logInfo("Launching Codex child session");
       const lifecycle = yield* ChildSessionLifecycle.current;
-      const { home, defaultHome } = environmentHome(request.environment, "CODEX_HOME", ".codex");
+      const { home, defaultHome } = environmentHome(spec.environment, "CODEX_HOME", ".codex");
       let client: CodexClient = {
-        cwd: request.cwd,
-        sessionId: Option.some(request.session.id),
-        environment: request.environment,
-        host: request.host,
+        cwd: spec.cwd,
+        sessionId: Option.some(spec.session.id),
+        environment: spec.environment,
+        host: spec.host,
       };
-      if (Option.isSome(request.resume)) client = { ...client, transport: "resume" };
+      if (start._tag === "StartResume") client = { ...client, transport: "resume" };
       let connection = yield* appServer.open(client);
-      yield* checkContinuationHome(request, home, defaultHome);
+      yield* checkContinuationHome(spec, start, home, defaultHome);
       yield* initializeCodex(connection);
       let billing = yield* codexChildAccount(
         connection,
-        request.session.brain,
-        request.session.gatewayCredential,
+        spec.session.brain,
+        gatewayCredential(spec.route.credential),
       );
 
       const models: Array<(typeof ModelListResponse.Type.data)[number]> = [];
@@ -213,7 +220,7 @@ const makeCodexChild = Effect.gen(function* () {
         models.push(...page.data);
         cursor = page.nextCursor ?? null;
       } while (cursor !== null);
-      const requestedModel = request.session.brain.model;
+      const requestedModel = spec.session.brain.model;
       const catalogModel = models.find(
         (model) => model.id === requestedModel || model.model === requestedModel,
       );
@@ -225,7 +232,7 @@ const makeCodexChild = Effect.gen(function* () {
           message: `Codex has no model "${requestedModel}"`,
         });
       }
-      const effort = request.session.brain.effort === "off" ? "none" : request.session.brain.effort;
+      const effort = spec.session.brain.effort === "off" ? "none" : spec.session.brain.effort;
       const supportedEfforts = catalogModel.supportedReasoningEfforts;
       if (
         supportedEfforts !== undefined &&
@@ -233,25 +240,25 @@ const makeCodexChild = Effect.gen(function* () {
         !supportedEfforts.some((option) => option.reasoningEffort === effort)
       ) {
         yield* Effect.logError("Codex child rejected an unsupported effort", {
-          effort: request.session.brain.effort,
+          effort: spec.session.brain.effort,
           model: requestedModel,
           supported: supportedEfforts.map((option) => option.reasoningEffort),
         });
         return yield* UnsupportedEffortError.make({
           harness: Harness.make("codex"),
           model: requestedModel,
-          effort: request.session.brain.effort,
+          effort: spec.session.brain.effort,
           message: `Codex model "${requestedModel}" doesn't support effort ${effort}`,
         });
       }
 
-      const thread = yield* Option.match(request.resume, {
+      const thread = yield* Option.match(startReference(start), {
         onNone: () =>
           Effect.gen(function* () {
             const params: ThreadStartParams = {
               model: requestedModel,
               allowProviderModelFallback: false,
-              cwd: request.cwd,
+              cwd: spec.cwd,
               approvalPolicy: "never",
               sandbox: "danger-full-access",
               ephemeral: false,
@@ -276,18 +283,14 @@ const makeCodexChild = Effect.gen(function* () {
               activeTurn: Option.none<(typeof ThreadResumeResponse.Type.thread.turns)[number]>(),
             };
           }),
-        onSome: (saved) => resumeThread(connection, client, request, saved),
+        onSome: (saved) => resumeThread(connection, client, spec, saved),
       });
-      const session = ChildSession.make({
-        id: request.session.id,
-        parentId: request.session.parentId,
-        agent: request.session.agent,
+      const session = resolvedSession(spec.session, {
         brain: BrainSpec.make({
           harness: Harness.make("codex"),
           model: ModelId.make(thread.model),
-          effort: request.session.brain.effort,
+          effort: spec.session.brain.effort,
         }),
-        gatewayCredential: request.session.gatewayCredential,
         pool: Option.some(billing.pool),
         endpoint: billing.pool === "apiKeys" ? thread.endpoint : Option.none(),
       });
@@ -297,7 +300,7 @@ const makeCodexChild = Effect.gen(function* () {
       });
       const harnessSession = HarnessSession.make({
         id: thread.id,
-        cwd: request.cwd,
+        cwd: spec.cwd,
         modelProvider: thread.endpoint,
         // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
         home,
@@ -311,15 +314,14 @@ const makeCodexChild = Effect.gen(function* () {
         pool: billing.pool,
         endpoint: Option.getOrUndefined(session.endpoint),
         sessionId: session.id,
-        parentSessionId: session.parentId,
+        ...parentFields(session),
         harnessSessionId: harnessSession.id,
         cwd: harnessSession.cwd,
         ...Option.match(harnessSession.home, { onNone: () => ({}), onSome: (home) => ({ home }) }),
       });
-      const turnParams: TurnStartParams = {
+      const turnParams: Omit<TurnStartParams, "input"> = {
         threadId: thread.id,
-        input: [{ type: "text", text: request.prompt, text_elements: [] }],
-        cwd: request.cwd,
+        cwd: spec.cwd,
         approvalPolicy: "never",
         sandboxPolicy: { type: "dangerFullAccess" },
         effort,
@@ -341,7 +343,7 @@ const makeCodexChild = Effect.gen(function* () {
         message: string;
         id: OperatorMessageId | undefined;
         turnId: string | undefined;
-      }> = turnActive ? request.unread.map((message) => ({ ...message, turnId })) : [];
+      }> = turnActive ? policy.restored.unread.map((message) => ({ ...message, turnId })) : [];
       const forgetInput = (input: (typeof submitted)[number]) =>
         Effect.sync(() => {
           const index = submitted.indexOf(input);
@@ -486,10 +488,10 @@ const makeCodexChild = Effect.gen(function* () {
       const conversation = yield* sessionConversation({
         session,
         channel,
-        held: request.held,
-        paused: request.paused,
-        idle: request.idle,
-        unread: request.unread,
+        held: policy.restored.held,
+        paused: policy.restored.paused,
+        idle: policy.restored.idle,
+        unread: policy.restored.unread,
         submitted: submitted.flatMap(({ id }) => (id === undefined ? [] : [id])),
         send: (message, _activity, id) => steer(message, id),
         pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
@@ -513,7 +515,7 @@ const makeCodexChild = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id, threadId: thread.id });
         if (yield* lifecycle.isStopping) return yield* Effect.never;
         if (
-          !isRemoteHost(request.host) ||
+          !isRemoteHost(spec.host) ||
           error._tag !== "SessionOperationError" ||
           !Schema.is(ChildProcessLost)(error.cause)
         )
@@ -532,10 +534,10 @@ const makeCodexChild = Effect.gen(function* () {
             yield* initializeCodex(connection);
             billing = yield* codexChildAccount(
               connection,
-              request.session.brain,
-              request.session.gatewayCredential,
+              spec.session.brain,
+              gatewayCredential(spec.route.credential),
             );
-            return yield* resumeThread(connection, client, request, harnessSession);
+            return yield* resumeThread(connection, client, spec, harnessSession);
           }),
         );
         const interruptedTools = [...toolsInFlight].map(([callId, tool]) => ({ callId, tool }));
@@ -556,8 +558,12 @@ const makeCodexChild = Effect.gen(function* () {
           sessionId: session.id,
           turnId,
         });
-        if (request.paused && toolsInFlight.size === 0) yield* interruptTurn();
-      } else if (!request.paused && Option.isNone(request.idle) && Option.isSome(prompt))
+        if (policy.restored.paused && toolsInFlight.size === 0) yield* interruptTurn();
+      } else if (
+        !policy.restored.paused &&
+        Option.isNone(policy.restored.idle) &&
+        Option.isSome(prompt)
+      )
         yield* startTurn(prompt.value).pipe(Effect.catch(resume));
       const consumeNotifications = Stream.unwrap(Effect.sync(() => connection.notifications)).pipe(
         Stream.runForEach(({ method, params }) =>
@@ -686,13 +692,13 @@ const makeCodexChild = Effect.gen(function* () {
               return;
             }
             if (method === "account/updated") {
-              if (Option.isSome(request.session.gatewayCredential))
+              if (Option.isSome(gatewayCredential(spec.route.credential)))
                 return yield* Effect.logDebug(
                   "Skipping a Codex account change: the Gateway holds the OpenAI credential",
                   { sessionId: session.id },
                 );
               const account = yield* Schema.decodeUnknownEffect(AccountUpdated)(params).pipe(
-                Effect.mapError(() => codexPoolUnavailable(request.session.brain.model)),
+                Effect.mapError(() => codexPoolUnavailable(spec.session.brain.model)),
               );
               if (
                 !isAuthMode(account.authMode, billing.pool === "apiKeys" ? "apikey" : "chatgpt") &&
@@ -706,9 +712,9 @@ const makeCodexChild = Effect.gen(function* () {
                   authentication: account.authMode ?? "logged-out",
                   requiredPool: billing.pool,
                 });
-                return yield* codexPoolUnavailable(request.session.brain.model);
+                return yield* codexPoolUnavailable(spec.session.brain.model);
               }
-              billing = yield* verifyCodexAccount(connection, request.session.brain.model);
+              billing = yield* verifyCodexAccount(connection, spec.session.brain.model);
               return;
             }
             if (method === "account/rateLimits/updated") {
@@ -838,26 +844,25 @@ const makeCodexChild = Effect.gen(function* () {
       };
     },
   );
-  const stop = Effect.fn("CodexRuntime.stop")((request: ChildRequest) =>
-    appServer.stop({ ...request, sessionId: Option.some(request.session.id) }),
+  const stop = Effect.fn("CodexRuntime.stop")((spec: SessionSpec) =>
+    appServer.stop({ ...spec, sessionId: Option.some(spec.session.id) }),
   );
-  return childContinuation({ open, stop });
+  return { open, stop } satisfies Pick<HarnessRuntime, "open" | "stop">;
 });
 
 /** Provides `ChildBackend` for local or remote children. Requires `CodexAppServer`; validates the model and authentication before starting the task. */
-export const codexChildLayer = Layer.effect(ChildBackend, makeCodexChild);
+export const codexChildLayer = Layer.effect(
+  ChildBackend,
+  Effect.map(makeCodexSessions, (sessions) =>
+    childContinuation(HarnessCatalog.make({ descriptors: [codex] }), sessions),
+  ),
+);
 
 export { codexConfigArgs } from "./app-server.ts";
 
-/** Combines preflight and scoped launch for registration. */
+/** Combines preflight and scoped sessions for registration. */
 export const codexRuntime = Effect.gen(function* () {
-  const child = yield* makeCodexChild;
+  const sessions = yield* makeCodexSessions;
   const preflight = yield* codexPreflight;
-  return {
-    id: codex.id,
-    preflight,
-    launch: child.launch,
-    resume: child.resume,
-    stop: child.stop,
-  } satisfies HarnessRuntime;
+  return { id: codex.id, preflight, ...sessions } satisfies HarnessRuntime;
 });

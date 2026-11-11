@@ -67,3 +67,11 @@ Native `resume(request, reference)` reopens a saved conversation without sending
 Claude's session UUID comes from usine before SDK startup. Operator messages carry UUIDs, with delivery acknowledged through Claude's `user_message_uuids` or correlated Codex native user-message items. Claude typed-prompt turns do not stamp every mid-turn fold, so a successful result's pending-send count also settles submitted message IDs that have no UUID receipt. Codex retains unconsumed input across turn boundaries and restores pending receipt IDs when reattaching to an active turn. The shared conversation receives message IDs for every acknowledgement; continuation decisions remain independent of each adapter's delivery evidence.
 
 If Codex native history confirms that the saved thread is empty, the shared policy sends the original task as its first input. A thread with saved work receives the continuation instruction.
+
+## Amendment (2026-11-11, #1203): role-neutral session seam
+
+The harness runtime no longer takes a child request. `HarnessRuntime.open` takes a `SessionSpec`: the session identity, the placement and credential route, the host, worker, machine, checkout, and environment. It starts the session with a prompt or reopens a saved `HarnessSession` without one. The spec names no role, so a decision session or an orchestrator agent can use the same primitives as a child. A `RoleSession` identity covers sessions outside the parent and child tree; stored `ParentSession` and `ChildSession` records decode unchanged.
+
+The child role is a decorator over the runtime. `childContinuation` admits a `ChildRequest`, builds its spec, and gives the adapter a continuation policy that holds the restart state: operator holds, pauses, unread messages, interrupted tool calls, committed usage, and the continuation history. Adapters read that state from the policy and their credential kind from the spec's route, never from child-only fields. Pi's own admission check moves into this decorator, so every child admission runs once with the catalog of the caller that composes the runtime.
+
+Preflight targets use the admission vocabulary: a `Placement` and a `CredentialRoute`. A sandbox probe is the `api-key` route at the `sandbox` placement instead of a fourth credential name.
