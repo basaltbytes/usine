@@ -2,7 +2,8 @@ import type { ConfigurationView } from "@usine/orchestrator/operator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { ConfigurationPage } from "~/features/configuration/components/section";
 import { WorkerRow } from "~/features/configuration/components/workers/row";
-import { plural } from "~/features/configuration/strings";
+import { ListEmpty } from "~/features/configuration/components/list-empty";
+import { emptyListCopy, plural } from "~/features/configuration/strings";
 
 type WorkersListProps = {
   readonly configuration: Pick<ConfigurationView, "workers" | "removedWorkers">;
@@ -15,29 +16,34 @@ export const WorkersList = ({ configuration }: WorkersListProps) => {
     <ConfigurationPage
       title="Workers"
       createKind="worker"
+      empty={configuration.workers.length === 0}
       counts={plural(configuration.workers.length, "worker")}
     >
-      {!running && (
+      {!running && configuration.workers.length > 0 && (
         <p className="text-muted-foreground">No attempts run until the GitHub App is set up.</p>
       )}
-      <div className="@container -mx-2">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>Worker</TableHead>
-              <TableHead>Kind</TableHead>
-              <TableHead className="hidden @2xl:table-cell">Location</TableHead>
-              <TableHead>Slots in use</TableHead>
-              <TableHead>Last preflight</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {configuration.workers.map((worker) => (
-              <WorkerRow key={worker.name} worker={worker} />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      {configuration.workers.length === 0 ? (
+        <ListEmpty {...emptyListCopy.worker} />
+      ) : (
+        <div className="@container -mx-2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Worker</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead className="hidden @2xl:table-cell">Location</TableHead>
+                <TableHead>Slots in use</TableHead>
+                <TableHead>Last preflight</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {configuration.workers.map((worker) => (
+                <WorkerRow key={worker.name} worker={worker} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
       {configuration.removedWorkers.length > 0 && (
         <ul className="flex flex-col gap-1 text-muted-foreground">
           {configuration.removedWorkers.map(({ name, running: attempts }) => (

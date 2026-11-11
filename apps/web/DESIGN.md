@@ -246,6 +246,8 @@ A 232px mantle sidebar, then the base work panel, inset 8px from the window's to
 
 Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at 768px) or full (fills the panel: the overview and every configuration page). List screens, such as Loops, are flat on the panel with no card: the page heading, then a table whose text aligns with the heading, so its hairlines and row fills extend 8px past it on each side. Below `sm`, tables drop or fold their least important columns instead of scrolling sideways. The Workers list shows **Location**, and the Repositories list **Tags**, from a 672px table.
 
+**Configuration list.** Loops, Agents, Workers, Projects, Repositories, Labels, and Role bindings share one layout: the page heading with counts (`3 labels`) and the primary create button at the right of the title row, named for the entity (`New loop`, `New role binding`), and wrapping under the title on phones. Each list is a flat table whose rows open the entity. The button opens the creation form between the heading and the table, and is disabled while the form is open: a 14px semibold title, the name step's fields and actions at most 768px wide, **Continue** and **Cancel**, then a hairline above the table. An empty list has no table: an empty state in an empty lane's dashed outline (8px radius, 20px padding) holds a 13px medium title (`No loops`), one 13px subtext0 sentence on what an entry does, and the create button, which then leaves the title row. When something else must exist first, such as a project for a loop, an outline button opens that list instead. The empty state hides while the creation form is open.
+
 **Board.** The project title and counts, then the lanes: 272px wide, 12px apart, scrolling sideways together, with headings sticky on the base ground. Folded lanes are 40px rails with the name set vertically and the count.
 
 **Overview** (`/`). The page heading with counts (`2 running, 7 stalled`), then Statistics, Needs attention, Running, Stalled, and Recent runs, 36px apart, each a 16px semibold title with its count in 13px subtext0, then the Workers line. An empty block is one 13px subtext0 fragment, such as `Nothing running`.
@@ -307,7 +309,7 @@ Content is visible without motion. Under `prefers-reduced-motion: reduce`, durat
 
 ## Shapes
 
-Corners step down with nesting: the work panel 10px; cards, lane rails, menus, and Needs attention items 8px; buttons, inputs, and menu items 6px; extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so the box size doesn't change. The only dashed line is an empty lane's outline.
+Corners step down with nesting: the work panel 10px; cards, lane rails, menus, and Needs attention items 8px; buttons, inputs, and menu items 6px; extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so the box size doesn't change. The only dashed line is the outline of an empty lane or an empty configuration list.
 
 ## Components
 
@@ -349,7 +351,7 @@ One chip per applied filter, then a **Filter** button (`FunnelSimple` in subtext
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items red with a red 15% focus fill. Menus list only actions that apply.
 
 ### Page heading
-On the overview, board, tasks list, and configuration pages: the 20px semibold title, after the repository mark on a repository's page, its counts in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), any mark such as Needs attention, and the screen's actions at the right.
+On the overview, board, tasks list, and configuration pages: the 20px semibold title, after the repository mark on a repository's page, its counts in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), any mark such as Needs attention, and the screen's actions at the right: a list's create button, an entity's **Edit** and **Delete**, or History's filter.
 
 ### Flat table
 The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, with a 2px mauve outline on the link; other rows have no hover fill. Row actions are subtext0 ghost buttons, only those that apply, such as Pause or Resume.

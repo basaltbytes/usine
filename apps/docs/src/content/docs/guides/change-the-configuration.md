@@ -11,7 +11,7 @@ A running instance and the role required for the entity: instance admin for sett
 
 ## Procedure
 
-1. Open **Configuration** and select the entity to change. Use **New** on its list to create an entity, or **Edit** on an existing entity.
+1. Open **Configuration** and select the entity to change. To create an entity, select the **New** button at the right of the list's title, such as **New loop**, then enter a name and select **Continue**. On an empty list, the button is in the empty state. To change an existing entity, select **Edit**.
 2. Change the fields. Use **Edit as text** for the entity's serialized representation. Review validation errors and, for loops, **Preview**.
 3. Add a revision message if useful and select **Save**. If another revision changed the entity first, inspect the diff, use **Reload text**, and reapply your draft.
 4. For a local edit of an existing entity, run the matching command from the instance folder instead:

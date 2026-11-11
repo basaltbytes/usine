@@ -99,7 +99,7 @@ it.each([1440, 390])(
       await capture("members");
       await page.getByRole("link", { name: "Add binding · olivia-operator", exact: true }).click();
       await page.getByRole("textbox", { name: "Name", exact: true }).fill("olivia-project");
-      await button("Edit").click();
+      await button("Continue").click();
       await assertForm();
       await expect.element(select("Member")).toHaveValue("2");
       expect([...document.querySelectorAll("select")][0]?.textContent).toContain("olivia-operator");
@@ -219,9 +219,9 @@ it("starts a binding from Configuration with an explicit member choice", async (
         </QueryClientProvider>,
       ),
     );
-    await button("New").click();
+    await button("New role binding").click();
     await page.getByRole("textbox", { name: "Name", exact: true }).fill("new-binding");
-    await button("Edit").click();
+    await button("Continue").click();
     await assertForm();
     await expect.element(select("Member")).toHaveValue("");
     await button("Save").click();
