@@ -492,6 +492,76 @@ describe("event-driven coordinator runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "leaves an outcome committed while cancel waits live when its terminal envelope fails",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated("coordinator/cancel-during-decision");
+        const attemptId = request.spec.attemptId;
+        const recording = recordingSink();
+        // Fails each terminal envelope, as a drained Worker's transcript does.
+        const failingFinal: AttemptChannel.Sink = {
+          ...recording.sink,
+          append: (direction, envelope) =>
+            envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Final"
+              ? Effect.fail(InfraFailure.make({ message: "transcript unavailable", cause: "test" }))
+              : recording.sink.append(direction, envelope),
+        };
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        // Holds the decision for the child's report, which the delegation has already recorded.
+        const holding = Layer.succeed(
+          WakeUp,
+          WakeUp.of({
+            handle: (event) =>
+              event._tag === "ChildReported"
+                ? Deferred.succeed(reached, undefined).pipe(
+                    Effect.andThen(Deferred.await(release)),
+                    Effect.as(Option.none()),
+                  )
+                : Effect.succeedNone,
+          }),
+        );
+        const process = yield* orchestrator(sqliteJournal(database).pipe(coordinatorWith(holding)));
+        const execution = yield* process.execute(request, failingFinal);
+        yield* (yield* process.nextChild).reply("Opened #12.");
+        yield* Deferred.await(reached);
+        const logged: Array<string> = [];
+        const canceling = yield* Effect.forkChild(
+          process.attempts
+            .cancel(attemptId)
+            .pipe(
+              Effect.provide(
+                Logger.layer([Logger.make(({ message }) => logged.push(String(message)))]),
+              ),
+            ),
+        );
+        // `cancel` has loaded the `Open` journal and signalled the attached call.
+        yield* until(() =>
+          logged.some((entry) => entry.includes("Canceling the coordinated Attempt")),
+        );
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(canceling);
+        yield* Fiber.await(execution);
+        const live = yield* process.attempts.isLive(attemptId);
+        const finished = yield* process.attempts.finished(attemptId);
+        yield* process.stop;
+        const journal = yield* stored(database, attemptId);
+
+        assert.isTrue(live);
+        assert.isTrue(Option.isNone(finished));
+        assert(Option.isSome(journal));
+        assert.strictEqual(journal.value.status._tag, "Terminal");
+        assert.strictEqual(journal.value.outbox.length, 1);
+        assert.isTrue(
+          logged.some((entry) =>
+            entry.includes("The canceled Attempt has an outcome; its caller decides to settle it"),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.live("drops a Worker notice while an execute call is attached to an ended Attempt", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
