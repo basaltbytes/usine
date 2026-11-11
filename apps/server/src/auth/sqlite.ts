@@ -2,7 +2,14 @@ import { Migrator, SqlClient } from "effect/sql";
 import { PermissionGrant } from "@usine/core/access";
 import { Clock, Effect, Layer, Option, Schema } from "effect";
 
-import { AuthError, authFailure, InstanceToken, Member, OperationId } from "./model.ts";
+import {
+  AuthError,
+  authFailure,
+  InstanceToken,
+  Member,
+  OperationCeilingChange,
+  OperationId,
+} from "./model.ts";
 import { AuthStore } from "./store.ts";
 
 const MemberJson = Schema.fromJsonString(Member);
@@ -168,16 +175,20 @@ export const sqliteAuthLayer = Layer.effect(
           );
         }).pipe(Effect.catch(failure("list tokens"))),
       ),
-      setScopes: Effect.fn("AuthStore.setScopes")((member, id, scopes, operations) =>
+      setScopes: Effect.fn("AuthStore.setScopes")((member, id, scopes, change) =>
         Effect.gen(function* () {
           const encoded = yield* Schema.encodeEffect(
             Schema.fromJsonString(Schema.Array(PermissionGrant)),
           )(scopes);
-          const rows = yield* Option.match(operations, {
-            onNone: () =>
+          const rows = yield* OperationCeilingChange.$match(change, {
+            Keep: () =>
+              sql`UPDATE usine_instance_tokens SET value = json_set(value, '$.scopes', json(${encoded})) WHERE id = ${id} AND member_id = ${member} RETURNING id`,
+            Remove: () =>
               sql`UPDATE usine_instance_tokens SET value = json_remove(json_set(value, '$.scopes', json(${encoded})), '$.operations') WHERE id = ${id} AND member_id = ${member} RETURNING id`,
-            onSome: (allowed) =>
-              Schema.encodeEffect(Schema.fromJsonString(Schema.Array(OperationId)))(allowed).pipe(
+            Replace: ({ operations }) =>
+              Schema.encodeEffect(Schema.fromJsonString(Schema.Array(OperationId)))(
+                operations,
+              ).pipe(
                 Effect.flatMap(
                   (ceiling) =>
                     sql`UPDATE usine_instance_tokens SET value = json_set(value, '$.scopes', json(${encoded}), '$.operations', json(${ceiling})) WHERE id = ${id} AND member_id = ${member} RETURNING id`,
@@ -188,7 +199,7 @@ export const sqliteAuthLayer = Layer.effect(
           yield* Effect.logInfo("Token scopes changed", {
             memberId: member,
             tokenId: id,
-            operationCeiling: Option.isSome(operations),
+            operationCeiling: change._tag,
           });
         }).pipe(
           Effect.catchIf(

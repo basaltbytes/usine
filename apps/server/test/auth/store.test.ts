@@ -16,6 +16,7 @@ import {
   GitHubIdentity,
   Member,
   InstanceToken,
+  OperationCeilingChange,
   OperationId,
   TokenId,
   TokenName,
@@ -82,17 +83,27 @@ for (const [name, layer] of [
           }),
         ];
         assert.equal(
-          (yield* store.setScopes(bob.id, token.id, scopes, Option.none()).pipe(Effect.flip))
-            .status,
+          (yield* store
+            .setScopes(bob.id, token.id, scopes, OperationCeilingChange.Keep())
+            .pipe(Effect.flip)).status,
           403,
         );
         const operations = [OperationId.make("operator.approve")];
-        yield* store.setScopes(alice.id, token.id, scopes, Option.some(operations));
+        yield* store.setScopes(
+          alice.id,
+          token.id,
+          scopes,
+          OperationCeilingChange.Replace({ operations }),
+        );
         const access = yield* store.authenticate(token.hash, 61000);
         assert.deepEqual(Option.getOrNull(access)?.token.scopes, scopes);
         assert.deepEqual((yield* store.tokens(alice.id))[0]?.scopes, scopes);
         assert.deepEqual(Option.getOrNull(access)?.token.operations, Option.some(operations));
-        yield* store.setScopes(alice.id, token.id, scopes, Option.none());
+        yield* store.setScopes(alice.id, token.id, [], OperationCeilingChange.Keep());
+        const kept = (yield* store.tokens(alice.id))[0];
+        assert.deepEqual(kept?.scopes, []);
+        assert.deepEqual(kept?.operations, Option.some(operations));
+        yield* store.setScopes(alice.id, token.id, scopes, OperationCeilingChange.Remove());
         assert.isTrue(
           Option.isNone((yield* store.tokens(alice.id))[0]?.operations ?? Option.some([])),
         );

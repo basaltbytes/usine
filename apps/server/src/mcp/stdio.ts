@@ -28,9 +28,13 @@ const Session = Schema.Struct({
 /**
  * Serves the operator tools of the instance at `origin` over standard input and output. It reads
  * the instance's OpenAPI document and the token's session once, at start, and sends every tool call
- * to the instance with `token`.
+ * to the instance with `token`. Each request to the instance fails after `requestTimeout`.
  */
-export const stdioServer = (origin: string, token: Redacted.Redacted<string>) =>
+export const stdioServer = (
+  origin: string,
+  token: Redacted.Redacted<string>,
+  requestTimeout: Duration.Input = REQUEST_TIMEOUT,
+) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const client = (yield* HttpClient.HttpClient).pipe(
@@ -49,7 +53,7 @@ export const stdioServer = (origin: string, token: Redacted.Redacted<string>) =>
         yield* Effect.annotateCurrentSpan({ origin, path });
         const response = yield* client
           .get(new URL(path, origin))
-          .pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.catch(failure(path)));
+          .pipe(Effect.timeout(requestTimeout), Effect.catch(failure(path)));
         if (response.status === 401 || response.status === 403)
           return yield* McpStartError.make({
             message: `${origin} refused the token (HTTP ${response.status}). Set USINE_TOKEN to an instance token from usine sign-in, or check its scopes.`,
@@ -86,7 +90,7 @@ export const stdioServer = (origin: string, token: Redacted.Redacted<string>) =>
             Effect.flatMap((response) =>
               Effect.map(response.text, (text) => ({ status: response.status, text })),
             ),
-            Effect.timeout(REQUEST_TIMEOUT),
+            Effect.timeout(requestTimeout),
             Effect.mapError((error) =>
               OperatorUnavailableError.make({
                 message: `Could not reach ${origin} (${error.message}).`,

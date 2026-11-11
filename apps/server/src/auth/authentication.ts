@@ -355,12 +355,12 @@ export const authenticationLayer = (options: {
             );
             return yield* authFailure("Token scopes exceed your permissions.", 403);
           }
-          const operations = yield* OperationCeilingChange.$match(change, {
-            Keep: () => Effect.succeed(current?.operations ?? Option.none()),
+          yield* OperationCeilingChange.$match(change, {
+            Keep: () => Effect.void,
             Remove: () => narrowCeiling(caller, Option.none()),
             Replace: ({ operations }) => narrowCeiling(caller, Option.some(operations)),
           });
-          yield* store.setScopes(caller.member.value.id, id, scopes, operations);
+          yield* store.setScopes(caller.member.value.id, id, scopes, change);
         }),
         removeMember: access.remove,
         origin: options.origin,

@@ -6,7 +6,7 @@ import {
   GitHubUserId,
   InstanceToken,
   Member,
-  type OperationId,
+  type OperationCeilingChange,
   TokenHash,
   TokenId,
 } from "./model.ts";
@@ -27,11 +27,12 @@ export class AuthStore extends Context.Service<
       AuthError
     >;
     readonly tokens: (id: GitHubUserId) => Effect.Effect<ReadonlyArray<InstanceToken>, AuthError>;
+    /** Replaces a token's scopes and applies `operations`; `Keep` leaves the stored ceiling as it is. */
     readonly setScopes: (
       member: GitHubUserId,
       token: TokenId,
       scopes: ReadonlyArray<PermissionGrant>,
-      operations: Option.Option<ReadonlyArray<OperationId>>,
+      operations: OperationCeilingChange,
     ) => Effect.Effect<void, AuthError>;
     readonly revoke: (member: GitHubUserId, token: TokenId) => Effect.Effect<void, AuthError>;
   }

@@ -45,7 +45,7 @@ Connect a coding agent on your laptop, such as Claude Code or Codex, to an insta
    To use stdio instead of HTTP, start `usine mcp` as a local command that reads the token from `USINE_TOKEN`:
 
    ```sh
-   claude mcp add --env USINE_TOKEN=<token> usine -- usine mcp --origin https://usine.example.com
+   claude mcp add usine --env USINE_TOKEN=<token> -- usine mcp --origin https://usine.example.com
    codex mcp add usine --env USINE_TOKEN=<token> -- usine mcp --origin https://usine.example.com
    ```
 

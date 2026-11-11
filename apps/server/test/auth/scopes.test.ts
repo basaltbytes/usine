@@ -11,6 +11,7 @@ import {
 import { ProjectId } from "@usine/core/project";
 import { alice, authFixture, localSecret } from "./fixture.ts";
 import {
+  type AuthError,
   InstanceToken,
   OperationCeilingChange,
   OperationId,
@@ -276,6 +277,51 @@ it.live("keeps, replaces, and removes a device token's operation ceiling", () =>
       OperationCeilingChange.Remove(),
     );
     assert.isTrue(Option.isNone((yield* auth.authenticate(device)).operations));
+  }).pipe(Effect.scoped),
+);
+
+it.live("keeps a ceiling that another edit narrows while a scope-only edit runs", () =>
+  Effect.gen(function* () {
+    const overview = OperationId.make("operator.overview");
+    const both = [overview, OperationId.make("operator.approve")];
+    // Runs once, after setScopes reads the token list and before it writes.
+    let interleave: Effect.Effect<void, AuthError> = Effect.void;
+    const services = yield* authFixture([alice], alice, undefined, (store) => ({
+      ...store,
+      tokens: (id) =>
+        store.tokens(id).pipe(
+          Effect.tap(() => {
+            const pending = interleave;
+            interleave = Effect.void;
+            return pending;
+          }),
+        ),
+    }));
+    const auth = services.authentication;
+    const secret = yield* browserSession(auth);
+    const issued = yield* auth.createToken(
+      secret,
+      deviceToken("Reader", administratorPermissions, Option.some(both)),
+    );
+    const token = (yield* services.store.tokens(alice.id)).find(({ kind }) => kind === "device");
+    assert.isDefined(token);
+    if (token === undefined) return;
+    interleave = services.store.setScopes(
+      alice.id,
+      token.id,
+      administratorPermissions,
+      OperationCeilingChange.Replace({ operations: [overview] }),
+    );
+    yield* auth.setScopes(
+      secret,
+      token.id,
+      administratorPermissions,
+      OperationCeilingChange.Keep(),
+    );
+    assert.deepEqual(
+      (yield* auth.authenticate(Redacted.value(issued.secret))).operations,
+      Option.some([overview]),
+    );
   }).pipe(Effect.scoped),
 );
 
