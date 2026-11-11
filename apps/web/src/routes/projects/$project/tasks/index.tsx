@@ -5,7 +5,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { RouteError, RoutePending } from "~/components/route-status";
-import { ProjectNotFound } from "~/components/project-not-found";
+import { missingProjectDescription, ProjectNotFound } from "~/components/project-not-found";
 import { deskQuery } from "~/lib/desk/queries";
 import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
 import { TaskList } from "~/features/tasks/list.page";
@@ -18,7 +18,7 @@ const TasksRoute = () => {
   const navigate = Route.useNavigate();
   const desk = useSuspenseQuery(deskQuery());
   if (Schema.is(OperatorHttpError)(error) && error.error === "BoardProjectNotFoundError")
-    return <ProjectNotFound />;
+    return <ProjectNotFound description={missingProjectDescription(slug)} />;
   return (
     <TaskList
       project={project}
