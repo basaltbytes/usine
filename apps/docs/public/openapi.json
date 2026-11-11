@@ -46014,7 +46014,8 @@
               "type": "string",
               "pattern": "^\\S(?:.*\\S)?$",
               "maxLength": 50
-            }
+            },
+            "uniqueItems": true
           },
           "undeclaredOutcomeLabels": {
             "type": "array",
