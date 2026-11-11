@@ -31,7 +31,18 @@ import {
   SessionFinished,
   SessionStarted,
 } from "@usine/core/agent/session";
-import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Schema, Stream } from "effect";
+import {
+  DateTime,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Match,
+  Option,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 import { durableError, type DurableHarnessError } from "../harness.ts";
 import { AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
@@ -755,15 +766,28 @@ export const subagentTool = (services: ExtensionServices) => {
               AgentBlockedError: () => "blocked" as const,
               AgentQuestionError: () => "question" as const,
             });
+            const resetsAt =
+              report._tag === "AgentCapacityError"
+                ? Option.map(report.resetsAt, DateTime.formatIso)
+                : Option.none<string>();
             yield* Effect.logInfo("Child session returned a reserved report to the Pi parent", {
               sessionId: session.id,
               kind,
+              resetsAt: Option.getOrUndefined(resetsAt),
             });
             const first = yield* call("record the child's report", () =>
               api.commit(async (tx) => {
                 const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
                 if (record.childBlocker !== null) return false;
-                record.childBlocker = { sessionId: session.id, message: report.message, kind };
+                record.childBlocker = {
+                  sessionId: session.id,
+                  message: report.message,
+                  kind,
+                  ...Option.match(resetsAt, {
+                    onNone: () => ({}),
+                    onSome: (value) => ({ resetsAt: value }),
+                  }),
+                };
                 return true;
               }, context),
             );

@@ -52,12 +52,15 @@ export type AttemptRecord = {
    * The first blocker, question, or harness failure reported by a child, which fails the Attempt
    * unless the parent relays one. The first infrastructure failure takes precedence until a new
    * delegation after a restart clears a previous process's failure, or that child resumes and
-   * returns a report. A missing `kind` means `blocked`.
+   * returns a report. An infrastructure failure or a `capacity` report also replaces the parent's
+   * own report. A missing `kind` means `blocked`.
    */
   childBlocker: {
     sessionId: string;
     message: string;
     kind?: "blocked" | "question" | "failed" | "capacity" | "infra";
+    /** The ISO 8601 time a `capacity` report's usage limit resets, if the provider reported it. */
+    resetsAt?: string;
   } | null;
   childBudgetExceeded: { attempted: number; max: number } | null;
   /** The next outbound and inbound sequence numbers. */
