@@ -17,7 +17,7 @@ _Note, 2026-10-28 ([ADR 0031](./0031-authored-configuration-in-the-database.md),
 ## Consequences
 
 - Forms first justifies ADR 0004's targeted YAML-AST writer: form edits rewrite only changed fields, keeping comments and formatting. Both editors refuse invalid saves, so only out-of-band git edits get quarantined.
-- `enabled:` leaves the loop schema (ADR 0004 amended): pause is database state only, per ADR 0009, resolving their contradiction. Losing the database re-arms every loop, accepted under ADR 0010's cold-start refire.
+- `enabled:` leaves the loop schema (ADR 0004 amended): pause is database state only. Losing the database re-arms every loop, accepted under ADR 0010's cold-start refire.
 - Match and prompt previews use already-polled state, with no extra GitHub calls; an unpolled repo shows "no data yet".
 - The add-repo picker lists only unregistered installation repos, so the UI can't create registry-installation drift (ADR 0011). Drift from git keeps its per-project error.
 - A future form must clear the same bar: binding live data the file author can't see. Everything else stays raw-first.

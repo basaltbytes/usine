@@ -1,3 +1,5 @@
+Historical: the `ModelAccess` port was never built, and usine keeps one way to call a model through the harness contract (see `AGENTS.md`).
+
 # Model access for parents and children
 
 Research for [#800](https://github.com/basaltbytes/usine/issues/800), supporting [#799](https://github.com/basaltbytes/usine/issues/799). Read and tested on 2026-11-01 against usine commit `1f129744a797299a206159eebec2d9d8a4f3aefc`, Pi and pi-durable 1.4.0, and usine's Claude Agent SDK 0.3.311.
@@ -6,7 +8,7 @@ Research for [#800](https://github.com/basaltbytes/usine/issues/800), supporting
 
 Introduce `ModelAccess` as a platform-free port for credential selection, pool attribution, and request admission, with the gateway as the authority for credentials it manages. Keep Pi as the parent. Implement a Pi provider adapter over the port before considering a different parent harness; the supervisor must use the same port. A shared library supplies contracts and deterministic policy, while one runtime owns each credential's admission state. Sharing code alone cannot coordinate concurrent requests.
 
-Do not adopt `pi-claude-bridge` as an operational stopgap yet. Its standalone Pi tests passed, but installing it does not register a provider in usine's durable parent. Its placeholder API key also produces the wrong pool classification under usine's existing rules. Integration needs an adapter and verified billing metadata, followed by an actual attempt and restart test. The [ADR proposal](../adr/0032-model-access.md) records this order without changing the accepted ADRs.
+Do not adopt `pi-claude-bridge` as an operational stopgap yet. Its standalone Pi tests passed, but installing it does not register a provider in usine's durable parent. Its placeholder API key also produces the wrong pool classification under usine's existing rules. Integration needs an adapter and verified billing metadata, followed by an actual attempt and restart test.
 
 **Incomplete acceptance:** this investigation did not complete the requested Claude-plan usine attempt or orchestrator restart with reattachment. The available environment exposed an attempt-scoped gateway caller token, not a disposable orchestrator endpoint, gateway credential-kind access, or the subscription account's billing view. Therefore the live bridge calls below establish transport compatibility, session continuation, caching, and steering only. They do not establish Claude-plan attribution or absence of Extra Usage. OpenAI's legal pages returned HTTP 403; the OpenAI terms assessment remains limited to its accessible product documentation.
 
@@ -208,4 +210,4 @@ Use deterministic tests for policy and durable state, real gateway transport tes
 | [0021](../adr/0021-pi-parent-pool-follows-authentication.md) | Replace provider-name/auth heuristics with a verified route binding. Claude-plan parents require a tested vendor-client adapter; this proposal does not enable them |
 | [0027](../adr/0027-gateway-credential-proxy.md) | Add parent/member model-call scopes, one credential authority, per-request admission, revision binding, and restart persistence; preserve credential secrecy, attachment checks, and vendor protocol semantics |
 
-The proposed ADR is conditional. The unresolved live-test and legal-source limits above prevent treating this report as approval to deploy the bridge or expand subscription use.
+The proposal is conditional. The unresolved live-test and legal-source limits above prevent treating this report as approval to deploy the bridge or expand subscription use.

@@ -19,7 +19,7 @@ Tool-call noise burying the story; the same text repeated (child's final message
 
 ## Constraints
 
-- Every behaviour the web README describes for the drawer keeps working, re-homed on the page or the drawer: interventions and their rules, held children, Load earlier, Jump to latest, following the tail, unread counts, error navigation, reading-place bookmarks (ADR 0025), resume commands for Claude and Codex children, rate-window meters, salvage branch or retained worktree, Raw details.
+- Every behaviour the web README describes for the drawer keeps working, re-homed on the page or the drawer: interventions and their rules, held children, Load earlier, Jump to latest, following the tail, unread counts, error navigation, reading-place bookmarks, resume commands for Claude and Codex children, rate-window meters, salvage branch or retained worktree, Raw details.
 - Menus and action rows list only the actions that apply.
 
 ## Direction contract
