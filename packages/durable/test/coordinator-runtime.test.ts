@@ -395,20 +395,46 @@ describe("event-driven coordinator restarts on SQLite", () => {
         const first = yield* orchestrator(
           sqliteJournal(database).pipe(interruptingTransition("ChildReported"), coordinator),
         );
+        const sessionEvents = () =>
+          trace(recording.outbound()).filter((entry) => entry.startsWith("child.Session"));
         const stopped = yield* first.execute(request, recording.sink);
         const child = yield* first.nextChild;
+        // A child that saved its harness session could be resumed, as Claude and Codex children are.
+        yield* child.emit(
+          SessionStarted.make({
+            session: child.request.session,
+            harnessSession: Option.some(
+              HarnessSession.make({ id: HarnessSessionId.make("native-1"), cwd: request.cwd }),
+            ),
+          }),
+        );
+        yield* until(
+          () => sessionEvents().filter((entry) => entry === "child.SessionStarted").length === 2,
+        );
         yield* child.reply("Done before the restart.");
         const exit = yield* Fiber.await(stopped);
         yield* first.stop;
+        const startedBeforeRestart = sessionEvents().filter(
+          (entry) => entry === "child.SessionStarted",
+        ).length;
 
         const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-        const report = yield* second.attempts.execute(request, recording.sink);
-        const another = yield* second.nextChild.pipe(Effect.timeoutOption("50 millis"));
+        const execution = yield* second.execute(request, recording.sink);
+        const another = yield* second.nextChild.pipe(Effect.timeoutOption("200 millis"));
+        // Lets a wrongly started child finish, so the assertions below report it.
+        if (Option.isSome(another)) yield* another.value.reply("Done again.");
+        const report = yield* Fiber.join(execution);
         yield* second.stop;
 
         assert.isTrue(Exit.hasInterrupts(exit));
         assert.strictEqual(report.message, "Done before the restart.");
         assert.isTrue(Option.isNone(another));
+        assert.strictEqual(startedBeforeRestart, 2);
+        assert.strictEqual(
+          sessionEvents().filter((entry) => entry === "child.SessionStarted").length,
+          startedBeforeRestart,
+        );
+        assert.notInclude(sessionEvents(), "child.SessionResumed");
         assertAdmitted(request.spec.attemptId, recording.outbound());
       }).pipe(Effect.scoped),
   );
@@ -534,17 +560,21 @@ describe("event-driven coordinator restarts on SQLite", () => {
       yield* child.reply("Opened #12.");
       const failure = yield* Fiber.join(execution).pipe(Effect.flip);
       const liveBeforeRestart = yield* first.attempts.isLive(attemptId);
+      const finishedBeforeRestart = yield* first.attempts.finished(attemptId);
       yield* first.stop;
 
       const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
       const report = yield* second.attempts.execute(request, duplicating);
       const liveAfter = yield* second.attempts.isLive(attemptId);
+      const finishedAfter = yield* second.attempts.finished(attemptId);
       yield* second.stop;
 
       assert.strictEqual(failure.message, "transcript unavailable");
       assert.isTrue(liveBeforeRestart);
+      assert.isTrue(Option.isNone(finishedBeforeRestart));
       assert.strictEqual(report.message, "Opened #12.");
       assert.isFalse(liveAfter);
+      assert.deepStrictEqual(finishedAfter, Option.some(ParentReported.make({ report })));
       assertAdmitted(attemptId, recording.outbound());
     }).pipe(Effect.scoped),
   );

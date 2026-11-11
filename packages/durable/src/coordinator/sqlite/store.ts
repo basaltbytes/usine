@@ -25,6 +25,7 @@ import {
 import {
   decided,
   keptDecision,
+  keptDelegationOutcome,
   opened,
   progressed,
   reserved,
@@ -372,7 +373,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
             if (result.record !== previous) {
               const encoded = yield* encode(EventJson)(outcome);
               yield* sql`UPDATE ${sql(delegations)} SET outcome = ${encoded} WHERE attempt_id = ${attemptId} AND number = ${number}`;
-            }
+            } else yield* keptDelegationOutcome(attemptId, number, result.recorded, outcome);
             return result.recorded;
           }).pipe(
             transaction,

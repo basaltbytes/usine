@@ -287,6 +287,32 @@ export const settledDelegation = (record: DelegationRecord, outcome: EncodedEven
     }),
   });
 
+const decodeTagged = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }));
+
+/** The `_tag` of an encoded event, or `unknown` if it has none. */
+const eventTag = (event: EncodedEvent) =>
+  Option.match(decodeTagged(event), { onNone: () => "unknown", onSome: ({ _tag }) => _tag });
+
+/** Logs why `settleDelegation` kept the outcome recorded first instead of `discarded`. */
+export const keptDelegationOutcome = (
+  attemptId: CoordinatorSnapshot["attemptId"],
+  delegation: DelegationRecord["number"],
+  recorded: EncodedEvent,
+  discarded: EncodedEvent,
+) =>
+  Equal.equals(recorded, discarded)
+    ? Effect.logInfo("Kept the delegation outcome recorded first; the new outcome matches it", {
+        attemptId,
+        delegation,
+        outcome: eventTag(recorded),
+      })
+    : Effect.logInfo("Kept the delegation outcome recorded first; discarded a different outcome", {
+        attemptId,
+        delegation,
+        outcome: eventTag(recorded),
+        discarded: eventTag(discarded),
+      });
+
 /** Returns the snapshot with the longer of its unsupervised time and `unsupervised`. */
 export const unsupervisedRecorded = (
   snapshot: CoordinatorSnapshot,

@@ -111,7 +111,7 @@ export const routerLayer = Layer.effect(
             if (Option.isSome(found)) return Option.some(found.value);
             const kept = keepNotice(waiting.get(attemptId) ?? [], notice);
             waiting.set(attemptId, kept);
-            yield* Effect.logDebug("Kept a Worker notice until the Attempt's execute call", {
+            yield* Effect.logInfo("Kept a Worker notice until the Attempt's execute call", {
               attemptId,
               notice: notice._tag,
               kept: kept.map(({ _tag }) => _tag),

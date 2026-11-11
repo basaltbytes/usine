@@ -7,6 +7,7 @@ import {
   decided,
   delegationOf,
   keptDecision,
+  keptDelegationOutcome,
   opened,
   progressed,
   reserved,
@@ -133,7 +134,8 @@ export const memoryAttemptJournalLayer = Layer.effect(
             const previous = yield* stored(attemptId);
             const record = yield* delegationOf(previous, number);
             const result = settledDelegation(record, outcome);
-            yield* save(withDelegation(previous, result.record));
+            if (result.record !== record) yield* save(withDelegation(previous, result.record));
+            else yield* keptDelegationOutcome(attemptId, number, result.recorded, outcome);
             return result.recorded;
           }).pipe(serialized);
         },

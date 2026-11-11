@@ -642,7 +642,7 @@ const make = Effect.gen(function* () {
       const hub = yield* hubFor(attemptId);
       const routed = yield* hub.outbox.notice(notice);
       if (routed._tag === "Kept")
-        yield* Effect.logDebug("Kept a Worker notice until the Attempt is relayed after Started", {
+        yield* Effect.logInfo("Kept a Worker notice until the Attempt is relayed after Started", {
           notice: notice._tag,
           worker: notice.worker,
           kept: routed.kept.map(({ _tag }) => _tag),
