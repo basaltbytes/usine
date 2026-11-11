@@ -71,7 +71,7 @@ describe("Run evidence reader", () => {
                 attemptId: execution.attempt.id,
                 sequence: AttemptChannel.Sequence.make(1),
                 sentAt: now,
-                payload: AttemptChannel.Started.make({ parentModel: model }),
+                payload: AttemptChannel.Started.make({ parentModel: Option.some(model) }),
               }),
             ),
           ).pipe(Effect.andThen(Effect.never)),

@@ -26,7 +26,7 @@ import { StepResult } from "@usine/core/step/result";
 import { DateTime, Deferred, Effect, Option, Queue, Result, Schema } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableHarness, DurableHarnessError } from "../harness.ts";
-import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
+import { type AttemptRecord, AttemptRecordDoc, hasStarted, HoldDoc } from "./documents.ts";
 import { entryEvents, ledgerUsage } from "./events.ts";
 import {
   type AttemptHub,
@@ -80,6 +80,11 @@ const progressOf = (record: Readonly<AttemptRecord>): RelayProgress => {
 type RelayCursor = Pick<RelayProgress, "entry" | "tokens">;
 
 const cursorOf = ({ entry, tokens }: RelayProgress): RelayCursor => ({ entry, tokens });
+
+/** A started Attempt, with its parent session if it has one. */
+interface StartedAttempt {
+  readonly parent: Option.Option<ParentSession>;
+}
 
 /**
  * Reads the Attempt's durable record. Returns `undefined` before the first `execute` creates its
@@ -581,39 +586,53 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     yield* Effect.logInfo("The Attempt's terminal envelope was relayed");
     return settledOf(task);
   }
-  let session = Option.map(Option.fromNullishOr(loaded.parentModel), (model) =>
-    parentSession(spec, ModelId.make(model), loaded),
-  );
+  const startedOf = (record: Readonly<AttemptRecord>): Option.Option<StartedAttempt> =>
+    hasStarted(record)
+      ? Option.some({
+          parent: Option.map(Option.fromNullishOr(record.parentModel), (model) =>
+            parentSession(spec, ModelId.make(model), record),
+          ),
+        })
+      : Option.none();
+  let start = startedOf(loaded);
   if (loaded.parentConversation !== null) hubs.bindParent(hub, loaded.parentConversation);
 
-  const startParent = Effect.gen(function* () {
-    if (Option.isSome(session) && progress().outbound.state !== "AwaitingStarted") {
-      return session;
-    }
+  /** Sends `Started`, and the parent's `SessionStarted` if it has one, once the task started. */
+  const startAttempt = Effect.gen(function* () {
+    if (Option.isSome(start) && progress().outbound.state !== "AwaitingStarted") return start;
     const record = yield* readRecord(durable, hub.attemptId);
-    if (record === undefined || record.parentModel === null) {
-      return Option.none<ParentSession>();
-    }
+    if (record === undefined) return Option.none<StartedAttempt>();
+    const started = startedOf(record);
+    if (Option.isNone(started)) return started;
     if (record.parentConversation !== null) hubs.bindParent(hub, record.parentConversation);
-    const started = parentSession(spec, ModelId.make(record.parentModel), record);
-    session = Option.some(started);
+    start = started;
+    const { parent } = started.value;
     if (progress().outbound.state === "AwaitingStarted") {
       yield* emitPayload(
         durable,
         hub,
         AttemptChannel.Started.make({
-          parentModel: started.brain.model,
+          parentModel: Option.map(parent, (session) => session.brain.model),
           conflictingSalvage: spec.conflictingSalvage,
         }),
       );
-      yield* emitPayload(
-        durable,
-        hub,
-        AttemptChannel.SessionEvent.make({ event: SessionStarted.make({ session: started }) }),
-      );
-      yield* Effect.logInfo("Relayed the Attempt's start", { parentModel: started.brain.model });
+      if (Option.isSome(parent)) {
+        yield* emitPayload(
+          durable,
+          hub,
+          AttemptChannel.SessionEvent.make({
+            event: SessionStarted.make({ session: parent.value }),
+          }),
+        );
+      }
+      yield* Effect.logInfo("Relayed the Attempt's start", {
+        parentModel: Option.match(parent, {
+          onNone: () => "none",
+          onSome: (session) => session.brain.model,
+        }),
+      });
     }
-    return session;
+    return start;
   });
 
   const relayEarlyNotices = Effect.gen(function* () {
@@ -621,14 +640,14 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     if (early.length === 0) return;
     hub.early = [];
     yield* emit(durable, hub, early, cursorOf);
-    yield* Effect.logInfo("Relayed the Worker notices that arrived before the parent started", {
+    yield* Effect.logInfo("Relayed the Worker notices that arrived before the Attempt started", {
       notices: early.map(({ _tag }) => _tag),
     });
   });
 
-  /** Starts the parent and, if it started, relays the early Worker notices. */
+  /** Starts the Attempt and, if it started, relays the early Worker notices. */
   const ensureStarted = Effect.gen(function* () {
-    const started = yield* startParent;
+    const started = yield* startAttempt;
     if (Option.isSome(started)) yield* relayEarlyNotices;
     return started;
   });
@@ -660,7 +679,8 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
 
   const relayEntries = Effect.fn("AttemptRelay.entries")(function* (bound: Option.Option<EntryId>) {
     const started = yield* ensureStarted;
-    if (Option.isNone(started) || Option.isNone(hub.parent)) return;
+    const session = Option.flatMap(started, ({ parent }) => parent);
+    if (Option.isNone(session) || Option.isNone(hub.parent)) return;
     const parent = hub.parent.value;
     let placedInput = false;
     let next = Option.none<Cursor>();
@@ -678,7 +698,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       );
       for (const entry of found.items) {
         if (entry.kind === UserEntry.kind) placedInput = true;
-        const events = entryEvents(entry, started.value);
+        const events = entryEvents(entry, session.value);
         if (events.length === 0) {
           progress().entry = entry.id;
           continue;
@@ -692,7 +712,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       }
       next = Option.fromNullishOr(found.next);
     } while (Option.isSome(next));
-    yield* relayTokens(started.value);
+    yield* relayTokens(session.value);
     if (placedInput) yield* deliveries("live");
   });
 
@@ -700,7 +720,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const started = yield* ensureStarted;
     if (Option.isNone(started)) {
       return yield* Effect.logWarning(
-        "Dropped a session event that arrived before the parent started",
+        "Dropped a session event that arrived before the Attempt started",
         {
           event: event._tag,
         },
@@ -715,7 +735,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const started = yield* ensureStarted;
     if (Option.isNone(started)) {
       hub.early = keepNotice(hub.early, notice);
-      return yield* Effect.logDebug("Kept a Worker notice until the parent starts", {
+      return yield* Effect.logDebug("Kept a Worker notice until the Attempt starts", {
         notice: notice._tag,
         worker: notice.worker,
         kept: hub.early.map(({ _tag }) => _tag),
@@ -734,19 +754,23 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const settled = settledOf(task);
     const started = yield* ensureStarted;
     if (Option.isNone(started) && hub.early.length > 0) {
-      yield* Effect.logWarning("Dropped the Worker notices kept for a parent that never started", {
-        notices: hub.early.map(({ _tag }) => _tag),
-      });
+      yield* Effect.logWarning(
+        "Dropped the Worker notices kept for an Attempt that never started",
+        {
+          notices: hub.early.map(({ _tag }) => _tag),
+        },
+      );
       hub.early = [];
     }
     yield* deliveries("ended");
     if (Result.isSuccess(settled)) {
-      if (Option.isSome(started)) {
+      const parent = Option.flatMap(started, (attempt) => attempt.parent);
+      if (Option.isSome(parent)) {
         yield* emitPayload(
           durable,
           hub,
           AttemptChannel.SessionEvent.make({
-            event: SessionFinished.make({ session: started.value }),
+            event: SessionFinished.make({ session: parent.value }),
           }),
         );
       }

@@ -123,7 +123,7 @@ describe("repeated final messages", () => {
   it("shows a failed Attempt's final report once, as the failure note where the child said it", () => {
     const failure = AgentFailureView.make({ message: report });
     const events = [
-      record(1, AttemptChannel.Started.make({ parentModel: ModelId.make("gpt-5") })),
+      record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
       ...delegation,
       said(3, "I'll use the tackle-issue skill."),
       said(9, `[usine:blocked]\n\n${report}`),
@@ -516,7 +516,7 @@ describe("GitHub changes", () => {
     message: `Baseline lint fails.\n\nRecorded the [signed blocker on #247](${blocker}) and removed \`agent-in-progress\`.`,
   });
   const events = [
-    record(1, AttemptChannel.Started.make({ parentModel: ModelId.make("gpt-5") })),
+    record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
     ...delegation,
     said(3, "I'll use the tackle-issue skill."),
     command(4, "claim", false),
@@ -596,7 +596,7 @@ describe("connectivity", () => {
   const unreachable =
     "Reconnecting... waiting for network (Connection failed: error sending request)";
   const events = [
-    record(1, AttemptChannel.Started.make({ parentModel: ModelId.make("gpt-5") })),
+    record(1, AttemptChannel.Started.make({ parentModel: Option.some(ModelId.make("gpt-5")) })),
     ...delegation,
     said(3, "Running the gate."),
     retry(5, 1, "Reconnecting... 1/5 (request timed out)"),

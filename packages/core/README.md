@@ -33,6 +33,8 @@ Branded schemas are exported under their brand name, as a value and a type. `Pul
 
 Parent and child sessions record the resolved `pool` at launch. API-key sessions can also record an `endpoint` provider name. Both keys are optional in serialized records, so older transcripts remain readable. `sessionPool` reads the recorded pool and applies the historical harness and model rule only when it is absent.
 
+`Started.parentModel` is the selected Pi parent model, or `None` for an attempt without a parent session. A stored `Started` without the key decodes as `None`.
+
 `SessionStarted.prompt` records the exact initial prompt sent to a child. It is `None` for parents and older transcripts.
 
 ## Runs

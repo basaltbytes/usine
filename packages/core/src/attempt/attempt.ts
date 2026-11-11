@@ -161,7 +161,7 @@ export class Attempt extends Schema.Class<
   agent: AgentName,
   /** Whether an operator action was accepted during this attempt. */
   operatorIntervened: Schema.Boolean,
-  /** The Pi parent model recorded for this attempt, or `None` if unavailable. */
+  /** The Pi parent model recorded for this attempt, or `None` if unavailable or the attempt has no parent session. */
   parentModel: Schema.OptionFromNullOr(ModelId),
   /** The time this attempt started, also the start of its attribution window. */
   startedAt: Schema.DateTimeUtc,

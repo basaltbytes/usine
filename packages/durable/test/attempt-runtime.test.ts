@@ -243,7 +243,7 @@ describe("durable AttemptRuntime", () => {
         });
         const live = yield* runtime.isLive(request.spec.attemptId);
         assert.isFalse(live);
-        // Sent before `execute` starts, so the notice is buffered until the parent starts.
+        // Sent before `execute` starts, so the notice is buffered until the Attempt starts.
         yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* children.next;
@@ -471,7 +471,7 @@ describe("durable AttemptRuntime", () => {
         assertAdmitted(request.spec.attemptId, outbound);
         assert.deepStrictEqual(trace(outbound), ["Failed"]);
         assert.lengthOf(
-          logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
+          logs.matching(/Dropped the Worker notices kept for an Attempt that never started/u),
           1,
         );
       }).pipe(Effect.provide(layer({ database, parent: [] }).pipe(Layer.provideMerge(logs.layer))));
