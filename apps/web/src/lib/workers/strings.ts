@@ -9,7 +9,7 @@ export const workerPausedLabel = "Paused";
 export const workerPausedLine = "Paused: takes no new attempts";
 /** Explains a paused Worker and how to resume it. */
 export const workerPausedDetail =
-  "This worker takes no new attempts while usine.yaml pauses it. Its running attempts finish. Clear Paused in the worker's configuration to resume it.";
+  "This worker takes no new attempts while paused. Running attempts finish. Clear Paused in Configuration > Workers to resume it.";
 
 export const providerLabel = {
   hetzner: "Hetzner",
