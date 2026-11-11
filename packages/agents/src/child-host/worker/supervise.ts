@@ -17,7 +17,22 @@ import { signal, type OwnerFiles } from "./files.ts";
 import { inputFrame, outputFrame } from "./protocol.ts";
 import type { Launch } from "./program.ts";
 
-export const supervise = (files: OwnerFiles, launch: Launch, lifeline: string) => {
+/**
+ * Records `reason` as the harness exit, marks the owner ready so the relay reports it at once, and
+ * exits. Exiting closes the lifeline pipe, which stops any harness already started.
+ */
+const abandon = (files: OwnerFiles, reason: string): never => {
+  try {
+    files.append({ exitCode: 1, stderrTail: reason });
+    rmSync(files.pidFile, { force: true });
+    writeFileSync(files.ready, "");
+  } finally {
+    process.exit(1);
+  }
+};
+
+/** Starts the lifeline and relays its journals; throws if setup fails before the owner is ready. */
+const start = (files: OwnerFiles, launch: Launch, lifeline: string) => {
   const identity = files.readIdentity(process.pid);
   if (identity === null) throw new Error("Could not identify the child process owner");
   writeFileSync(files.pidFile, String(process.pid), { mode: 0o600 });
@@ -29,13 +44,7 @@ export const supervise = (files: OwnerFiles, launch: Launch, lifeline: string) =
   );
   if (child.pid !== undefined) {
     const childIdentity = files.readIdentity(child.pid);
-    if (childIdentity === null) {
-      // Exiting closes the lifeline pipe, which stops the harness.
-      files.append({ exitCode: 1, stderrTail: "Could not identify the child process lifeline" });
-      rmSync(files.pidFile, { force: true });
-      writeFileSync(files.ready, "");
-      process.exit(1);
-    }
+    if (childIdentity === null) throw new Error("Could not identify the child process lifeline");
     writeFileSync(files.identityFile(files.lifelinePid), childIdentity, { mode: 0o600 });
   }
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -96,4 +105,13 @@ export const supervise = (files: OwnerFiles, launch: Launch, lifeline: string) =
     }
   }, 25);
   writeFileSync(files.ready, "");
+};
+
+/** Supervises one harness; a setup failure becomes its exit record. */
+export const supervise = (files: OwnerFiles, launch: Launch, lifeline: string) => {
+  try {
+    start(files, launch, lifeline);
+  } catch (cause) {
+    abandon(files, cause instanceof Error ? cause.message : String(cause));
+  }
 };

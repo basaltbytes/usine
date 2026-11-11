@@ -1,17 +1,14 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Logger, Schema } from "effect";
+import { Effect, Logger } from "effect";
 import { claudeOutputCheckpoint } from "../src/harness/claude/sdk.ts";
+import { jsonLine } from "./child-host/scripted-owner.ts";
 
-const encode = (message: Schema.Json) =>
-  Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(message).pipe(
-    Effect.map((line) => Buffer.from(`${line}\n`)),
-  );
-const hookRequest = encode({
+const hookRequest = jsonLine({
   type: "control_request",
   request_id: "hook",
   request: { subtype: "hook_callback" },
 });
-const hookResponse = encode({
+const hookResponse = jsonLine({
   type: "control_response",
   response: { request_id: "hook", subtype: "success" },
 });
@@ -42,12 +39,12 @@ it.effect("covers a handled message only once all earlier output is checkpointed
     const first = { type: "assistant", uuid: "first", message: { id: "one" } };
     const second = { type: "assistant", uuid: "second", message: { id: "two" } };
     const checkpoint = claudeOutputCheckpoint();
-    const firstLine = yield* encode(first);
+    const firstLine = yield* jsonLine(first);
     yield* checkpoint.read(Buffer.concat([hook, firstLine]));
     const blocked = yield* checkpoint.handled(first);
     assert.deepStrictEqual(blocked, { bytes: 0, covered: false });
     yield* checkpoint.inputAcknowledged(response);
-    const line = yield* encode(second);
+    const line = yield* jsonLine(second);
     yield* checkpoint.read(line);
     const covered = yield* checkpoint.handled(second);
     assert.deepStrictEqual(covered, { bytes: line.length, covered: true });
@@ -61,13 +58,13 @@ it.effect("cancels only the control request with the matching request ID", () =>
       if (logLevel === "Info") logs.push(message);
     });
     const hook = yield* hookRequest;
-    const other = yield* encode({
+    const other = yield* jsonLine({
       type: "control_request",
       request_id: "other",
       request: { subtype: "hook_callback" },
     });
-    const unknown = yield* encode({ type: "control_cancel_request", request_id: "unknown" });
-    const cancel = yield* encode({ type: "control_cancel_request", request_id: "other" });
+    const unknown = yield* jsonLine({ type: "control_cancel_request", request_id: "unknown" });
+    const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "other" });
     const checkpoint = claudeOutputCheckpoint();
     const pending = yield* checkpoint.read(Buffer.concat([hook, other]));
     assert.strictEqual(pending, 0);
@@ -91,12 +88,12 @@ for (const release of ["response", "cancellation"] as const) {
     () =>
       Effect.gen(function* () {
         const message = { type: "assistant", uuid: "hook", message: { id: "one" } };
-        const line = yield* encode(message);
+        const line = yield* jsonLine(message);
         const checkpoint = claudeOutputCheckpoint();
         const pending = yield* checkpoint.read(line);
         assert.strictEqual(pending, 0);
         const response = yield* hookResponse;
-        const cancel = yield* encode({ type: "control_cancel_request", request_id: "hook" });
+        const cancel = yield* jsonLine({ type: "control_cancel_request", request_id: "hook" });
         const released = yield* release === "response"
           ? checkpoint.inputAcknowledged(response)
           : checkpoint.read(cancel);
@@ -116,7 +113,7 @@ it.effect(
     Effect.gen(function* () {
       const hook = yield* hookRequest;
       const message = { type: "assistant", uuid: "hook", message: { id: "one" } };
-      const line = yield* encode(message);
+      const line = yield* jsonLine(message);
       const checkpoint = claudeOutputCheckpoint();
       const pending = yield* checkpoint.read(Buffer.concat([hook, line]));
       assert.strictEqual(pending, 0);
@@ -136,19 +133,19 @@ it.effect("keeps a blocked hook replayable after the main turn's result", () =>
     });
     const hook = yield* hookRequest;
     const response = yield* hookResponse;
-    const other = yield* encode({
+    const other = yield* jsonLine({
       type: "control_request",
       request_id: "answered",
       request: { subtype: "remote_tools_probe" },
     });
-    const otherResponse = yield* encode({
+    const otherResponse = yield* jsonLine({
       type: "control_response",
       response: { request_id: "answered", subtype: "success" },
     });
     const assistant = { type: "assistant", uuid: "assistant", message: { id: "one" } };
-    const assistantLine = yield* encode(assistant);
+    const assistantLine = yield* jsonLine(assistant);
     const result = { type: "result", subtype: "success", uuid: "result", result: "Done" };
-    const line = yield* encode(result);
+    const line = yield* jsonLine(result);
     const checkpoint = claudeOutputCheckpoint();
     yield* checkpoint.read(Buffer.concat([hook, other, assistantLine, line]));
     const otherAnswered = yield* checkpoint.inputAcknowledged(otherResponse);
@@ -169,7 +166,7 @@ it.effect("keeps a blocked hook replayable after the main turn's result", () =>
     const answered = yield* checkpoint.inputAcknowledged(response);
     assert.strictEqual(answered, hook.length + other.length + assistantLine.length + line.length);
     const nextResult = { ...result, uuid: "next-result" };
-    const nextLine = yield* encode(nextResult);
+    const nextLine = yield* jsonLine(nextResult);
     const nextRead = yield* checkpoint.read(Buffer.concat([nextLine, hook]));
     assert.strictEqual(nextRead, 0);
     const nextHandled = yield* checkpoint
@@ -186,7 +183,7 @@ it.effect("ends a stdout line at a lone carriage return, as the SDK does", () =>
   Effect.gen(function* () {
     const noise = Buffer.from("progress 50%\r\nprogress 100%\r");
     const message = { type: "assistant", uuid: "after-progress", message: { id: "one" } };
-    const line = yield* encode(message);
+    const line = yield* jsonLine(message);
     const checkpoint = claudeOutputCheckpoint();
     const read = yield* checkpoint.read(Buffer.concat([noise, line]));
     assert.strictEqual(read, noise.length);
