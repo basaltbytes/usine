@@ -107,6 +107,18 @@ export const recordingSink = () => {
 };
 
 /**
+ * Returns `sink` with each `Interrupted` envelope appended after a pause, so a test can tell
+ * whether a call returned before or after the channel ended.
+ */
+export const slowToInterrupt = (sink: AttemptChannel.Sink): AttemptChannel.Sink => ({
+  ...sink,
+  append: (direction, envelope) =>
+    envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Interrupted"
+      ? Effect.sleep("100 millis").pipe(Effect.andThen(sink.append(direction, envelope)))
+      : sink.append(direction, envelope),
+});
+
+/**
  * Asserts that every outbound envelope passes `AttemptChannel.admit` and the final state is
  * `Terminal`.
  */

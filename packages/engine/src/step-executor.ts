@@ -8,7 +8,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId, type StopReason } from "@usine/core/attempt";
 import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
-import { LoopPermissions } from "@usine/core/loop";
+import { LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, type RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
@@ -50,6 +50,8 @@ export class StepExecution extends Schema.Class<
   reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** Whether the Run has a CI policy, so the Attempt's pull request must be verified on origin. */
   requiresCi: Schema.Boolean,
+  /** The labels the Item must carry after a successful Attempt; empty disables the check. */
+  outcomeLabels: OutcomeLabels.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** A reservation of one Worker slot for an Attempt, freed by `release`. */

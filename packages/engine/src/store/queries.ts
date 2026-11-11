@@ -401,6 +401,7 @@ export const queriesFor = (
       parentModel: Option.fromNullishOr(storedRun.parentModel),
       permissions: route.permissions,
       ciPolicy: Option.fromNullishOr(route.ciPolicy),
+      outcomeLabels: route.outcomeLabels,
     });
   });
 

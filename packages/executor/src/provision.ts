@@ -594,6 +594,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         preparedAt: Option.some(preparedAt),
         botLogin: request.botLogin,
         requiresCi: request.requiresCi,
+        outcomeLabels: request.outcomeLabels,
       }),
       worktree: WorktreePath.make(layout.worktree),
     }),

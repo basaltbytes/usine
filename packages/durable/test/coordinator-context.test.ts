@@ -36,14 +36,16 @@ const report = (child: number, length: number) =>
   });
 
 /**
- * Returns the snapshot after child 1 reported `first` and child 2 left `output`, with a task and
- * payload of the given lengths.
+ * Returns the snapshot in which a child reported each of `earlier` in order, then the last child
+ * left `output` and ended with `event`, as the coordinator records it before handling `event`. The
+ * task and payload have the given lengths.
  */
 const journalWith = (sizes: {
   readonly task: number;
   readonly payload: number;
-  readonly first: number;
+  readonly earlier: ReadonlyArray<number>;
   readonly output: number;
+  readonly event: ChildReported;
 }) =>
   Effect.gen(function* () {
     const journal = yield* AttemptJournal;
@@ -71,20 +73,21 @@ const journalWith = (sizes: {
         ],
         outbound: [],
       });
-    const one = ChildSessionCount.make(1);
-    const two = ChildSessionCount.make(2);
     yield* journal.open(StoredRequest.make({ spec, worker: base.worker, cwd: base.cwd }));
-    yield* journal.transition(attemptId, JournalRevision.make(0), step(1));
-    yield* journal.startDelegation(attemptId, one);
-    const firstReport = yield* encodeEvent(report(1, sizes.first));
-    yield* journal.settleDelegation(attemptId, one, EncodedEvent.make(firstReport));
-    yield* journal.transition(attemptId, JournalRevision.make(1), step(2));
-    yield* journal.startDelegation(attemptId, two);
-    yield* journal.saveProgress(
-      attemptId,
-      two,
-      OutputSaved.make({ output: "o".repeat(sizes.output) }),
-    );
+    const ended = [...sizes.earlier.map((length, index) => report(index + 1, length)), sizes.event];
+    for (const [index, event] of ended.entries()) {
+      const child = ChildSessionCount.make(index + 1);
+      yield* journal.transition(attemptId, JournalRevision.make(index), step(child));
+      yield* journal.startDelegation(attemptId, child);
+      if (event === sizes.event)
+        yield* journal.saveProgress(
+          attemptId,
+          child,
+          OutputSaved.make({ output: "o".repeat(sizes.output) }),
+        );
+      const encoded = yield* encodeEvent(event);
+      yield* journal.settleDelegation(attemptId, child, EncodedEvent.make(encoded));
+    }
     const snapshot = yield* journal.load(attemptId);
     if (Option.isNone(snapshot)) return yield* Effect.die(new Error("no journal"));
     return snapshot.value;
@@ -93,13 +96,14 @@ const journalWith = (sizes: {
 describe("AttemptContext.build", () => {
   it.effect("stays within the cap for the sizes of run 2c33c58d", () =>
     Effect.gen(function* () {
+      const event = report(2, 3_413);
       const snapshot = yield* journalWith({
         task: 11_900,
         payload: 14_700,
-        first: 112,
+        earlier: [112],
         output: 30_000,
+        event,
       });
-      const event = report(2, 3_413);
       const context = yield* buildAttemptContext(snapshot, event);
       const encoded = yield* contextJson(context);
 
@@ -118,7 +122,7 @@ describe("AttemptContext.build", () => {
         })),
         [
           { child: 1, status: "ended", end: Option.some("reported"), report: Option.some(112) },
-          { child: 2, status: "running", end: Option.none(), report: Option.none() },
+          { child: 2, status: "ended", end: Option.some("reported"), report: Option.none() },
         ],
       );
     }),
@@ -126,18 +130,82 @@ describe("AttemptContext.build", () => {
 
   it.effect("shortens the task, output, and earlier report to fit, and keeps the event whole", () =>
     Effect.gen(function* () {
+      const event = report(2, 9_000);
       const snapshot = yield* journalWith({
         task: 50_000,
         payload: 0,
-        first: 30_000,
+        earlier: [30_000],
         output: 60_000,
+        event,
       });
-      const event = report(2, 9_000);
       const context = yield* buildAttemptContext(snapshot, event);
       const encoded = yield* contextJson(context);
 
       assert.isAtMost(encoded.length, CONTEXT_CHARACTERS);
       assert.deepStrictEqual(context.event, event);
+    }),
+  );
+
+  it.effect(
+    "keeps the latest two reports up to 4,000 characters and earlier ones as one line",
+    () =>
+      Effect.gen(function* () {
+        const event = report(3, 3_000);
+        const snapshot = yield* journalWith({
+          task: 100,
+          payload: 0,
+          earlier: [5_000, 5_000],
+          output: 0,
+          event,
+        });
+        const context = yield* buildAttemptContext(snapshot, event);
+
+        assert.deepStrictEqual(context.event, event);
+        assert.deepStrictEqual(
+          context.delegations.map(({ child, status, report }) => ({
+            child,
+            status,
+            report: Option.map(report, (text) => text.length),
+          })),
+          [
+            // 160 characters and an ellipsis.
+            { child: 1, status: "ended", report: Option.some(161) },
+            { child: 2, status: "ended", report: Option.some(4_000) },
+            // The event carries the handled child's report.
+            { child: 3, status: "ended", report: Option.none() },
+          ],
+        );
+      }),
+  );
+
+  it.effect("shortens the output, then the reports, when shortening the task isn't enough", () =>
+    Effect.gen(function* () {
+      const event = report(3, 12_000);
+      const snapshot = yield* journalWith({
+        task: 100,
+        payload: 0,
+        earlier: [5_000, 5_000],
+        output: 2_000,
+        event,
+      });
+      const context = yield* buildAttemptContext(snapshot, event);
+      const encoded = yield* contextJson(context);
+      const [first, second, handled] = context.delegations.map(({ report }) =>
+        Option.getOrElse(
+          Option.map(report, (text) => text.length),
+          () => 0,
+        ),
+      );
+
+      assert.isAtMost(encoded.length, CONTEXT_CHARACTERS);
+      assert.deepStrictEqual(context.event, event);
+      assert.strictEqual(context.task, "");
+      assert.strictEqual(context.output, "");
+      // The report shortening keeps at least one line of each report.
+      assert.strictEqual(first, 160);
+      assert.isAbove(second ?? 0, 160);
+      assert.isBelow(second ?? 0, 4_000);
+      assert.strictEqual(handled, 0);
     }),
   );
 });

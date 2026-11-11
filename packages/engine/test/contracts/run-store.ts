@@ -450,6 +450,32 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           }),
         ),
     );
+    it.live("keeps the Loop's outcome labels with the Event, so each Attempt carries them", () =>
+      withPersistence(
+        adapter,
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("outcome-labels");
+          yield* store.recordAndClaim(
+            Submission.make({ ...lifecycleSubmission, outcomeLabels: ["ready-to-merge"] }),
+            runId,
+          );
+          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(first._tag === "AttemptStarted");
+          yield* store.finishAttempt(
+            first.execution.attempt,
+            Result.fail(AgentFailure.make({ message: "Checks failed" })),
+          );
+          yield* store.retry(runId);
+          const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(retried._tag === "AttemptStarted");
+
+          assert.deepStrictEqual(first.execution.outcomeLabels, ["ready-to-merge"]);
+          assert.deepStrictEqual(retried.execution.outcomeLabels, ["ready-to-merge"]);
+          assert.deepStrictEqual((yield* store.snapshot(runId)).outcomeLabels, ["ready-to-merge"]);
+        }),
+      ),
+    );
     it.live("stops tracking a closed Attempt once, and never an open one", () =>
       withPersistence(
         adapter,

@@ -5,10 +5,12 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { type StepCompletion, StepResult } from "@usine/core/step/result";
 import {
+  Cause,
   Context,
   Deferred,
   type Duration,
   Effect,
+  Exit,
   Layer,
   Match,
   Option,
@@ -455,6 +457,11 @@ const make = Effect.gen(function* () {
           Effect.exit,
         );
         if (yield* Deferred.isDone(hub.canceled)) {
+          if (Exit.isFailure(ended) && !Cause.hasInterruptsOnly(ended.cause))
+            yield* Effect.logWarning(
+              "The canceled Attempt's coordinator failed while it stopped; the cancel still applies",
+              { cause: Cause.pretty(ended.cause) },
+            );
           if ((yield* hub.outbox.started) && !(yield* hub.outbox.ended))
             yield* hub.outbox.emit([AttemptChannel.Interrupted.make()]);
           yield* Effect.logInfo("The canceled Attempt stopped its children");

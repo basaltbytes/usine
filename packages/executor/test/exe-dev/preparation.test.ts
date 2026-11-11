@@ -454,13 +454,14 @@ describe("exe.dev preparation", () => {
       yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       // The sweep failure doesn't block prepare, and the path outside the Worker root isn't touched.
       const prepared = yield* executor.prepare(
-        CheckoutRequest.make({ ...request, requiresCi: true }),
+        CheckoutRequest.make({ ...request, requiresCi: true, outcomeLabels: ["ready-to-merge"] }),
       );
       assert.strictEqual(prepared.workspace.spec.attemptId, ATTEMPT_ID);
       assert.deepStrictEqual(prepared.workspace.spec.payload, request.payload);
       assert.deepStrictEqual(prepared.workspace.spec.agent, request.agent);
       assert.deepStrictEqual(prepared.workspace.spec.parentModel, request.parentModel);
       assert.isTrue(prepared.workspace.spec.requiresCi);
+      assert.deepStrictEqual(prepared.workspace.spec.outcomeLabels, ["ready-to-merge"]);
       const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
       assert(!commandLine.includes("/tmp/not-a-worker-child"));
       assert(commandLine.includes("integrations attach"));

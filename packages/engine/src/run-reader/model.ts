@@ -4,7 +4,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
-import { LoopName, LoopPermissions } from "@usine/core/loop";
+import { LoopName, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import { RunState } from "@usine/core/run/state";
@@ -60,6 +60,8 @@ export class RunSnapshot extends Schema.Class<
   permissions: LoopPermissions,
   /** The loop CI policy saved when the event matched. */
   ciPolicy: Schema.Option(CiPolicy).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
+  /** The labels the Item must carry after a successful Attempt, saved when the event matched. */
+  outcomeLabels: OutcomeLabels.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** A Run and the Event it was opened for; the payload is the Item as the trigger saw it. */

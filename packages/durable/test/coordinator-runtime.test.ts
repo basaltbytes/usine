@@ -20,6 +20,7 @@ import {
   Exit,
   Fiber,
   Layer,
+  Logger,
   Option,
   Ref,
   Schema,
@@ -32,6 +33,7 @@ import {
   REPLACEMENT_ASSIGNMENT,
 } from "../src/attempt/coordinator/rules.ts";
 import { AttemptJournal } from "../src/coordinator/journal.ts";
+import { outboxFor } from "../src/coordinator/outbox.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
 import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { RecordedDecision, WakeUp } from "../src/coordinator/wake-up.ts";
@@ -40,6 +42,7 @@ import {
   assertAdmitted,
   attemptRequest,
   recordingSink,
+  slowToInterrupt,
   temporaryDatabase,
   trace,
 } from "./support.ts";
@@ -73,6 +76,49 @@ const interruptingTransition = (tag: string) => (journal: Layer.Layer<AttemptJou
       });
     }),
   ).pipe(Layer.provide(journal));
+
+/**
+ * Holds the first `load` that finds the Attempt `Terminal` until `release` completes, after
+ * completing `reached`. The coordinator makes that load after it delivered the terminal envelope
+ * and before its `execute` call detaches.
+ */
+const holdingTerminalLoad =
+  (reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  (journal: Layer.Layer<AttemptJournal>) =>
+    Layer.effect(
+      AttemptJournal,
+      Effect.gen(function* () {
+        const inner = yield* AttemptJournal;
+        let held = false;
+        return AttemptJournal.of({
+          ...inner,
+          load: (attemptId) =>
+            inner.load(attemptId).pipe(
+              Effect.tap((snapshot) => {
+                if (held || !Option.exists(snapshot, ({ status }) => status._tag === "Terminal"))
+                  return Effect.void;
+                held = true;
+                return Deferred.succeed(reached, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                );
+              }),
+            ),
+        });
+      }),
+    ).pipe(Layer.provide(journal));
+
+const unresponsive = (reason: string) =>
+  AttemptChannel.WorkerUnresponsive.make({
+    worker: WorkerName.make("local"),
+    lastAnsweredAt: DateTime.makeUnsafe("2026-11-11T08:59:00Z"),
+    reason,
+  });
+
+/** The reasons of the relayed `WorkerUnresponsive` notices, in order. */
+const unresponsiveReasons = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
+  envelopes.flatMap(({ payload }) =>
+    payload._tag === "WorkerUnresponsive" ? [payload.reason] : [],
+  );
 
 /** A coordinator runtime over the journal with stub children, waking `wakeUp`. */
 const coordinatorWith = (wakeUp: Layer.Layer<WakeUp>) => (journal: Layer.Layer<AttemptJournal>) =>
@@ -226,15 +272,19 @@ describe("event-driven coordinator runtime", () => {
         const attemptId = request.spec.attemptId;
         const recording = recordingSink();
         const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-        const execution = yield* process.execute(request, recording.sink);
+        const execution = yield* process.execute(request, slowToInterrupt(recording.sink));
         const child = yield* process.nextChild;
         yield* process.attempts.cancel(attemptId);
-        yield* child.interrupted;
+        // `cancel` returns only after the child stopped and the channel ended.
+        const stoppedOnReturn = yield* child.interrupted.pipe(Effect.timeoutOption(0));
+        const lastOnReturn = trace(recording.outbound()).at(-1);
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
         const live = yield* process.attempts.isLive(attemptId);
         const finished = yield* process.attempts.finished(attemptId);
         yield* process.stop;
 
+        assert.isTrue(Option.isSome(stoppedOnReturn));
+        assert.strictEqual(lastOnReturn, "Interrupted");
         assert.strictEqual(failure._tag, "AgentFailure");
         assert.isFalse(live);
         assert.isTrue(Option.isNone(finished));
@@ -249,12 +299,6 @@ describe("event-driven coordinator runtime", () => {
       const request = coordinated("coordinator/notices");
       const attemptId = request.spec.attemptId;
       const recording = recordingSink();
-      const unresponsive = (reason: string) =>
-        AttemptChannel.WorkerUnresponsive.make({
-          worker: WorkerName.make("local"),
-          lastAnsweredAt: DateTime.makeUnsafe("2026-11-11T08:59:00Z"),
-          reason,
-        });
       const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
       yield* process.attempts.notify(attemptId, unresponsive("before start"));
       const execution = yield* process.execute(request, recording.sink);
@@ -278,14 +322,84 @@ describe("event-driven coordinator runtime", () => {
       assert.strictEqual(refused._tag, "AgentFailure");
       const outbound = recording.outbound();
       assertAdmitted(attemptId, outbound);
-      assert.deepStrictEqual(
-        outbound.flatMap(({ payload }) =>
-          payload._tag === "WorkerUnresponsive" ? [payload.reason] : [],
-        ),
-        ["before start", "while working"],
-      );
+      assert.deepStrictEqual(unresponsiveReasons(outbound), ["before start", "while working"]);
       assert.deepStrictEqual(trace(outbound).slice(0, 2), ["Started", "WorkerUnresponsive"]);
       assert.deepStrictEqual(recording.inbound(), []);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("drops Worker notices and relays no Interrupted after the terminal envelope", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/after-final");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const reached = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const process = yield* orchestrator(
+        sqliteJournal(database).pipe(holdingTerminalLoad(reached, release), coordinator),
+      );
+      const execution = yield* process.execute(request, recording.sink);
+      const child = yield* process.nextChild;
+      yield* child.reply("Done.");
+      // `Final` is delivered, and the `execute` call is still attached.
+      yield* Deferred.await(reached);
+      yield* process.attempts.notify(attemptId, unresponsive("after Final"));
+      const logged: Array<string> = [];
+      const canceling = yield* Effect.forkChild(
+        process.attempts
+          .cancel(attemptId)
+          .pipe(
+            Effect.provide(
+              Logger.layer([Logger.make(({ message }) => logged.push(String(message)))]),
+            ),
+          ),
+      );
+      // The cancel signals the attached call right after this log, without yielding.
+      yield* until(() =>
+        logged.some((entry) => entry.includes("Canceling the coordinated Attempt")),
+      );
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(canceling);
+      yield* Fiber.await(execution);
+      yield* process.stop;
+
+      const outbound = recording.outbound();
+      assertAdmitted(attemptId, outbound);
+      assert.strictEqual(trace(outbound).at(-1), "Final");
+      assert.deepStrictEqual(unresponsiveReasons(outbound), []);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("drops a Worker notice while an execute call is attached to an ended Attempt", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/attached-after-end");
+      const attemptId = request.spec.attemptId;
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      const execution = yield* process.execute(request, recordingSink().sink);
+      yield* (yield* process.nextChild).reply("Done.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      // A second `execute` call's outbox, between its attach and its detach.
+      const recording = recordingSink();
+      const routing = yield* Effect.gen(function* () {
+        const journal = yield* AttemptJournal;
+        const snapshot = yield* journal.load(attemptId);
+        if (Option.isNone(snapshot)) return yield* Effect.die(new Error("no journal"));
+        const outbox = yield* outboxFor(journal, attemptId);
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const attached = yield* outbox.attach(recording.sink, snapshot.value);
+            assert.isTrue(attached);
+            return yield* outbox.notice(unresponsive("after the end"));
+          }),
+        );
+      }).pipe(Effect.provide(sqliteJournal(database)));
+
+      assert.strictEqual(routing._tag, "Dropped");
+      assert.deepStrictEqual(recording.outbound(), []);
     }).pipe(Effect.scoped),
   );
 });
@@ -303,12 +417,15 @@ describe("event-driven coordinator restarts on SQLite", () => {
       yield* first.stop;
 
       const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      // The run fiber reattaches only an Attempt that is live after the restart.
+      const liveAfterRestart = yield* second.attempts.isLive(request.spec.attemptId);
       const execution = yield* second.execute(request, recording.sink);
       const replacement = yield* second.nextChild;
       yield* replacement.reply("Finished from the checkout.");
       const report = yield* Fiber.join(execution);
       yield* second.stop;
 
+      assert.isTrue(liveAfterRestart);
       assert.strictEqual(report.message, "Finished from the checkout.");
       assert.notStrictEqual(replacement.request.session.id, interrupted.request.session.id);
       assert.include(replacement.request.prompt, REPLACEMENT_ASSIGNMENT);
@@ -372,12 +489,15 @@ describe("event-driven coordinator restarts on SQLite", () => {
       yield* first.stop;
 
       const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      // The run fiber reattaches only an Attempt that is live after the restart.
+      const liveAfterRestart = yield* second.attempts.isLive(request.spec.attemptId);
       const execution = yield* second.execute(request, recording.sink);
       const resumed = yield* second.nextChild;
       yield* resumed.reply("Done after the restart.");
       const report = yield* Fiber.join(execution);
       yield* second.stop;
 
+      assert.isTrue(liveAfterRestart);
       assert.strictEqual(report.message, "Done after the restart.");
       assert.strictEqual(resumed.request.session.id, working.request.session.id);
       assert.deepStrictEqual(resumed.request.resume, Option.some(harnessSession));
@@ -576,6 +696,50 @@ describe("event-driven coordinator restarts on SQLite", () => {
       assert.isFalse(liveAfter);
       assert.deepStrictEqual(finishedAfter, Option.some(ParentReported.make({ report })));
       assertAdmitted(attemptId, recording.outbound());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("relays Worker notices and a cancel after a restart reattaches the Attempt", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("restart/notices");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const startedChildren = () =>
+        trace(recording.outbound()).filter((entry) => entry === "child.SessionStarted").length;
+      const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* first.execute(request, recording.sink);
+      const working = yield* first.nextChild;
+      yield* working.emit(
+        SessionStarted.make({
+          session: working.request.session,
+          harnessSession: Option.some(
+            HarnessSession.make({ id: HarnessSessionId.make("native-1"), cwd: request.cwd }),
+          ),
+        }),
+      );
+      yield* until(() => startedChildren() === 2);
+      yield* first.stop;
+      const relayedBeforeRestart = recording.outbound().length;
+
+      const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+      yield* second.attempts.notify(attemptId, unresponsive("before the reattach"));
+      const execution = yield* second.execute(request, slowToInterrupt(recording.sink));
+      const resumed = yield* second.nextChild;
+      yield* second.attempts.notify(attemptId, unresponsive("after the reattach"));
+      yield* second.attempts.cancel(attemptId);
+      const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+      yield* resumed.interrupted;
+      yield* second.stop;
+
+      const outbound = recording.outbound();
+      assert.strictEqual(failure._tag, "AgentFailure");
+      assertAdmitted(attemptId, outbound);
+      assert.deepStrictEqual(unresponsiveReasons(outbound.slice(relayedBeforeRestart)), [
+        "before the reattach",
+        "after the reattach",
+      ]);
+      assert.strictEqual(trace(outbound).at(-1), "Interrupted");
     }).pipe(Effect.scoped),
   );
 });

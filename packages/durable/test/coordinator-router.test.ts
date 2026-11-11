@@ -1,13 +1,14 @@
 import { assert, describe, it } from "@effect/vitest";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Fiber, Layer, Option } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { AttemptRequest, AttemptRuntime, ParentReported } from "../src/attempt-runtime.ts";
 import type { ParentKind } from "@usine/core/agent";
 import { AttemptJournal } from "../src/coordinator/journal.ts";
-import { memoryAttemptJournalLayer } from "../src/coordinator/memory.ts";
 import { PiAttemptRuntime, routerLayer } from "../src/coordinator/router.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
+import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { WakeUp } from "../src/coordinator/wake-up.ts";
 import {
   stubAttemptRuntime,
@@ -15,7 +16,13 @@ import {
   StubChildren,
   StubStorage,
 } from "../src/testing.ts";
-import { attemptRequest, recordingSink, trace } from "./support.ts";
+import {
+  attemptRequest,
+  recordingSink,
+  slowToInterrupt,
+  temporaryDatabase,
+  trace,
+} from "./support.ts";
 
 const withParent = (attemptId: string, parent: ParentKind) => {
   const request = attemptRequest(attemptId);
@@ -25,8 +32,17 @@ const withParent = (attemptId: string, parent: ParentKind) => {
   });
 };
 
-/** The router over a stub Pi runtime on `storage` and a coordinator with stub children. */
-const routed = (storage: StubStorage) =>
+const sqliteJournal = (database: string) =>
+  sqliteAttemptJournalLayer.pipe(
+    Layer.provide(SqliteClient.layer({ filename: database })),
+    Layer.orDie,
+  );
+
+/**
+ * The router over a stub Pi runtime on `storage` and a coordinator with stub children, on
+ * `journal`. Each layer built is one orchestrator process.
+ */
+const routed = (storage: StubStorage, journal: Layer.Layer<AttemptJournal>) =>
   routerLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -36,56 +52,91 @@ const routed = (storage: StubStorage) =>
         CoordinatorRuntime.layer.pipe(Layer.provide(WakeUp.rules)),
       ),
     ),
-    Layer.provideMerge(memoryAttemptJournalLayer),
+    Layer.provideMerge(journal),
     Layer.provideMerge(stubChildBackendLayer),
   );
 
+/** Holds each `open` of `journal` until `release` completes, after completing `opening`. */
+const holdingOpen =
+  (opening: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  (journal: Layer.Layer<AttemptJournal>) =>
+    Layer.effect(
+      AttemptJournal,
+      Effect.gen(function* () {
+        const inner = yield* AttemptJournal;
+        return AttemptJournal.of({
+          ...inner,
+          open: (request) =>
+            Deferred.succeed(opening, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.andThen(inner.open(request)),
+            ),
+        });
+      }),
+    ).pipe(Layer.provide(journal));
+
+const unresponsive = (reason: string) =>
+  AttemptChannel.WorkerUnresponsive.make({
+    worker: WorkerName.make("local"),
+    lastAnsweredAt: DateTime.makeUnsafe("2026-11-11T08:59:00Z"),
+    reason,
+  });
+
 describe("AttemptRuntime router", () => {
-  it.effect("keeps each Attempt on the coordinator it started with when its parent changes", () =>
-    Effect.gen(function* () {
-      const storage = new StubStorage();
-      yield* Effect.gen(function* () {
-        const attempts = yield* AttemptRuntime;
-        const journal = yield* AttemptJournal;
+  it.live(
+    "keeps each Attempt on the coordinator it started with when its parent changes across a restart",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const storage = new StubStorage();
         const coordinated = withParent("router/coordinated", "none");
-        const execution = yield* Effect.forkChild(
-          attempts.execute(coordinated, recordingSink().sink),
-        );
-        const child = yield* (yield* StubChildren).next;
-        yield* child.reply("Done by the child.");
-        const first = yield* Fiber.join(execution);
-        const again = yield* attempts.execute(
-          withParent("router/coordinated", "pi"),
-          recordingSink().sink,
-        );
-
         const parented = withParent("router/parented", "pi");
-        const parentReport = yield* attempts.execute(parented, recordingSink().sink);
-        const parentAgain = yield* attempts.execute(
-          withParent("router/parented", "none"),
-          recordingSink().sink,
-        );
-        const coordinatedLive = yield* attempts.isLive(coordinated.spec.attemptId);
-        const parentedRequest = yield* attempts.request(parented.spec.attemptId);
-        const parentedJournal = yield* journal.load(parented.spec.attemptId);
+        const [first, parentReport] = yield* Effect.gen(function* () {
+          const attempts = yield* AttemptRuntime;
+          const execution = yield* Effect.forkChild(
+            attempts.execute(coordinated, recordingSink().sink),
+          );
+          const child = yield* (yield* StubChildren).next;
+          yield* child.reply("Done by the child.");
+          return [
+            yield* Fiber.join(execution),
+            yield* attempts.execute(parented, recordingSink().sink),
+          ] as const;
+        }).pipe(Effect.provide(routed(storage, sqliteJournal(database))));
 
-        assert.strictEqual(first.message, "Done by the child.");
-        assert.strictEqual(again.message, "Done by the child.");
-        assert.isFalse(storage.tasks.has(coordinated.spec.attemptId));
-        assert.strictEqual(parentReport.message, `Completed: ${parented.spec.task}`);
-        assert.strictEqual(parentAgain.message, parentReport.message);
-        assert.isFalse(coordinatedLive);
-        assert.deepStrictEqual(
-          Option.map(parentedRequest, ({ spec }) => spec.parent),
-          Option.some("pi"),
-        );
-        assert.isTrue(Option.isNone(parentedJournal));
-      }).pipe(Effect.provide(routed(storage)));
-    }),
+        yield* Effect.gen(function* () {
+          const attempts = yield* AttemptRuntime;
+          const journal = yield* AttemptJournal;
+          const again = yield* attempts.execute(
+            withParent("router/coordinated", "pi"),
+            recordingSink().sink,
+          );
+          const parentAgain = yield* attempts.execute(
+            withParent("router/parented", "none"),
+            recordingSink().sink,
+          );
+          const coordinatedLive = yield* attempts.isLive(coordinated.spec.attemptId);
+          const parentedRequest = yield* attempts.request(parented.spec.attemptId);
+          const parentedJournal = yield* journal.load(parented.spec.attemptId);
+
+          assert.strictEqual(first.message, "Done by the child.");
+          assert.strictEqual(again.message, "Done by the child.");
+          assert.isFalse(storage.tasks.has(coordinated.spec.attemptId));
+          assert.strictEqual(parentReport.message, `Completed: ${parented.spec.task}`);
+          assert.strictEqual(parentAgain.message, parentReport.message);
+          assert.isFalse(coordinatedLive);
+          assert.deepStrictEqual(
+            Option.map(parentedRequest, ({ spec }) => spec.parent),
+            Option.some("pi"),
+          );
+          assert.isTrue(Option.isNone(parentedJournal));
+        }).pipe(Effect.provide(routed(storage, sqliteJournal(database))));
+      }).pipe(Effect.scoped),
   );
 
-  it.effect("sends a coordinated Attempt's harvest, request, and cancel to the coordinator", () =>
+  it.live("sends a coordinated Attempt's harvest, request, and cancel to the coordinator", () =>
     Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
       const storage = new StubStorage();
       yield* Effect.gen(function* () {
         const attempts = yield* AttemptRuntime;
@@ -105,45 +156,79 @@ describe("AttemptRuntime router", () => {
 
         const canceled = withParent("router/canceled", "none");
         const recording = recordingSink();
-        const running = yield* Effect.forkChild(attempts.execute(canceled, recording.sink));
+        const running = yield* Effect.forkChild(
+          attempts.execute(canceled, slowToInterrupt(recording.sink)),
+        );
         const working = yield* children.next;
         yield* attempts.cancel(canceled.spec.attemptId);
-        yield* working.interrupted;
+        // `cancel` returns only after the child stopped and the channel ended.
+        const stoppedOnReturn = yield* working.interrupted.pipe(Effect.timeoutOption(0));
+        const lastOnReturn = trace(recording.outbound()).at(-1);
         const failure = yield* Fiber.join(running).pipe(Effect.flip);
 
+        assert.isTrue(Option.isSome(stoppedOnReturn));
+        assert.strictEqual(lastOnReturn, "Interrupted");
         assert.strictEqual(failure._tag, "AgentFailure");
         assert.strictEqual(trace(recording.outbound()).at(-1), "Interrupted");
         assert.isFalse(storage.tasks.has(reported.spec.attemptId));
         assert.isFalse(storage.tasks.has(canceled.spec.attemptId));
-      }).pipe(Effect.provide(routed(storage)));
-    }),
+      }).pipe(Effect.provide(routed(storage, sqliteJournal(database))));
+    }).pipe(Effect.scoped),
   );
 
-  it.effect("gives a Worker notice that came before execute to the Attempt's coordinator", () =>
+  it.live("gives a Worker notice that came before execute to the Attempt's coordinator", () =>
     Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
       const storage = new StubStorage();
       const request = withParent("router/early-notice", "none");
       const recording = recordingSink();
+      const attachedBeforeExecute = yield* Effect.gen(function* () {
+        const attempts = yield* AttemptRuntime;
+        const attached = yield* Effect.forkChild(attempts.attached(request.spec.attemptId));
+        yield* attempts.notify(request.spec.attemptId, unresponsive("probe timed out"));
+        const execution = yield* Effect.forkChild(attempts.execute(request, recording.sink));
+        const child = yield* (yield* StubChildren).next;
+        const attachedExit = yield* Fiber.join(attached).pipe(Effect.timeoutOption("1 second"));
+        yield* child.reply("Done.");
+        yield* Fiber.join(execution);
+        return attachedExit;
+      }).pipe(Effect.provide(routed(storage, sqliteJournal(database))));
+
+      assert.isTrue(Option.isSome(attachedBeforeExecute));
+      assert.deepStrictEqual(trace(recording.outbound()).slice(0, 2), [
+        "Started",
+        "WorkerUnresponsive",
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("relays a Worker notice that arrives while the coordinator opens the Attempt", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const storage = new StubStorage();
+      const request = withParent("router/opening-notice", "none");
+      const recording = recordingSink();
+      const opening = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
       yield* Effect.gen(function* () {
         const attempts = yield* AttemptRuntime;
-        yield* attempts.notify(
-          request.spec.attemptId,
-          AttemptChannel.WorkerUnresponsive.make({
-            worker: WorkerName.make("local"),
-            lastAnsweredAt: DateTime.makeUnsafe("2026-11-11T08:59:00Z"),
-            reason: "probe timed out",
-          }),
-        );
         const execution = yield* Effect.forkChild(attempts.execute(request, recording.sink));
+        yield* Deferred.await(opening);
+        yield* attempts.notify(request.spec.attemptId, unresponsive("while opening"));
+        yield* Deferred.succeed(release, undefined);
         const child = yield* (yield* StubChildren).next;
         yield* child.reply("Done.");
         yield* Fiber.join(execution);
-      }).pipe(Effect.provide(routed(storage)));
+      }).pipe(
+        Effect.provide(
+          routed(storage, sqliteJournal(database).pipe(holdingOpen(opening, release))),
+        ),
+      );
 
       assert.deepStrictEqual(trace(recording.outbound()).slice(0, 2), [
         "Started",
         "WorkerUnresponsive",
       ]);
-    }),
+    }).pipe(Effect.scoped),
   );
 });

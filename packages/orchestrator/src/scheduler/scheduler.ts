@@ -976,6 +976,7 @@ export const stepExecutorLayer = (
                 reattach: execution.reattach,
                 botLogin: Option.some(botLogin),
                 requiresCi: execution.requiresCi,
+                outcomeLabels: execution.outcomeLabels,
                 commitAuthor,
               }),
             )
