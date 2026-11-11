@@ -245,6 +245,19 @@ pi-durable opens `.usine/durable.sqlite` through its own connection and defines 
 - `AttemptRecordDoc`: the task id; the parent model and conversation; the child spawn count, first child blocker, and exceeded child budget; the next outbound and inbound sequences, the relay position, and the parent's last relayed token count; whether the terminal envelope was relayed; the harvested result; a storage failure that explains an aborted task; and the operator inputs queued for the busy parent whose delivery receipt isn't sent yet.
 - `HoldDoc`: whether the parent is paused, the operator guidance waiting for it, and the held sessions, the parent included.
 
+## Attempt journal
+
+The event-driven coordinator's journal ([#1162](https://github.com/basaltbytes/usine/issues/1162)) lives in the runtime database. Nothing runs an attempt on it yet. The `AttemptJournal` port ([journal.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/journal.ts)) has a memory adapter and a SQLite adapter on the application's `SqlClient`, with the `usine_attempt_journal_migrations` ledger:
+
+| Table                       | Rows                                                                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `usine_attempt_coordination` | One per attempt: the stored request, the revision, the coordinator state, the status with its outcome, and the next outbound sequence.               |
+| `usine_attempt_events`      | The ledger: one row per event with its decision. A row without an event holds a decision recorded before its transition committed.                  |
+| `usine_attempt_delegations` | One per child the coordinator decided to run: its number in the child-session budget and its assignment.                                             |
+| `usine_attempt_outbox`      | Reserved channel envelopes that the sink hasn't acknowledged, by sequence.                                                                           |
+
+A transition writes the event, its decision, the state, the delegations, and the reserved envelopes in one `BEGIN IMMEDIATE` transaction, and fails with `StaleRevision` when the expected revision is stale. `decide` keeps the first decision recorded for an event. `settle` keeps the outcome and outbox and advances the revision. The coordinator encodes the event, decision, and state; the journal stores them as JSON without reading them.
+
 ## Configuration store
 
 [ADR 0031](https://github.com/basaltbytes/usine/blob/main/docs/adr/0031-authored-configuration-in-the-database.md) makes the runtime database the source of truth for configuration. The server supplies the same SQLite connection to the engine and configuration store. The configuration package owns these tables ([schema.ts](https://github.com/basaltbytes/usine/blob/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b/packages/config/src/configuration/sqlite/schema.ts)):
