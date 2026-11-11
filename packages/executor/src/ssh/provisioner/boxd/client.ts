@@ -1,5 +1,6 @@
 import { BoxdRegion, MachineId } from "@usine/core/worker";
-import { type Brand, Context, Effect, Schema } from "effect";
+import { type Brand, Context, Effect, type Layer, type Redacted, Schema } from "effect";
+import type { HttpClient } from "effect/http";
 
 export class BoxdCallError extends Schema.TaggedError<
   BoxdCallError,
@@ -10,7 +11,10 @@ export class BoxdCallError extends Schema.TaggedError<
   message: Schema.String,
 }) {}
 
-/** The error when boxd lists no region with the configured id; `available` lists the ids it has. */
+/**
+ * The error when boxd lists no region with the configured id, or lists it without an API endpoint;
+ * `available` lists the ids of the regions that have one.
+ */
 export class BoxdUnknownRegion extends Schema.TaggedError<
   BoxdUnknownRegion,
   Brand.Brand<"@usine/executor/boxd/BoxdUnknownRegion">
@@ -34,10 +38,19 @@ export const BoxdSnapshot = Schema.Struct({
   region: Schema.String,
   vcpu: Schema.Int,
   memoryBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /**
+   * Where boxd keeps the snapshot: `local`, `archiving`, `archived`, or `unarchiving`. boxd
+   * creates machines only from a `local` snapshot. Empty when boxd doesn't report it.
+   */
+  storage: Schema.String,
 });
 export type BoxdSnapshot = typeof BoxdSnapshot.Type;
 
-export const BoxdRegions = Schema.Struct({ thisRegion: Schema.String });
+/** A `ListRegions` response: every region with its API endpoint, and the region that answered. */
+export const BoxdRegionList = Schema.Struct({
+  regions: Schema.Array(Schema.Struct({ id: Schema.String, apiEndpoint: Schema.String })),
+  thisRegion: Schema.String,
+});
 export const BoxdLimit = Schema.Struct({ maxVms: Schema.Int, vmCount: Schema.Int });
 export const BoxdIdentity = Schema.Struct({ userId: Schema.NonEmptyString });
 export const BoxdCreated = Schema.Struct({
@@ -50,7 +63,6 @@ export interface BoxdCreate {
   readonly name: string;
   readonly isolated: boolean;
   readonly labels: Record<string, string>;
-  readonly config: { readonly network: { readonly ssh: true } };
 }
 
 /** Transport boundary: responses contain only decoded values used by the driver. */
@@ -62,7 +74,11 @@ export class BoxdApi extends Context.Service<
     readonly whoami: Effect.Effect<typeof BoxdIdentity.Type, BoxdCallError>;
     readonly orgMachineLimit: Effect.Effect<typeof BoxdLimit.Type, BoxdCallError>;
     readonly snapshot: (name: string) => Effect.Effect<BoxdSnapshot, BoxdCallError>;
-    readonly regions: Effect.Effect<typeof BoxdRegions.Type, BoxdCallError>;
+    /**
+     * The region that `endpoint` serves. When the client resolved `endpoint` from the region
+     * listing, it is the configured region, without a call; otherwise boxd reports it.
+     */
+    readonly servedRegion: Effect.Effect<string, BoxdCallError>;
     readonly createFromSnapshot: (
       request: BoxdCreate,
     ) => Effect.Effect<typeof BoxdCreated.Type, BoxdCallError>;
@@ -93,3 +109,14 @@ export class BoxdApi extends Context.Service<
     ) => Effect.Effect<void, BoxdCallError>;
   }
 >()("@usine/executor/ssh/provisioner/boxd/client/BoxdApi") {}
+
+/**
+ * Builds the `BoxdApi` for the region `region` with the API key `token`. When `endpoint` is set, it
+ * serves both account and regional calls. Building fails when boxd refuses the key, doesn't
+ * answer, or lists no such region.
+ */
+export type BoxdApiLayer = (
+  token: Redacted.Redacted<string>,
+  region: BoxdRegion,
+  endpoint?: string,
+) => Layer.Layer<BoxdApi, BoxdCallError | BoxdUnknownRegion, HttpClient.HttpClient>;

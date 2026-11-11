@@ -428,7 +428,6 @@ describe("boxd driver", () => {
           snapshot: "usine-attempt",
           name: "pool-aaaaaaaa",
           isolated: true,
-          config: { network: { ssh: true } },
           labels: {
             "usine.instance": tags.instance,
             "usine.worker": WORKER,
@@ -816,7 +815,21 @@ describe("boxd driver", () => {
         boxd.state.region = "nyc";
         assert.include(
           (yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message,
-          "endpoint serves nyc",
+          "serves region nyc, but provisioner.region",
+        );
+        boxd.state.region = "fra";
+        for (const storage of ["archived", "unarchiving"]) {
+          boxd.state.snapshot.storage = storage;
+          const { warnings } = yield* driver.verify(WORKER, 1);
+          assert.lengthOf(warnings, 1);
+          assert.include(warnings[0], `"usine-attempt" is ${storage}`);
+          assert.include(warnings[0], "only from a local snapshot");
+        }
+        boxd.state.snapshot.storage = "";
+        assert.deepStrictEqual(
+          (yield* driver.verify(WORKER, 1)).warnings,
+          [],
+          "a snapshot without a reported storage state passes",
         );
       }).pipe(Effect.provide([boxd.layer, host.layer]));
     },
