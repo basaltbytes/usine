@@ -237,6 +237,10 @@ const quotedReports = [
   "Example:\n```\n~~~\n[usine:question]\nWhich?\n```\nDone.",
   "- Ex:\n\n    ```\n    [usine:blocked]\n    ```\nDone.",
   "- Ex:\n\n\t```\n\t[usine:question]\n\t```\nDone.",
+  'The child answered "[usine:blocked]\nNo access." and I continued.',
+  "The child answered '[usine:question]\nWhich transport?' and I chose HTTP.",
+  "const answer = `[usine:blocked]\nNo access.`;",
+  'prompt = """[usine:question]\nWhich transport?"""',
 ] as const;
 
 it.each(quotedReports)("treats a quoted marker as ordinary text: %j", (answer) => {
