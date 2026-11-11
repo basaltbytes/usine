@@ -18,7 +18,7 @@ A defect escaping the `StepExecutor` port becomes `DefectFailure` at the durable
 
 ## Amendment (2026-10-11, #176): each open run is an engine fiber over the run tables
 
-The Effect workflow and cluster modules are gone. An attempt is the pi-durable task running its Pi parent (ADR 0006 amendment of 2026-10-08), so pi-durable now does the hard part: resuming an agent session that a crash cut off. The run level is a small state machine already stored in usine's tables, and a second durable store only added commands to replay and drift to repair.
+The Effect workflow and cluster modules are gone. An attempt is the pi-durable task running its Pi parent (ADR 0006), so pi-durable now does the hard part: resuming an agent session that a crash cut off. The run level is a small state machine already stored in usine's tables, and a second durable store only added commands to replay and drift to repair.
 
 Each open run is one engine fiber that waits for approval if gated, reserves a worker, opens or reattaches the attempt, records the outcome, and repeats until the run closes. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. At startup, the engine starts a fiber per open run (gated runs keep waiting) and opens the queued events of items whose run closed before its continuation ran. Run ids still hash the dedup key with Effect's input, so they don't change. Escaping defects still become `DefectFailure` at the attempt boundary.
 

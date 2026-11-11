@@ -25,7 +25,7 @@ All durable runtime state is in one SQLite database in the instance folder's git
 
 ## Amendment (2026-10-08, #176): two SQLite files in the instance directory
 
-The instance directory now has two SQLite files: the runtime database and pi-durable storage (`.usine/durable.sqlite`) with each local attempt's parent task and conversations (ADR 0006 amendment of the same date). They use separate connections, never one transaction. pi-durable controls its format, assumes one writer, and commits through its own connection, so sharing usine's file would add no atomicity.
+The instance directory now has two SQLite files: the runtime database and pi-durable storage (`.usine/durable.sqlite`) with each local attempt's parent task and conversations (ADR 0006). They use separate connections, never one transaction. pi-durable controls its format, assumes one writer, and commits through its own connection, so sharing usine's file would add no atomicity.
 
 The projection-plus-sweep pattern therefore stays for usine's rows. An attempt row can say open while its task finished, failed, or still runs: at startup, the engine reads task liveness through the executor and reattaches or fails the attempt, and executor recovery cancels live tasks of closed attempts. A reattached parent's resent envelope is identified by attempt, direction, and channel sequence, and the first stored copy is kept, so the transcript stays contiguous.
 

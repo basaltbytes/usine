@@ -211,7 +211,7 @@ The root layout ([`__root.tsx`][root-layout]) has the sidebar; the Needs you str
 
 The drawer summarizes one run ([run-drawer.tsx][]): a header with facts, worker and duration, and actions; one summary (a sentence for a waiting run, current activity and latest message for a running one, or the outcome); and **Open run page**, repeated by an expand button beside Close. The drawer and run page share the actions Approve, Mark resolved (Mark answered after a question), Retry, Cancel run (confirmed), Edit and retry, and, for succeeded or canceled runs, Run again and Edit and run again, which open the new run ([actions.tsx][]).
 
-On the run page, the composer under the reader while an attempt runs ([workspace.tsx][]) sends `OperatorMessage` to the parent or a child. Pause session sends `Interrupt`; Release child and Release parent send `Release`, and Release parent appears only while the parent is held or paused ([session-composer.tsx][]). The run page stores each reader's position in browser storage ([remember.tsx][], [ADR 0025](https://github.com/basaltbytes/usine/blob/main/docs/adr/0025-run-conversation-reader-bookmarks.md)).
+On the run page, the composer under the reader while an attempt runs ([workspace.tsx][]) sends `OperatorMessage` to the parent or a child. Pause session sends `Interrupt`; Release child and Release parent send `Release`, and Release parent appears only while the parent is held or paused ([session-composer.tsx][]). The run page stores each reader's position in browser storage ([remember.tsx][]).
 
 The UI polls:
 
@@ -224,7 +224,7 @@ The UI polls:
 
 The scheduler keeps each worker's last preflight in memory ([worker-status.ts][]), from startup or any reload, refused or not. A harness that reports itself unavailable fails that harness and passes the ones checked before it; any other failure fails the worker's prerequisites.
 
-Under the run's facts, the run page and drawer show the newest attempt's worker and the attempts' total duration, counting while one runs; the run page adds tokens, expandable per pool and session ([header.tsx][], [usage.tsx][]). The outline shows each attempt's start reason, folds a session's consecutive turns into one entry, and keeps blockers, questions, operator input, connectivity notices, and outcomes separate ([outline.tsx][]). A red count steps through what the run ended with or the operator must read, a grey one through tool failures the agent recovered from ([navigation/model.ts][], [ADR 0025](https://github.com/basaltbytes/usine/blob/main/docs/adr/0025-run-conversation-reader-bookmarks.md)).
+Under the run's facts, the run page and drawer show the newest attempt's worker and the attempts' total duration, counting while one runs; the run page adds tokens, expandable per pool and session ([header.tsx][], [usage.tsx][]). The outline shows each attempt's start reason, folds a session's consecutive turns into one entry, and keeps blockers, questions, operator input, connectivity notices, and outcomes separate ([outline.tsx][]). A red count steps through what the run ended with or the operator must read, a grey one through tool failures the agent recovered from ([navigation/model.ts][]).
 
 The UI has no page for editing configuration, worker preflight on demand, or GitHub App creation.
 
