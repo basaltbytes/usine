@@ -14,6 +14,15 @@ const other = "b".repeat(64);
 const diagnostic = (cgroup: string, command: string, pid: number) =>
   `oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=libpod-${container}.scope,mems_allowed=0,oom_memcg=/user.slice/libpod-${container}.scope,task_memcg=${cgroup},task=${command},pid=${pid},uid=1000`;
 
+/** Kernel lines that the collection must drop: an unrelated one, and an OOM line that isn't the kill. */
+const kernelNoise = [
+  "docker0: port 1(veth1) entered blocking state",
+  "node invoked oom-killer: gfp_mask=0xcc0",
+];
+/** A shell command that prints each line. */
+const printLines = (lines: ReadonlyArray<string>) =>
+  `printf '%s\\n' ${lines.map((line) => `'${line}'`).join(" ")}`;
+
 describe("kernel OOM process attribution", () => {
   it.live.each(
     (["match", "no match", "no match, failing", "unreadable"] as const).flatMap((journal) =>
@@ -57,11 +66,21 @@ exit 0`
 # The readability check reads the latest entry of the boot.
 [ "$2" = -b ] && echo 'Linux version 6.18.0' && exit 0
 [ "$2" = --since ] && [ "$3" = '${created}' ] || exit 2
+# The journal holds kernel lines besides the OOM kill, and prints the ones that --grep keeps.
+pattern=
+previous=
+for arg in "$@"; do
+  [ "$previous" = --grep ] && pattern=$arg
+  [ "$arg" = -q ] && quiet=1
+  previous=$arg
+done
+entries=$(${printLines(journal === "match" ? [...kernelNoise, "oom-kill:journal-diagnostic"] : kernelNoise)} | grep -E -- "\${pattern:-.}" || true)
+[ -n "$entries" ] && printf '%s\\n' "$entries" && exit 0
 ${
   {
-    match: "echo oom-kill:journal-diagnostic",
+    match: "",
     // Like journalctl, prints a placeholder when nothing matches, unless quiet.
-    "no match": `for arg in "$@"; do [ "$arg" = -q ] && exit 0; done
+    "no match": `[ -n "\${quiet:-}" ] && exit 0
 echo '-- No entries --'`,
     // journalctl 257 exits 1 when --grep matches nothing.
     "no match, failing": "exit 1",
@@ -74,8 +93,8 @@ echo '-- No entries --'`,
         yield* fs.writeFileString(
           path.join(directory, "dmesg"),
           {
-            match: "#!/bin/sh\necho unrelated-diagnostic\necho oom-kill:ring-buffer-diagnostic\n",
-            "no match": "#!/bin/sh\necho unrelated-diagnostic\n",
+            match: `#!/bin/sh\n${printLines([...kernelNoise, "oom-kill:ring-buffer-diagnostic"])}\n`,
+            "no match": `#!/bin/sh\n${printLines(kernelNoise)}\n`,
             failing:
               "#!/bin/sh\necho 'dmesg: read kernel buffer failed: Operation not permitted' >&2\nexit 1\n",
           }[dmesg],
