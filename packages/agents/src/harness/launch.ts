@@ -2,7 +2,7 @@ import type { ChildHost } from "../child-host/child-host.ts";
 import { AgentResultError, type ChildRequest, RestartState } from "../runtime.ts";
 import { Effect, Option, Struct } from "effect";
 import { admitBrain, AdmissionContext } from "./admission.ts";
-import { SessionSpec } from "./contract.ts";
+import { SessionSpec, type Start } from "./contract.ts";
 import type { HarnessCatalog } from "./harness.ts";
 import type { Placement } from "./capability.ts";
 
@@ -70,6 +70,55 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
     ),
     Effect.mapError((error) =>
       AgentResultError.make({ sessionId: Option.some(request.session.id), message: error.message }),
+    ),
+  );
+});
+
+/**
+ * Admits the brain of `spec` at its placement and credential route before a session opens. Roles
+ * have no requirements of their own yet, so every session is admitted as a coding agent, and a
+ * `StartResume` also requires `resume-session`.
+ */
+export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
+  catalog: HarnessCatalog,
+  spec: SessionSpec,
+  start: Start,
+) {
+  const resume = start._tag === "StartResume";
+  yield* Effect.annotateCurrentSpan({
+    sessionId: spec.session.id,
+    worker: spec.worker,
+    harness: spec.session.brain.harness,
+  });
+  return yield* Effect.fromResult(
+    admitBrain(
+      catalog,
+      "coding-agent",
+      spec.session.brain,
+      spec.route,
+      resume ? ["resume-session"] : [],
+    ),
+  ).pipe(
+    Effect.tap(() =>
+      Effect.logInfo("Harness session admitted", {
+        sessionId: spec.session.id,
+        harness: spec.session.brain.harness,
+        credentialRoute: spec.route.credential,
+        placement: spec.route.placement,
+        resume,
+      }),
+    ),
+    Effect.tapError((error) =>
+      Effect.logWarning("Harness session refused", {
+        sessionId: spec.session.id,
+        role: error.role,
+        harness: error.harness,
+        missing: error.missing,
+        worker: spec.worker,
+      }),
+    ),
+    Effect.mapError((error) =>
+      AgentResultError.make({ sessionId: Option.some(spec.session.id), message: error.message }),
     ),
   );
 });

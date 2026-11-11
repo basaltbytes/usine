@@ -1,5 +1,9 @@
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
+import { pi } from "../../src/harness/pi/descriptor.ts";
+import { AdmissionContext } from "../../src/harness/admission.ts";
+import { continuationPolicy } from "../../src/harness/continuation.ts";
+import { SessionSpec, StartPrompt, StartResume } from "../../src/harness/contract.ts";
 import { Harnesses, type HarnessRuntime, ProbeTarget } from "../../src/harness/node.ts";
 import { checkedPreflight } from "../../src/harness/runtime.ts";
 import { CapabilityProfile, Lacking } from "../../src/harness/capability.ts";
@@ -12,6 +16,8 @@ import {
   ChildSession,
   HarnessSession,
   HarnessSessionId,
+  RoleName,
+  RoleSession,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -19,7 +25,13 @@ import { preflight } from "../../src/preflight/preflight.ts";
 import { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Layer, Option, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
-import { ChildRequest, ChildBackend, SessionResult, WorkingDirectory } from "../../src/runtime.ts";
+import {
+  ChildRequest,
+  ChildBackend,
+  RestartState,
+  SessionResult,
+  WorkingDirectory,
+} from "../../src/runtime.ts";
 import { childDispatcherLayer } from "../../src/harness/children.ts";
 
 const request = (harness: Harness) =>
@@ -131,6 +143,103 @@ describe("harness runtime registration", () => {
                 })),
             ]),
           ),
+        ),
+      ),
+    );
+  });
+
+  it.effect("admits a role session before a registered runtime opens it", () => {
+    const opened: Array<string> = [];
+    const recording = (id: Harness): HarnessRuntime => ({
+      id,
+      stop: () => Effect.void,
+      preflight: checkedPreflight(() => Effect.void),
+      open: (spec, start, continuation) => {
+        opened.push(`${id}:${spec.route.placement}:${start._tag}`);
+        return backend(id).open(spec, start, continuation);
+      },
+    });
+    const withoutResume = HarnessDescriptor.make({
+      ...claude,
+      capabilities: Arr.map(claude.capabilities, (profile) =>
+        CapabilityProfile.make({
+          ...profile,
+          supported: profile.supported.filter((capability) => capability !== "resume-session"),
+          lacking: [
+            ...profile.lacking,
+            Lacking.make({ capability: "resume-session", reason: "No saved-session recovery" }),
+          ],
+        }),
+      ),
+    });
+    const spec = (harness: Harness, route: AdmissionContext) =>
+      SessionSpec.make({
+        session: RoleSession.make({
+          id: AgentSessionId.make(`role-${harness}`),
+          role: RoleName.make("contract-probe"),
+          agent: AgentName.make("developer"),
+          brain: BrainSpec.make({
+            harness,
+            model: ModelId.make(`${harness}-model`),
+            effort: "high",
+          }),
+        }),
+        route,
+        host: LocalProcess.make(),
+        worker: WorkerName.make("worker-1"),
+        machine: Option.none(),
+        cwd: WorkingDirectory.make("/remote/checkout"),
+        environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
+      });
+    const prompt = "Probe the contract.";
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const harnesses = yield* Harnesses;
+        const open = Effect.fn(function* (selected: SessionSpec, resume: boolean) {
+          const runtime = yield* harnesses.runtime(selected.session.brain.harness);
+          const policy = yield* continuationPolicy(selected, prompt, RestartState.make({}));
+          return yield* runtime.open(
+            selected,
+            resume
+              ? StartResume.make({
+                  reference: HarnessSession.make({
+                    id: HarnessSessionId.make("saved"),
+                    cwd: selected.cwd,
+                  }),
+                })
+              : StartPrompt.make({ text: prompt }),
+            policy,
+          );
+        });
+        const remote = yield* open(
+          spec(pi.id, AdmissionContext.make({ placement: "ssh", credential: "api-key" })),
+          false,
+        ).pipe(Effect.flip);
+        assert.strictEqual(remote._tag, "AgentResultError");
+        assert.include(remote.message, "pi cannot run as coding-agent at ssh: lacks ssh");
+        const resumed = yield* open(
+          spec(claude.id, AdmissionContext.make({ placement: "local", credential: "host-login" })),
+          true,
+        ).pipe(Effect.flip);
+        assert.strictEqual(resumed._tag, "AgentResultError");
+        assert.include(resumed.message, "resume-session");
+        assert.deepStrictEqual(opened, []);
+        const local = yield* open(
+          spec(pi.id, AdmissionContext.make({ placement: "local", credential: "host-login" })),
+          false,
+        );
+        assert.strictEqual((yield* local.running.result).message, pi.id);
+        assert.deepStrictEqual(opened, [`${pi.id}:local:StartPrompt`]);
+      }),
+    ).pipe(
+      Effect.provide(
+        Harnesses.layerFrom(
+          HarnessCatalog.make({
+            descriptors: catalog.descriptors.map((descriptor) =>
+              descriptor.id === claude.id ? withoutResume : descriptor,
+            ),
+          }),
+          catalog.ids.map(recording),
         ),
       ),
     );

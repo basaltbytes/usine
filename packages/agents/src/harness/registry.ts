@@ -3,6 +3,7 @@ import { type Brand, Context, Effect, Layer, Option, Schema } from "effect";
 import { HarnessCatalog } from "./harness.ts";
 import { admitPreflight, type HarnessRuntime } from "./runtime.ts";
 import { SessionSpec } from "./contract.ts";
+import { admitSession } from "./launch.ts";
 
 /** A descriptor and its runtime cannot be registered together. */
 export class HarnessRegistrationError extends Schema.TaggedError<
@@ -24,8 +25,8 @@ export class UnknownHarnessError extends Schema.TaggedError<
 
 /**
  * A complete catalog of harness descriptors and their runtimes. Each registered runtime opens and
- * stops sessions with only its own harness's host variables, and admits preflight brains with the
- * catalog.
+ * stops sessions with only its own harness's host variables, and admits each opened session and
+ * preflight brain with the catalog.
  */
 export class Harnesses extends Context.Service<
   Harnesses,
@@ -57,7 +58,10 @@ export class Harnesses extends Context.Service<
       registered.set(runtime.id, {
         id: runtime.id,
         stop: (spec) => runtime.stop(scoped(spec)),
-        open: (spec, start, continuation) => runtime.open(scoped(spec), start, continuation),
+        open: (spec, start, continuation) =>
+          admitSession(catalog, spec, start).pipe(
+            Effect.andThen(() => runtime.open(scoped(spec), start, continuation)),
+          ),
         preflight: (brain, target) =>
           admitPreflight(catalog, brain, target).pipe(
             Effect.andThen(() => runtime.preflight(brain, target)),

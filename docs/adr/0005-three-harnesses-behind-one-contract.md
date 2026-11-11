@@ -1,6 +1,6 @@
 # Three harnesses behind one contract; roles state what they need
 
-usine works with whichever model provider and login the operator has. It maintains three harnesses, none folded into another:
+usine works with whichever model provider and login the operator has. It maintains three harnesses, none of them the default or folded into another:
 
 - **Pi** reaches API keys across providers, and the ChatGPT subscription through its `openai-codex` login. Its other subscription logins are refused, since usine can't represent their billing ([ADR 0013](./0013-cost-accounting-native-meters-guardrails.md)).
 - **Claude Code** is the only client that a Claude subscription works in.
@@ -12,9 +12,9 @@ An agent is standing instructions plus a brain spec: harness, model, and effort.
 
 ## Status
 
-Built: the three harness runtimes, their descriptors, `admitBrain`, and a role-neutral session spec (#1203). The coding agent runs on all three, with Pi on local workers only.
+Built: the harness runtimes and descriptors, `admitBrain`, and a role-neutral session spec (#1203). The coding agent runs on all three; Pi on local workers only.
 
-Decided, not built: the event-driven coordinator replaces the Pi parent session, with no parent model, selected with `coordinator: session | events` (#1150, #1158). Until #1166 removes the Pi parent, it coordinates every attempt, and admission refuses the coordinator role on Claude Code and Codex. Roles become declarations derived from that spec, and the contract gains tool sets and a structured `complete` (#1204 to #1206, #1208). The supervisor has admission rules and no runtime yet (#799).
+Decided, not built: the event-driven coordinator replaces the Pi parent session, with no parent model, selected with `coordinator: session | events` (#1150, #1158). Until #1166 removes the Pi parent, it coordinates every attempt, and admission refuses the coordinator role on Claude Code and Codex. Roles become declarations over that spec; the contract gains tool sets and a structured `complete` (#1204 to #1206, #1208). The supervisor has admission rules and no runtime yet (#799).
 
 ## Considered options
 
