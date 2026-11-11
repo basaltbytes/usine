@@ -186,6 +186,11 @@ export interface PreflightReport {
    * the machine. `None` if the Worker runs no containers or the preflight checked no machine.
    */
   readonly containerLimits: Option.Option<ContainerLimits>;
+  /**
+   * What the preflight found missing that Attempts run without, for operators, such as a kernel
+   * log that the SSH user can't read, which leaves out-of-memory kills without process names.
+   */
+  readonly findings: ReadonlyArray<string>;
 }
 
 /** The report of a Worker that runs Attempts as designed, without containers. */
@@ -193,6 +198,7 @@ export const fullPreflight: PreflightReport = {
   degraded: Option.none(),
   deferred: Option.none(),
   containerLimits: Option.none(),
+  findings: [],
 };
 
 /** Logs each preflight failure at error level. */
@@ -451,6 +457,8 @@ export class MachineCheck extends Schema.Class<
    * or `None` if the machine has no Docker.
    */
   containerLimits: Schema.Option(ContainerLimits),
+  /** The machine's preflight findings, as in `PreflightReport`. */
+  findings: Schema.Array(Schema.String),
 }) {}
 
 /** A machine that a provisioned Worker created for an Attempt and holds until `release`. */

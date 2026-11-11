@@ -8,6 +8,7 @@ import { Link } from "@tanstack/react-router";
 import type { ConfigurationView, WorkerSlotsView } from "@usine/orchestrator/operator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { CheckRow } from "~/features/configuration/components/workers/check-row";
+import { PreflightFindings } from "~/features/configuration/components/workers/findings";
 import { Machines } from "~/features/configuration/components/workers/machines";
 import {
   ConfigurationPage,
@@ -119,6 +120,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
               </Table>
             </div>
           )}
+          <PreflightFindings findings={worker.findings} />
         </DetailSection>
       </DetailColumns>
     </ConfigurationPage>

@@ -369,6 +369,30 @@ describe("Workers page", () => {
     );
   });
 
+  it("lists the findings of a Worker's last machine preflight, and nothing without any", async () => {
+    const finding =
+      "The SSH user can't read the kernel journal or ring buffer on usine@eu-1, so out-of-memory kills record no process names.";
+    const checked = Schema.decodeUnknownSync(ConfigurationView)({
+      ...configurationJson,
+      workers: configurationJson.workers.map((worker) =>
+        worker.name === "eu-1"
+          ? {
+              ...worker,
+              prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
+              findings: [finding],
+            }
+          : worker,
+      ),
+    });
+    const page = await render(() => <WorkerDetail name="eu-1" configuration={checked} />);
+    assert.include(text(page), `Preflight findings ${finding}`);
+    assert.match(page, /<p id="([^"]+)"[^>]*>Preflight findings<\/p><ul aria-labelledby="\1"/u);
+    const without = text(
+      await render(() => <WorkerDetail name="eu-1" configuration={configurationFixture()} />),
+    );
+    assert.notInclude(without, "Preflight findings");
+  });
+
   it("shows an SSH Worker without Docker as degraded, with the reason, and its container settings", async () => {
     const page = text(
       await render(() => <WorkerDetail name="eu-2" configuration={configurationFixture()} />),

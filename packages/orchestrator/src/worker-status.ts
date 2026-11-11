@@ -156,6 +156,11 @@ export interface WorkerPreflight {
    * Worker's machine. `None` before one, or if that machine had no Docker.
    */
   readonly containerLimits: Option.Option<ContainerLimits>;
+  /**
+   * What the last passed preflight that checked the Worker's machine found missing that
+   * Attempts run without, such as a kernel log that the SSH user can't read.
+   */
+  readonly findings: ReadonlyArray<string>;
 }
 
 const isHarnessUnavailable = Schema.is(HarnessUnavailableError);
@@ -210,6 +215,9 @@ export const recordPreflight = (
       containerLimits: Option.isSome(outcome.success.deferred)
         ? previous.containerLimits
         : outcome.success.containerLimits,
+      findings: Option.isSome(outcome.success.deferred)
+        ? previous.findings
+        : outcome.success.findings,
     };
   }
   const error = outcome.failure;
@@ -230,6 +238,7 @@ export const recordPreflight = (
         failed,
       ),
       containerLimits: previous.containerLimits,
+      findings: previous.findings,
     };
   }
   return {
@@ -237,6 +246,7 @@ export const recordPreflight = (
     prerequisites: Option.some(failed),
     harnesses: previous.harnesses,
     containerLimits: previous.containerLimits,
+    findings: previous.findings,
   };
 };
 
@@ -246,6 +256,7 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   prerequisites: Option.none(),
   harnesses: [],
   containerLimits: Option.none(),
+  findings: [],
 });
 
 /** An on-demand preflight could not reserve the configured worker. */

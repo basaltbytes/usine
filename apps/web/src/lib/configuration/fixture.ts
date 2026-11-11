@@ -57,6 +57,7 @@ const deferredHarness = (harness: string, checkedAt: string) => ({
 /** A worker without a provisioner, as every kind but a provisioned SSH Worker has. */
 const unprovisioned = {
   preflightRunning: false,
+  findings: [],
   provisioner: null,
   machines: [],
   provisioning: null,
@@ -256,6 +257,7 @@ export const configurationJson = {
     {
       name: "hz-pool",
       preflightRunning: false,
+      findings: [],
       kind: "ssh",
       maxConcurrentAttempts: 3,
       destination: null,
@@ -339,6 +341,7 @@ export const configurationJson = {
     {
       name: "boat-pool",
       preflightRunning: false,
+      findings: [],
       kind: "ssh",
       maxConcurrentAttempts: 2,
       destination: null,
@@ -364,6 +367,7 @@ export const configurationJson = {
     {
       name: "boxd-pool",
       preflightRunning: false,
+      findings: [],
       kind: "ssh",
       maxConcurrentAttempts: 2,
       destination: null,

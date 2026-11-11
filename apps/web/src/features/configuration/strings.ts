@@ -22,6 +22,9 @@ export const workerKindLabel = {
   cloudflare: "Cloudflare",
 } satisfies Record<WorkerKind, string>;
 
+/** The heading of what a Worker's last machine preflight found missing that Attempts run without. */
+export const preflightFindingsLabel = "Preflight findings";
+
 export const provisionedHarnessCheckDescription =
   "Harness checks run on the first machine, then on the next machine created after the configured interval since the last successful check.";
 

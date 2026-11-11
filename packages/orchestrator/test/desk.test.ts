@@ -479,12 +479,14 @@ const deskLayer = (
           },
         ],
         containerLimits: Option.none(),
+        findings: [],
       },
       {
         worker: WorkerName.make("spare"),
         prerequisites: Option.some(passed("05:00:00")),
         harnesses: [{ harness: Harness.make("claude"), check: passed("05:30:00") }],
         containerLimits: Option.none(),
+        findings: [],
       },
     ]),
   });

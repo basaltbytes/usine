@@ -290,11 +290,13 @@ describe("run transcript", () => {
   });
 
   it("separates an attempt's total out-of-memory kills from its last recorded container's limit", () => {
-    const ended = (outOfMemory: OutOfMemoryKills | null) =>
+    const markup = (outOfMemory: OutOfMemoryKills | null) =>
       reader(
         [event(1, "Running the test gate.")],
         [AttemptView.make({ ...liveAttempt, outcome: CanceledAttemptView.make(), outOfMemory })],
-      ).replace(/<[^>]+>/gu, "");
+      );
+    const ended = (outOfMemory: OutOfMemoryKills | null) =>
+      markup(outOfMemory).replace(/<[^>]+>/gu, "");
     const total = totalOutOfMemoryKills([
       ContainerOutOfMemoryKills.make({
         container: ContainerId.make("a".repeat(64)),
@@ -318,6 +320,11 @@ describe("run transcript", () => {
     );
     assert.include(ended(total), "vitest worker (host PID 1234)");
     assert.include(ended(total), "Process details unavailable for 2 kills.");
+    // Screen readers announce the visible label once, as the list's name.
+    assert.match(
+      markup(total),
+      /<p id="([^"]+)">Killed processes \(kernel task names\)<\/p><ul aria-labelledby="\1">/u,
+    );
     assert.notInclude(ended(null), "The kernel killed");
   });
 
