@@ -94,6 +94,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       repositoryUrl: (_machine, repository) => `https://${EDGE_GITHUB_HOST}/${repository}.git`,
       // exe.dev Workers have no Gateway; every harness uses its own login.
       gatewayCredential: () => Effect.succeedNone,
+      credentialRoute: () => "host-login",
       grantFor,
       readOnlyAccessGap: Option.some(
         "An exe.dev GitHub integration has the access of exe.dev's GitHub App, which can't be limited to read-only",

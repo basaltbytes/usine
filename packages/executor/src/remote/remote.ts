@@ -209,7 +209,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       });
     });
 
-    /** Returns the container of an Attempt, which mounts its checkout and the paths of `access`. */
+    /**
+     * Returns the container of an Attempt, which mounts its checkout, the paths of `access`, and
+     * the login files of `logins`.
+     */
     const containerSpec = (
       machine: M,
       settings: ContainerSettings,
@@ -220,7 +223,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       },
       worktree: string,
       access: RemoteAccess,
-      harnesses: ReadonlyArray<Harness>,
+      logins: ReadonlyArray<Harness>,
     ) => ({
       name: attemptContainerName(attempt.attemptId),
       settings,
@@ -229,7 +232,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       checkout: Option.some({ path: worktree, parent: `${machine.workerDirectory}/attempts` }),
       readOnly: [cachePath(machine, attempt.repository), ...access.readOnlyPaths],
       writable: access.writableMounts,
-      harnesses,
+      logins,
       environment: access.environment,
       secrets: access.secrets,
     });
@@ -246,7 +249,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       worktree: string,
       access: RemoteAccess,
       isolation: AttemptIsolation,
-      harnesses: ReadonlyArray<Harness>,
+      logins: ReadonlyArray<Harness>,
     ) {
       if (isolation._tag === "SharedUser") {
         const shell = Effect.succeed(access.shell);
@@ -259,7 +262,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         return shared;
       }
       const started = yield* SynchronizedRef.make(Option.none<RemoteHost>());
-      const spec = containerSpec(machine, isolation.settings, attempt, worktree, access, harnesses);
+      const spec = containerSpec(machine, isolation.settings, attempt, worktree, access, logins);
       const marker = containerCheckoutMarker(machine.workerDirectory, attempt.attemptId);
       const memory = yield* containers.trackMemory(machine.shell, spec);
       const shell = SynchronizedRef.modifyEffect(started, (current) =>
@@ -835,6 +838,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         onNone: () => request.agent.brain.harness,
         onSome: (spec) => spec.agent.brain.harness,
       });
+      const credentialRoute = worker.credentialRoute(machine, harness);
 
       // A checkout kept after a failed remote stop never closes its scope, so its salvage result
       // is completed here instead of by the checkout finalizer.
@@ -900,7 +904,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           worktree,
           access,
           isolation,
-          [harness],
+          credentialRoute === "host-login" ? [harness] : [],
         );
         const ops = workspaceOps(
           request,
@@ -973,6 +977,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         resume: Option.map(prepared.spec.resume, ({ ref }) => ref),
         reattach: request.reattach,
         isolation: isolation._tag,
+        harness,
+        credentialRoute,
         worktree,
       });
       return {
