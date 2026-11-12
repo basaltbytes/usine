@@ -530,10 +530,19 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           : Option.none(),
         record,
       );
-      // The machine stays until the finalizers release it, so a later recovery visits it again.
-      if (present)
+      if (present) {
         yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
-      return "found" satisfies RecoveredLeftovers;
+        return "found" satisfies RecoveredLeftovers;
+      }
+      // A machine created for the Attempt stays until the finalizers release it, so a later
+      // recovery visits it again. A long-lived machine keeps nothing of the Attempt outside its
+      // checkout: listing its leftovers reclaimed whatever else no Attempt holds.
+      if (Option.isSome(machine.provisioned)) return "found" satisfies RecoveredLeftovers;
+      yield* Effect.logDebug(
+        "The Attempt's checkout is gone from its Worker's machine; nothing is left to reconcile",
+        { attemptId: attempt.attemptId, worker: attempt.worker },
+      );
+      return "gone" satisfies RecoveredLeftovers;
     }, Effect.scoped);
 
     /** Reconciles a kept checkout after its parent stops; skips a missing checkout. */

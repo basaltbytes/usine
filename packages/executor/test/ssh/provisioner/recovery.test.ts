@@ -94,8 +94,8 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
         );
         assert.strictEqual(providers.hetzner.servers.size, 0, "the machine is deleted after");
         machine.state.cacheExists = false;
-        // An Attempt whose machine is gone has nothing to reconcile. A fixed address keeps its
-        // machine, which recovery still finds.
+        // An Attempt whose machine is gone has nothing to reconcile, and neither has one whose
+        // checkout is gone from a fixed address's machine.
         const second = yield* executor.recover(
           {
             ...attempt,
@@ -104,10 +104,7 @@ for (const connection of ["unchanged", "replaced", "restarted", "unreadable"] as
           sink,
           Effect.succeed(request.commitAuthor),
         );
-        assert.strictEqual(
-          second,
-          connection === "replaced" || connection === "restarted" ? "found" : "gone",
-        );
+        assert.strictEqual(second, "gone");
       }).pipe(
         Effect.scoped,
         Effect.provide(

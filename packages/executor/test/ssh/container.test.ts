@@ -1089,6 +1089,46 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
+    "finds nothing left of an ended Attempt whose checkout is gone at each later start, and finds a kept checkout",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      const storage = new StubStorage();
+      const recovery = {
+        attemptId: request.attemptId,
+        repository: request.repository,
+        worker: WORKER,
+        ref: request.salvageRef,
+        permissions: "write",
+        succeeded: true,
+        open: false,
+        rejected: Option.none(),
+      } as const;
+      // Each start builds a new executor on the same storage.
+      const recoverAtStart = Effect.gen(function* () {
+        const executor = yield* Executor;
+        return yield* executor.recover(
+          recovery,
+          { salvage: () => Effect.void, comments: () => Effect.void, windows: aloneOnItem() },
+          Effect.succeed(request.commitAuthor),
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, completes, storage)));
+      return Effect.gen(function* () {
+        yield* stopWhileRunning(machine, credentials, storage);
+        machine.state.salvage = "clean";
+        const kept = yield* recoverAtStart;
+        assert.strictEqual(kept, "found", "a start that finds the checkout reconciles it");
+        // The fake machine doesn't model the checkout's removal.
+        machine.state.cacheExists = false;
+        const first = yield* recoverAtStart;
+        const second = yield* recoverAtStart;
+        assert.deepStrictEqual([first, second], ["gone", "gone"]);
+        assert.strictEqual(machine.state.containers.size, 0);
+      });
+    },
+  );
+
+  it.effect(
     "derives the limits for one Attempt, and logs them, when a container starts before any preflight on the Worker",
     () => {
       const machine = dockerMachine();
