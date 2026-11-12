@@ -8,6 +8,9 @@ import {
 import { type UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted, Crypto } from "effect";
+import { HttpServerRequest } from "effect/http";
+import type { IpNetwork } from "effect/net";
+import { clientAddress } from "./client.ts";
 import { GitHubSignIn } from "./github.ts";
 import {
   AuthError,
@@ -45,7 +48,14 @@ interface DeviceState {
   readonly interval: number;
   readonly name: TokenName;
 }
+interface LimitWindow {
+  readonly until: number;
+  readonly count: number;
+}
 const TEN_MINUTES = 600_000;
+const LIMIT_WINDOW = 60_000;
+const CLIENT_LIMIT = 60;
+const INSTANCE_LIMIT = 600;
 const SESSION_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 
 export class Authentication extends Context.Service<
@@ -94,6 +104,7 @@ export const authenticationLayer = (options: {
   readonly origin: UiOrigin;
   readonly origins: ReadonlyArray<UiOrigin>;
   readonly localToken: Redacted.Redacted<string>;
+  readonly trustedProxies: ReadonlyArray<IpNetwork.IpNetwork>;
 }) =>
   Layer.effect(
     Authentication,
@@ -109,7 +120,8 @@ export const authenticationLayer = (options: {
       const bootstrapSessions = new Map<TokenHash, number>();
       const states = new Map<TokenHash, WebState>();
       const devices = new Map<TokenHash, DeviceState>();
-      const limits = new Map<string, { readonly until: number; readonly count: number }>();
+      const clientLimits = new Map<string, LimitWindow>();
+      const instanceLimits = new Map<string, LimitWindow>();
       const localHash = secretHash(Redacted.value(options.localToken));
       const csrf = (secret: string) => secretHash(`csrf:${secret}`);
       const callback = `${options.origin}/api/auth/callback`;
@@ -118,6 +130,8 @@ export const authenticationLayer = (options: {
         for (const [key, expires] of bootstrapSessions)
           if (expires <= now) bootstrapSessions.delete(key);
         for (const [key, value] of states) if (value.expires <= now) states.delete(key);
+        for (const windows of [clientLimits, instanceLimits])
+          for (const [key, window] of windows) if (window.until <= now) windows.delete(key);
         for (const [key, value] of devices)
           if (value.expires <= now) {
             Redacted.wipeUnsafe(value.code);
@@ -227,16 +241,31 @@ export const authenticationLayer = (options: {
       const limit = Effect.fn("Authentication.limit")(function* (endpoint: string) {
         const now = yield* Clock.currentTimeMillis;
         prune(now);
-        const previous = limits.get(endpoint);
-        const window =
-          previous === undefined || previous.until <= now
-            ? { until: now + 60_000, count: 0 }
-            : previous;
-        if (window.count >= 60) {
-          yield* Effect.logWarning("Sign-in rate limit reached", { endpoint });
+        const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest);
+        const client = Option.match(request, {
+          onNone: () => "in-process",
+          onSome: (current) => clientAddress(current, options.trustedProxies),
+        });
+        yield* Effect.annotateCurrentSpan({ endpoint, client });
+        const clientKey = `${endpoint} ${client}`;
+        const clientWindow = clientLimits.get(clientKey) ?? { until: now + LIMIT_WINDOW, count: 0 };
+        if (clientWindow.count >= CLIENT_LIMIT) {
+          yield* Effect.logWarning("Sign-in rate limit reached for a client", { endpoint, client });
           return yield* authFailure("Too many sign-in requests. Try again in a minute.", 429);
         }
-        limits.set(endpoint, { ...window, count: window.count + 1 });
+        const instanceWindow = instanceLimits.get(endpoint) ?? {
+          until: now + LIMIT_WINDOW,
+          count: 0,
+        };
+        if (instanceWindow.count >= INSTANCE_LIMIT) {
+          yield* Effect.logWarning("Instance-wide sign-in rate limit reached", {
+            endpoint,
+            client,
+          });
+          return yield* authFailure("Too many sign-in requests. Try again in a minute.", 429);
+        }
+        clientLimits.set(clientKey, { ...clientWindow, count: clientWindow.count + 1 });
+        instanceLimits.set(endpoint, { ...instanceWindow, count: instanceWindow.count + 1 });
       });
       return Authentication.of({
         createToken: Effect.fn("Authentication.createToken")(function* (secret, name, scopes) {

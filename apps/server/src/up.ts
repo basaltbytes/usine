@@ -427,6 +427,7 @@ export const up = (command: UpCommand) =>
             origin: Option.getOrElse(origin, () => UiOrigin.make(`http://127.0.0.1:${port}`)),
             origins: config.auth.origins,
             localToken,
+            trustedProxies: config.auth.trustedProxies,
           }).pipe(
             Layer.provide(authDependencies),
             Layer.provide(Layer.succeedContext(accessContext)),

@@ -5,6 +5,7 @@ import { UiOrigin } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import { ConfigProvider, Context, Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
+import type { IpNetwork } from "effect/net";
 import { Authentication, authenticationLayer } from "../../src/auth/authentication.ts";
 import { GitHubSignIn, githubSignInLayer } from "../../src/auth/github.ts";
 import { memoryAuthLayer } from "../../src/auth/memory.ts";
@@ -28,6 +29,7 @@ export const authFixture = (
   initial: ReadonlyArray<Member> = [alice],
   identity = alice,
   permissions: () => ReadonlyArray<PermissionGrant> = () => administratorPermissions,
+  trustedProxies: ReadonlyArray<IpNetwork.IpNetwork> = [],
 ) =>
   Effect.gen(function* () {
     const seen: Array<string> = [];
@@ -69,6 +71,7 @@ export const authFixture = (
         origin: UiOrigin.make("https://usine.example"),
         origins: [UiOrigin.make("https://client.example")],
         localToken: Redacted.make(localSecret),
+        trustedProxies,
       }).pipe(
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.succeed(AuthStore, store)),

@@ -5,7 +5,9 @@ import { securityMiddleware } from "../../src/security.ts";
 import { TestClock } from "effect/testing";
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
 import { Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
-import { HttpRouter, HttpServerResponse } from "effect/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { IpNetwork } from "effect/net";
+import { administratorPermissions } from "@usine/core/access";
 import { assert, it } from "@effect/vitest";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { seedOperator } from "../../src/auth/authentication.ts";
@@ -35,6 +37,15 @@ const cookie = (response: Response) =>
     .join("; ");
 const linkToken = (url: string) =>
   new URLSearchParams(new URL(url).hash.slice(1)).get("link") ?? "";
+const from = (peer: string, forwardedFor?: string) =>
+  Effect.provideService(
+    HttpServerRequest.HttpServerRequest,
+    HttpServerRequest.fromWeb(
+      new Request("https://usine.example/api/auth/github", {
+        headers: forwardedFor === undefined ? {} : { "x-forwarded-for": forwardedFor },
+      }),
+    ).modify({ remoteAddress: Option.some(peer) }),
+  );
 
 it.live(
   "requires authentication even from loopback, binds cookie writes to CSRF, and revokes sessions",
@@ -215,7 +226,7 @@ it.live("issues a device token once, refuses non-members, and expires one-time l
   }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
 );
 
-it.live("limits sign-in attempts globally and refuses cross-site link consumption", () =>
+it.live("limits repeated sign-in requests and refuses cross-site link consumption", () =>
   Effect.gen(function* () {
     const services = yield* authFixture();
     const { routes } = authenticatedRoutes(services);
@@ -250,6 +261,67 @@ it.live("limits sign-in attempts globally and refuses cross-site link consumptio
         .status,
       429,
     );
+  }).pipe(Effect.scoped),
+);
+
+it.live("counts sign-in requests per client address so one client can't lock out another", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture([alice, bob], bob);
+    for (let count = 0; count < 60; count++) yield* auth.startWeb(false).pipe(from("203.0.113.7"));
+
+    assert.equal((yield* auth.startWeb(false).pipe(from("203.0.113.7"), Effect.flip)).status, 429);
+    const started = yield* auth.startWeb(false).pipe(from("198.51.100.4"));
+    const session = yield* auth
+      .finishWeb(Redacted.value(started.state), "fake")
+      .pipe(from("198.51.100.4"));
+    const signedIn = yield* auth.authenticate(Redacted.value(session.secret));
+    assert.equal(Option.getOrNull(signedIn.member)?.login, bob.login);
+  }).pipe(Effect.scoped),
+);
+
+it.live("stops sign-in requests from new clients at the instance-wide ceiling", () =>
+  Effect.gen(function* () {
+    const { authentication: auth } = yield* authFixture();
+    for (let client = 1; client <= 10; client++)
+      for (let count = 0; count < 60; count++)
+        yield* auth.startWeb(false).pipe(from(`203.0.113.${client}`));
+
+    assert.equal((yield* auth.startWeb(false).pipe(from("198.51.100.4"), Effect.flip)).status, 429);
+  }).pipe(Effect.scoped),
+);
+
+it.live("reads the client address from X-Forwarded-For only behind a trusted proxy", () =>
+  Effect.gen(function* () {
+    const direct = (yield* authFixture()).authentication;
+    for (let count = 0; count < 60; count++)
+      yield* direct.startWeb(false).pipe(from("127.0.0.1", `203.0.113.${count}`));
+
+    assert.equal(
+      (yield* direct.startWeb(false).pipe(from("127.0.0.1", "198.51.100.4"), Effect.flip)).status,
+      429,
+    );
+
+    const proxied = (yield* authFixture([alice], alice, () => administratorPermissions, [
+      IpNetwork.fromStringUnsafe("127.0.0.0/8"),
+    ])).authentication;
+    for (let count = 0; count < 60; count++)
+      yield* proxied.startWeb(false).pipe(from("192.0.2.1", `203.0.113.${count}`));
+    assert.equal(
+      (yield* proxied.startWeb(false).pipe(from("192.0.2.1", "198.51.100.4"), Effect.flip)).status,
+      429,
+    );
+    for (let count = 0; count < 60; count++)
+      yield* proxied
+        .startWeb(false)
+        .pipe(from("127.0.0.1", `198.51.100.${count}, 203.0.113.7, 127.0.0.2`));
+
+    assert.equal(
+      (yield* proxied
+        .startWeb(false)
+        .pipe(from("127.0.0.1", "198.51.100.200, 203.0.113.7"), Effect.flip)).status,
+      429,
+    );
+    yield* proxied.startWeb(false).pipe(from("127.0.0.1", "203.0.113.8"));
   }).pipe(Effect.scoped),
 );
 
