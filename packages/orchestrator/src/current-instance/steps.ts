@@ -3,7 +3,8 @@ import { Clock, Effect, Exit, Schema, type Semaphore } from "effect";
 /**
  * A step of a configuration save or reload: waiting for the running one, reading the store,
  * parsing the candidate, checking restart-only changes, checking coordinator brains, preflighting
- * Workers, storing the revision, and applying it.
+ * Workers, storing the revision, and applying it. The startup check of coordinator brains is also
+ * the `coordinator-brains` step.
  */
 export const RevisionStep = Schema.Literals([
   "wait",
