@@ -4,7 +4,7 @@ import { ProviderLogins } from "./providers/control.ts";
 import { providerLoginRunnerLayer } from "./providers/runner.ts";
 import type { StepOutputStore } from "@usine/engine/step-outputs";
 import { changeBusLayer } from "@usine/core/changes";
-import { listenForStartup, type StartupListener } from "./listener.ts";
+import { listenForStartup, listenThenBuild, type StartupListener } from "./listener.ts";
 import { memberAccessLayer } from "./auth/access.ts";
 import { Setup } from "./setup/control.ts";
 import { webhookEndpoint } from "./webhooks.ts";
@@ -250,12 +250,11 @@ const start = Effect.fnUntraced(function* (
 
   const shutdown = yield* Deferred.make<void>();
   const startup = Effect.gen(function* () {
-    const listener = yield* listenForStartup(port, record.version);
     const runtime = runtimeLayer(directory, instanceId, database).pipe(
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
     );
-    const context = yield* Layer.build(runtime).pipe(
+    const { listener, context } = yield* listenThenBuild(port, record.version, runtime).pipe(
       Effect.provideService(RunEngineShutdown, shutdown),
     );
     const webhooks = yield* webhookEndpoint(

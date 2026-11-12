@@ -58,3 +58,20 @@ export const listenForStartup = Effect.fnUntraced(function* (port: Port, version
     Effect.provideService(HttpServer.HttpServer, Context.get(http, HttpServer.HttpServer)),
   );
 });
+
+/**
+ * Opens the startup listener on `port`, then builds `runtime`. The listener answers while
+ * `runtime` builds, so a slow startup step, such as the coordinator brain check, can't keep the
+ * port closed. Fails with `PortInUseError` or `ServerStartError` before `runtime` builds when the
+ * port can't be opened.
+ */
+export const listenThenBuild = <A, E, R>(
+  port: Port,
+  version: string,
+  runtime: Layer.Layer<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const listener = yield* listenForStartup(port, version);
+    const context = yield* Layer.build(runtime);
+    return { listener, context };
+  });

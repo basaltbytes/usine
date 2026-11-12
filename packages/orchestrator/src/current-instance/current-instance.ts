@@ -494,7 +494,15 @@ export class CurrentInstance extends Context.Service<
             );
             yield* Effect.gen(function* () {
               const loaded = yield* SubscriptionRef.get(current);
-              const problems = yield* timedStep("coordinator-brains", admit(loaded));
+              // A refusal fails the step, so it logs as `failed`, and then quarantines the agents.
+              const problems = yield* timedStep(
+                "coordinator-brains",
+                Effect.flatMap(admit(loaded), (problems) =>
+                  EffectArray.isReadonlyArrayNonEmpty(problems)
+                    ? Effect.fail(problems)
+                    : Effect.void,
+                ),
+              ).pipe(Effect.as(EffectArray.empty<ConfigFileError>()), Effect.catch(Effect.succeed));
               if (problems.length === 0) return;
               const refused = new Set(problems.map(({ file }) => file));
               const agents = loaded.agents.filter(

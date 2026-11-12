@@ -570,6 +570,37 @@ it.effect("logs the startup coordinator brain check as a step", () => {
   );
 });
 
+it.effect("logs a refused startup coordinator brain as a failed step and quarantines it", () => {
+  const steps: Array<StepLog> = [];
+  const messages: Array<unknown> = [];
+  const spans: Array<Tracer.Span> = [];
+  return Effect.gen(function* () {
+    const { current } = yield* revisionFixture;
+    steps.length = 0;
+    spans.length = 0;
+    messages.length = 0;
+    const refusal = ConfigFileError.make({
+      file: InstancePath.make("agents/reviewer.md"),
+      stage: "schema",
+      expression: Option.none(),
+      message: 'Agent "reviewer" cannot run as coordinator: no model unknown/x',
+    });
+    yield* current.registerParentAdmission(() => Effect.succeed([refusal]));
+
+    expect(steps).toEqual([{ step: "coordinator-brains", durationMillis: 0, outcome: "failed" }]);
+    expect(stepSpans(spans)).toEqual(steps);
+    expect(messages).toContain("Coordinator admission quarantined agents and loops at startup");
+    const running = yield* current.get;
+    expect(running.agents).toEqual([]);
+    expect(running.invalidAgents.map(({ file }) => file)).toEqual(["agents/reviewer.md"]);
+  }).pipe(
+    Effect.scoped,
+    Effect.withLogger(stepLogger(steps, messages)),
+    recordingSpans(spans),
+    Effect.provide(NodeServices.layer),
+  );
+});
+
 it.effect("keeps following stored revisions after one times out its brain check", () => {
   const steps: Array<StepLog> = [];
   const messages: Array<unknown> = [];
