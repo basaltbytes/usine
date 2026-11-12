@@ -47,7 +47,7 @@ import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
 import { piChildLayer } from "../../src/harness/pi/pi.ts";
 import {
   environmentBashTool,
-  piChildTools,
+  piSessionTools,
   type PiMessage,
   PiSdk,
   type PiSession,
@@ -728,7 +728,12 @@ describe("Pi child backend", () => {
       assert.includeMembers(unpinned.getActiveToolNames(), ["grep", "find", "ls"]);
 
       const child = yield* start(
-        piChildTools(directory, Option.some({ PATH: "/usr/bin:/bin", USINE_REQUEST_ONLY: "yes" })),
+        piSessionTools(
+          directory,
+          Option.some({ PATH: "/usr/bin:/bin", USINE_REQUEST_ONLY: "yes" }),
+          true,
+          [],
+        ),
       );
       assert.sameMembers(child.getActiveToolNames(), childTools);
       assert.sameMembers(

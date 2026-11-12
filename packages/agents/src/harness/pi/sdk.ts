@@ -65,6 +65,10 @@ export interface PiStartOptions {
   readonly environment: Option.Option<Readonly<Record<string, string>>>;
   /** Trusted inline extensions to register, such as the operator pause gate. */
   readonly extensions: ReadonlyArray<InlineExtension>;
+  /** Whether the session keeps Pi's own read, bash, edit, and write tools. */
+  readonly nativeTools: boolean;
+  /** The usine tools that the session lists beside, or instead of, Pi's own. */
+  readonly hostTools: ReadonlyArray<ToolDefinition>;
   /** The requested model in `provider/model` form. */
   readonly model: ModelId;
   /** Cancels SDK startup and authentication requests. */
@@ -135,21 +139,39 @@ export const environmentBashTool = (
  */
 const piChildToolNames = ["read", "bash", "edit", "write"];
 
+/** The names of Pi's built-in tools, which a usine tool can't take. */
+export const piBuiltInToolNames: ReadonlySet<string> = new Set([
+  ...piChildToolNames,
+  "grep",
+  "find",
+  "ls",
+]);
+
 /**
- * Returns the session options that give a Pi child exactly Pi's default tools. With `environment`,
- * the bash tool runs its commands with exactly that environment.
+ * Returns the session options that list exactly `hostTools`, and with `nativeTools` also Pi's
+ * default tools. With `environment`, the bash tool runs its commands with exactly that
+ * environment.
  */
-export const piChildTools = (
+export const piSessionTools = (
   cwd: string,
   environment: Option.Option<Readonly<Record<string, string>>>,
-): Pick<CreateAgentSessionOptions, "customTools" | "tools"> => ({
-  tools: [...piChildToolNames],
-  // A custom tool replaces the built-in tool of the same name.
-  customTools: Option.match(environment, {
-    onNone: () => [],
-    onSome: (exact) => [environmentBashTool(cwd, exact)],
-  }),
-});
+  nativeTools: boolean,
+  hostTools: ReadonlyArray<ToolDefinition>,
+): Pick<CreateAgentSessionOptions, "customTools" | "tools"> => {
+  const hosted = hostTools.map(({ name }) => name);
+  if (!nativeTools) return { tools: hosted, customTools: [...hostTools] };
+  return {
+    tools: [...piChildToolNames, ...hosted],
+    // A custom tool replaces the built-in tool of the same name.
+    customTools: [
+      ...Option.match(environment, {
+        onNone: () => [],
+        onSome: (exact) => [environmentBashTool(cwd, exact)],
+      }),
+      ...hostTools,
+    ],
+  };
+};
 
 /** The service that starts a Pi session with the selected model and its repository tools. */
 export class PiSdk extends Context.Service<
@@ -218,7 +240,7 @@ const piSdk = (sources: PiSdkSources): PiSdk["Service"] => ({
       }
     }
     const { session } = await createAgentSession({
-      ...piChildTools(options.cwd, options.environment),
+      ...piSessionTools(options.cwd, options.environment, options.nativeTools, options.hostTools),
       cwd: options.cwd,
       model: selected,
       modelRuntime,

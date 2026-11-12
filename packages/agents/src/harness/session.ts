@@ -202,6 +202,7 @@ export const lastPiMessageText = (messages: ReadonlyArray<PiMessage>): string | 
 const sessionEventFrom = (
   event: PiSessionEvent,
   session: AgentSession,
+  toolName: (reported: string) => string,
 ): AgentSessionEvent | undefined => {
   if (event.type === "message_end") {
     const text = messageText(event.message);
@@ -211,7 +212,7 @@ const sessionEventFrom = (
     return ToolStarted.make({
       session,
       callId: event.toolCallId,
-      tool: event.toolName,
+      tool: toolName(event.toolName),
       input: toolInputJson(event),
     });
   }
@@ -219,7 +220,7 @@ const sessionEventFrom = (
     return ToolFinished.make({
       session,
       callId: event.toolCallId,
-      tool: event.toolName,
+      tool: toolName(event.toolName),
       output: toolOutputJson(event),
       isError: event.isError,
     });
@@ -229,13 +230,15 @@ const sessionEventFrom = (
 
 /**
  * Subscribes to `piSession` and queues normalized events synchronously, so none arrive after the
- * prompt resolves. Provider retries are counted per turn and reset on `agent_settled`.
+ * prompt resolves. Provider retries are counted per turn and reset on `agent_settled`. `toolName`
+ * maps the name that Pi reports for a tool to the name that events carry.
  */
 export const subscribePiSession = (
   piSession: PiSession,
   session: AgentSession,
   channel: SessionChannel,
   seed: Option.Option<SessionUsage> = Option.none(),
+  toolName: (reported: string) => string = (reported) => reported,
 ) =>
   Effect.gen(function* () {
     const context = yield* Effect.context<never>();
@@ -320,7 +323,7 @@ export const subscribePiSession = (
         );
         return;
       }
-      const sessionEvent = sessionEventFrom(event, session);
+      const sessionEvent = sessionEventFrom(event, session, toolName);
       if (sessionEvent === undefined) return;
       if (sessionEvent._tag === "TextOutput") lastText = sessionEvent.text;
       offer(sessionEvent);
