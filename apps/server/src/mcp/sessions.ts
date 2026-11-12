@@ -10,6 +10,13 @@ export interface McpSession {
   readonly lastUsedAt: number;
 }
 
+/** A session that the server ends on its tool server, and why. */
+export interface EndingSession {
+  readonly id: string;
+  readonly session: McpSession;
+  readonly reason: "idle" | "tools-changed";
+}
+
 /** How a request relates to the session that its `Mcp-Session-Id` names. */
 export type SessionAdmission = Data.TaggedEnum<{
   Admitted: {};
@@ -24,6 +31,8 @@ export const SessionAdmission = Data.taggedEnum<SessionAdmission>();
 /** The open MCP sessions, by session ID. A session ends after `idleMillis` without a request. */
 export const sessionTable = (idleMillis: number) => {
   const sessions = new Map<string, McpSession>();
+  // Sessions that no request can use any more, but that their tool server didn't end.
+  const unended = new Map<string, EndingSession>();
   return {
     open: (id: string, session: McpSession) => {
       sessions.set(id, session);
@@ -43,11 +52,23 @@ export const sessionTable = (idleMillis: number) => {
       sessions.set(id, { ...session, lastUsedAt: now });
       return SessionAdmission.Admitted();
     },
-    /** Removes and returns the sessions that went unused for the idle time. */
-    takeIdle: (now: number) => {
-      const idle = [...sessions].filter(([, { lastUsedAt }]) => now - lastUsedAt >= idleMillis);
-      for (const [id] of idle) sessions.delete(id);
-      return idle;
+    /**
+     * Removes and returns the sessions that went unused for the idle time, and the sessions passed
+     * to `retry` since the last call.
+     */
+    takeStale: (now: number): ReadonlyArray<EndingSession> => {
+      const stale = [...unended.values()];
+      unended.clear();
+      for (const [id, session] of sessions)
+        if (now - session.lastUsedAt >= idleMillis) {
+          sessions.delete(id);
+          stale.push({ id, session, reason: "idle" });
+        }
+      return stale;
+    },
+    /** Keeps a session that its tool server didn't end, so the next `takeStale` returns it. */
+    retry: (ending: EndingSession) => {
+      unended.set(ending.id, ending);
     },
   };
 };

@@ -17,6 +17,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { webRequest } from "../../../../tooling/test/http.mts";
 import {
   type Cause,
+  Clock,
   Context,
   DateTime,
   Duration,
@@ -36,7 +37,7 @@ import {
 } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer, HttpServerResponse } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
-import { OperationId, TokenName } from "../../src/auth/model.ts";
+import { OperationCeilingChange, OperationId, TokenName } from "../../src/auth/model.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { Port } from "../../src/cli.ts";
 import { apiRoutes, MAX_REQUEST_BODY_BYTES, serverLayer } from "../../src/http.ts";
@@ -101,11 +102,30 @@ const expectedTools = (permissions: ReadonlyArray<"public" | "read" | "operate">
     )
     .map(([name]) => name);
 
-const makeFixture = (
-  sessionIdle: Duration.Input = MCP_SESSION_IDLE,
-  logger: Logger.Logger<unknown, void> = Logger.defaultLogger,
-) =>
+interface LogLine {
+  readonly message: unknown;
+  readonly fields: unknown;
+}
+
+const makeFixture = () =>
   Effect.gen(function* () {
+    // The server's clock runs ahead of real time by `skew` milliseconds.
+    let skew = 0;
+    const skewed = (real: Clock.Clock): Clock.Clock => ({
+      ...real,
+      currentTimeMillisUnsafe: () => real.currentTimeMillisUnsafe() + skew,
+      currentTimeMillis: Effect.sync(() => real.currentTimeMillisUnsafe() + skew),
+      currentTimeNanosUnsafe: () => real.currentTimeNanosUnsafe() + BigInt(skew) * 1_000_000n,
+      currentTimeNanos: Effect.sync(
+        () => real.currentTimeNanosUnsafe() + BigInt(skew) * 1_000_000n,
+      ),
+      sleep: (duration) => real.sleep(duration),
+    });
+    const logs: Array<LogLine> = [];
+    const collector = Logger.make<unknown, void>(({ message }) => {
+      const [text, fields] = Array.isArray(message) ? message : [message];
+      logs.push({ message: text, fields });
+    });
     const approvals: Array<{ readonly runId: RunId; readonly actor: Option.Option<string> }> = [];
     const services = yield* authFixture();
     const auth = services.authentication;
@@ -153,14 +173,20 @@ const makeFixture = (
     const authenticated = authenticatedRoutes(services);
     const routes = Layer.mergeAll(
       apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
-      mcpRoutes([], sessionIdle).pipe(
+      mcpRoutes([]).pipe(
         Layer.provide(authenticated.guard.layer),
         Layer.provide(NodeHttpServer.layerHttpServices),
       ),
       authenticated.routes,
     ).pipe(HttpRouter.provideRequest(Layer.merge(backend, upgrades)));
     const logged = HttpRouter.middleware(
-      (handler) => Effect.provide(handler, Logger.layer([logger])),
+      (handler) =>
+        Effect.clockWith((real) =>
+          handler.pipe(
+            Effect.provide(Logger.layer([collector, Logger.defaultLogger])),
+            Effect.provideService(Clock.Clock, skewed(real)),
+          ),
+        ),
       {
         global: true,
       },
@@ -176,6 +202,12 @@ const makeFixture = (
       backend,
       upgrades,
       browser: { session, csrf: browser.csrf },
+      logs,
+      /** Moves the server's clock forward by `duration`. */
+      advance: (duration: Duration.Input) =>
+        Effect.sync(() => {
+          skew += Duration.toMillis(Duration.fromInputUnsafe(duration));
+        }),
     };
   });
 const fixture = makeFixture();
@@ -473,18 +505,18 @@ describe("operator MCP endpoint", () => {
 
   it.live("ends a session on its tool server after it goes unused for the idle time", () =>
     Effect.gen(function* () {
-      const logs: Array<{ readonly message: unknown; readonly fields: unknown }> = [];
-      const logger = Logger.make<unknown, void>(({ message }) => {
-        const [text, fields] = Array.isArray(message) ? message : [message];
-        logs.push({ message: text, fields });
-      });
-      const { app, device } = yield* makeFixture("200 millis", logger);
+      const { app, device, logs, advance } = yield* fixture;
       const token = yield* device([grant("read")]);
       const client = mcpClient(inProcess(app), token);
       yield* client.initialize;
-      const before = yield* client.listTools;
-      assert.sameMembers(before, expectedTools(["public", "read"]));
-      yield* Effect.sleep("300 millis");
+      // Each request restarts the idle time, so a session in use outlives it.
+      const half = Duration.toMillis(MCP_SESSION_IDLE) / 2;
+      yield* advance(half + 1);
+      const midway = yield* client.status("tools/list");
+      yield* advance(half + 1);
+      const pastOpening = yield* client.status("tools/list");
+      assert.deepEqual([midway, pastOpening], [200, 200]);
+      yield* advance(MCP_SESSION_IDLE);
       const expired = yield* client.status("tools/list");
       assert.equal(expired, 404);
       assert.deepInclude(logs, { message: "MCP session ended", fields: { reason: "idle" } });
@@ -493,6 +525,81 @@ describe("operator MCP endpoint", () => {
       yield* client.initialize;
       const after = yield* client.listTools;
       assert.sameMembers(after, expectedTools(["public", "read"]));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends idle sessions when a browser session's GET triggers the sweep", () =>
+    Effect.gen(function* () {
+      const { app, device, browser, logs, advance } = yield* fixture;
+      const token = yield* device([grant("read")]);
+      const client = mcpClient(inProcess(app), token);
+      yield* client.initialize;
+      yield* advance(MCP_SESSION_IDLE);
+      // A browser opens the MCP URL: a GET with the session cookie and no CSRF header.
+      const opened = yield* Effect.promise(() =>
+        app.handler(
+          new Request(`https://usine.example${MCP_PATH}`, {
+            headers: { cookie: `usine_session=${browser.session}` },
+          }),
+        ),
+      );
+      assert.notEqual(opened.status, 403);
+      assert.deepInclude(logs, { message: "MCP session ended", fields: { reason: "idle" } });
+      assert.notInclude(
+        logs.map(({ message }) => message),
+        "MCP tool server did not end the session; the next sweep retries",
+      );
+      const owned = yield* client.status("tools/list");
+      assert.equal(owned, 404);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends a session on its old tool server when the token's tool list changes", () =>
+    Effect.gen(function* () {
+      const { app, device, browser, services, logs } = yield* fixture;
+      const token = yield* device([grant("read")]);
+      const client = mcpClient(inProcess(app), token);
+      yield* client.initialize;
+      const before = yield* client.listTools;
+      assert.sameMembers(before, expectedTools(["public", "read"]));
+      const access = yield* services.authentication.authenticate(token);
+      const tokenId = yield* Effect.fromOption(access.token, () => "The token has no record.");
+      yield* services.authentication.setScopes(
+        browser.session,
+        tokenId.id,
+        [grant("read"), grant("operate")],
+        OperationCeilingChange.Keep(),
+      );
+      const changed = yield* client.status("tools/list");
+      assert.equal(changed, 404);
+      // Only a 204 from the old tool server logs this message.
+      assert.deepInclude(logs, {
+        message: "MCP session ended",
+        fields: { reason: "tools-changed" },
+      });
+      client.useSession(undefined);
+      yield* client.initialize;
+      const after = yield* client.listTools;
+      assert.sameMembers(after, expectedTools(["public", "read", "operate"]));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("forgets a session that its client ended, so the idle sweep skips it", () =>
+    Effect.gen(function* () {
+      const { app, device, logs, advance } = yield* fixture;
+      const token = yield* device([grant("read")]);
+      const client = mcpClient(inProcess(app), token);
+      yield* client.initialize;
+      const ended = yield* client.end;
+      assert.equal(ended, 204);
+      yield* advance(MCP_SESSION_IDLE);
+      client.useSession(undefined);
+      yield* client.initialize;
+      assert.deepInclude(logs, { message: "MCP session ended", fields: { reason: "client" } });
+      assert.deepEqual(
+        logs.filter(({ fields }) => jsonKey(fields ?? null) === jsonKey({ reason: "idle" })),
+        [],
+      );
     }).pipe(Effect.scoped),
   );
 

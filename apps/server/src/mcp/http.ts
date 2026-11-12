@@ -8,7 +8,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/http";
-import { RequestCredential, RequestOperations } from "../auth/http.ts";
+import { RequestCredential, RequestCsrf, RequestOperations } from "../auth/http.ts";
 import { packageVersion } from "../cli.ts";
 import { operatorOpenApi } from "../openapi.ts";
 import {
@@ -17,7 +17,7 @@ import {
   OperatorUnavailableError,
   registerOperatorTools,
 } from "./server.ts";
-import { type McpSession, SessionAdmission, sessionTable } from "./sessions.ts";
+import { type EndingSession, SessionAdmission, sessionTable } from "./sessions.ts";
 import { loadOperatorTools, type OperatorTool, PublishedApi, visibleTools } from "./tools.ts";
 
 /** The path of the Streamable HTTP MCP endpoint. */
@@ -42,13 +42,10 @@ export const MCP_SESSION_IDLE = Duration.hours(1);
  * HTTP request with the caller's credential, so the route policy, the auth guard, and audit apply
  * to it unchanged. Install the auth guard on this route.
  *
- * A session answers only the credential that opened it, and ends after `sessionIdle` without a
- * request. Other requests for it get HTTP 404, so the client starts a new session.
+ * A session answers only the credential that opened it, and ends after `MCP_SESSION_IDLE` without
+ * a request. Other requests for it get HTTP 404, so the client starts a new session.
  */
-export const mcpRoutes = (
-  allowedOrigins: ReadonlyArray<string>,
-  sessionIdle: Duration.Input = MCP_SESSION_IDLE,
-) =>
+export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const router = yield* HttpRouter.HttpRouter;
@@ -131,15 +128,17 @@ export const mcpRoutes = (
           }),
         idleTimeToLive: "1 hour",
       });
-      const sessions = sessionTable(Duration.toMillis(Duration.fromInputUnsafe(sessionIdle)));
+      const sessions = sessionTable(Duration.toMillis(MCP_SESSION_IDLE));
       // Ends the session on its tool server, which keeps it until a DELETE. The auth guard also
-      // covers the tool server's routes, so the DELETE carries the credential of `caller`.
+      // covers the tool server's routes, so the DELETE carries the credential of `caller`, with
+      // the CSRF token that a cookie `GET` doesn't send. A session that the tool server doesn't
+      // end goes back to the table, so the next sweep retries it.
       const endSession = Effect.fn("Mcp.endSession")(function* (
         caller: HttpServerRequest.HttpServerRequest,
-        id: string,
-        session: McpSession,
-        reason: "idle" | "tools-changed",
+        csrf: Option.Option<string>,
+        ending: EndingSession,
       ) {
+        const { id, session, reason } = ending;
         // A released tool server took its sessions with it.
         const server = yield* RcMap.getOption(servers, session.tools);
         if (Option.isNone(server)) {
@@ -147,6 +146,7 @@ export const mcpRoutes = (
           return;
         }
         const headers = credentialHeaders(caller);
+        if (Option.isSome(csrf)) headers.set("x-usine-csrf", csrf.value);
         headers.set(SESSION_HEADER, id);
         const ended = yield* server.value.pipe(
           Effect.provideService(
@@ -157,11 +157,18 @@ export const mcpRoutes = (
           ),
         );
         if (ended.status === 204) yield* Effect.logInfo("MCP session ended", { reason });
-        else
-          yield* Effect.logWarning("MCP tool server did not end the session", {
-            reason,
-            status: ended.status,
-          });
+        else if (ended.status === 404)
+          yield* Effect.logInfo("MCP session already ended on its tool server", { reason });
+        else {
+          sessions.retry(ending);
+          yield* Effect.logWarning(
+            "MCP tool server did not end the session; the next sweep retries",
+            {
+              reason,
+              status: ended.status,
+            },
+          );
+        }
       }, Effect.scoped);
       const notFound = HttpServerResponse.empty({ status: 404 });
       const handler = Effect.gen(function* () {
@@ -169,9 +176,9 @@ export const mcpRoutes = (
         const credential = yield* RequestCredential;
         if (Option.isNone(credential))
           return yield* Effect.die("The MCP route runs without the auth guard.");
+        const csrf = yield* RequestCsrf;
         const now = yield* Clock.currentTimeMillis;
-        for (const [id, session] of sessions.takeIdle(now))
-          yield* endSession(request, id, session, "idle");
+        for (const ending of sessions.takeStale(now)) yield* endSession(request, csrf, ending);
         const grants = yield* RequestPermissions;
         const ceiling = yield* RequestOperations;
         const visible: ReadonlyArray<OperatorTool> = visibleTools(tools, grants, ceiling);
@@ -191,7 +198,7 @@ export const mcpRoutes = (
                   "MCP request refused: the session belongs to another credential",
                 ).pipe(Effect.as(Option.some(notFound))),
               ToolsChanged: ({ session }) =>
-                endSession(request, id, session, "tools-changed").pipe(
+                endSession(request, csrf, { id, session, reason: "tools-changed" }).pipe(
                   Effect.as(Option.some(notFound)),
                 ),
             },

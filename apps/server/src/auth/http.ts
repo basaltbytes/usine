@@ -72,6 +72,11 @@ const ceilingExempt: ReadonlySet<string> = new Set([
 const RequestAccess = Context.Reference<Option.Option<Access>>("@usine/server/RequestAccess", {
   defaultValue: Option.none,
 });
+/** The CSRF token of the request's credential; `None` outside the auth guard. */
+export const RequestCsrf = Effect.map(
+  RequestAccess,
+  Option.map(({ csrf }) => csrf),
+);
 const accessEffect = Effect.flatMap(RequestAccess, (access) =>
   Effect.fromOption(access, () => authFailure("Sign in to continue.")),
 );
