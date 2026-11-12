@@ -39,7 +39,7 @@ import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { OperationId, TokenName } from "../../src/auth/model.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { Port } from "../../src/cli.ts";
-import { apiRoutes, serverLayer } from "../../src/http.ts";
+import { apiRoutes, MAX_REQUEST_BODY_BYTES, serverLayer } from "../../src/http.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { startupListener } from "../../src/listener.ts";
 import { MCP_PATH, MCP_SESSION_IDLE, mcpRoutes } from "../../src/mcp/http.ts";
@@ -512,9 +512,9 @@ describe("operator MCP endpoint", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("guards /api/mcp on the assembled server", () =>
+  it.live("guards /api/mcp and limits request bodies on the assembled server", () =>
     Effect.gen(function* () {
-      const { device, approvals, services, backend, upgrades } = yield* fixture;
+      const { device, approvals, services, backend, upgrades, browser } = yield* fixture;
       const context = yield* Layer.build(NodeHttpServer.layerTest);
       const origin = yield* loopbackOrigin(context);
       const listener = yield* startupListener("test").pipe(Effect.provideContext(context));
@@ -558,6 +558,38 @@ describe("operator MCP endpoint", () => {
         .pipe(Effect.flatMap(Schema.decodeUnknownEffect(ToolCall)));
       assert.isNotTrue(result.result.isError);
       assert.deepEqual(approvals, [{ runId: "run-1", actor: Option.some("alice") }]);
+      // One limit covers every route: an MCP request and an operator API request.
+      const initializeWith = (padding: number) =>
+        webRequest(`${origin}${MCP_PATH}`, {
+          method: "POST",
+          headers: {
+            ...authorization,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: jsonKey({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { ...initializeParams, padding: "x".repeat(padding) },
+          }),
+        }).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+      const underLimit = yield* initializeWith(MAX_REQUEST_BODY_BYTES - 1024);
+      assert.property(underLimit, "result");
+      const tooLarge = yield* initializeWith(MAX_REQUEST_BODY_BYTES).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(RpcError)),
+      );
+      assert.equal(tooLarge.error.message, "Parse error");
+      const dismissed = yield* webRequest(`${origin}/api/attention/dismiss`, {
+        method: "POST",
+        headers: {
+          cookie: `usine_session=${browser.session}`,
+          "x-usine-csrf": browser.csrf,
+          "content-type": "application/json",
+        },
+        body: "x".repeat(MAX_REQUEST_BODY_BYTES + 1),
+      }).pipe(Effect.tap((response) => Effect.promise(() => response.arrayBuffer())));
+      assert.equal(dismissed.status, 413);
     }).pipe(Effect.provide([NodeServices.layer, FetchHttpClient.layer]), Effect.scoped),
   );
 
