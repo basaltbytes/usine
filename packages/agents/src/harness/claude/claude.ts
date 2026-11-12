@@ -53,12 +53,9 @@ import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { claudeSessionMeter, claudeTokenMeter } from "../usage.ts";
-import {
-  type CompletionRequest,
-  type CompletionSchema,
-  structuredCompletion,
-} from "../completion.ts";
-import { readClaudeCompletion } from "./completion.ts";
+import { structuredCompletion } from "../completion.ts";
+import { claudeCompletion } from "./completion.ts";
+import { brainOptions } from "./options.ts";
 import { claudeRateLimits } from "./rate-limits.ts";
 import { claudeProviderFailures } from "./provider.ts";
 import {
@@ -106,37 +103,6 @@ const operationError = (
     cause,
   });
 
-/** The options that select the brain, checkout, and environment of every Claude Code launch. */
-const brainOptions = (
-  spec: SessionSpec,
-): Pick<
-  ClaudeQueryOptions,
-  "cwd" | "effort" | "env" | "model" | "pathToClaudeCodeExecutable" | "settingSources" | "thinking"
-> => {
-  const effort = spec.session.brain.effort;
-  const shared: Pick<
-    ClaudeQueryOptions,
-    "cwd" | "env" | "model" | "pathToClaudeCodeExecutable" | "settingSources"
-  > = {
-    cwd: spec.cwd,
-    // Replaces the subprocess environment instead of extending this process's.
-    env: { ...spec.environment },
-    model: spec.session.brain.model,
-    // The Worker-provisioned binary that the readiness checks inspect.
-    pathToClaudeCodeExecutable: "claude",
-    // The worktree is untrusted, so its project and local settings (hooks, env) are not loaded into
-    // a child that has the App credential; only the Worker user's settings apply.
-    settingSources: ["user"],
-  };
-  return effort === "off"
-    ? { ...shared, thinking: { type: "disabled" } }
-    : {
-        ...shared,
-        effort: effort === "minimal" ? "low" : effort,
-        thinking: { type: "adaptive" },
-      };
-};
-
 /** Returns the SDK options; each launch supplies the shared process callback. */
 const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQueryOptions => ({
   ...brainOptions(spec),
@@ -149,19 +115,6 @@ const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQ
   }),
   // Flag settings take precedence over the Worker user's settings file.
   settings: { attribution: { commit: "", pr: "" } },
-});
-
-/**
- * Returns the SDK options of a structured completion: no built-in tools, no saved transcript, and
- * `schema` as the output format. Claude Code then offers only its `StructuredOutput` tool, checks
- * the tool's input against `schema`, and asks the model again when it doesn't match.
- */
-const completionOptions = (spec: SessionSpec, schema: CompletionSchema): ClaudeQueryOptions => ({
-  ...brainOptions(spec),
-  tools: [],
-  outputFormat: { type: "json_schema", schema },
-  permissionMode: "dontAsk",
-  persistSession: false,
 });
 
 const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: ModelId): boolean =>
@@ -945,37 +898,6 @@ const makeClaudeSessions = Effect.gen(function* () {
       };
     },
   );
-  const completeJson = Effect.fn("ClaudeRuntime.complete")(function* ({
-    spec,
-    prompt,
-    schema,
-    spent,
-  }: CompletionRequest) {
-    yield* Effect.annotateCurrentSpan({
-      agent: spec.session.agent,
-      effort: spec.session.brain.effort,
-      harness: spec.session.brain.harness,
-      model: spec.session.brain.model,
-      ...parentFields(spec.session),
-      sessionId: spec.session.id,
-      worker: spec.worker,
-    });
-    yield* Effect.logInfo("Starting Claude structured completion");
-    const scope = yield* Effect.scope;
-    const launch = yield* launchWithRetries(
-      spec,
-      completionOptions(spec, schema),
-      [userMessage(prompt)],
-      scope,
-    );
-    const pool = yield* billingPool(spec, launch.query);
-    const session = resolvedSession(spec.session, {
-      brain: spec.session.brain,
-      pool: Option.some(pool),
-      endpoint: spec.session.endpoint,
-    });
-    return yield* readClaudeCompletion(spec, session, launch, spent);
-  });
   const stop = Effect.fn("ClaudeRuntime.stop")(function* (spec: SessionSpec) {
     if (isRemoteHost(spec.host))
       yield* stopChildProcess({ ...spec, sessionId: Option.some(spec.session.id) }).pipe(
@@ -985,7 +907,7 @@ const makeClaudeSessions = Effect.gen(function* () {
   return {
     open,
     stop,
-    complete: structuredCompletion(completeJson),
+    complete: structuredCompletion(claudeCompletion(launchWithRetries, billingPool)),
   } satisfies Pick<HarnessRuntime, "open" | "stop" | "complete">;
 });
 
