@@ -133,7 +133,7 @@ The outbox relay in `src/coordinator/outbox.ts` reserves each envelope in the jo
 
 ### Coordinator operator input
 
-`intervene` appends the input to the transcript through the outbox and applies it under the attempt's routing permit, which transitions also take:
+`Interventions` in `src/coordinator/interventions.ts` handles one attempt's operator input. `intervene` appends the input to the transcript through the outbox and applies it under the attempt's routing permit, which transitions also take:
 
 - Input for a child goes to that child. Input addressed to the parent goes to the live child, and its receipts set `InterventionState.forwardedTo` to the child, as a forwarded Pi parent steer does. This covers steers, operator messages, interrupts, and releases, and the runaway guard's warning, which is a parent steer.
 - With no live child, or for a child that ended, the receipt is `InterventionRejected`. Input before `Started` or after the terminal envelope fails with `AgentFailure`, because the channel admits no receipt there.

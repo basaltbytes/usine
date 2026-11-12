@@ -23,7 +23,7 @@ export interface Supervisor {
 }
 
 /** Returns the stored supervision of `sessionId`, or one that neither holds nor pauses it. */
-export const supervisionOf = (snapshot: CoordinatorSnapshot, sessionId: AgentSessionId) =>
+const supervisionOf = (snapshot: CoordinatorSnapshot, sessionId: AgentSessionId) =>
   Option.getOrElse(
     Option.fromUndefinedOr(snapshot.supervision.find((found) => found.sessionId === sessionId)),
     () => Supervision.make({ sessionId, held: false, paused: false }),
