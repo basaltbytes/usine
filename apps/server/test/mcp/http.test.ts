@@ -671,7 +671,7 @@ describe("operator MCP endpoint", () => {
       assert.lengthOf(warnings, 1);
       assert.include(
         warnings[0],
-        "MCP tool schemas left references unresolved: the inlining budget ran out",
+        "MCP tool schemas left references unresolved: the inlining budget or depth ran out",
       );
       assert.include(warnings[0], origin);
     }).pipe(Effect.timeout("10 seconds"), Effect.scoped),

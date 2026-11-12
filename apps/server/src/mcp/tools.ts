@@ -92,6 +92,13 @@ const componentName = (reference: Schema.Json | undefined) =>
  */
 const MAX_INLINED_LENGTH = 500_000;
 
+/**
+ * The most component `$ref`s that inlining resolves inside one another. The real document nests
+ * at most 2. Without it, a chain of bare `$ref`s, each costing almost nothing, would recurse once
+ * per level and overflow the stack or stall the start.
+ */
+const MAX_REFERENCE_DEPTH = 32;
+
 /** What inlining may still build for a document, and whether it left a `$ref` unresolved. */
 interface InlineBudget {
   remaining: number;
@@ -107,12 +114,14 @@ const scalarLength = (value: Schema.Json) =>
  * inlining builds, including array entries and strings, is charged to `budget` by the length of
  * its JSON text. Once `budget` runs out, a `$ref` is left unresolved and accepts any value, so a
  * document whose references fan out or repeat a large component can't make the expansion grow
- * without bound.
+ * without bound. A `$ref` nested deeper than `MAX_REFERENCE_DEPTH` resolutions is left unresolved
+ * the same way, so a long chain of references can't make the recursion deep. `resolving` holds the
+ * components being resolved, outermost first.
  */
 const inline = (
   schema: Schema.Json,
   components: Readonly<Record<string, JsonSchema>>,
-  resolving: ReadonlySet<string>,
+  resolving: Set<string>,
   budget: InlineBudget,
 ): Schema.Json => {
   if (Array.isArray(schema)) {
@@ -138,12 +147,17 @@ const inline = (
   const target = components[name];
   // A recursive schema accepts any value at the point where it repeats.
   if (target === undefined || resolving.has(name)) return siblings;
-  if (budget.remaining <= 0) {
+  if (budget.remaining <= 0 || resolving.size >= MAX_REFERENCE_DEPTH) {
     budget.exhausted = true;
     return siblings;
   }
-  const resolved = inline(target, components, new Set([...resolving, name]), budget);
-  return isObject(resolved) ? { ...resolved, ...siblings } : siblings;
+  resolving.add(name);
+  try {
+    const resolved = inline(target, components, resolving, budget);
+    return isObject(resolved) ? { ...resolved, ...siblings } : siblings;
+  } finally {
+    resolving.delete(name);
+  }
 };
 
 const inlineObject = (
@@ -249,8 +263,9 @@ const tool = (
 export interface OperatorTools {
   readonly tools: ReadonlyArray<OperatorTool>;
   /**
-   * False when inlining the document's references would build more than the inlining budget, so
-   * some input schemas keep a `$ref` that accepts any value.
+   * False when inlining the document's references would build more than the inlining budget, or
+   * nest more than `MAX_REFERENCE_DEPTH` of them, so some input schemas keep a `$ref` that accepts
+   * any value.
    */
   readonly complete: boolean;
 }
@@ -258,8 +273,9 @@ export interface OperatorTools {
 /**
  * Returns one tool for each operation of the operator group, named by its endpoint identifier.
  * Event streams are left out: a tool call needs a response that ends. All the input schemas share
- * one inlining budget, charged by the length of the JSON text that inlining builds, so the work and
- * the size of the tool list are bounded for the whole document, apart from the document's own size.
+ * one inlining budget, charged by the length of the JSON text that inlining builds, and nested
+ * references stop at `MAX_REFERENCE_DEPTH`. The size of the tool list is therefore bounded for the
+ * whole document, apart from the document's own size, and so is the work of each resolution.
  */
 export const operatorTools = (document: PublishedApi): OperatorTools => {
   const budget: InlineBudget = { remaining: MAX_INLINED_LENGTH, exhausted: false };
@@ -280,7 +296,8 @@ export const operatorTools = (document: PublishedApi): OperatorTools => {
 };
 
 /**
- * Returns the tools of `document`, and logs a warning when the inlining budget runs out. `source`
+ * Returns the tools of `document`, and logs a warning when the inlining budget or the reference
+ * depth runs out. `source`
  * names the instance that served the document, such as `{ origin }`.
  */
 export const loadOperatorTools = Effect.fn("Mcp.loadOperatorTools")(function* (
@@ -290,8 +307,8 @@ export const loadOperatorTools = Effect.fn("Mcp.loadOperatorTools")(function* (
   const generated = operatorTools(document);
   if (!generated.complete)
     yield* Effect.logWarning(
-      "MCP tool schemas left references unresolved: the inlining budget ran out",
-      { ...source, limit: MAX_INLINED_LENGTH },
+      "MCP tool schemas left references unresolved: the inlining budget or depth ran out",
+      { ...source, limit: MAX_INLINED_LENGTH, depth: MAX_REFERENCE_DEPTH },
     );
   return generated.tools;
 });

@@ -220,6 +220,49 @@ describe("operator MCP tools", () => {
     }),
   );
 
+  it.effect("stops resolving references nested deeper than the depth limit", () =>
+    Effect.gen(function* () {
+      // `Link0` references `Link1`, and so on; each bare `$ref` costs the budget almost nothing.
+      const chain = (length: number) =>
+        Schema.decodeEffect(PublishedApi)({
+          paths: {
+            "/api/chain": {
+              get: {
+                operationId: "operator.chain",
+                parameters: [
+                  { name: "link", in: "query", schema: { $ref: "#/components/schemas/Link0" } },
+                ],
+                responses: { "200": {} },
+                "x-usine-permission": "read",
+              },
+            },
+          },
+          components: {
+            schemas: Object.fromEntries(
+              Array.from({ length }, (_, index) => [
+                `Link${index}`,
+                index === length - 1
+                  ? { type: "string" }
+                  : { $ref: `#/components/schemas/Link${index + 1}` },
+              ]),
+            ),
+          },
+        }).pipe(Effect.map(operatorTools));
+      const linkSchema = ({ tools }: ReturnType<typeof operatorTools>) =>
+        tools[0]?.descriptor.inputSchema.properties?.["link"];
+      const resolved = yield* chain(32);
+      assert.isTrue(resolved.complete);
+      assert.deepStrictEqual(linkSchema(resolved), { type: "string" });
+      const cut = yield* chain(33);
+      assert.isFalse(cut.complete);
+      assert.deepStrictEqual(linkSchema(cut), {});
+      // Without the limit, 5,000 levels overflow the stack.
+      const long = yield* chain(5_000);
+      assert.isFalse(long.complete);
+      assert.lengthOf(long.tools, 1);
+    }),
+  );
+
   it.effect("inlines the real document completely within the budget", () =>
     Effect.gen(function* () {
       const document = yield* Schema.decodeUnknownEffect(PublishedApi)(operatorOpenApi());
