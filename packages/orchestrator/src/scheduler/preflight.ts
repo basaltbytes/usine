@@ -86,13 +86,26 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
       : Option.map(Exit.findErrorOption(exit), Result.fail);
     if (Option.isNone(outcome)) return;
     const checkedAt = yield* DateTime.now;
-    yield* Ref.update(records, ({ current, beforeMachineFailures }) => ({
-      current: new Map(current).set(
-        worker,
-        recordPreflight(current.get(worker) ?? unchecked(worker), roster, checkedAt, outcome.value),
-      ),
-      beforeMachineFailures: withoutWorker(beforeMachineFailures, worker),
-    }));
+    const dropped = yield* Ref.modify(records, ({ current, beforeMachineFailures }) => [
+      beforeMachineFailures.has(worker),
+      {
+        current: new Map(current).set(
+          worker,
+          recordPreflight(
+            current.get(worker) ?? unchecked(worker),
+            roster,
+            checkedAt,
+            outcome.value,
+          ),
+        ),
+        beforeMachineFailures: withoutWorker(beforeMachineFailures, worker),
+      },
+    ]);
+    if (dropped)
+      yield* Effect.logInfo(
+        "A newer worker check replaced the failed machine creation's check; the next machine doesn't restore the earlier record",
+        { worker },
+      );
   });
 
   /**

@@ -25,7 +25,7 @@ import {
   OpenAiProvider,
   UpstreamBase,
 } from "@usine/gateway";
-import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, Logger, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import {
   CheckoutRequest,
@@ -473,17 +473,45 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
 }
 
 describe("boxd tailnet gateway check", () => {
+  const PAUSE_MILLIS = 200;
   const gatewayChecks = (machine: ReturnType<typeof fakeMachine>) =>
     machine.state.calls.filter(
       (call) =>
         call.line.startsWith("exec 'curl' '--silent'") && call.line.includes("http://git.gw.test/"),
-    ).length;
+    );
+  /** A log entry of the gateway check: its message and the try it names. */
+  const GatewayLog = Schema.Tuple([
+    Schema.String,
+    Schema.Struct({
+      attempt: Schema.optional(Schema.Finite),
+      tries: Schema.optional(Schema.Finite),
+    }),
+  ]);
+  /** Collects the gateway check's log entries with their level and time. */
+  const gatewayLogs = () => {
+    const entries: Array<{
+      readonly level: string;
+      readonly text: string;
+      readonly attempt: number | undefined;
+      readonly tries: number | undefined;
+      readonly at: number;
+    }> = [];
+    const logger = Logger.make<unknown, void>(({ message, logLevel, date }) => {
+      const decoded = Schema.decodeUnknownOption(GatewayLog)(message);
+      if (Option.isNone(decoded)) return;
+      const [text, { attempt, tries }] = decoded.value;
+      if (text.includes("the gateway over the tailnet"))
+        entries.push({ level: logLevel, text, attempt, tries, at: date.getTime() });
+    });
+    return { entries, layer: Logger.layer([logger]) };
+  };
   const setup = (timeouts: number) => {
     const machine = fakeMachine();
     machine.state.gatewayTimeouts = timeouts;
     const boat = fakeProviders();
     const api = fakeTailnet();
     const gateway = fakeGateway(machine, providers);
+    const logs = gatewayLogs();
     const layer = sshLayer({
       workers: [boxdAddress],
       instance: INSTANCE,
@@ -491,7 +519,7 @@ describe("boxd tailnet gateway check", () => {
       boxdClient: boat.boxdClient,
       boxdExec: boat.boxdExecOn(machine),
       providerEndpoints: { boat: BOAT_TEST_API },
-      machinePollInterval: "1 millis",
+      machinePollInterval: Duration.millis(PAUSE_MILLIS),
       machineReadyTimeout: "5 seconds",
     }).pipe(
       Layer.provide(harnessesLive),
@@ -500,12 +528,16 @@ describe("boxd tailnet gateway check", () => {
       Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
       Layer.provide(hostLoginLockLayer),
       Layer.provide(boat.over(api.over(gateway.layer))),
+      Layer.provideMerge(logs.layer),
     );
-    return { machine, boat, api, layer };
+    return { machine, boat, api, logs, layer };
+  };
+  const assertLimits = (machine: ReturnType<typeof fakeMachine>) => {
+    for (const call of gatewayChecks(machine)) assert.include(call.line, "'--max-time' '13'");
   };
 
   it.live("keeps the machine when the gateway answers a later check", () => {
-    const { machine, boat, api, layer } = setup(2);
+    const { machine, boat, api, logs, layer } = setup(2);
     return Effect.gen(function* () {
       const machines = yield* WorkerMachines;
       const grant = yield* machines.create(
@@ -514,26 +546,48 @@ describe("boxd tailnet gateway check", () => {
         AttemptId.make("remote-run/execute/1"),
         [TEST_AGENT.brain],
       );
-      assert.strictEqual(gatewayChecks(machine), 3);
+      assert.lengthOf(gatewayChecks(machine), 3);
+      assertLimits(machine);
       assert.strictEqual(boat.boxd.machines.size, 1);
       assert.strictEqual(
         api.calls.filter((call) => call.method === "POST" && call.path.endsWith("/keys")).length,
         1,
       );
+      assert.deepStrictEqual(
+        logs.entries.map(({ level, attempt }) => [level, attempt]),
+        [
+          ["Warn", 1],
+          ["Warn", 2],
+          ["Info", 3],
+        ],
+      );
+      const [first, , success] = logs.entries;
+      assert(first !== undefined && success !== undefined);
+      assert.isAtLeast(success.at - first.at, 2 * PAUSE_MILLIS - 20, "two pauses between tries");
       yield* machines.release(grant.hold);
     }).pipe(Effect.scoped, Effect.provide(layer));
   });
 
   it.live("discards the machine after three gateway checks time out", () => {
-    const { machine, boat, layer } = setup(3);
+    const { machine, boat, logs, layer } = setup(3);
     return Effect.gen(function* () {
       const machines = yield* WorkerMachines;
       const failure = yield* machines
         .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [TEST_AGENT.brain])
         .pipe(Effect.flip);
       assert.include(failure.message, "could not join");
-      assert.strictEqual(gatewayChecks(machine), 3);
+      assert.lengthOf(gatewayChecks(machine), 3);
+      assertLimits(machine);
       assert.strictEqual(boat.boxd.machines.size, 0);
+      assert.deepStrictEqual(
+        logs.entries.map(({ level, attempt, tries }) => [level, attempt ?? tries]),
+        [
+          ["Warn", 1],
+          ["Warn", 2],
+          ["Warn", 3],
+        ],
+      );
+      assert.include(logs.entries.at(-1)?.text ?? "", "discards the machine");
     }).pipe(Effect.scoped, Effect.provide(layer));
   });
 });
