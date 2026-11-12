@@ -24,7 +24,7 @@ import { WorkerName } from "@usine/core/worker";
 
 import { GitHubApp, InvalidGitHubResponseError } from "@usine/github/github-app";
 
-import { Effect, Layer, Option, Ref, Schema } from "effect";
+import { Clock, Effect, Layer, Option, Ref, Schema } from "effect";
 
 import { harness, agentText, loopText, unused } from "./support.ts";
 it("attributes binding creation, edits, and deletion to the authenticated member", () =>
@@ -243,6 +243,37 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
         },
       });
 
+      expect((yield* store.read).number).toBe(1);
+    }).pipe(Effect.scoped),
+  ));
+
+it("refuses a write whose coordinator brain check runs out of time with HTTP 504", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const live = yield* Clock.Clock;
+      // Sleeps end at once, so the 10-second limit expires without waiting.
+      const instant = Layer.succeed(Clock.Clock, {
+        currentTimeMillisUnsafe: () => live.currentTimeMillisUnsafe(),
+        currentTimeMillis: live.currentTimeMillis,
+        currentTimeNanosUnsafe: () => live.currentTimeNanosUnsafe(),
+        currentTimeNanos: live.currentTimeNanos,
+        monotonicTimeNanosUnsafe: () => live.monotonicTimeNanosUnsafe(),
+        monotonicTimeNanos: live.monotonicTimeNanos,
+        sleep: () => Effect.void,
+      });
+      const { request, store, current } = yield* harness(instant);
+      let slow = false;
+      yield* current.registerParentAdmission(() => (slow ? Effect.never : Effect.succeed([])));
+      slow = true;
+      const response = yield* request("PUT", "/entities/label/ready", {
+        expected: 1,
+        value: { name: "ready" },
+      });
+      expect(response).toMatchObject({
+        status: 504,
+        body: { error: "ValidationTimeoutError", step: "coordinator-brains" },
+      });
+      expect(jsonKey(response)).toContain("didn't finish within 10 seconds");
       expect((yield* store.read).number).toBe(1);
     }).pipe(Effect.scoped),
   ));
