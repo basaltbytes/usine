@@ -53,11 +53,11 @@ const openSession = (spec: SessionSpec, prompt: string) =>
 - **Codex**: an ephemeral thread with a read-only sandbox and a turn with `outputSchema`. The turn's final answer is parsed as JSON.
 - **Pi**: one model request through Pi's model runtime and its credential routes, with no session and one `structured_output` tool whose parameters are the schema. A provider sends the tool in strict mode when its API and the schema allow it.
 
-A completion fails with `CompletionError`. Its `usage` carries the tokens and cost spent before the failure, as a `SessionTokensUpdated` like a successful completion's, or `None` when the harness reported none, as for a refusal at admission or the timeout. Its `reason` is one of these:
+A completion fails with `CompletionError`. Its `usage` carries the tokens and cost spent before the failure, as a `SessionTokensUpdated` like a successful completion's, or `None` when the harness reported none, as for a refusal at admission. Its `reason` is one of these:
 
 - `CompletionInvalid` for a value that the schema rejects, or none.
 - `CompletionRefused` when admission, the model, or its credential rules the request out, or the model declines. Claude Code and Pi report a declined answer when the provider marks it as a refusal. Codex reports no refusal, and some Pi providers send one as text, so there a declined answer fails as `CompletionInvalid`.
-- `AgentCapacityError` for a provider capacity refusal or usage limit.
+- `AgentCapacityError` for a provider capacity refusal or usage limit, with the limit's reset time when the harness reports one, as for a session.
 - `SessionOperationError` for a harness failure, or after 10 minutes without a value.
 
 The caller names no harness:

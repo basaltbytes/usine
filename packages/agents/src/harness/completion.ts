@@ -118,18 +118,8 @@ export const admitCompletion = Effect.fn("HarnessAdmission.completion")(function
   });
 });
 
-/** A completion that stopped without a value after `limit`, as `Harnesses` reports it. */
-export const timedOutCompletion = (spec: SessionSpec, message: string): CompletionError =>
-  failed(
-    spec.session.id,
-    SessionOperationError.make({
-      operation: "stream",
-      sessionId: Option.some(spec.session.id),
-      message,
-      cause: new Error("completion timed out"),
-    }),
-    Option.none(),
-  );
+/** How long a structured completion may run before it fails as a stalled operation. */
+const COMPLETION_TIMEOUT = "10 minutes";
 
 /** What a harness answered to one completion request. */
 export type CompletionReply = Data.TaggedEnum<{
@@ -226,6 +216,8 @@ const valueOf = <A>(
  * Returns a runtime's `complete` from `run`, which sends the prompt with the JSON Schema of the
  * output and returns what the harness answered. Every outcome is classified, logged, and given
  * the usage that the harness reported here, so each adapter deals only in its harness's outcomes.
+ * A `run` that answers nothing within 10 minutes is interrupted, and the completion fails with a
+ * `SessionOperationError` reason and the usage reported before then.
  */
 export const structuredCompletion =
   (
@@ -249,6 +241,26 @@ export const structuredCompletion =
         spent: (usage) => Ref.set(spent, Option.some(usage)),
       }).pipe(
         Effect.scoped,
+        Effect.timeoutOrElse({
+          duration: COMPLETION_TIMEOUT,
+          orElse: () =>
+            Effect.logError("Structured completion timed out", {
+              sessionId,
+              harness: spec.session.brain.harness,
+              timeout: COMPLETION_TIMEOUT,
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  SessionOperationError.make({
+                    operation: "stream",
+                    sessionId: Option.some(sessionId),
+                    message: `${spec.session.brain.harness} returned no completion within ${COMPLETION_TIMEOUT}`,
+                    cause: new Error("completion timed out"),
+                  }),
+                ),
+              ),
+            ),
+        }),
         Effect.mapError((error) => failureOf(sessionId, error)),
         Effect.flatMap((reply) => valueOf(sessionId, output, reply)),
         Effect.result,

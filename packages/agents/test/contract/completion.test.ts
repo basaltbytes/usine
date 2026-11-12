@@ -348,6 +348,27 @@ describe("structured completion contract", () => {
     );
   }
 
+  it.live(
+    "pi: a model that doesn't support the effort is refused before any request",
+    () =>
+      replay(
+        Effect.gen(function* () {
+          const fixture = yield* openCompletionFixture("pi", "structured-result", "replay", {
+            // Pi's catalog offers this model only without reasoning, and the brain asks for low
+            // effort. With no entries, any model request fails the replay.
+            transform: (transcript) => ({ ...transcript, model: "openai/gpt-4.1", entries: [] }),
+          });
+          const completion = yield* fixture.run;
+          assert(Result.isFailure(completion), "the effort rules the request out");
+          assert.strictEqual(completion.failure.reason._tag, "CompletionRefused");
+          assert.include(completion.failure.message, "low");
+          assert(Option.isNone(completion.failure.usage), "no request spent tokens");
+          yield* fixture.save;
+        }),
+      ),
+    20_000,
+  );
+
   for (const { harness, answer, transform, reason, resetsAt } of failedReplays)
     it.live(
       `${harness}: structured-result with ${answer} fails with ${reason}`,

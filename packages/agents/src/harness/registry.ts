@@ -4,10 +4,7 @@ import { HarnessCatalog } from "./harness.ts";
 import { admitPreflight, type HarnessRuntime } from "./runtime.ts";
 import { SessionSpec } from "./contract.ts";
 import { admitSession } from "./launch.ts";
-import { admitCompletion, timedOutCompletion } from "./completion.ts";
-
-/** How long a structured completion may run before it fails as a stalled operation. */
-const COMPLETION_TIMEOUT = "10 minutes";
+import { admitCompletion } from "./completion.ts";
 
 /** A descriptor and its runtime cannot be registered together. */
 export class HarnessRegistrationError extends Schema.TaggedError<
@@ -30,8 +27,7 @@ export class UnknownHarnessError extends Schema.TaggedError<
 /**
  * A complete catalog of harness descriptors and their runtimes. Each registered runtime opens and
  * stops sessions and runs completions with only its own harness's host variables, and admits each
- * opened session, completion, and preflight brain with the catalog. A completion fails with
- * a `SessionOperationError` reason after 10 minutes.
+ * opened session, completion, and preflight brain with the catalog.
  */
 export class Harnesses extends Context.Service<
   Harnesses,
@@ -70,24 +66,6 @@ export class Harnesses extends Context.Service<
         complete: (spec, prompt, output) =>
           admitCompletion(catalog, spec, output).pipe(
             Effect.andThen(() => runtime.complete(scoped(spec), prompt, output)),
-            Effect.timeoutOrElse({
-              duration: COMPLETION_TIMEOUT,
-              orElse: () =>
-                Effect.logError("Structured completion timed out", {
-                  sessionId: spec.session.id,
-                  harness: runtime.id,
-                  timeout: COMPLETION_TIMEOUT,
-                }).pipe(
-                  Effect.andThen(
-                    Effect.fail(
-                      timedOutCompletion(
-                        spec,
-                        `${runtime.id} returned no completion within ${COMPLETION_TIMEOUT}`,
-                      ),
-                    ),
-                  ),
-                ),
-            }),
           ),
         preflight: (brain, target) =>
           admitPreflight(catalog, brain, target).pipe(

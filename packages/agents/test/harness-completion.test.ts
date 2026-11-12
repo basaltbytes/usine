@@ -48,6 +48,32 @@ class VerdictClass extends Schema.Class<VerdictClass, { readonly brand: unique s
   approved: Schema.Boolean,
 }) {}
 
+class NestedVerdict extends Schema.Class<NestedVerdict, { readonly brand: unique symbol }>(
+  "NestedVerdict",
+)({
+  verdict: VerdictClass,
+  note: Schema.String,
+}) {}
+
+interface Tree {
+  readonly label: string;
+  readonly children: ReadonlyArray<Tree>;
+}
+const Tree = Schema.Struct({
+  label: Schema.String,
+  children: Schema.Array(Schema.suspend((): Schema.Codec<Tree> => Tree)),
+}).annotate({ identifier: "Tree" });
+
+/** Every `$ref` in `schema`, at any depth. */
+const referencesIn = (schema: Schema.Json): ReadonlyArray<string> =>
+  Array.isArray(schema)
+    ? schema.flatMap(referencesIn)
+    : typeof schema === "object" && schema !== null
+      ? Object.entries(schema).flatMap(([key, value]) =>
+          key === "$ref" && typeof value === "string" ? [value] : referencesIn(value),
+        )
+      : [];
+
 const decision = RoleSpec.make({
   name: RoleName.make("decision"),
   placement: RolePlacements.make({
@@ -218,20 +244,6 @@ describe("structured completions through the registry", () => {
         }
       }).pipe(Effect.provide(Harnesses.layerFrom(catalog, answering().runtimes))),
   );
-
-  it.effect("fails a completion that returns nothing within ten minutes", () => {
-    const { runtimes } = runtimesWith(() => Effect.never);
-    return Effect.gen(function* () {
-      const runtime = yield* (yield* Harnesses).runtime(claude.id);
-      const fiber = yield* runtime
-        .complete(specFor(decision), "Approve?", Verdict)
-        .pipe(Effect.flip, Effect.forkChild);
-      yield* TestClock.adjust("10 minutes");
-      const failure = yield* Fiber.join(fiber);
-      assert.strictEqual(failure.reason._tag, "SessionOperationError");
-      assert.include(failure.message, "no completion within 10 minutes");
-    }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
-  });
 });
 
 /** Runtimes whose completion is the shared seam over `run`, recording each JSON Schema sent. */
@@ -294,6 +306,62 @@ describe("the structured completion seam", () => {
       assert.strictEqual(schemas.length, 2);
     }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
   });
+
+  it.effect("keeps the definitions that a nested or recursive output schema references", () => {
+    const { schemas, runtimes } = seamWith(
+      spending(5, (request) =>
+        Effect.succeed(
+          CompletionReply.Value({
+            value:
+              request.prompt === "Approve?"
+                ? { verdict: { approved: true }, note: "Looks right" }
+                : { label: "root", children: [{ label: "leaf", children: [] }] },
+          }),
+        ),
+      ),
+    );
+    return Effect.gen(function* () {
+      const runtime = yield* (yield* Harnesses).runtime(claude.id);
+      const nested = yield* runtime.complete(specFor(decision), "Approve?", NestedVerdict);
+      assert.instanceOf(nested.value.verdict, VerdictClass);
+      const tree = yield* runtime.complete(specFor(decision), "Classify?", Tree);
+      assert.deepStrictEqual(tree.value.children[0]?.label, "leaf");
+      assert.strictEqual(schemas.length, 2);
+      for (const schema of schemas) {
+        assert.strictEqual(schema.type, "object");
+        const references = referencesIn(schema);
+        assert.isNotEmpty(references, "the schema references a definition");
+        const definitions = schema.$defs;
+        assert(
+          typeof definitions === "object" && definitions !== null && !Array.isArray(definitions),
+          "the schema sends its definitions",
+        );
+        for (const reference of references) {
+          assert(reference.startsWith("#/$defs/"), reference);
+          assert.property(definitions, reference.slice("#/$defs/".length), reference);
+        }
+      }
+    }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
+  });
+
+  it.effect(
+    "fails a completion that answers nothing within ten minutes with the tokens spent",
+    () => {
+      const { runtimes } = seamWith(spending(50_000, () => Effect.never));
+      return Effect.gen(function* () {
+        const runtime = yield* (yield* Harnesses).runtime(claude.id);
+        const fiber = yield* runtime
+          .complete(specFor(decision), "Approve?", Verdict)
+          .pipe(Effect.flip, Effect.forkChild);
+        yield* TestClock.adjust("10 minutes");
+        const failure = yield* Fiber.join(fiber);
+        assert.strictEqual(failure.reason._tag, "SessionOperationError");
+        assert.include(failure.message, "no completion within 10 minutes");
+        assert(Option.isSome(failure.usage), "the timeout carries the tokens spent");
+        assert.strictEqual(failure.usage.value.totalTokens, 50_000);
+      }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
+    },
+  );
 
   const brain = { harness: claude.id, model: ModelId.make("claude-model") };
   const sessionId = Option.some(AgentSessionId.make("decision-1"));
