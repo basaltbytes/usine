@@ -476,12 +476,14 @@ const makeClaudeSessions = Effect.gen(function* () {
       yield* checkContinuationHome(spec, start, home, defaultHome);
       yield* journal.started(reference);
       // Login-lock retries finish before the session starts.
+      const startsIdle = policy.restored.paused || Option.isSome(policy.restored.idle);
+      const prompts = startsIdle
+        ? []
+        : Option.toArray(Option.map(startPrompt(start), (text) => userMessage(text)));
       let current = yield* launchWithRetries(
         spec,
         options,
-        policy.restored.paused || Option.isSome(policy.restored.idle)
-          ? []
-          : Option.toArray(Option.map(startPrompt(start), (text) => userMessage(text))),
+        prompts,
         scope,
         start._tag === "StartResume" ? "resume" : undefined,
       );
@@ -520,6 +522,16 @@ const makeClaudeSessions = Effect.gen(function* () {
         });
       const submitted =
         current.retained && !unprompted ? policy.restored.unread.map(({ id }) => id) : [];
+      /**
+       * The tool-call count where each submitted message starts a turn of its own. Claude reads such
+       * a message when that turn starts, before its tool calls.
+       */
+      const queuedTurnStarts = new Map<OperatorMessageId, number>();
+      /**
+       * Whether Claude runs no turn, from a result until the next assistant message. A message sent
+       * then starts the next turn instead of joining a running one.
+       */
+      let betweenTurns = current.retained ? unprompted || startsIdle : prompts.length === 0;
       const send = Effect.fn("ClaudeRuntime.send")(function* (
         message: string,
         id?: OperatorMessageId,
@@ -529,7 +541,15 @@ const makeClaudeSessions = Effect.gen(function* () {
           try: () => current.input.offer(userMessage(message, id)),
           catch: (cause) => operationError("steer", spec, "Can't send a message to Claude", cause),
         });
-        if (id !== undefined) submitted.push(id);
+        if (id === undefined) return;
+        submitted.push(id);
+        if (!betweenTurns) return;
+        const calls = yield* channel.toolCalls;
+        queuedTurnStarts.set(id, calls);
+        yield* Effect.logInfo("Claude reads the operator message when its next turn starts", {
+          sessionId: session.id,
+          toolCalls: calls,
+        });
       });
       const conversation = yield* sessionConversation({
         session,
@@ -546,11 +566,6 @@ const makeClaudeSessions = Effect.gen(function* () {
         beforeFinish: Effect.void,
       });
       boundary = conversation.awaitUnpaused;
-      /**
-       * The tool-call count at the latest result that left each submitted message queued as a turn
-       * of its own. Claude reads such a message when that turn starts, before its tool calls.
-       */
-      const queuedTurnStarts = new Map<OperatorMessageId, number>();
       /** Reports `ids` as read by a result: at their queued turn's start, or where the turn folded them. */
       const readAtResult = (ids: ReadonlyArray<OperatorMessageId>) =>
         Effect.gen(function* () {
@@ -664,8 +679,10 @@ const makeClaudeSessions = Effect.gen(function* () {
             providerFailure = apiRetryFailure(session.id, retry.value);
             return yield* reportRetry(retry.value);
           }
-          if (isAssistantMessage(message))
+          if (isAssistantMessage(message)) {
+            betweenTurns = false;
             providerFailure = assistantFailure(session.id, message, providerFailure);
+          }
           if (retrying && isAssistantMessage(message)) yield* reportRecovery();
           if (Schema.is(ClaudeCompletionHeader)(message)) {
             const update = yield* decodeCompletionUpdate(message).pipe(
@@ -713,6 +730,7 @@ const makeClaudeSessions = Effect.gen(function* () {
             yield* channel.emit(event);
           }
           if (!Schema.is(ClaudeResultMessage)(message)) return;
+          betweenTurns = true;
           completedTurn = Option.none();
           retries = 0;
           retrying = false;
@@ -842,6 +860,8 @@ const makeClaudeSessions = Effect.gen(function* () {
         );
         submitted.length = 0;
         queuedTurnStarts.clear();
+        // The new process runs no turn until recovery sends one.
+        betweenTurns = true;
         yield* conversation.recover(
           policy,
           [...tools].map(([callId, tool]) => ({ callId, tool })),
