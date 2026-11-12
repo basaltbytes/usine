@@ -1,5 +1,5 @@
 import { RequestPermissions } from "@usine/core/access";
-import { Deferred, Effect, Layer, Option, RcMap, Schema } from "effect";
+import { Clock, Deferred, Duration, Effect, Layer, Option, RcMap, Schema } from "effect";
 import { McpServer } from "effect/ai";
 import {
   HttpEffect,
@@ -8,7 +8,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/http";
-import { RequestOperations } from "../auth/http.ts";
+import { RequestCredential, RequestOperations } from "../auth/http.ts";
 import { packageVersion } from "../cli.ts";
 import { operatorOpenApi } from "../openapi.ts";
 import {
@@ -17,6 +17,7 @@ import {
   OperatorUnavailableError,
   registerOperatorTools,
 } from "./server.ts";
+import { type McpSession, SessionAdmission, sessionTable } from "./sessions.ts";
 import { loadOperatorTools, type OperatorTool, PublishedApi, visibleTools } from "./tools.ts";
 
 /** The path of the Streamable HTTP MCP endpoint. */
@@ -24,13 +25,30 @@ export const MCP_PATH = "/api/mcp";
 // The credential headers that an in-process operator request carries from the MCP request.
 const CREDENTIAL_HEADERS = ["authorization", "cookie", "x-usine-csrf"] as const;
 const JsonBody = Schema.fromJsonString(Schema.Json);
+const credentialHeaders = (request: HttpServerRequest.HttpServerRequest) => {
+  const headers = new Headers();
+  for (const name of CREDENTIAL_HEADERS) {
+    const value = request.headers[name];
+    if (value !== undefined) headers.set(name, value);
+  }
+  return headers;
+};
+const SESSION_HEADER = "mcp-session-id";
+/** How long an MCP session can go unused before the server ends it. */
+export const MCP_SESSION_IDLE = Duration.hours(1);
 
 /**
  * Serves the operator tools at `POST /api/mcp`. Each tool call goes through the same router as an
  * HTTP request with the caller's credential, so the route policy, the auth guard, and audit apply
  * to it unchanged. Install the auth guard on this route.
+ *
+ * A session answers only the credential that opened it, and ends after `sessionIdle` without a
+ * request. Other requests for it get HTTP 404, so the client starts a new session.
  */
-export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
+export const mcpRoutes = (
+  allowedOrigins: ReadonlyArray<string>,
+  sessionIdle: Duration.Input = MCP_SESSION_IDLE,
+) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const router = yield* HttpRouter.HttpRouter;
@@ -52,11 +70,7 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
           return yield* OperatorUnavailableError.make({
             message: "The MCP request has no HTTP request to take the credential from.",
           });
-        const headers = new Headers();
-        for (const name of CREDENTIAL_HEADERS) {
-          const value = caller.value.headers[name];
-          if (value !== undefined) headers.set(name, value);
-        }
+        const headers = credentialHeaders(caller.value);
         const body = yield* Effect.transposeOption(
           Option.map(request.body, (value) => Schema.encodeEffect(JsonBody)(value)),
         ).pipe(Effect.orDie);
@@ -117,12 +131,88 @@ export const mcpRoutes = (allowedOrigins: ReadonlyArray<string>) =>
           }),
         idleTimeToLive: "1 hour",
       });
+      const sessions = sessionTable(Duration.toMillis(Duration.fromInputUnsafe(sessionIdle)));
+      // Ends the session on its tool server, which keeps it until a DELETE. The auth guard also
+      // covers the tool server's routes, so the DELETE carries the credential of `caller`.
+      const endSession = Effect.fn("Mcp.endSession")(function* (
+        caller: HttpServerRequest.HttpServerRequest,
+        id: string,
+        session: McpSession,
+        reason: "idle" | "tools-changed",
+      ) {
+        // A released tool server took its sessions with it.
+        const server = yield* RcMap.getOption(servers, session.tools);
+        if (Option.isNone(server)) {
+          yield* Effect.logInfo("MCP session ended with its tool server", { reason });
+          return;
+        }
+        const headers = credentialHeaders(caller);
+        headers.set(SESSION_HEADER, id);
+        const ended = yield* server.value.pipe(
+          Effect.provideService(
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.fromWeb(
+              new Request(new URL(MCP_PATH, "http://localhost"), { method: "DELETE", headers }),
+            ),
+          ),
+        );
+        if (ended.status === 204) yield* Effect.logInfo("MCP session ended", { reason });
+        else
+          yield* Effect.logWarning("MCP tool server did not end the session", {
+            reason,
+            status: ended.status,
+          });
+      }, Effect.scoped);
+      const notFound = HttpServerResponse.empty({ status: 404 });
       const handler = Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const credential = yield* RequestCredential;
+        if (Option.isNone(credential))
+          return yield* Effect.die("The MCP route runs without the auth guard.");
+        const now = yield* Clock.currentTimeMillis;
+        for (const [id, session] of sessions.takeIdle(now))
+          yield* endSession(request, id, session, "idle");
         const grants = yield* RequestPermissions;
         const ceiling = yield* RequestOperations;
         const visible: ReadonlyArray<OperatorTool> = visibleTools(tools, grants, ceiling);
-        const server = yield* RcMap.get(servers, visible.map(({ name }) => name).join(","));
-        return yield* server;
+        const key = visible.map(({ name }) => name).join(",");
+        const id = request.headers[SESSION_HEADER];
+        if (id !== undefined) {
+          const refusal = yield* SessionAdmission.$match(
+            sessions.admit(id, credential.value, key, now),
+            {
+              Admitted: () => Effect.succeedNone,
+              Unknown: () =>
+                Effect.logInfo("MCP request refused: the session is unknown or ended").pipe(
+                  Effect.as(Option.some(notFound)),
+                ),
+              OtherCredential: () =>
+                Effect.logWarning(
+                  "MCP request refused: the session belongs to another credential",
+                ).pipe(Effect.as(Option.some(notFound))),
+              ToolsChanged: ({ session }) =>
+                endSession(request, id, session, "tools-changed").pipe(
+                  Effect.as(Option.some(notFound)),
+                ),
+            },
+          );
+          if (Option.isSome(refusal)) return refusal.value;
+        }
+        const server = yield* RcMap.get(servers, key);
+        const response = yield* server;
+        if (id !== undefined && request.method === "DELETE" && response.status === 204) {
+          sessions.close(id);
+          yield* Effect.logInfo("MCP session ended", { reason: "client" });
+        }
+        // The MCP server sets the header of a new session just before the response is sent.
+        if (id === undefined)
+          yield* HttpEffect.appendPreResponseHandler((_, sent) => {
+            const opened = sent.headers[SESSION_HEADER];
+            if (opened !== undefined)
+              sessions.open(opened, { credential: credential.value, tools: key, lastUsedAt: now });
+            return Effect.succeed(sent);
+          });
+        return response;
       });
       yield* router.add("*", MCP_PATH, handler);
     }),

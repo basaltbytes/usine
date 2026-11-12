@@ -13,6 +13,7 @@ import {
   AuthError,
   authFailure,
   ceilingAdmits,
+  CredentialId,
   GitHubUserId,
   Member,
   NO_EXPIRY,
@@ -42,6 +43,11 @@ export interface AuthServices {
 /** The operations the request's device token may call; `None` when it has no operation ceiling. */
 export const RequestOperations = Context.Reference<Option.Option<ReadonlyArray<OperationId>>>(
   "@usine/server/RequestOperations",
+  { defaultValue: Option.none },
+);
+/** The credential that authenticated the request; `None` outside the auth guard. */
+export const RequestCredential = Context.Reference<Option.Option<CredentialId>>(
+  "@usine/server/RequestCredential",
   { defaultValue: Option.none },
 );
 /** Returns the operation IDs that the published API doesn't have. */
@@ -443,6 +449,14 @@ export const authenticatedRoutes = (services: AuthServices) => {
             ),
         ),
         Effect.provideService(RequestAccess, Option.some(access)),
+        Effect.provideService(
+          RequestCredential,
+          Option.some(
+            CredentialId.make(
+              Option.match(access.token, { onNone: () => access.csrf, onSome: ({ id }) => id }),
+            ),
+          ),
+        ),
         Effect.provideService(
           ActingMember,
           access.credential === "local"

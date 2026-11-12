@@ -19,6 +19,7 @@ import {
   type Cause,
   Context,
   DateTime,
+  Duration,
   Effect,
   Fiber,
   FileSystem,
@@ -41,7 +42,7 @@ import { Port } from "../../src/cli.ts";
 import { apiRoutes, serverLayer } from "../../src/http.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { startupListener } from "../../src/listener.ts";
-import { MCP_PATH, mcpRoutes } from "../../src/mcp/http.ts";
+import { MCP_PATH, MCP_SESSION_IDLE, mcpRoutes } from "../../src/mcp/http.ts";
 import {
   MAX_START_CONTAINERS,
   MAX_START_NESTING,
@@ -100,73 +101,84 @@ const expectedTools = (permissions: ReadonlyArray<"public" | "read" | "operate">
     )
     .map(([name]) => name);
 
-const fixture = Effect.gen(function* () {
-  const approvals: Array<{ readonly runId: RunId; readonly actor: Option.Option<string> }> = [];
-  const services = yield* authFixture();
-  const auth = services.authentication;
-  const currentLink = yield* auth.link;
-  const link = new URL(currentLink);
-  const browser = yield* auth.consumeLink(
-    new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
-  );
-  const session = Redacted.value(browser.secret);
-  const device = Effect.fn(function* (
-    scopes: ReadonlyArray<Grant>,
-    operations: Option.Option<ReadonlyArray<OperationId>> = Option.none(),
-  ) {
-    const issued = yield* auth.createToken(session, {
-      name: TokenName.make("Agent"),
-      scopes,
-      operations,
-      expiresAt: Option.none(),
+const makeFixture = (
+  sessionIdle: Duration.Input = MCP_SESSION_IDLE,
+  logger: Logger.Logger<unknown, void> = Logger.defaultLogger,
+) =>
+  Effect.gen(function* () {
+    const approvals: Array<{ readonly runId: RunId; readonly actor: Option.Option<string> }> = [];
+    const services = yield* authFixture();
+    const auth = services.authentication;
+    const currentLink = yield* auth.link;
+    const link = new URL(currentLink);
+    const browser = yield* auth.consumeLink(
+      new URLSearchParams(link.hash.slice(1)).get("link") ?? "",
+    );
+    const session = Redacted.value(browser.secret);
+    const device = Effect.fn(function* (
+      scopes: ReadonlyArray<Grant>,
+      operations: Option.Option<ReadonlyArray<OperationId>> = Option.none(),
+    ) {
+      const issued = yield* auth.createToken(session, {
+        name: TokenName.make("Agent"),
+        scopes,
+        operations,
+        expiresAt: Option.none(),
+      });
+      return Redacted.value(issued.secret);
     });
-    return Redacted.value(issued.secret);
+    const backend = Layer.mock(FactoryBackend)({
+      approve: (runId) =>
+        runId === "run-slow"
+          ? Effect.never
+          : Effect.map(ActingMember, (actor) => {
+              approvals.push({ runId, actor });
+            }),
+    });
+    // `serverVersion` returns `running`, so a long one gives a tool result over the cap.
+    const upgrades = Layer.mock(ServerUpgrades)({
+      status: Effect.succeed(
+        UpgradeView.make({
+          running: "x".repeat(MAX_RESULT_BYTES * 2),
+          channel: "next",
+          mode: "propose",
+          supported: true,
+          available: null,
+          phase: "idle",
+          message: null,
+          outcome: null,
+        }),
+      ),
+    });
+    const authenticated = authenticatedRoutes(services);
+    const routes = Layer.mergeAll(
+      apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
+      mcpRoutes([], sessionIdle).pipe(
+        Layer.provide(authenticated.guard.layer),
+        Layer.provide(NodeHttpServer.layerHttpServices),
+      ),
+      authenticated.routes,
+    ).pipe(HttpRouter.provideRequest(Layer.merge(backend, upgrades)));
+    const logged = HttpRouter.middleware(
+      (handler) => Effect.provide(handler, Logger.layer([logger])),
+      {
+        global: true,
+      },
+    );
+    const app = HttpRouter.toWebHandler(Layer.merge(routes, logged), { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    return {
+      app,
+      routes,
+      device,
+      approvals,
+      services,
+      backend,
+      upgrades,
+      browser: { session, csrf: browser.csrf },
+    };
   });
-  const backend = Layer.mock(FactoryBackend)({
-    approve: (runId) =>
-      runId === "run-slow"
-        ? Effect.never
-        : Effect.map(ActingMember, (actor) => {
-            approvals.push({ runId, actor });
-          }),
-  });
-  // `serverVersion` returns `running`, so a long one gives a tool result over the cap.
-  const upgrades = Layer.mock(ServerUpgrades)({
-    status: Effect.succeed(
-      UpgradeView.make({
-        running: "x".repeat(MAX_RESULT_BYTES * 2),
-        channel: "next",
-        mode: "propose",
-        supported: true,
-        available: null,
-        phase: "idle",
-        message: null,
-        outcome: null,
-      }),
-    ),
-  });
-  const authenticated = authenticatedRoutes(services);
-  const routes = Layer.mergeAll(
-    apiRoutes.pipe(Layer.provide(authenticated.guard.layer)),
-    mcpRoutes([]).pipe(
-      Layer.provide(authenticated.guard.layer),
-      Layer.provide(NodeHttpServer.layerHttpServices),
-    ),
-    authenticated.routes,
-  ).pipe(HttpRouter.provideRequest(Layer.merge(backend, upgrades)));
-  const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
-  yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
-  return {
-    app,
-    routes,
-    device,
-    approvals,
-    services,
-    backend,
-    upgrades,
-    browser: { session, csrf: browser.csrf },
-  };
-});
+const fixture = makeFixture();
 
 /** Serves `routes` on a loopback port and returns its origin. */
 const serveOnLoopback = <E, R>(routes: Layer.Layer<never, E, R>) =>
@@ -299,10 +311,23 @@ const mcpClient = <E, R>(
         }),
       ),
     );
+  const rpc = (method: string, params: JsonObject = {}) =>
+    post({ jsonrpc: "2.0", id: ++id, method, params });
   const request = (method: string, params: JsonObject = {}) =>
-    post({ jsonrpc: "2.0", id: ++id, method, params }).pipe(
-      Effect.flatMap((response) => Effect.promise(() => response.json())),
-    );
+    rpc(method, params).pipe(Effect.flatMap((response) => Effect.promise(() => response.json())));
+  // Ends the session with DELETE and returns the status.
+  const end = Effect.suspend(() =>
+    send(
+      new Request(`${origin}${MCP_PATH}`, {
+        method: "DELETE",
+        headers: {
+          ...credentialHeaders,
+          "mcp-session-id": session ?? "",
+          "mcp-protocol-version": "2025-06-18",
+        },
+      }),
+    ),
+  ).pipe(Effect.map(({ status }) => status));
   // Returns the response to `initialize`, whose body it has read.
   const initialize = post({
     jsonrpc: "2.0",
@@ -322,7 +347,17 @@ const mcpClient = <E, R>(
     Effect.map(({ result }) => result.tools.map(({ name }) => name)),
   );
   const call = (name: string, args: JsonObject) => request("tools/call", { name, arguments: args });
-  return { initialize, listTools, call };
+  return {
+    initialize,
+    listTools,
+    call,
+    end,
+    status: (method: string) => rpc(method).pipe(Effect.map(({ status }) => status)),
+    session: () => session,
+    useSession: (other: string | undefined) => {
+      session = other;
+    },
+  };
 };
 
 describe("operator MCP endpoint", () => {
@@ -413,6 +448,51 @@ describe("operator MCP endpoint", () => {
         .pipe(Effect.flatMap(Schema.decodeUnknownEffect(ToolCall)));
       assert.isNotTrue(result.result.isError);
       assert.deepEqual(approvals, [{ runId: "run-1", actor: Option.some("alice") }]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("answers a session only for the credential that opened it", () =>
+    Effect.gen(function* () {
+      const { app, device } = yield* fixture;
+      const ownerToken = yield* device([grant("read"), grant("operate")]);
+      const owner = mcpClient(inProcess(app), ownerToken);
+      yield* owner.initialize;
+      // The same grants share one tool server, which knows the owner's session.
+      const otherToken = yield* device([grant("read"), grant("operate")]);
+      const other = mcpClient(inProcess(app), otherToken);
+      other.useSession(owner.session());
+      const borrowed = yield* other.status("tools/list");
+      const borrowedEnd = yield* other.end;
+      const ownerTools = yield* owner.listTools;
+      const ended = yield* owner.end;
+      const afterEnd = yield* owner.status("tools/list");
+      assert.deepEqual([borrowed, borrowedEnd, ended, afterEnd], [404, 404, 204, 404]);
+      assert.sameMembers(ownerTools, expectedTools(["public", "read", "operate"]));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends a session on its tool server after it goes unused for the idle time", () =>
+    Effect.gen(function* () {
+      const logs: Array<{ readonly message: unknown; readonly fields: unknown }> = [];
+      const logger = Logger.make<unknown, void>(({ message }) => {
+        const [text, fields] = Array.isArray(message) ? message : [message];
+        logs.push({ message: text, fields });
+      });
+      const { app, device } = yield* makeFixture("200 millis", logger);
+      const token = yield* device([grant("read")]);
+      const client = mcpClient(inProcess(app), token);
+      yield* client.initialize;
+      const before = yield* client.listTools;
+      assert.sameMembers(before, expectedTools(["public", "read"]));
+      yield* Effect.sleep("300 millis");
+      const expired = yield* client.status("tools/list");
+      assert.equal(expired, 404);
+      assert.deepInclude(logs, { message: "MCP session ended", fields: { reason: "idle" } });
+      // A new session starts on the same tool server.
+      client.useSession(undefined);
+      yield* client.initialize;
+      const after = yield* client.listTools;
+      assert.sameMembers(after, expectedTools(["public", "read"]));
     }).pipe(Effect.scoped),
   );
 
