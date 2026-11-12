@@ -4,7 +4,7 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
+import { Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { env } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -287,7 +287,11 @@ export const openFixture = (
     const childLayer: Layer.Layer<
       ChildBackend,
       never,
-      ClaudeSdk | CodexAppServer | HostLoginLock | ChildProcessSpawner.ChildProcessSpawner
+      | ClaudeSdk
+      | CodexAppServer
+      | HostLoginLock
+      | ChildProcessSpawner.ChildProcessSpawner
+      | Crypto.Crypto
     > = provider === "claude" ? claudeChildLayer : codexChildLayer;
     const backend = childLayer.pipe(Layer.provide(harness), Layer.provideMerge(NodeServices.layer));
     const request = ChildRequest.make({

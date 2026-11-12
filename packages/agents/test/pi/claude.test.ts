@@ -5,6 +5,7 @@ import { jsonKey } from "@usine/core/json-key";
 // SDK hooks, transactions, and async iterators require Promise callbacks.
 // @effect-diagnostics asyncFunction:off
 import { assert, describe, it } from "@effect/vitest";
+import { NodeCrypto } from "@effect/platform-node";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
@@ -116,7 +117,11 @@ const workerCommands = (exitCode: number, stdout = "") => {
 
 /** The Claude backend, with a login lock that the test can also acquire, and `commands` on Workers. */
 const claudeChildWith = (commands: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>
-  claudeChildLayer.pipe(Layer.provideMerge(loginLock), Layer.provide(commands));
+  claudeChildLayer.pipe(
+    Layer.provideMerge(loginLock),
+    Layer.provide(commands),
+    Layer.provide(NodeCrypto.layer),
+  );
 
 const claudeChild = claudeChildWith(workerCommands(0).layer);
 

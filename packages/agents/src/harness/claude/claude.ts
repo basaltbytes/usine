@@ -20,6 +20,7 @@ import {
 } from "@usine/core/agent/session";
 import {
   type Cause,
+  Crypto,
   DateTime,
   Deferred,
   Duration,
@@ -181,6 +182,7 @@ const makeClaudeSessions = Effect.gen(function* () {
   const sdk = yield* ClaudeSdk;
   const logins = yield* HostLoginLock;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const crypto = yield* Crypto.Crypto;
 
   /**
    * Acquires the spec's Claude login lock in a fiber of the current scope and returns an effect
@@ -471,10 +473,8 @@ const makeClaudeSessions = Effect.gen(function* () {
       yield* journal.started(reference);
       // Login-lock retries finish before the session starts.
       const startsIdle = policy.restored.paused || Option.isSome(policy.restored.idle);
-      // Claude names a message with a client UUID on each result that consumed it. The layer
-      // doesn't require `Crypto`, and the UUID only has to be unique.
-      // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off
-      const clientId = Effect.sync(() => crypto.randomUUID());
+      // Claude names a message with a client UUID on each result that consumed it.
+      const clientId = crypto.randomUUIDv4().pipe(Effect.orDie);
       const prompts = startsIdle
         ? []
         : yield* Effect.forEach(Option.toArray(startPrompt(start)), (text) =>
