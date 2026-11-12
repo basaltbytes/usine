@@ -9,9 +9,10 @@ import {
   Schema,
 } from "effect";
 import { PoolRateLimitsUpdated } from "@usine/core/agent/session";
-import { and, asc, eq, gte, lt, ne, or } from "drizzle-orm";
-import { jsonExtract } from "../database/dialect.ts";
-import { events as storedEvents, runs } from "../database/schema.ts";
+import { and, asc, eq, ne, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
+import { jsonExtract, startsWith } from "../database/dialect.ts";
+import { events as storedEvents, runs, triggerEvents } from "../database/schema.ts";
 import type { DedupKey } from "@usine/core/event";
 import type { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -19,6 +20,7 @@ import { ItemKey } from "@usine/core/item";
 import { ReadSnapshot, RunDatabase } from "../database/database.ts";
 import { latestPoolRateLimits } from "./pool-rate-limits.ts";
 import {
+  CiFixRun,
   type LoopSighting,
   ProjectionRevision,
   type RunEvent,
@@ -31,9 +33,13 @@ import {
 import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { RunStoreError } from "../engine/error.ts";
 import { persistence } from "../store/codec.ts";
-import { ciFixDedupKeyRange } from "../engine/submission.ts";
+import { ciFixDedupKeyPrefix } from "../engine/submission.ts";
 import { leftoverQueries } from "../store/leftovers.ts";
 import { queriesFor } from "../store/queries.ts";
+
+// Each source binds two parameters, so a read stays under 100 bound parameters, the cap that some
+// SQLite hosts set.
+const CI_FIX_SOURCES_PER_READ = 48;
 
 const makeRunReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
@@ -61,39 +67,49 @@ const makeRunReader = Effect.gen(function* () {
     sourceRunIds: ReadonlyArray<RunId>,
   ) {
     yield* Effect.annotateCurrentSpan({ sourceRunIds });
-    const ranges = [...new Set(sourceRunIds)].map((sourceRunId) => ({
+    const sources = [...new Set(sourceRunIds)].map((sourceRunId) => ({
       sourceRunId,
-      ...ciFixDedupKeyRange(sourceRunId),
+      prefix: ciFixDedupKeyPrefix(sourceRunId),
     }));
-    const fixes = new Map<RunId, RunId>();
-    // Chunks stay below SQLite's expression-depth and bind-parameter limits. Each source's
-    // fixes are read together so ascending open time selects its newest fix.
+    const fixes = new Map<RunId, CiFixRun>();
+    const source = alias(storedEvents, "ci_fix_source");
+    const state = jsonExtract(runs.stateJson, "$._tag");
+    // Each source's fixes are read together, oldest first, so the last row is its newest fix.
     yield* Effect.forEach(
-      EffectArray.chunksOf(ranges, 100),
+      EffectArray.chunksOf(sources, CI_FIX_SOURCES_PER_READ),
       (chunk) =>
         Effect.gen(function* () {
           const rows = yield* database
-            .select({ runId: runs.runId, dedupKey: storedEvents.dedupKey })
-            .from(storedEvents)
-            .innerJoin(runs, eq(runs.eventId, storedEvents.eventId))
-            .where(
-              and(
-                ne(jsonExtract(runs.stateJson, "$._tag"), "Canceled"),
-                or(
-                  ...chunk.map(({ from, to }) =>
-                    and(gte(storedEvents.dedupKey, from), lt(storedEvents.dedupKey, to)),
-                  ),
-                ),
+            .select({ runId: runs.runId, state, dedupKey: source.dedupKey })
+            .from(source)
+            .innerJoin(
+              triggerEvents,
+              or(
+                eq(triggerEvents.eventId, source.eventId),
+                eq(triggerEvents.reopensEventId, source.eventId),
               ),
             )
-            .orderBy(asc(runs.openedAt))
+            .innerJoin(runs, eq(runs.eventId, triggerEvents.eventId))
+            .where(
+              and(
+                ne(state, "Canceled"),
+                or(...chunk.map(({ prefix }) => startsWith(source.dedupKey, prefix))),
+              ),
+            )
+            .orderBy(asc(runs.openedAt), asc(runs.runId))
             .execute();
-          const decoded = yield* Schema.decodeEffect(
-            Schema.Array(Schema.Struct({ runId: RunId, dedupKey: Schema.String })),
+          const decoded = yield* Schema.decodeUnknownEffect(
+            Schema.Array(
+              Schema.Struct({
+                runId: RunId,
+                state: CiFixRun.fields.state,
+                dedupKey: Schema.String,
+              }),
+            ),
           )(rows);
-          for (const { runId, dedupKey } of decoded) {
-            const source = chunk.find(({ from, to }) => dedupKey >= from && dedupKey < to);
-            if (source !== undefined) fixes.set(source.sourceRunId, runId);
+          for (const { runId, state, dedupKey } of decoded) {
+            const match = chunk.find(({ prefix }) => dedupKey.startsWith(prefix));
+            if (match !== undefined) fixes.set(match.sourceRunId, CiFixRun.make({ runId, state }));
           }
         }),
       { discard: true },
@@ -244,13 +260,14 @@ export class RunReader extends Context.Service<
       dedupKey: DedupKey,
     ) => Effect.Effect<Option.Option<RunId>, RunStoreError>;
     /**
-     * Returns the CI fix Run admitted for each source Run's failed head, keyed by source Run. Source
-     * Runs without an admitted fix are absent; canceled fixes, including revoked fixes, are
-     * excluded. A source Run with several eligible fixes maps to the newest.
+     * Returns the CI fix Run admitted for each source Run's failed head, with its state, keyed by
+     * source Run. A reopening or run-again of a fix Event counts as a fix. Source Runs without an
+     * admitted fix are absent; canceled fixes, including revoked fixes, are excluded. A source Run
+     * with several eligible fixes maps to the newest by open time, then by Run ID.
      */
     readonly ciFixRuns: (
       sourceRunIds: ReadonlyArray<RunId>,
-    ) => Effect.Effect<ReadonlyMap<RunId, RunId>, RunStoreError>;
+    ) => Effect.Effect<ReadonlyMap<RunId, CiFixRun>, RunStoreError>;
     /** Returns a Run snapshot and all its transcript entries, in append order, from one snapshot. */
     readonly evidence: (runId: RunId) => Effect.Effect<RunEvidence, RunStoreError>;
     /** Returns every open Run plus the newest `closedLimit` closed ones and their Attempts from one snapshot, newest first. */
@@ -306,6 +323,7 @@ export class RunReader extends Context.Service<
 }
 
 export {
+  CiFixRun,
   LoopSighting,
   AttemptSummary,
   ItemRunHistory,

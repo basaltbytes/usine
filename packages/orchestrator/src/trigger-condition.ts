@@ -22,7 +22,12 @@ import { Effect, Layer, Option, Result, Schema } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { needsCiFix } from "./polling/ci-fix-state.ts";
 import { repositoryFailureLogFields } from "./polling/cycle.ts";
-import { loopSettings, resolveTriggerLoop, taskWithCiPolicy } from "./trigger-submission.ts";
+import {
+  loopSettings,
+  recordedPrompt,
+  resolveTriggerLoop,
+  withCiInstructions,
+} from "./trigger-submission.ts";
 import { GitHubItemKey } from "@usine/core/item";
 
 const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
@@ -74,16 +79,25 @@ export const triggerConditionLayer: Layer.Layer<
         repository,
         submission.event.payload,
       );
+      const recorded = recordedPrompt(submission);
       yield* Effect.logInfo("Queued CI fix takes its Loop's current settings", {
         ...logFields(submission),
         approval: settings.approval,
         agent: settings.agent.name,
         permissions: settings.permissions,
         cycleLimit: Option.getOrNull(settings.cycleLimit),
+        removedCiInstructions: recorded.removed,
+        ciInstructions: Option.isSome(settings.ciPolicy) ? "appended" : "none",
       });
+      if (recorded.removed === "none" && Option.isSome(submission.ciPolicy)) {
+        yield* Effect.logWarning(
+          "Queued CI fix's task doesn't end with known CI handoff instructions; none were removed",
+          { ...logFields(submission), appendsCiInstructions: Option.isSome(settings.ciPolicy) },
+        );
+      }
       return Option.some<AdmissionSettings>({
         ...settings,
-        task: taskWithCiPolicy(submission.task, settings.ciPolicy, submission.ciPolicy),
+        ...withCiInstructions(recorded.prompt, settings.ciPolicy),
       });
     });
 

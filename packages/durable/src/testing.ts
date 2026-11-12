@@ -1,6 +1,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 import {
+  type FauxModelDefinition,
   type FauxResponseStep,
   fauxAssistantMessage,
   fauxProvider,
@@ -92,10 +93,15 @@ export interface FauxParent {
 
 /**
  * Returns pi-ai model access that answers requests with `steps` in order, at any reasoning effort
- * up to `high`.
+ * up to `high`. `contextWindow`, in tokens, replaces the faux model's default.
  */
-export const fauxParent = (steps: ReadonlyArray<ParentStep>): FauxParent => {
-  const faux = fauxProvider({ models: [{ id: "faux-1", reasoning: true }] });
+export const fauxParent = (
+  steps: ReadonlyArray<ParentStep>,
+  contextWindow?: number,
+): FauxParent => {
+  const model: FauxModelDefinition = { id: "faux-1", reasoning: true };
+  if (contextWindow !== undefined) model.contextWindow = contextWindow;
+  const faux = fauxProvider({ models: [model] });
   const models = createModels();
   models.setProvider(faux.provider);
   faux.setResponses([...steps]);
@@ -323,6 +329,8 @@ export interface DurableTestingOptions {
   readonly database: string;
   /** The parent model's answers, one per request. */
   readonly parent: ReadonlyArray<ParentStep>;
+  /** The parent model's context window in tokens, if not the faux default. */
+  readonly contextWindow?: number;
 }
 
 /**
@@ -345,7 +353,7 @@ export const layer = (options: DurableTestingOptions) =>
       Layer.unwrap(
         Effect.sync(() =>
           durableHarnessLayer({
-            ...fauxParent(options.parent),
+            ...fauxParent(options.parent, options.contextWindow),
             openStorage: Effect.tryPromise({
               try: () => openNodeSqliteStorage(options.database),
               catch: (cause) => durableError("open the durable storage", cause),

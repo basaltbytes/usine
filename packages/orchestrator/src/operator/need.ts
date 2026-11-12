@@ -1,4 +1,5 @@
 import { UpgradeWait } from "@usine/engine/engine";
+import { CiFixRun } from "@usine/engine/run-reader";
 import { ConfigFileError } from "@usine/config/file";
 import { BillingPool, PoolLogin } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
@@ -56,8 +57,11 @@ export class RunFailureNeed extends Schema.TaggedClass<
   loop: LoopName,
   /** The unresolved failure from the latest failed attempt. */
   failure: FailureView,
-  /** The CI fix Run admitted for this Run's failed head, which carries the work on, or null. */
-  fixRunId: Schema.NullOr(RunId).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
+  /**
+   * The newest CI fix Run admitted for this Run's failed head, with its state, or null. It isn't
+   * part of the attention revision, so a dismissed failure stays dismissed when its fix opens.
+   */
+  fixRun: Schema.NullOr(CiFixRun).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
 }) {}
 
 /** A repository poll failure that needs operator attention. */

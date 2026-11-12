@@ -308,7 +308,7 @@ tests cover the derivation cases and the default.
 - `packages/executor/src/ssh/provisioner/boxd.ts`
 - `packages/executor/src/ssh/provisioner/drivers.ts`
 - `packages/executor/src/ssh/model.ts`
-- `packages/executor/test/ssh/provisioner/boxd-grpc.test.ts`
+- `packages/executor/test/ssh/provisioner/boxd/grpc.test.ts`
 - `packages/config/test/config.test.ts`
 - `apps/web/src/features/configuration/components/forms/provisioner.tsx`
 - `apps/web/src/features/configuration/strings.ts`
@@ -344,7 +344,7 @@ configured region.
 - `packages/executor/src/ssh/provisioner/boxd.ts`
 - `packages/config/src/factory.ts`
 - `packages/core/src/worker.ts`
-- `packages/executor/test/ssh/provisioner/boxd-grpc.test.ts`
+- `packages/executor/test/ssh/provisioner/boxd/grpc.test.ts`
 - `apps/docs/src/content/docs/guides/add-a-boxd-worker.md`
 
 ### Draft 3

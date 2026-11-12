@@ -128,9 +128,6 @@ export interface BoatProvisioner {
   readonly reuse: Option.Option<ProvisionerReuse>;
 }
 
-/** @deprecated Use ProvisionerTailnet. */
-export type BoatTailnet = ProvisionerTailnet;
-
 /**
  * Restores each attempt's boxd machine from a prepared snapshot. A restore takes under a second,
  * so every attempt gets a new machine and the provisioner has no reuse policy.

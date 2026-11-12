@@ -3,6 +3,7 @@ import { RunId } from "@usine/core/run";
 import type {
   CycleBudgetNeed,
   NeedView,
+  RunFailureNeed,
   UnresponsiveWorkerNeed,
 } from "@usine/orchestrator/operator";
 import { DateTime, Match, Option } from "effect";
@@ -181,11 +182,29 @@ export const needKindLabel = {
   UnconfirmedStopNeed: "Parent task not stopped",
 } satisfies Record<NeedView["_tag"], string>;
 
+/** Reports the CI fixes that a cycle budget reset replayed, for example `Replayed 2 CI fixes`. */
+export const replayedCiFixes = (count: number) =>
+  `Replayed ${count} CI ${count === 1 ? "fix" : "fixes"}`;
+
 export const needDetailsLabel = "Details";
 export const needOpenItemLabel = "Open item";
 export const needOpenRunLabel = "Open run";
 export const needOpenFixRunLabel = "Open fix run";
-/** Names the CI fix run that took over a failed run's work, for example `fix run 1a2b3c4d continues the work`. */
-export const fixRunContinues = (fixRunId: RunId) =>
-  `fix run ${fixRunId.slice(0, 8)} continues the work`;
+const fixRunProgress = {
+  Pending: "continues the work",
+  Waiting: "continues the work",
+  Queued: "continues the work",
+  Running: "continues the work",
+  AwaitingCi: "continues the work",
+  Succeeded: "finished the work",
+  HandedOff: "handed the work to another fix run",
+  Failed: "failed too",
+} satisfies Record<NonNullable<RunFailureNeed["fixRun"]>["state"], string>;
+
+/**
+ * Names the CI fix run that took over a failed run's work and says where it stands, for example
+ * `fix run 1a2b3c4d continues the work` or `fix run 1a2b3c4d failed too`.
+ */
+export const fixRunStatus = ({ runId, state }: NonNullable<RunFailureNeed["fixRun"]>) =>
+  `fix run ${runId.slice(0, 8)} ${fixRunProgress[state]}`;
 export const needActionsLabel = (title: string) => `Actions for ${title}`;

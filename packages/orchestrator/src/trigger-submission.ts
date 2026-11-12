@@ -119,27 +119,57 @@ export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
   };
 });
 
-const ciInstructions = (policy: CiPolicy): string =>
-  `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${policy.fixLoop}"), timeout_seconds (${policy.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`;
+const ciInstructions = (policy: CiPolicy) =>
+  Schema.NonEmptyString.make(
+    `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${policy.fixLoop}"), timeout_seconds (${policy.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`,
+  );
 
-/** Replaces the generated CI suffix while preserving the recorded prompt and failure evidence. */
-export const taskWithCiPolicy = (
-  task: AttemptTask,
-  policy: Option.Option<CiPolicy>,
-  previousPolicy: Option.Option<CiPolicy> = Option.none(),
-): AttemptTask => {
-  const prompt = Option.match(previousPolicy, {
-    onNone: () => task,
-    onSome: (previous) => {
-      const suffix = ciInstructions(previous);
-      return task.endsWith(suffix) ? task.slice(0, -suffix.length) : task;
-    },
+/** Returns `prompt` followed by the CI handoff instructions of `policy`, and those instructions. */
+export const withCiInstructions = (prompt: string, policy: Option.Option<CiPolicy>) => {
+  const instructions = Option.map(policy, ciInstructions);
+  return {
+    task: AttemptTask.make(`${prompt}${Option.getOrElse(instructions, () => "")}`),
+    ciInstructions: instructions,
+  };
+};
+
+/**
+ * The CI handoff instructions that `recordedPrompt` removed: the ones recorded with the Event, the
+ * ones its CI policy generates now for an Event recorded without them, or none.
+ */
+type RemovedCiInstructions = "recorded" | "current-wording" | "none";
+
+interface RecordedSuffix {
+  readonly instructions: string;
+  readonly removed: Exclude<RemovedCiInstructions, "none">;
+}
+
+/**
+ * Returns the prompt of a recorded Submission: its task without the CI handoff instructions
+ * recorded with it. For an Event recorded before the instructions were stored, it removes the
+ * instructions that the Event's CI policy generates now, if the task ends with them. `removed`
+ * states which instructions it removed; with `none`, the task is returned unchanged.
+ */
+export const recordedPrompt = (
+  submission: Pick<Submission, "task" | "ciInstructions" | "ciPolicy">,
+): { readonly prompt: string; readonly removed: RemovedCiInstructions } => {
+  const suffix = Option.match(submission.ciInstructions, {
+    onSome: (instructions) => Option.some<RecordedSuffix>({ instructions, removed: "recorded" }),
+    onNone: () =>
+      Option.map(submission.ciPolicy, (policy): RecordedSuffix => ({
+        instructions: ciInstructions(policy),
+        removed: "current-wording",
+      })),
   });
-  return AttemptTask.make(
-    Option.match(policy, {
-      onNone: () => prompt,
-      onSome: (current) => `${prompt}${ciInstructions(current)}`,
-    }),
+  return Option.match(
+    Option.filter(suffix, ({ instructions }) => submission.task.endsWith(instructions)),
+    {
+      onNone: () => ({ prompt: submission.task, removed: "none" }),
+      onSome: ({ instructions, removed }) => ({
+        prompt: submission.task.slice(0, -instructions.length),
+        removed,
+      }),
+    },
   );
 };
 
@@ -164,7 +194,7 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
     ...settings,
     repository: options.repository.name,
     revision: options.revision,
-    task: taskWithCiPolicy(options.task, options.loop.ci),
+    ...withCiInstructions(options.task, options.loop.ci),
   });
 });
 

@@ -387,6 +387,13 @@ export default mergeConfig(
                   await route.fulfill({ status, contentType: "application/json", body });
                 },
                 lateOverviewRequests: async ({ page }) => approvals.get(page)?.lateOverviews ?? 0,
+                // Answers every cycle budget reset with `body`.
+                cycleResetResponse: async ({ page }, body: string) => {
+                  await page.unroute("**/api/cycle-budgets/reset");
+                  await page.route("**/api/cycle-budgets/reset", (route) =>
+                    route.fulfill({ contentType: "application/json", body }),
+                  );
+                },
                 githubChangesResponse: async ({ page }, body: string) => {
                   await page.unroute("**/api/runs/*/github-changes");
                   await page.route("**/api/runs/*/github-changes", (route) =>

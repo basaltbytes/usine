@@ -58,6 +58,14 @@ export class Submission extends Schema.Class<
     Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /**
+   * The CI handoff instructions generated from `ciPolicy` that end `task`. `None` without a CI
+   * policy, and for Events recorded before the instructions were stored apart from the prompt.
+   */
+  ciInstructions: Schema.Option(Schema.NonEmptyString).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
   /** Required outcome labels captured with the event; empty disables verification. */
   outcomeLabels: OutcomeLabels.pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed([])),
@@ -82,7 +90,10 @@ export class Submission extends Schema.Class<
   repository: RepositoryName,
   /** The repository revision to resolve when preparing an attempt checkout. */
   revision: RepositoryRevision,
-  /** The rendered loop task for the run, before any edit-and-retry amendment. */
+  /**
+   * The rendered loop task for the run, before any edit-and-retry amendment. It ends with
+   * `ciInstructions` when they are recorded.
+   */
   task: AttemptTask,
   /** The agent definition saved at match time for the run. */
   agent: Agent,
@@ -106,14 +117,9 @@ export const runIdFor = Effect.fn("Submission.runIdFor")(function* (submission: 
 export const ciFixDedupKey = (sourceRunId: RunId, head: CommitSha): DedupKey =>
   DedupKey.make(jsonKey(["ci-failure", sourceRunId, head]));
 
-/**
- * Returns the bounds of every CI fix dedup key of the source Run: the keys start with the
- * returned `from` and sort below `to`, since `-` follows `,` in code point order.
- */
-export const ciFixDedupKeyRange = (sourceRunId: RunId) => {
-  const from = `${jsonKey(["ci-failure", sourceRunId]).slice(0, -1)},`;
-  return { from: DedupKey.make(from), to: DedupKey.make(`${from.slice(0, -1)}-`) };
-};
+/** Returns the prefix that every CI fix dedup key of the source Run starts with. */
+export const ciFixDedupKeyPrefix = (sourceRunId: RunId): string =>
+  `${jsonKey(["ci-failure", sourceRunId]).slice(0, -1)},`;
 
 /**
  * Returns the Submission recorded when the Item returns to the state of an Event whose Run was

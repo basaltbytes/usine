@@ -22739,6 +22739,16 @@
                 }
               }
             }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                }
+              }
+            }
           }
         },
         "description": "Checks the proposed loop, CEL expressions, and prompt without saving a revision.",
@@ -23432,6 +23442,16 @@
                 }
               }
             }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                }
+              }
+            }
           }
         },
         "description": "Evaluates the proposed loop against stored GitHub items without making GitHub requests or saving a revision.",
@@ -24069,6 +24089,16 @@
                     "message"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
                 }
               }
             }
@@ -26620,6 +26650,16 @@
                 }
               }
             }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                }
+              }
+            }
           }
         },
         "description": "Returns a page of revisions, newest first. Pass nextBefore as before for the next page; the default limit is 50.",
@@ -27245,6 +27285,16 @@
                     "message"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
                 }
               }
             }
@@ -27882,6 +27932,16 @@
                     "message"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
                 }
               }
             }
@@ -28540,6 +28600,16 @@
                     "message"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
                 }
               }
             }
@@ -29268,6 +29338,16 @@
                 }
               }
             }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
+                }
+              }
+            }
           }
         },
         "description": "Deletes the entity if the expected revision is current.",
@@ -29926,6 +30006,16 @@
                     "message"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "@usine/orchestrator/ValidationTimeoutRefusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/_usine_orchestrator_ValidationTimeoutRefusalEncoded"
                 }
               }
             }
@@ -46255,6 +46345,39 @@
         ],
         "additionalProperties": false
       },
+      "_usine_orchestrator_ValidationTimeoutRefusalEncoded": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "ValidationTimeoutError"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "step": {
+            "type": "string",
+            "enum": [
+              "wait",
+              "read",
+              "parse",
+              "restart",
+              "coordinator-brains",
+              "worker-preflight",
+              "store",
+              "apply"
+            ]
+          }
+        },
+        "required": [
+          "error",
+          "message",
+          "step"
+        ],
+        "additionalProperties": false
+      },
       "_usine_orchestrator_FactoryConfigRefusalEncoded": {
         "type": "object",
         "properties": {
@@ -52036,11 +52159,10 @@
               }
             ]
           },
-          "fixRunId": {
+          "fixRun": {
             "anyOf": [
               {
-                "type": "string",
-                "minLength": 1
+                "$ref": "#/components/schemas/_usine_engine_CiFixRunEncoded"
               },
               {
                 "type": "null"
@@ -52055,7 +52177,34 @@
           "runId",
           "loop",
           "failure",
-          "fixRunId"
+          "fixRun"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_engine_CiFixRunEncoded": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Waiting",
+              "Queued",
+              "Running",
+              "AwaitingCi",
+              "Succeeded",
+              "HandedOff",
+              "Failed"
+            ]
+          }
+        },
+        "required": [
+          "runId",
+          "state"
         ],
         "additionalProperties": false
       },
