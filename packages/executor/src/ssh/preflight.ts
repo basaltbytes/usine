@@ -67,7 +67,7 @@ const containerLogins = Effect.fn("SshExecutor.containerLogins")(function* (
       seeded: files.flatMap(({ file, mounted }) => (mounted ? [] : [file])).join(","),
       reason: LOGIN_MOUNT_REASONS[credentialRoute],
     });
-    if (credentialRoute === "host-login") logins.push(harness);
+    if (files.length > 0) logins.push(harness);
   }
   return logins;
 });
