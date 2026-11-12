@@ -241,6 +241,9 @@ const quotedReports = [
   "The child answered '[usine:question]\nWhich transport?' and I chose HTTP.",
   "const answer = `[usine:blocked]\nNo access.`;",
   'prompt = """[usine:question]\nWhich transport?"""',
+  'The child answered:\n"[usine:blocked]\nNo access."\nI continued with the fix.',
+  'The child answered ("[usine:blocked]\nNo access.") and I continued.',
+  "answer=`[usine:blocked]\nNo access.`;",
 ] as const;
 
 it.each(quotedReports)("treats a quoted marker as ordinary text: %j", (answer) => {
@@ -266,6 +269,7 @@ it.each([
   "Next I need to run `gh pr view`[usine:blocked]\nNo access.",
   'The command failed with "permission denied"[usine:blocked]\nNo access.',
   "I could not reach 'api.github.com'[usine:blocked]\nNo access.",
+  'I ran `git commit -m ""`[usine:blocked]\nNo access.',
 ])("recognizes a report header after an indented fence or inline backticks: %j", (answer) => {
   const report = reportedOutcome(Option.none(), answer);
   assert(Option.isSome(report));

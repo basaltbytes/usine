@@ -384,11 +384,12 @@ const reportMarker = `(?:${[BLOCKED_MARKER, QUESTION_MARKER].map(escapeRegExp).j
 
 /**
  * A report marker that starts a line, or that directly follows narration and ends the line. A run
- * of quote characters at the start of a line or after whitespace, `(`, or `=` opens a quoted
- * string, so a marker directly after it is a mention. Any other quote character closes a string.
+ * of one repeated quote character at the start of a line or after whitespace, `(`, or `=` opens a
+ * quoted string, so a marker directly after it is a mention. Any other quote character closes a
+ * string or inline code, as in ``-m ""`[usine:blocked]``.
  */
 const reportHeader = new RegExp(
-  `^[ \\t]*${reportMarker}|(?<=\\S)(?<!(?:^|[\\s(=])["'\`]+)${reportMarker}(?=[ \\t]*\\r?$)`,
+  `^[ \\t]*${reportMarker}|(?<=\\S)(?<!(?:^|[\\s(=])\\1*(["'\`]))${reportMarker}(?=[ \\t]*\\r?$)`,
   "u",
 );
 
