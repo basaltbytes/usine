@@ -67,6 +67,10 @@
       "types": "./dist/item.d.ts",
       "default": "./dist/item.js"
     },
+    "./label": {
+      "types": "./dist/label.d.ts",
+      "default": "./dist/label.js"
+    },
     "./loop": {
       "types": "./dist/loop.d.ts",
       "default": "./dist/loop.js"

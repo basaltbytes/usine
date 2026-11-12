@@ -46,6 +46,14 @@ outcome_labels: [review-passed, agent-review-findings]
 
 Replace `review-passed` with `ready-to-merge` if that is your loop's success label. usine verifies that the review attempt added one of the configured labels to the pull request. The label counts even after the fix loop removes `agent-review-findings` to start its run; a verdict label left from an earlier review doesn't count. If the attempt added neither label, the attempt and run fail in **Needs attention** with a missing-outcome diagnostic. A success message alone cannot satisfy this requirement. Existing loops use an empty list until you configure their verdict labels.
 
+If your review task restores `ready-for-review` and stops without a verdict when the head changes during the review, list the trigger label too. Otherwise that run fails in **Needs attention**, even though the next review picks up the new head:
+
+```yaml
+outcome_labels: [review-passed, agent-review-findings, ready-for-review]
+```
+
+Leave the fix loop's `outcome_labels` empty. Its handoff adds `ready-for-review` through `on_green` after CI passes, but usine checks outcome labels when the agent ends, before the CI wait starts.
+
 ## Check the result
 
 A finding starts the fix loop. After its push, the agent session ends and frees its worker slot while the run shows **Waiting for CI**. Green checks on the recorded head apply the completion labels and start review again. Failed checks start the configured fix loop with bounded evidence; inherited completion actions continue through subsequent fixes.

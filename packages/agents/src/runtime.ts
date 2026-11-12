@@ -397,9 +397,61 @@ export type AgentReport =
   | AgentBlockedError
   | AgentQuestionError;
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+const reportMarker = `(?:${[BLOCKED_MARKER, QUESTION_MARKER].map(escapeRegExp).join("|")})`;
+
 /**
- * Returns a blocker or question report from any line of a final answer, including a report header
- * appended to narration before a line break. Failure and capacity prefixes take precedence.
+ * A report marker that starts a line, or that directly follows narration and ends the line. A run
+ * of one repeated quote character at the start of a line or after whitespace, `(`, or `=` opens a
+ * quoted string, so a marker directly after it is a mention. Any other quote character closes a
+ * string or inline code, as in ``-m ""`[usine:blocked]``.
+ */
+const reportHeader = new RegExp(
+  `^[ \\t]*${reportMarker}|(?<=\\S)(?<!(?:^|[\\s(=])\\1*(["'\`]))${reportMarker}(?=[ \\t]*\\r?$)`,
+  "u",
+);
+
+/**
+ * A Markdown code fence at any indentation, so a fence nested in a list item still quotes its
+ * contents: its group is the run of backticks or tildes.
+ */
+const codeFence = /^[ \t]*(`{3,}|~{3,})/u;
+
+/** Returns whether `line` closes a code block opened by `opener`: same character, no shorter. */
+const closesFence = (line: string, opener: string): boolean => {
+  const [fence, run] = codeFence.exec(line) ?? [];
+  return (
+    fence !== undefined &&
+    run !== undefined &&
+    run[0] === opener[0] &&
+    run.length >= opener.length &&
+    line.slice(fence.length).trim() === ""
+  );
+};
+
+/** Returns the offset of the first report header in `answer` outside fenced code blocks. */
+const reportHeaderOffset = (answer: string): Option.Option<number> => {
+  let offset = 0;
+  let opener: string | undefined;
+  for (const line of answer.split("\n")) {
+    if (opener !== undefined) {
+      if (closesFence(line, opener)) opener = undefined;
+    } else {
+      opener = codeFence.exec(line)?.[1];
+      const header = opener === undefined ? reportHeader.exec(line) : null;
+      if (header !== null) return Option.some(offset + header.index);
+    }
+    offset += line.length + 1;
+  }
+  return Option.none();
+};
+
+/**
+ * Returns a blocker or question report from a final answer. A report header starts a line, or
+ * directly follows narration without a space or opening quote and ends the line. Headers inside
+ * fenced code blocks, quoted strings, and inline mentions are ordinary text. Failure and capacity
+ * prefixes take precedence.
  */
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
@@ -424,10 +476,10 @@ export const reportedOutcome = (
       }),
     );
   }
-  const report = prefix.match(
-    /^[ \t]*\[usine:(?:blocked|question)\]|\[usine:(?:blocked|question)\](?=[ \t]*(?:\r?\n|\\n|$))/mu,
-  );
-  const trimmed = (report === null ? prefix : prefix.slice(report.index)).trim();
+  const trimmed = Option.match(reportHeaderOffset(prefix), {
+    onNone: () => prefix,
+    onSome: (offset) => prefix.slice(offset).trim(),
+  });
   if (trimmed.startsWith(QUESTION_MARKER)) {
     return Option.some(
       AgentQuestionError.make({

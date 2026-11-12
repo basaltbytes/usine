@@ -11,7 +11,7 @@ import {
 } from "@usine/expression/expression-engine";
 import { environmentFor } from "./payload-slices.ts";
 import { InstancePath, ConfigFileError } from "./file.ts";
-import { nonBlankString } from "./checks.ts";
+import { nonBlankString, scheduleWithoutOutcomeLabels, uniqueLabelNames } from "./checks.ts";
 import { ValidSelector } from "./selector.ts";
 import { Trigger } from "./trigger.ts";
 
@@ -47,49 +47,51 @@ export type LoopApproval = typeof LoopApproval.Type;
  */
 export class LoopFile extends Schema.Class<LoopFile, Brand.Brand<"@usine/config/loop/LoopFile">>(
   "@usine/config/LoopFile",
-)({
-  /** The loop identifier derived from its path; version 2 uses `project/loop`. */
-  name: LoopFileName,
-  /** The stream and condition checked before opening a run. */
-  trigger: Trigger,
-  /**
-   * The repository names or tags that narrow project membership; `None` selects the whole project.
-   */
-  selector: Schema.Option(ValidSelector),
-  /** Whether a run must wait for operator approval before its first attempt. */
-  approval: LoopApproval,
-  /**
-   * The positive run limit per item between operator resets; defaults to 3 and does not limit
-   * schedule loops.
-   */
-  maxCycles: CycleLimit.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
-    Schema.withConstructorDefault(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
-  ),
-  /** The CI requirement for successful pushes, or `None` for loops that finish in the session. */
-  ci: Schema.Option(CiPolicy).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
-    Schema.withConstructorDefault(Effect.succeedNone),
-  ),
-  /** Labels checked on the current item before an agent completion can succeed. */
-  outcomeLabels: OutcomeLabels.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed([])),
-    Schema.withConstructorDefault(Effect.succeed([])),
-  ),
-  /** The repository access of the loop's attempts. */
-  permissions: LoopPermissions.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed("write" as const)),
-    Schema.withConstructorDefault(Effect.succeed("write" as const)),
-  ),
-  /** The loop's queue priority; `None` evaluates to zero. */
-  priority: Schema.Option(LoopPriority).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
-  /** The name of the single step started by each run; file parsing defaults to `run`. */
-  step: StepName,
-  /** The rostered agent that runs the step. */
-  agent: AgentName,
-  /** The Markdown task template with scalar CEL interpolations in `{{ ... }}`. */
-  body: PromptTemplate,
-}) {}
+)(
+  Schema.Struct({
+    /** The loop identifier derived from its path; version 2 uses `project/loop`. */
+    name: LoopFileName,
+    /** The stream and condition checked before opening a run. */
+    trigger: Trigger,
+    /**
+     * The repository names or tags that narrow project membership; `None` selects the whole project.
+     */
+    selector: Schema.Option(ValidSelector),
+    /** Whether a run must wait for operator approval before its first attempt. */
+    approval: LoopApproval,
+    /**
+     * The positive run limit per item between operator resets; defaults to 3 and does not limit
+     * schedule loops.
+     */
+    maxCycles: CycleLimit.pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
+      Schema.withConstructorDefault(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
+    ),
+    /** The CI requirement for successful pushes, or `None` for loops that finish in the session. */
+    ci: Schema.Option(CiPolicy).pipe(
+      Schema.withDecodingDefaultTypeKey(Effect.succeedNone),
+      Schema.withConstructorDefault(Effect.succeedNone),
+    ),
+    /** Labels checked on the current item before an agent completion can succeed. */
+    outcomeLabels: OutcomeLabels.check(uniqueLabelNames((label) => label)).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed([])),
+      Schema.withConstructorDefault(Effect.succeed([])),
+    ),
+    /** The repository access of the loop's attempts. */
+    permissions: LoopPermissions.pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed("write" as const)),
+      Schema.withConstructorDefault(Effect.succeed("write" as const)),
+    ),
+    /** The loop's queue priority; `None` evaluates to zero. */
+    priority: Schema.Option(LoopPriority).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
+    /** The name of the single step started by each run; file parsing defaults to `run`. */
+    step: StepName,
+    /** The rostered agent that runs the step. */
+    agent: AgentName,
+    /** The Markdown task template with scalar CEL interpolations in `{{ ... }}`. */
+    body: PromptTemplate,
+  }).check(scheduleWithoutOutcomeLabels("outcomeLabels")),
+) {}
 
 /** A loop that isn't run because its file failed to load or a reference didn't resolve. */
 export class QuarantinedLoop extends Schema.Class<

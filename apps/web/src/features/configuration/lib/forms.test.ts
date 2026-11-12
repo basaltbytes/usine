@@ -19,6 +19,7 @@ it.each(
     const exported = formText(key, draft.success);
     expect(exported).toContain("max_cycles: 7");
     expect(exported).toContain("priority:");
+    expect(exported).not.toContain("outcome_labels");
     expect(readForm(key, exported)).toEqual(draft);
   },
 );

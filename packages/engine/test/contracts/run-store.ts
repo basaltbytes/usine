@@ -7,6 +7,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
+import { GitHubLabelName } from "@usine/core/label";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
@@ -449,6 +450,33 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
             );
           }),
         ),
+    );
+    it.live("keeps the Loop's outcome labels with the Event, so each Attempt carries them", () =>
+      withPersistence(
+        adapter,
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("outcome-labels");
+          const outcomeLabels = [GitHubLabelName.make("ready-to-merge")];
+          yield* store.recordAndClaim(
+            Submission.make({ ...lifecycleSubmission, outcomeLabels }),
+            runId,
+          );
+          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(first._tag === "AttemptStarted");
+          yield* store.finishAttempt(
+            first.execution.attempt,
+            Result.fail(AgentFailure.make({ message: "Checks failed" })),
+          );
+          yield* store.retry(runId);
+          const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(retried._tag === "AttemptStarted");
+
+          assert.deepStrictEqual(first.execution.outcomeLabels, outcomeLabels);
+          assert.deepStrictEqual(retried.execution.outcomeLabels, outcomeLabels);
+          assert.deepStrictEqual((yield* store.snapshot(runId)).outcomeLabels, outcomeLabels);
+        }),
+      ),
     );
     it.live("stops tracking a closed Attempt once, and never an open one", () =>
       withPersistence(

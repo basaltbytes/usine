@@ -12,8 +12,9 @@ import { DurableHarness, type DurableHarnessError, type DurableStorageFailed } f
 import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./documents.ts";
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
+import { PiAttemptRuntime } from "../coordinator/router.ts";
 import { encodeResult, finishedOf } from "./outcome.ts";
-import { parentSessionId } from "./parent.ts";
+import { parentSessionId } from "./sessions.ts";
 import { abortEndedAttempts, repairUnreadableConversations } from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt, relayDeliveries } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
@@ -693,7 +694,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
 });
 
 /**
- * Provides `AttemptRuntime` on the durable harness. Building it installs the usine extension and
- * resumes unfinished Attempts.
+ * Provides the Pi parent's runtime on the durable harness. Building it installs the usine extension
+ * and resumes unfinished Attempts.
  */
-export const layer = Layer.effect(AttemptRuntime, makeAttemptRuntime);
+export const layer = Layer.effect(PiAttemptRuntime, makeAttemptRuntime);

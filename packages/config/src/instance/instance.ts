@@ -48,7 +48,9 @@ export class LoadedInstance extends Schema.Class<
 export {
   UndeclaredLaneLabelWarning,
   UndeclaredTriggerLabelWarning,
+  UndeclaredOutcomeLabelWarning,
   ConfigWarning,
+  logConfigWarnings,
 } from "./diagnostics.ts";
 
 export { referenceIndex } from "./references.ts";

@@ -295,3 +295,43 @@ it("keeps history reachable for a reader without edit access", async () => {
   await revision(2).click();
   await expect.element(page.getByText("+name: Factory", { exact: false })).not.toBeInTheDocument();
 });
+
+const storedLoop = (outcomeLabels: readonly string[]) => ({
+  name: "start-dev",
+  trigger: { on: "issue", if: "true" },
+  selector: { _tag: "None" },
+  approval: "none",
+  maxCycles: 3,
+  ci: { _tag: "None" },
+  outcomeLabels,
+  permissions: "write",
+  priority: { _tag: "None" },
+  step: "run",
+  agent: "developer",
+  body: "Start the work.\n",
+});
+
+it("shows and reverts a revision whose stored loop the current rules reject", async () => {
+  await mount(
+    "/configuration/history?kind=loop&identifier=start-dev",
+    administratorPermissions,
+    JSON.stringify([
+      {
+        number: 2,
+        actor: null,
+        time: "2026-11-04T10:00:00.000Z",
+        message: "Removed outcome labels that the loop rules no longer accept",
+        entities: [{ kind: "loop", identifier: "start-dev" }],
+        changes: [
+          {
+            key: { kind: "loop", identifier: "start-dev" },
+            before: storedLoop(["ready", "Ready"]),
+            after: storedLoop(["ready"]),
+          },
+        ],
+      },
+    ]),
+  );
+  await expect.element(page.getByText("-  - Ready", { exact: true })).toBeVisible();
+  await expect.element(button("Revert")).toBeVisible();
+});

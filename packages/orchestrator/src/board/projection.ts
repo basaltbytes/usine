@@ -1,5 +1,5 @@
 import type { ItemRunHistory } from "@usine/engine/run-reader";
-import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
 import {
   isSettledItemState,
   LabelLaneSource,

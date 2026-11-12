@@ -1,5 +1,5 @@
 import type { Lane, LaneName } from "@usine/config/board";
-import { canonicalLabelName } from "@usine/config/label";
+import { canonicalLabelName } from "@usine/core/label";
 import type { PriorityValue } from "@usine/config/loop";
 import type { WorkerName } from "@usine/core/worker";
 import { Array as EffectArray, Option, Order } from "effect";

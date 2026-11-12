@@ -6,7 +6,7 @@ import {
   type ConfigurationEntityKey,
   type ConfigurationRevisionNumber,
 } from "@usine/config/configuration";
-import { formatConfigurationEntity } from "@usine/config/folder-codec";
+import { formatRevisionEntity } from "@usine/config/folder-codec";
 import {
   type ConfigurationReplacement,
   type LoopDraft,
@@ -96,7 +96,7 @@ export const revisionQuery = (number: ConfigurationRevisionNumber) =>
             change.before === null
               ? ""
               : await Effect.runPromise(
-                  formatConfigurationEntity(
+                  formatRevisionEntity(
                     ConfigurationEntity.make({ key: change.key, value: change.before }),
                   ),
                 ),
@@ -104,7 +104,7 @@ export const revisionQuery = (number: ConfigurationRevisionNumber) =>
             change.after === null
               ? ""
               : await Effect.runPromise(
-                  formatConfigurationEntity(
+                  formatRevisionEntity(
                     ConfigurationEntity.make({ key: change.key, value: change.after }),
                   ),
                 ),

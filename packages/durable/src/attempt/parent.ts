@@ -22,11 +22,11 @@ import {
 } from "@usine/agents/runtime";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, EndpointName, ParentSession, RoleName } from "@usine/core/agent/session";
-import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
 import type { DurableHarness } from "../harness.ts";
 import type { AttemptRecord } from "./documents.ts";
+import { parentSessionId } from "./sessions.ts";
 
 /**
  * The coordinator: the parent session on the orchestrator. Its only tool is `subagent`, which the
@@ -53,14 +53,6 @@ interface ResolvedParent {
   readonly pool: PiPool;
   readonly endpoint: Option.Option<EndpointName>;
 }
-
-/** Returns the session ID of the Attempt's Pi parent, the default target of operator input. */
-export const parentSessionId = (attemptId: AttemptId): AgentSessionId =>
-  AgentSessionId.make(`parent:${attemptId}`);
-
-/** Returns the session ID of the Attempt's `count`th child delegation. */
-export const childSessionId = (attemptId: AttemptId, count: number): AgentSessionId =>
-  AgentSessionId.make(`${parentSessionId(attemptId)}:child:${count}`);
 
 /** Returns the parent session with the rostered Agent and the resolved model. */
 export const parentSession = (

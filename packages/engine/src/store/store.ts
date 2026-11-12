@@ -513,6 +513,7 @@ const makeRunStore = Effect.gen(function* () {
       resume,
       reattach,
       requiresCi: Option.isSome(current.ciPolicy),
+      outcomeLabels: current.outcomeLabels,
     });
 
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (

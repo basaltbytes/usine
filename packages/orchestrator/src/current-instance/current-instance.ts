@@ -14,7 +14,7 @@ import {
   type ConfigurationStoreError,
   type StaleRevision,
 } from "@usine/config/configuration";
-import { LoadedInstance } from "@usine/config/instance";
+import { LoadedInstance, logConfigWarnings } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { WorkerName } from "@usine/core/worker";
@@ -224,6 +224,7 @@ export class CurrentInstance extends Context.Service<
           (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>
         >(() => Effect.succeed([]));
         const reloading = yield* Semaphore.make(1);
+        yield* logConfigWarnings(initial.warnings);
 
         const beforeWorkersStart = Effect.fn("CurrentInstance.beforeWorkersStart")(function* (
           running: LoadedInstance,
@@ -283,6 +284,7 @@ export class CurrentInstance extends Context.Service<
                     target: { kind: "configuration", id: "instance" },
                   })),
                 );
+                yield* logConfigWarnings(loaded.warnings);
                 yield* Effect.logInfo(
                   "Stored configuration applied; new runs use the new configuration",
                   {

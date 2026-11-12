@@ -25,13 +25,15 @@ import {
 } from "effect";
 import { splitMarkdown } from "./frontmatter.ts";
 import { AgentFile } from "./agent.ts";
-import { canonicalLabelName, GitHubLabelName } from "./label.ts";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
 import { ConfigFileError, ConfigProblem, InstancePath } from "./file.ts";
 import {
   type ConfigWarning,
   UndeclaredLaneLabelWarning,
   UndeclaredTriggerLabelWarning,
+  UndeclaredOutcomeLabelWarning,
 } from "./instance/diagnostics.ts";
+import { scheduleWithoutOutcomeLabels } from "./checks.ts";
 import { LoopFile, loopPath, LoopApproval, LoopPriority, PromptTemplate } from "./loop.ts";
 import { AgentPersona, AgentName } from "@usine/core/agent";
 import { IssueTrigger, PullRequestTrigger, ScheduleTrigger, Stream } from "./trigger.ts";
@@ -72,20 +74,22 @@ const TriggerFromYaml = Schema.Union([
 class LoopFrontmatter extends Schema.Class<
   LoopFrontmatter,
   Brand.Brand<"@usine/config/parser/LoopFrontmatter">
->("@usine/config/LoopFrontmatter")({
-  trigger: TriggerFromYaml,
-  selector: Schema.OptionFromOptionalKey(ValidSelector),
-  approval: LoopApproval.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
-  step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
-  agent: AgentName,
-  maxCycles: LoopFile.fields.maxCycles,
-  permissions: LoopFile.fields.permissions,
-  outcomeLabels: LoopFile.fields.outcomeLabels,
-  ci: Schema.OptionFromOptionalKey(
-    CiPolicy.pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
-  ),
-  priority: Schema.OptionFromOptionalKey(LoopPriority),
-}) {}
+>("@usine/config/LoopFrontmatter")(
+  Schema.Struct({
+    trigger: TriggerFromYaml,
+    selector: Schema.OptionFromOptionalKey(ValidSelector),
+    approval: LoopApproval.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
+    step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
+    agent: AgentName,
+    maxCycles: LoopFile.fields.maxCycles,
+    permissions: LoopFile.fields.permissions,
+    outcomeLabels: LoopFile.fields.outcomeLabels,
+    ci: Schema.OptionFromOptionalKey(
+      CiPolicy.pipe(Schema.encodeKeys({ fixLoop: "fix_loop", timeoutSeconds: "timeout_seconds" })),
+    ),
+    priority: Schema.OptionFromOptionalKey(LoopPriority),
+  }).check(scheduleWithoutOutcomeLabels("outcome_labels")),
+) {}
 
 const AuthoredLoopFrontmatter = LoopFrontmatter.pipe(
   Schema.encodeKeys({ maxCycles: "max_cycles", outcomeLabels: "outcome_labels" }),
@@ -575,6 +579,11 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
           );
         }
       }
+      for (const label of loop.outcomeLabels) {
+        if (!declared.has(canonicalLabelName(label))) {
+          warnings.push(UndeclaredOutcomeLabelWarning.make({ loop: loop.name, label }));
+        }
+      }
     }
     return warnings;
   });
@@ -615,7 +624,7 @@ export class ConfigParser extends Context.Service<
       { readonly loop: Option.Option<LoopFile>; readonly problems: ReadonlyArray<ConfigFileError> },
       ConfigFileError
     >;
-    /** Returns warnings for undeclared labels used by board lanes or loop conditions. */
+    /** Returns warnings for undeclared labels used by board lanes, loop conditions, or outcome labels. */
     readonly configWarnings: (
       config: UsineConfig,
       loops: ReadonlyArray<LoopFile>,

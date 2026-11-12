@@ -10,7 +10,7 @@ import { Effect, Fiber, Layer, Option, Schema } from "effect";
 import { gatewayModelAccess } from "../src/gateway.ts";
 import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
-import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as runtimeLayer } from "../src/testing.ts";
 import { resolveParent } from "../src/attempt/parent.ts";
 import { StubChildren, stubChildBackendLayer } from "../src/testing.ts";
 import { attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";

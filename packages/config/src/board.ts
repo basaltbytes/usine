@@ -1,6 +1,6 @@
 import { type Brand, Schema } from "effect";
 import { nonBlankString } from "./checks.ts";
-import { GitHubLabelName } from "./label.ts";
+import { GitHubLabelName } from "@usine/core/label";
 
 /** A nonblank display name that identifies a lane within its project. */
 export const LaneName = nonBlankString("Expected a non-blank lane name").pipe(
