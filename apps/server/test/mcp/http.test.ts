@@ -440,18 +440,7 @@ describe("operator MCP endpoint", () => {
       const listener = yield* startupListener("test").pipe(Effect.provideContext(context));
       const fileSystem = yield* FileSystem.FileSystem;
       const webRoot = yield* fileSystem.makeTempDirectoryScoped();
-      yield* Layer.build(
-        serverLayer(
-          backend,
-          webRoot,
-          Port.make(Number(new URL(origin).port)),
-          services,
-          upgrades,
-          Layer.empty,
-          undefined,
-          listener,
-        ),
-      );
+      yield* Layer.build(serverLayer(backend, webRoot, listener, services, upgrades, Layer.empty));
       const initialize = (headers: Readonly<Record<string, string>>) =>
         webRequest(`${origin}${MCP_PATH}`, {
           method: "POST",

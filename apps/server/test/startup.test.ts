@@ -25,7 +25,6 @@ import {
 import { HttpClient } from "effect/http";
 import { serverLayer } from "../src/http.ts";
 import { FactoryBackend } from "../src/backend.ts";
-import { Port } from "../src/cli.ts";
 import { authFixture } from "./auth/fixture.ts";
 import { assert, it } from "@effect/vitest";
 import { committedBeforeCrash, submission } from "../../../packages/engine/test/support.ts";
@@ -161,12 +160,10 @@ it.live(
         serverLayer(
           Layer.mock(FactoryBackend)({}),
           directory,
-          Port.make(7331),
+          listener,
           auth,
           Layer.empty,
           Layer.empty,
-          undefined,
-          listener,
         ),
       );
       const readiness = yield* client.get("/api/ready");
