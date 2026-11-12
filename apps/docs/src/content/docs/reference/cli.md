@@ -74,7 +74,7 @@ Subscription sign-in uses the installed Claude Code `setup-token` command or Cod
 
 Gateway transfers use its authenticated admin API over SSH and require `curl` on the gateway. Managed credentials persist in its state directory with mode `0600`, take precedence over environment credentials, and apply without reloading the service. ChatGPT refreshes use the gateway’s existing token refresh and atomic auth-file replacement. Worker routing changes are configuration revisions. Logout disables the managed provider and removes its routing from workers.
 
-Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values as local dates and times; opaque Claude setup tokens report neither. Pi parent authentication remains a separate Pi login.
+Instance admins can use the same controls in setup and **Configuration > Settings > Provider connections**. Expiry and last refresh show the provider’s reported values as local dates and times; opaque Claude setup tokens report neither. Pi children, and the Pi parent of `coordinator: session` agents, authenticate with a separate Pi login.
 
 ## usine status
 
@@ -222,7 +222,7 @@ The command serves the operator API as MCP tools over standard input and output,
 | `USINE_GITHUB_CLIENT_ID` | string | App secrets file | App client ID for member sign-in. |
 | `USINE_GITHUB_CLIENT_SECRET` | secret string | App secrets file | App client secret for member sign-in. |
 | `USINE_GITHUB_WEBHOOK_SECRET` | secret string | App secrets file | Signature secret for endpoint webhook hints. |
-| `PI_CODING_AGENT_DIR` | path | `~/.pi/agent` | Pi parent configuration and credential directory. |
+| `PI_CODING_AGENT_DIR` | path | `~/.pi/agent` | Configuration and credential directory of Pi children and of the Pi parent of `coordinator: session` agents. |
 | Worker credential variable names | secret strings | required when configured | Provider tokens, API keys, gateway admin tokens, and Access credentials referenced by worker records. |
 | `OTEL_RESOURCE_ATTRIBUTES` | percent-encoded `key=value` list | empty | Additional span resource attributes when tracing is enabled. |
 
