@@ -257,40 +257,29 @@ describe("coordinator rules", () => {
     }),
   );
 
-  it.effect("clamp honors a model's decision about an interruption", () =>
-    Effect.gen(function* () {
-      const event = ChildInterrupted.make({ child: child(1), reason: "worker gone" });
-      const cases: ReadonlyArray<readonly [Decision, object]> = [
-        [
-          Failed.make({ message: "The checkout is gone" }),
-          { failed: { _tag: "AgentFailure", message: "The checkout is gone" } },
-        ],
-        [
-          Complete.make({ message: "The pull request already merged" }),
-          {
-            completed: {
-              _tag: "AttemptCompleted",
-              message: "The pull request already merged",
-              answeredOperator: false,
-            },
-          },
-        ],
-        [
-          Blocked.make({}),
-          { failed: { _tag: "BlockedFailure", message: "Child 1 was interrupted: worker gone" } },
-        ],
-        [
-          RetryChild.make({ assignment: "Rebuild the checkout first." }),
-          { delegate: 2, assignment: "Rebuild the checkout first." },
-        ],
-      ];
-      for (const [decision, expected] of cases) {
-        const [, intents] = handle(startedState(), event, { decision });
-        const intent = yield* intentOf(intents);
-        assert.deepStrictEqual(intent, expected, decision._tag);
+  it("clamp keeps an interruption's rule over every model decision, so it never completes", () => {
+    const event = ChildInterrupted.make({ child: child(1), reason: "worker gone" });
+    const decisions: ReadonlyArray<Decision> = [
+      Complete.make({ message: "The pull request already merged" }),
+      Complete.make({}),
+      Failed.make({ message: "The checkout is gone" }),
+      Blocked.make({}),
+      RetryChild.make({ assignment: "Rebuild the checkout first." }),
+    ];
+    for (const maxChildren of [1, 3]) {
+      const context = contextFor(event, maxChildren);
+      const rule = clamp(ruleFor(event, context), context);
+      for (const decision of decisions) {
+        const resolved = clamp(decision, context);
+        assert.deepStrictEqual(resolved, rule, `${maxChildren} ${decision._tag}`);
+        assert.notStrictEqual(
+          resolved._tag === "Settle" && resolved.outcome._tag,
+          "AttemptCompleted",
+          `${maxChildren} ${decision._tag}`,
+        );
       }
-    }),
-  );
+    }
+  });
 
   it.effect("clamp fills a model's missing free text from the event it answers", () =>
     Effect.gen(function* () {
@@ -311,11 +300,6 @@ describe("coordinator rules", () => {
             assignment: `${REPORTED_REPLACEMENT_ASSIGNMENT}\n\n${BLANK_REPORT_MESSAGE}`,
           },
         ],
-        [
-          ChildInterrupted.make({ child: child(1), reason: "worker gone" }),
-          RetryChild.make({}),
-          { delegate: 2, assignment: REPLACEMENT_ASSIGNMENT },
-        ],
       ];
       for (const [event, decision, expected] of cases) {
         const [, intents] = handle(startedState(), event, { decision });
@@ -324,20 +308,6 @@ describe("coordinator rules", () => {
       }
     }),
   );
-
-  it("clamp applies an interruption's rule to a Complete without a message", () => {
-    const event = ChildInterrupted.make({ child: child(1), reason: "worker gone" });
-    for (const maxChildren of [1, 3]) {
-      const context = contextFor(event, maxChildren);
-      const resolved = clamp(Complete.make({}), context);
-      assert.deepStrictEqual(resolved, clamp(ruleFor(event, context), context), `${maxChildren}`);
-      assert.notStrictEqual(
-        resolved._tag === "Settle" && resolved.outcome._tag,
-        "AttemptCompleted",
-        `${maxChildren}`,
-      );
-    }
-  });
 
   it("clamp applies the event's rule to a rule-only tag about a child", () => {
     const ruleOnly = [
