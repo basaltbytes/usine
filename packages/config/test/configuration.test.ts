@@ -1,5 +1,5 @@
 import { AgentFile } from "../src/agent.ts";
-import { Harness } from "@usine/core/agent/brain";
+import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
@@ -24,6 +24,7 @@ import {
   Stream,
 } from "effect";
 import { LoadedInstance } from "../src/instance/instance.ts";
+import { Settings, UsineConfig } from "../src/factory.ts";
 import { ConfigParser, makeConfigParser } from "../src/parser.ts";
 import { InstancePath } from "../src/file.ts";
 import {
@@ -167,6 +168,72 @@ describe("configuration domain without layers", () => {
           }
         }
       }
+    }),
+  );
+
+  it.effect("admits a supervisor brain only on a harness that can serve the role", () =>
+    Effect.gen(function* () {
+      const instance = yield* fixture;
+      const withSupervisor = (supervisor: Option.Option<BrainSpec>) =>
+        configurationEntities(
+          LoadedInstance.make({
+            ...instance,
+            config: UsineConfig.make({
+              ...instance.config,
+              settings: Settings.make({ ...instance.config.settings, supervisor }),
+            }),
+          }),
+        );
+      const brain = (harness: string, model: string) =>
+        BrainSpec.make({
+          harness: Harness.make(harness),
+          model: ModelId.make(model),
+          effort: "low",
+        });
+      const committed = (entities: ReadonlyArray<ConfigurationEntity>) =>
+        commit(parser, Configuration.empty, zero, configurationDiff([], entities), metadata).pipe(
+          Effect.result,
+        );
+
+      const unset = yield* Option.none<BrainSpec>().pipe(withSupervisor, committed);
+      assert(Result.isSuccess(unset), "an instance without a supervisor brain is valid");
+      expect(
+        Option.flatMap(
+          unset.success.configuration.instance,
+          ({ config }) => config.settings.supervisor,
+        ),
+      ).toEqual(Option.none());
+
+      const claude = yield* Option.some(brain("claude", "claude-sonnet-5-5")).pipe(
+        withSupervisor,
+        committed,
+      );
+      assert(Result.isSuccess(claude), "Claude Code serves the supervisor role");
+      expect(
+        Option.map(
+          Option.flatMap(
+            claude.success.configuration.instance,
+            ({ config }) => config.settings.supervisor,
+          ),
+          ({ harness }) => harness,
+        ),
+      ).toEqual(Option.some("claude"));
+
+      const codex = yield* Option.some(brain("codex", "gpt-5.6-terra")).pipe(
+        withSupervisor,
+        committed,
+      );
+      assert(Result.isFailure(codex) && codex.failure._tag === "ConfigurationInvalid");
+      const [problem] = codex.failure.problems;
+      assert(problem !== undefined);
+      expect(problem.file).toBe("usine.yaml");
+      expect(problem.message).toContain("codex cannot run as supervisor at orchestrator");
+      expect(problem.message).toContain(
+        "lacks usine-tools (The Codex adapter passes no usine tool set to a session",
+      );
+      expect(problem.details?.map(({ path }) => path)).toEqual([
+        ["settings", "supervisor", "harness"],
+      ]);
     }),
   );
 

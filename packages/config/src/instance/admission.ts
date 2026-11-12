@@ -1,4 +1,10 @@
-import { admitBrain, AdmissionContext, catalog, codingAgent } from "@usine/agents/harness";
+import {
+  admitBrain,
+  AdmissionContext,
+  admitSupervisor,
+  catalog,
+  codingAgent,
+} from "@usine/agents/harness";
 import { Option, Result } from "effect";
 import type { AgentFile } from "../agent.ts";
 import type { UsineConfig } from "../factory.ts";
@@ -50,3 +56,27 @@ export const brainAdmissionProblems = (
           ];
     }),
   );
+
+/**
+ * Returns the refusal of the instance's `supervisor` brain, if it has one. The supervisor runs on
+ * the orchestrator with the instance's gateway credential, whose kind is checked when a turn
+ * starts, so the check admits the brain on a gateway route of unreported kind.
+ */
+export const supervisorAdmissionProblems = (config: UsineConfig): Array<ConfigFileError> =>
+  Option.match(config.settings.supervisor, {
+    onNone: () => [],
+    onSome: (brain) => {
+      const admitted = admitSupervisor(catalog, brain, "gateway");
+      if (Result.isSuccess(admitted)) return [];
+      const message = `settings.supervisor: ${admitted.failure.message}`;
+      return [
+        ConfigFileError.make({
+          file: InstancePath.make("usine.yaml"),
+          stage: "schema",
+          expression: Option.none(),
+          message,
+          details: [{ path: ["settings", "supervisor", "harness"], message }],
+        }),
+      ];
+    },
+  });
