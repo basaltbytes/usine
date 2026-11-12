@@ -6,8 +6,8 @@ import {
   type BoxdCreate,
   type BoxdMachine,
   type BoxdSnapshot,
-} from "../../../src/ssh/provisioner/boxd/client.ts";
-import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
+} from "../../../../src/ssh/provisioner/boxd/client.ts";
+import { BoxdExec } from "../../../../src/ssh/provisioner/boxd/exec.ts";
 
 /** The regional API endpoint that the fake reports. */
 export const BOXD_ENDPOINT = "https://fra.boxd.test:9443";

@@ -23,9 +23,9 @@ import {
   boxdTransport,
   DEFAULT_KEEPALIVE,
   STDIN_CHUNK_BYTES,
-} from "../../../src/ssh/provisioner/boxd/exec.ts";
-import { BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
-import { type ExecHandler, fakeBoxdExec, runLocally } from "./fake-boxd-exec.ts";
+} from "../../../../src/ssh/provisioner/boxd/exec.ts";
+import { BoxdCallError } from "../../../../src/ssh/provisioner/boxd/client.ts";
+import { type ExecHandler, fakeBoxdExec, runLocally } from "./fake-exec.ts";
 
 const KEY = "bxd_exec_test_key";
 /** Returns the `Exec` credential that always answers `credential`. */

@@ -3,14 +3,14 @@ import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { Effect, Predicate, Stream } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { createServer, type Http2Session } from "node:http2";
-import { runLocally as runCommand } from "../../remote/local-command.ts";
+import { runLocally as runCommand } from "../../../remote/local-command.ts";
 import {
   BoxdApi as BoxdService,
   type ExecChunk,
-} from "../../../src/ssh/provisioner/boxd/api-pb.ts";
-import { BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
-import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
-import { BOXD_ENDPOINT } from "./fake-boxd.ts";
+} from "../../../../src/ssh/provisioner/boxd/api-pb.ts";
+import { BoxdCallError } from "../../../../src/ssh/provisioner/boxd/client.ts";
+import { BoxdExec } from "../../../../src/ssh/provisioner/boxd/exec.ts";
+import { BOXD_ENDPOINT } from "./fake.ts";
 
 type ExecReply = Partial<Pick<ExecChunk, "data" | "isStderr" | "exitCode">>;
 

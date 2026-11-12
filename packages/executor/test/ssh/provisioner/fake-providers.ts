@@ -1,7 +1,7 @@
 import { assert } from "@effect/vitest";
 import type { BoxdApiLayer, BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
-import { fakeBoxd } from "./fake-boxd.ts";
-import { spawnedBoxdExec } from "./fake-boxd-exec.ts";
+import { fakeBoxd } from "./boxd/fake.ts";
+import { spawnedBoxdExec } from "./boxd/fake-exec.ts";
 import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
