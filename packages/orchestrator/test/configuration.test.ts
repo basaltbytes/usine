@@ -300,26 +300,39 @@ const workers = Layer.succeed(WorkerStatus)({
   }),
 });
 
-const readConfiguration = Effect.gen(function* () {
-  const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-    prefix: "usine-config-",
-  });
-  const root = InstanceDirectory.make(directory);
-  yield* writeInstanceFiles(root, files);
-  return yield* Effect.gen(function* () {
-    const instance = yield* (yield* CurrentInstance).get;
+const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
+  function* (instanceFiles: ReadonlyArray<readonly [string, string]>) {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+      prefix: "usine-config-",
+    });
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, instanceFiles);
+    return yield* Effect.gen(function* () {
+      const instance = yield* (yield* CurrentInstance).get;
 
-    return yield* (yield* OperatorConfiguration).view(instance);
-  }).pipe(
-    Effect.provide(
-      OperatorConfiguration.layer.pipe(
-        Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
-        Layer.provideMerge(reloadableInstanceLayer(root)),
+      return yield* (yield* OperatorConfiguration).view(instance);
+    }).pipe(
+      Effect.provide(
+        OperatorConfiguration.layer.pipe(
+          Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
+          Layer.provideMerge(reloadableInstanceLayer(root)),
+        ),
       ),
-    ),
-    Effect.flatMap(Schema.encodeEffect(ConfigurationView)),
-  );
-}).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+      Effect.flatMap(Schema.encodeEffect(ConfigurationView)),
+    );
+  },
+  Effect.scoped,
+  Effect.provide(NodeServices.layer),
+);
+
+const readConfiguration = readConfigurationOf(files);
+
+/** The instance files with `settings.coordinator: events` in place of `settings.parent_model`. */
+const eventsFiles = files.map(([path, content]) =>
+  path === "usine.yaml"
+    ? ([path, content.replace("  parent_model: gpt-5.6-sol\n", "  coordinator: events\n")] as const)
+    : ([path, content] as const),
+);
 
 describe("Configuration view", () => {
   it.effect("shows each Loop as parsed, with its pause, its repositories, and its file", () =>
@@ -553,6 +566,20 @@ describe("Configuration view", () => {
         webhooksPublicUrl: "https://factory.example/webhooks",
         tracing: { otlpUrl: "http://localhost:4318/v1/traces", serviceName: "usine" },
       });
+    }),
+  );
+
+  it.effect("shows the instance's coordinator and resolves Agents that don't set one to it", () =>
+    Effect.gen(function* () {
+      const view = yield* readConfigurationOf(eventsFiles);
+      assert.strictEqual(view.settings.coordinator, "events");
+      assert.isNull(view.settings.parentModel);
+      const developer = view.agents.find(({ name }) => name === "developer");
+      assert(developer !== undefined, "developer loads");
+      assert.deepStrictEqual(
+        [developer.coordinator, developer.resolvedCoordinator],
+        [null, "events"],
+      );
     }),
   );
 

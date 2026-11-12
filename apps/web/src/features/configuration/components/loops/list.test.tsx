@@ -21,6 +21,8 @@ import { usePauseLoop } from "~/features/configuration/queries";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
 import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 import { SettingsPage } from "~/features/configuration/settings.page";
+import { AgentFields } from "~/features/configuration/components/forms/agent";
+import { SettingsFields } from "~/features/configuration/components/forms/settings";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
 import { AgentFileView, ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
@@ -553,6 +555,29 @@ describe("Repositories page", () => {
 });
 
 describe("Settings page", () => {
+  it("shows the instance's coordinator and what it does", async () => {
+    const configuration = configurationFixture();
+    const page = text(
+      await render(() => (
+        <SettingsPage
+          configuration={ConfigurationView.make({
+            ...configuration,
+            settings: SettingsView.make({
+              ...configuration.settings,
+              coordinator: "events",
+              parentModel: null,
+              parentEffort: null,
+            }),
+          })}
+        />
+      )),
+    );
+    assert.include(
+      page,
+      "settings.coordinator events Rules on lifecycle events coordinate each attempt",
+    );
+  });
+
   it("lists settings, the operator, the webhooks mode, and tracing with what each does", async () => {
     const page = text(await render(() => <SettingsPage configuration={configurationFixture()} />));
     assert.include(page, "settings.poll_interval 60");
@@ -593,4 +618,44 @@ describe("Settings page", () => {
       assert.include(page, `Last hint received ${at}`);
     },
   );
+});
+
+/** Returns the markup of the select labeled `label`, from its label to its closing tag. */
+const selectLabeled = (markup: string, label: string): string => {
+  const start = markup.indexOf(`>${label}</label>`);
+  assert.isAtLeast(start, 0, `the form has a ${label} field`);
+  const end = markup.indexOf("</select>", start);
+  assert.isAtLeast(end, 0, `the ${label} field is a select`);
+  return markup.slice(start, end);
+};
+
+describe("Configuration forms", () => {
+  const noop = () => {};
+
+  it("edits the instance's coordinator in the settings form", async () => {
+    const markup = await render(() => (
+      <SettingsFields
+        value={{ settings: { coordinator: "events" } }}
+        onChange={noop}
+        problems={[]}
+      />
+    ));
+    const select = selectLabeled(markup, "Coordinator");
+    assert.include(select, '<option value="session">session</option>');
+    assert.include(select, '<option value="events" selected="">events</option>');
+  });
+
+  it("edits an Agent's coordinator in the agent form", async () => {
+    const markup = await render(() => (
+      <AgentFields
+        value={{ name: "triager", harness: "codex", coordinator: "events" }}
+        onChange={noop}
+        problems={[]}
+      />
+    ));
+    const select = selectLabeled(markup, "Coordinator");
+    assert.include(select, '<option value="session">session</option>');
+    assert.include(select, '<option value="events" selected="">events</option>');
+    assert.include(text(markup), "Leave blank to use settings.coordinator.");
+  });
 });
