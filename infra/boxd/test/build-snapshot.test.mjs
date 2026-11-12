@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -18,12 +21,13 @@ const script = new URL("../build-snapshot.mjs", import.meta.url).pathname;
 const env = { BOXD_API_KEY: "bxd_test", ATTEMPT_IMAGE: "ghcr.io/example/attempt:test" };
 
 /**
- * An `Exec` stream that relays one line on each output, and exits with `exit` after stdin closes,
- * or never exits when `exit` is null. `onEnd` runs when stdin closes. A `chatty` stream then prints
- * a line on stdout every few milliseconds until it ends. Closing the stream ends it with an error,
- * unless `cancellable` is false, as on a connection that no longer carries bytes.
+ * An `Exec` stream that relays one line on each output, then `chunks` on stdout, and exits with
+ * `exit` after stdin closes, or never exits when `exit` is null. `onEnd` runs when stdin closes.
+ * With `chatter`, the stream then prints a line on stdout every `chatter.everyMs` for
+ * `chatter.forMs`, and exits only after that. Closing the stream ends it with an error, unless
+ * `cancellable` is false, as on a connection that no longer carries bytes.
  */
-const fakeStream = ({ exit = 0, onEnd, chatty = false, cancellable = true } = {}) => {
+const fakeStream = ({ exit = 0, onEnd, chunks = [], chatter, cancellable = true } = {}) => {
   const stdin = [];
   let finish;
   let fail;
@@ -35,18 +39,25 @@ const fakeStream = ({ exit = 0, onEnd, chatty = false, cancellable = true } = {}
     () => true,
     () => true,
   );
-  const output = async function* (text, chatter) {
+  const output = async function* (text, more = [], chatty) {
     yield new TextEncoder().encode(text);
-    for (let line = 1; chatter && !(await Promise.race([ended, sleep(5, false)])); line += 1)
-      yield new TextEncoder().encode(`step ${line}\n`);
+    for (const chunk of more) yield new TextEncoder().encode(chunk);
+    if (chatty !== undefined) {
+      const start = Date.now();
+      for (let line = 1; Date.now() - start < chatty.forMs; line += 1) {
+        if (await Promise.race([ended, sleep(chatty.everyMs, false)])) break;
+        yield new TextEncoder().encode(`step ${line}\n`);
+      }
+      if (exit !== null) finish(exit);
+    }
     await ended;
   };
   return {
     stdin,
     ended: false,
     closed: false,
-    stdout: output("pulled\n", chatty),
-    stderr: output("progress\n", false),
+    stdout: output("pulled\n", chunks, chatter),
+    stderr: output("progress\n"),
     write(data) {
       assert.equal(this.ended, false);
       stdin.push(data);
@@ -54,7 +65,7 @@ const fakeStream = ({ exit = 0, onEnd, chatty = false, cancellable = true } = {}
     end() {
       this.ended = true;
       onEnd?.(this);
-      if (exit !== null) finish(exit);
+      if (exit !== null && chatter === undefined) finish(exit);
     },
     close() {
       this.closed = true;
@@ -73,10 +84,11 @@ const fakeStream = ({ exit = 0, onEnd, chatty = false, cancellable = true } = {}
  * default, the first read returns the previous version, and the next ones the new version, or
  * `pending` for good when `neverReady` is set. `setup` holds the options of the setup's `Exec`
  * stream. When `reappliesEgress` is set, the reads after the first one that reports the allowlist
- * lifted report the allowlist of the machine's creation again.
+ * lifted report the allowlist of the machine's creation again. `create` waits for `creating`.
  */
 const fakeBoxd = ({
   setup,
+  creating,
   reappliesEgress = false,
   failSave = false,
   failDelete = false,
@@ -106,6 +118,7 @@ const fakeBoxd = ({
     machines: {
       create: async (params) => {
         events.push(["create", params]);
+        await creating;
         const spec = params.spec.resolve();
         state.egress = spec.egress;
         state.requested = spec.egress;
@@ -164,12 +177,16 @@ const fakeBoxd = ({
   };
 };
 
-const run = (boxd, options, signal = new AbortController().signal, timing = {}) => {
+/** Runs `build` with fast timings. `onLog` sees each line that the build logs. */
+const run = (boxd, options, signal = new AbortController().signal, { onLog, ...timing } = {}) => {
   const logged = [];
   const relayed = [];
   const result = build(boxd, options, {
     cleanup: boxd,
-    log: (line) => logged.push(line),
+    log: (line) => {
+      logged.push(line);
+      onLog?.(line);
+    },
     output: { write: (chunk) => relayed.push(Buffer.from(chunk).toString()) },
     signal,
     pollMs: 0,
@@ -216,21 +233,133 @@ test("builds on an isolated, shared machine from a spec with the allowlist, over
   assert.match(setup, /volume create usine-pnpm-store/u);
   assert.match(setup, /rm -f \/var\/lib\/tailscale\/tailscaled\.state/u);
   assert.doesNotMatch(setup, /sshd|AcceptEnv|systemctl (?:reload|restart) ssh|service ssh/u);
-  assert.match(setup, /Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";'/u);
-  assert.match(
-    setup,
-    /^(sudo timeout -k 10 \d+ sh \/tmp\/usine-tailscale\.sh) \|\| \1$/mu,
-    "the Tailscale installer, which runs apt-get update, runs once more after a failure",
-  );
-  assert.match(
-    setup,
-    /apt-get --error-on=any update \|\| sudo timeout -k 10 \d+ apt-get update$/mu,
-    "apt-get update runs once more after a failed download",
-  );
   assert.equal(boxd.state.stream.ended, true);
   assert.deepEqual(relayed.sort(), ["progress\n", "pulled\n"]);
   assert.match(logged[0], /^Created temporary machine usine-snapshot-/u);
+  assert.ok(
+    logged.includes(
+      "boxd still reports the temporary machine's egress unrestricted 0 seconds later",
+    ),
+    logged.join("\n"),
+  );
   assert.match(logged.at(-1), /^Deleted temporary machine usine-snapshot-/u);
+});
+
+/** Returns the setup script that a build sends to the machine. */
+const setupScript = async () => {
+  const boxd = fakeBoxd();
+  await run(boxd, parseOptions(["usine-attempt"], env)).result;
+  return Buffer.concat(boxd.state.stream.stdin).toString();
+};
+
+/**
+ * A command that appends its name and arguments to `$LOG`. As `timeout`, it skips the command
+ * that it limits, and exits 124 for the first `$HANG_TIMES` runs of a command that contains
+ * `$HANG`. As `tee`, it also appends its input. As `id`, it prints a user ID.
+ */
+const STUB = `#!/bin/sh
+name=$(basename "$0")
+echo "$name $*" >> "$LOG"
+case "$name" in
+  timeout)
+    shift 3
+    if [ -n "$HANG" ]; then
+      case "$*" in
+        *"$HANG"*)
+          runs=$(cat "$LOG.hangs" 2>/dev/null || echo 0)
+          runs=$((runs + 1))
+          echo "$runs" > "$LOG.hangs"
+          if [ "$runs" -le "$HANG_TIMES" ]; then exit 124; fi
+          ;;
+      esac
+    fi
+    ;;
+  tee) cat >> "$LOG" ;;
+  id) echo 1000 ;;
+esac
+`;
+
+/** Runs the setup script with podman against stub commands; see `STUB`. */
+const runSetupScript = async (script, hang = "", hangTimes = 0) => {
+  const dir = await mkdtemp(join(tmpdir(), "usine-setup-"));
+  try {
+    await writeFile(join(dir, "stub"), STUB);
+    await chmod(join(dir, "stub"), 0o755);
+    for (const name of ["timeout", "tee", "install", "podman", "apt-get", "loginctl"].concat([
+      "systemctl",
+      "curl",
+      "rm",
+      "sync",
+      "id",
+    ]))
+      await symlink(join(dir, "stub"), join(dir, name));
+    // `sudo` runs the command after it.
+    await writeFile(join(dir, "sudo"), '#!/bin/sh\nexec "$@"\n');
+    await chmod(join(dir, "sudo"), 0o755);
+    const log = join(dir, "log");
+    const pending = exec("/bin/sh", ["-s", "--", "podman", "ghcr.io/example/attempt:test"], {
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        LOG: log,
+        HANG: hang,
+        HANG_TIMES: String(hangTimes),
+      },
+    });
+    pending.child.stdin.end(script);
+    const outcome = await pending.then(
+      ({ stderr }) => ({ code: 0, stderr }),
+      ({ code, stderr }) => ({ code, stderr }),
+    );
+    return { ...outcome, log: (await readFile(log, "utf8")).split("\n") };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+};
+
+const limited = (log) => log.filter((line) => line.startsWith("timeout "));
+
+test("the setup limits apt and the Tailscale installer and runs each once more", async () => {
+  const script = await setupScript();
+  const passed = await runSetupScript(script);
+  assert.equal(passed.code, 0, passed.stderr);
+  assert.equal(passed.stderr, "");
+  const config = passed.log.indexOf("tee /etc/apt/apt.conf.d/80usine-network");
+  assert.deepEqual(passed.log.slice(config, config + 3), [
+    "tee /etc/apt/apt.conf.d/80usine-network",
+    'Acquire::http::Timeout "30";',
+    'Acquire::https::Timeout "30";',
+  ]);
+  assert.deepEqual(limited(passed.log), [
+    "timeout -k 10 120 apt-get --error-on=any update",
+    "timeout -k 10 240 sh /tmp/usine-tailscale.sh",
+  ]);
+
+  const apt = await runSetupScript(script, "apt-get", 1);
+  assert.equal(apt.code, 0, apt.stderr);
+  assert.equal(
+    apt.stderr,
+    "usine: apt-get update didn't finish within 120 seconds\nusine: running apt-get update again\n",
+  );
+  assert.deepEqual(limited(apt.log).slice(0, 2), [
+    "timeout -k 10 120 apt-get --error-on=any update",
+    "timeout -k 10 120 apt-get update",
+  ]);
+
+  const once = await runSetupScript(script, "usine-tailscale", 1);
+  assert.equal(once.code, 0, once.stderr);
+  assert.equal(
+    once.stderr,
+    "usine: the Tailscale installer didn't finish within 240 seconds\nusine: running the Tailscale installer again\n",
+  );
+  assert.equal(limited(once.log).filter((line) => line.includes("usine-tailscale")).length, 2);
+
+  const twice = await runSetupScript(script, "usine-tailscale", 2);
+  assert.equal(twice.code, 124);
+  assert.equal(
+    twice.stderr,
+    "usine: the Tailscale installer didn't finish within 240 seconds\nusine: running the Tailscale installer again\nusine: the Tailscale installer didn't finish within 240 seconds\n",
+  );
+  assert.equal(twice.log.includes("systemctl enable tailscaled"), false);
 });
 
 test("passes each size to the spec, including one that only a self-hosted cluster lists", async () => {
@@ -407,10 +536,11 @@ test(
 );
 
 test(
-  "stops a setup that prints nothing or runs too long, quotes its last lines, and deletes the machine",
+  "stops a setup that prints nothing or runs too long, quotes its last lines, reads the egress through the second client, and deletes the machine",
   { timeout: 10_000 },
   async () => {
     const options = parseOptions(["usine-attempt"], env);
+    const lines = Array.from({ length: 25 }, (_, index) => `line ${index + 1}\n`);
     for (const [setup, quietMs, setupTimeoutMs, message] of [
       [
         { exit: null },
@@ -418,18 +548,30 @@ test(
         options.setupTimeoutMs,
         /^Error: The setup printed nothing for 0\.05 seconds\. Its last output lines:\n(?:pulled\nprogress|progress\npulled)$/u,
       ],
+      // The lines arrive at once, so the tail is complete before the overall limit fires.
       [
-        { exit: null, chatty: true },
+        { exit: null, chunks: lines },
         1_000,
         100,
-        /^Error: The setup didn't finish within 0\.1 seconds\. Its last output lines:\n(?:.+\n){19}step \d+$/u,
+        new RegExp(
+          `^Error: The setup didn't finish within 0\\.1 seconds\\. Its last output lines:\\n${lines.slice(5).join("").trimEnd()}$`,
+          "u",
+        ),
       ],
     ]) {
       const boxd = fakeBoxd({ setup });
-      const { result, logged } = run(boxd, { ...options, setupTimeoutMs }, undefined, { quietMs });
+      const cleanup = fakeBoxd();
+      const { result, logged } = run(boxd, { ...options, setupTimeoutMs }, undefined, {
+        cleanup,
+        quietMs,
+      });
       await assert.rejects(result, message);
       assert.equal(boxd.state.stream.closed, true);
-      assert.deepEqual(names(boxd).slice(-3), ["exec", "machine", "delete"]);
+      assert.equal(names(boxd).at(-1), "exec");
+      assert.deepEqual(cleanup.events, [
+        ["machine", []],
+        ["delete", "vm-1"],
+      ]);
       assert.ok(
         logged.includes("boxd reports the temporary machine's egress as unrestricted"),
         logged.join("\n"),
@@ -437,6 +579,88 @@ test(
     }
   },
 );
+
+test("output resets the quiet limit", { timeout: 10_000 }, async () => {
+  // The setup prints for longer than the quiet limit, with gaps shorter than it.
+  const boxd = fakeBoxd({ setup: { chatter: { everyMs: 20, forMs: 600 } } });
+  const { result, relayed } = run(boxd, parseOptions(["usine-attempt"], env), undefined, {
+    quietMs: 250,
+  });
+  assert.equal(await result, "usine-attempt");
+  assert.ok(relayed.length > 10, relayed.join(""));
+});
+
+test("reads the egress through the second client when a command in the setup times out", async () => {
+  const boxd = fakeBoxd({
+    setup: {
+      // The line is split across two chunks.
+      chunks: [
+        "usine: the Tailscale installer didn't fin",
+        "ish within 240 seconds\nusine: running the Tailscale installer again\n",
+      ],
+    },
+  });
+  const cleanup = fakeBoxd();
+  const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), undefined, {
+    cleanup,
+  });
+  assert.equal(await result, "usine-attempt");
+  assert.deepEqual(cleanup.events, [
+    ["machine", []],
+    ["delete", "vm-1"],
+  ]);
+  const read = logged.indexOf("boxd reports the temporary machine's egress as unrestricted");
+  assert.ok(
+    read !== -1 && read < logged.indexOf("Saving snapshot usine-attempt"),
+    logged.join("\n"),
+  );
+});
+
+test(
+  "an interrupt during the wait after the lift deletes the machine at once",
+  { timeout: 10_000 },
+  async () => {
+    const controller = new AbortController();
+    const boxd = fakeBoxd();
+    const cleanup = fakeBoxd();
+    let interruptedAt;
+    let deletedAt;
+    const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), controller.signal, {
+      cleanup,
+      egressInForceMs: 1_000,
+      onLog: (line) => {
+        if (line === "boxd reports the temporary machine's egress unrestricted") {
+          interruptedAt = Date.now();
+          controller.abort(130);
+        }
+        if (line.startsWith("Deleted temporary machine")) deletedAt = Date.now();
+      },
+    });
+    await assert.rejects(result, /^Error: Interrupted$/u);
+    assert.ok(deletedAt - interruptedAt < 500, `deleted ${deletedAt - interruptedAt} ms after`);
+    assert.equal(names(boxd).includes("exec"), false);
+    assert.equal(names(boxd).includes("delete"), false);
+    assert.deepEqual(cleanup.events, [["delete", "vm-1"]]);
+    assert.ok(logged.includes("Interrupted; deleting the temporary machine"), logged.join("\n"));
+  },
+);
+
+test("an interrupt during the machine's creation logs at once and deletes the machine once boxd creates it", async () => {
+  const controller = new AbortController();
+  const { promise: creating, resolve: created } = Promise.withResolvers();
+  const boxd = fakeBoxd({ creating });
+  const cleanup = fakeBoxd();
+  const { result, logged } = run(boxd, parseOptions(["usine-attempt"], env), controller.signal, {
+    cleanup,
+  });
+  controller.abort(130);
+  assert.deepEqual(logged, ["Interrupted; deleting the temporary machine"]);
+  created();
+  await assert.rejects(result, /^Error: Interrupted$/u);
+  assert.deepEqual(names(boxd), ["create"]);
+  assert.deepEqual(cleanup.events, [["delete", "vm-1"]]);
+  assert.match(logged.at(-1), /^Deleted temporary machine usine-snapshot-/u);
+});
 
 test("sends stdin in chunks of at most 64 KiB, byte-exact", () => {
   assert.equal(STDIN_CHUNK_BYTES, 65_536);

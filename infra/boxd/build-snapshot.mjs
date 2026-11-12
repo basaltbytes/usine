@@ -29,6 +29,8 @@ const EGRESS_IN_FORCE_MS = 5_000;
 const SETUP_TIMEOUT_MINUTES = "20";
 /** How long the setup may run without output before the script stops it. */
 const SETUP_QUIET_MS = 300_000;
+/** The line that the setup prints when `apt-get update` or the Tailscale installer times out. */
+const TIMED_OUT = /^usine: .+ didn't finish within \d+ seconds$/u;
 /** How many of the setup's last output lines the error of a stopped setup quotes. */
 const TAIL_LINES = 20;
 const TAIL_CHARS = 8_192;
@@ -46,14 +48,32 @@ export class UsageError extends Error {}
  * Runs in the builder as user `boxd`, with the runtime and the image as `$1` and `$2`, and leaves
  * the state that every restore resumes. apt gives up on a connection after 30 seconds without
  * data, and `apt-get update` and the Tailscale installer, which runs `apt-get update` itself, run
- * once more if they fail or don't finish in time. `apt-get update` exits 0 when an index fails to
- * download, so the first run uses `--error-on=any`.
+ * once more if they fail or don't finish in time. Each failed run prints a line that starts with
+ * `usine:` and says why it failed. `apt-get update` exits 0 when an index fails to download, so
+ * the first run uses `--error-on=any`.
  */
 const SETUP = `set -eu
 runtime=$1
 image=$2
+# Runs a command as root and stops it after $1 seconds. $2 names it in the line about a failure.
+run_limited() {
+  seconds=$1
+  what=$2
+  shift 2
+  status=0
+  sudo timeout -k 10 "$seconds" "$@" || status=$?
+  if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+    echo "usine: $what didn't finish within $seconds seconds" >&2
+  elif [ "$status" -ne 0 ]; then
+    echo "usine: $what exited with code $status" >&2
+  fi
+  return "$status"
+}
 apt_update() {
-  sudo timeout -k 10 120 apt-get --error-on=any update || sudo timeout -k 10 120 apt-get update
+  run_limited 120 'apt-get update' apt-get --error-on=any update || {
+    echo 'usine: running apt-get update again' >&2
+    run_limited 120 'apt-get update' apt-get update
+  }
 }
 printf '%s\\n' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' |
   sudo tee /etc/apt/apt.conf.d/80usine-network >/dev/null
@@ -71,7 +91,10 @@ fi
 "$runtime" volume create usine-pnpm-store >/dev/null
 "$runtime" volume create usine-turbo-cache >/dev/null
 curl -fsSL https://tailscale.com/install.sh -o /tmp/usine-tailscale.sh
-sudo timeout -k 10 240 sh /tmp/usine-tailscale.sh || sudo timeout -k 10 240 sh /tmp/usine-tailscale.sh
+run_limited 240 'the Tailscale installer' sh /tmp/usine-tailscale.sh || {
+  echo 'usine: running the Tailscale installer again' >&2
+  run_limited 240 'the Tailscale installer' sh /tmp/usine-tailscale.sh
+}
 rm /tmp/usine-tailscale.sh
 sudo systemctl enable tailscaled
 sudo systemctl stop tailscaled
@@ -201,16 +224,17 @@ const outputTail = () => {
 };
 
 /**
- * Runs the setup on `machine`, relays its output to `output`, and returns the exit code. Stops the
- * setup and throws `SetupLimitError`, with the last output lines, when it runs longer than
- * `setupTimeoutMs` or prints nothing for `quietMs`. When `signal` aborts, stops the setup and
- * throws at once, without waiting for the stream to end.
+ * Runs the setup on `machine`, relays its output to `output`, and returns the exit code. Calls
+ * `onTimeout` for each line that says a command in the setup timed out. Stops the setup and throws
+ * `SetupLimitError`, with the last output lines, when it runs longer than `setupTimeoutMs` or
+ * prints nothing for `quietMs`. When `signal` aborts, stops the setup and throws at once, without
+ * waiting for the stream to end.
  */
 const runSetup = async (
   boxd,
   machine,
   { runtime, image, setupTimeoutMs },
-  { output, signal, quietMs },
+  { output, signal, quietMs, onTimeout },
 ) => {
   const stream = boxd.machines.streamExec(machine, {
     command: `sh -s -- '${runtime}' '${image}'`,
@@ -241,10 +265,15 @@ const runSetup = async (
   try {
     sendStdin(stream, new TextEncoder().encode(SETUP));
     const relay = async (chunks) => {
+      const decoder = new TextDecoder();
+      let partial = "";
       for await (const chunk of chunks) {
         heard();
         tail.push(chunk);
         output.write(chunk);
+        const lines = (partial + decoder.decode(chunk, { stream: true })).split("\n");
+        partial = lines.pop();
+        for (const line of lines) if (TIMED_OUT.test(line.trimEnd())) onTimeout();
       }
     };
     const run = Promise.all([stream.wait(), relay(stream.stdout), relay(stream.stderr)]);
@@ -300,9 +329,10 @@ const saveSnapshot = async (boxd, machine, name, { signal, pollMs, timeoutMs }) 
  * with the egress allowlist of `egress.mjs` in its spec, which the snapshot keeps. The setup runs
  * with egress unrestricted, because it downloads from hosts outside the allowlist. The machine is
  * deleted when the build ends, fails, or `signal` aborts; `log` names it if its deletion fails.
- * `cleanup` is a second client for the deletion and for the egress read after a stopped setup:
- * its calls open their own connection instead of sharing the one that carried the setup, which a
- * long setup without output can leave dead. `pollMs` sets how often the script reads the machine
+ * `cleanup` is a second client for the deletion and for the egress reads during and after the
+ * setup. On a TLS endpoint, its calls open their own connection instead of sharing the one that
+ * carried the setup, which a long setup without output can leave dead; on a plaintext endpoint,
+ * grpc-js shares one connection between the two clients. `pollMs` sets how often the script reads the machine
  * and the snapshot. `egressTimeoutMs` and `snapshotTimeoutMs` set how long it waits for an egress
  * edit and the snapshot, `egressInForceMs` how long it waits after boxd reports the allowlist
  * lifted before it reads it again, and `quietMs` how long the setup may run without output.
@@ -327,14 +357,16 @@ export const build = async (
   const name = `usine-snapshot-${stamp}-${process.pid}`;
   const sized = Machine.spec().size(options.size);
   const spec = (options.isolated ? sized.isolated() : sized).egress(...egress);
-  const machine = await boxd.machines.create({ name, shared: true, spec });
-  log(`Created temporary machine ${name}`);
+  let machine;
   let removal;
-  const remove = () =>
-    (removal ??= cleanup.machines.delete(machine.id).then(
+  const remove = () => {
+    if (machine === undefined) return Promise.resolve();
+    return (removal ??= cleanup.machines.delete(machine.id).then(
       () => log(`Deleted temporary machine ${name}`),
       () => log(`Delete temporary machine ${name} in boxd`),
     ));
+  };
+  // Before `create` returns, the deletion starts once it does, from the `finally` below.
   const interrupted = () => {
     log("Interrupted; deleting the temporary machine");
     void remove();
@@ -342,6 +374,9 @@ export const build = async (
   if (signal.aborted) interrupted();
   else signal.addEventListener("abort", interrupted, { once: true });
   try {
+    throwIfAborted(signal);
+    machine = await boxd.machines.create({ name, shared: true, spec });
+    log(`Created temporary machine ${name}`);
     throwIfAborted(signal);
     await boxd.machines.waitUntilReady(machine.id, { timeout: READY_TIMEOUT_MS });
     await boxd.machines.setAutoHibernateTimeout(machine.id, 0);
@@ -357,12 +392,24 @@ export const build = async (
       throw new Error(
         `boxd reported the temporary machine's egress unrestricted, then ${describeEgress(lifted.egressAllow)} ${egressInForceMs / 1000} seconds later`,
       );
+    log(
+      `boxd still reports the temporary machine's egress unrestricted ${egressInForceMs / 1000} seconds later`,
+    );
+    const reads = [];
+    const readEgress = () => reads.push(logEgress(cleanup, machine.id, log));
     let code;
     try {
-      code = await runSetup(boxd, machine.id, options, { output, signal, quietMs });
+      code = await runSetup(boxd, machine.id, options, {
+        output,
+        signal,
+        quietMs,
+        onTimeout: readEgress,
+      });
     } catch (error) {
-      if (error instanceof SetupLimitError) await logEgress(cleanup, machine.id, log);
+      if (error instanceof SetupLimitError) readEgress();
       throw error;
+    } finally {
+      await Promise.all(reads);
     }
     throwIfAborted(signal);
     if (code !== 0) throw new Error(`The setup exited with code ${code}`);
