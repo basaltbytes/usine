@@ -546,6 +546,23 @@ const makeClaudeSessions = Effect.gen(function* () {
         beforeFinish: Effect.void,
       });
       boundary = conversation.awaitUnpaused;
+      /**
+       * The tool-call count at the latest result that left each submitted message queued as a turn
+       * of its own. Claude reads such a message when that turn starts, before its tool calls.
+       */
+      const queuedTurnStarts = new Map<OperatorMessageId, number>();
+      /** Reports `ids` as read by a result: at their queued turn's start, or where the turn folded them. */
+      const readAtResult = (ids: ReadonlyArray<OperatorMessageId>) =>
+        Effect.gen(function* () {
+          const folded = ids.filter((id) => !queuedTurnStarts.has(id));
+          if (folded.length > 0) yield* conversation.read(folded, "turn");
+          for (const id of ids) {
+            const start = queuedTurnStarts.get(id);
+            if (start === undefined) continue;
+            queuedTurnStarts.delete(id);
+            yield* conversation.read([id], start);
+          }
+        });
       yield* Deferred.succeed(boundaryReady, undefined);
       const tools = new Map<string, string>();
       const usage = claudeSessionMeter(
@@ -626,8 +643,11 @@ const makeClaudeSessions = Effect.gen(function* () {
               const id = submitted[index];
               if (id !== undefined && ids.includes(id)) submitted.splice(index, 1);
             }
-            // A result acknowledges input that the turn folded in between tool rounds.
-            yield* conversation.read(ids, Schema.is(ClaudeResultMessage)(message) ? "turn" : "now");
+            if (Schema.is(ClaudeResultMessage)(message)) yield* readAtResult(ids);
+            else {
+              for (const id of ids) queuedTurnStarts.delete(id);
+              yield* conversation.read(ids, "now");
+            }
           }
           const limits = yield* readRateLimits(message);
           if (Option.isSome(limits)) yield* channel.emit(limits.value);
@@ -732,10 +752,14 @@ const makeClaudeSessions = Effect.gen(function* () {
                 read: read.length,
                 queuedTurns: message.queued_turn_count,
               });
-              yield* conversation.read(read, "turn");
+              yield* readAtResult(read);
             }
           }
           if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
+            // The last unread messages start the queued turns, which run after this result.
+            const calls = yield* channel.toolCalls;
+            for (const id of submitted.slice(-message.queued_turn_count))
+              queuedTurnStarts.set(id, calls);
             yield* Effect.logInfo("Claude child has queued user turns", {
               sessionId: session.id,
               queuedTurns: message.queued_turn_count,
@@ -817,6 +841,7 @@ const makeClaudeSessions = Effect.gen(function* () {
           launchWithRetries(spec, { ...resumeOptions, resume: reference.id }, [], scope, "replace"),
         );
         submitted.length = 0;
+        queuedTurnStarts.clear();
         yield* conversation.recover(
           policy,
           [...tools].map(([callId, tool]) => ({ callId, tool })),

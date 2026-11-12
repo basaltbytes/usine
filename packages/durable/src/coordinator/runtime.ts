@@ -621,8 +621,18 @@ const make = Effect.gen(function* () {
               "The canceled Attempt's coordinator failed while it stopped; the cancel still applies",
               { cause: Cause.pretty(ended.cause) },
             );
-          if ((yield* hub.outbox.started) && !(yield* hub.outbox.ended))
+          if ((yield* hub.outbox.started) && !(yield* hub.outbox.ended)) {
+            // The stopped children's unread inputs get their rejection before the channel ends.
+            yield* hub.interventions.settle.pipe(
+              Effect.catch((failure) =>
+                Effect.logWarning(
+                  "Could not reject the unread operator inputs of the canceled Attempt",
+                  { errorTag: failure._tag, message: failure.message },
+                ),
+              ),
+            );
             yield* hub.outbox.emit([AttemptChannel.Interrupted.make()]);
+          }
           yield* Effect.logInfo("The canceled Attempt stopped its children");
           return yield* canceledFailure();
         }

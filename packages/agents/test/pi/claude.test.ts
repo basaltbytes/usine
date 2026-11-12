@@ -1158,6 +1158,82 @@ describe("Claude child backend", () => {
         }).pipe(Effect.scoped),
       );
 
+  // Claude runs a message that arrives after a turn's last tool round as a turn of its own. The
+  // first result leaves it queued, and the next turn reads it before any of its tool calls.
+  for (const { name, tool, answered } of [
+    {
+      name: "doesn't count a steer run as its own turn when that turn calls a tool",
+      tool: true,
+      answered: false,
+    },
+    {
+      name: "counts a steer run as its own turn when that turn calls no tool",
+      tool: false,
+      answered: true,
+    },
+  ])
+    for (const acknowledgement of ["user_message_uuids", "queued_turn_count"] as const)
+      it.effect(`${name}, acknowledged by ${acknowledgement}`, () =>
+        Effect.gen(function* () {
+          const { inputs, output, sdk } = yield* typedTurnSdk;
+          const result = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(request());
+            const events = yield* Queue.unbounded<string>();
+            yield* Effect.forkScoped(
+              running.events.pipe(Stream.runForEach((event) => Queue.offer(events, event._tag))),
+            );
+            const until = (tag: string): Effect.Effect<void> =>
+              Queue.take(events).pipe(
+                Effect.flatMap((taken) => (taken === tag ? Effect.void : until(tag))),
+              );
+            const toolRound = (id: string) =>
+              Effect.gen(function* () {
+                yield* Queue.offer(output, {
+                  type: "assistant",
+                  message: {
+                    content: [{ type: "tool_use", id, name: "Bash", input: { command: "ls" } }],
+                  },
+                });
+                yield* until("ToolStarted");
+                yield* Queue.offer(output, {
+                  type: "user",
+                  message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+                });
+                yield* until("ToolFinished");
+              });
+            yield* Queue.take(inputs);
+            yield* toolRound("bash-1");
+            const steer = Steer.make({ message: "Check the logs" });
+            yield* running.intervene(steer, noDelivery);
+            yield* Queue.take(inputs);
+            yield* Queue.offer(output, {
+              type: "result",
+              subtype: "success",
+              result: "Started",
+              queued_turn_count: 1,
+            });
+            const acknowledged =
+              acknowledgement === "user_message_uuids" ? { user_message_uuids: [steer.id] } : {};
+            yield* Queue.offer(output, {
+              type: "assistant",
+              message: { content: [{ type: "text", text: "Checking the logs" }] },
+              ...acknowledged,
+            });
+            if (tool) yield* toolRound("bash-2");
+            yield* Queue.offer(output, {
+              type: "result",
+              subtype: "success",
+              result: "Done",
+              queued_turn_count: 0,
+              ...acknowledged,
+            });
+            return yield* running.result;
+          }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+          assert.strictEqual(result.message, "Done");
+          assert.strictEqual(result.answeredOperator, answered);
+        }).pipe(Effect.scoped),
+      );
+
   for (const answered of [true, false])
     it.effect(
       `restores whether a held idle report ${answered ? "answers" : "doesn't answer"} the operator`,
