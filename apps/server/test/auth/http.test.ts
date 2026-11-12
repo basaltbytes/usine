@@ -314,6 +314,7 @@ it.live("reads the client address from X-Forwarded-For only behind a trusted pro
       yield* proxied
         .startWeb(false)
         .pipe(from("127.0.0.1", `198.51.100.${count}, 203.0.113.7, 127.0.0.2`));
+    yield* proxied.startWeb(false).pipe(from("127.0.0.1", "198.51.100.201, 203.0.113.9"));
 
     assert.equal(
       (yield* proxied
