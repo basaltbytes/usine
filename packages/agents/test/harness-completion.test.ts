@@ -15,6 +15,13 @@ import { LocalProcess } from "../src/child-host/child-host.ts";
 import { AdmissionContext, AdmittedBrain } from "../src/harness/admission.ts";
 import { CapabilityProfile, Lacking } from "../src/harness/capability.ts";
 import { catalog } from "../src/harness/catalog.ts";
+import {
+  CompletionReply,
+  type CompletionRequest,
+  type CompletionSchema,
+  type HarnessCompletionError,
+  structuredCompletion,
+} from "../src/harness/completion.ts";
 import { claude } from "../src/harness/claude/descriptor.ts";
 import { continuationPolicy } from "../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../src/harness/contract.ts";
@@ -22,9 +29,24 @@ import { HarnessCatalog, HarnessDescriptor } from "../src/harness/harness.ts";
 import { Harnesses, type HarnessRuntime } from "../src/harness/node.ts";
 import { RolePlacements, RoleSpec } from "../src/harness/role.ts";
 import { checkedPreflight } from "../src/harness/runtime.ts";
-import { RestartState, WorkingDirectory } from "../src/runtime.ts";
+import {
+  AgentCapacityError,
+  AgentResultError,
+  PoolUnavailableError,
+  RestartState,
+  SessionOperationError,
+  UnknownModelError,
+  UnsupportedEffortError,
+  WorkingDirectory,
+} from "../src/runtime.ts";
 
 const Verdict = Schema.Struct({ approved: Schema.Boolean });
+
+class VerdictClass extends Schema.Class<VerdictClass, { readonly brand: unique symbol }>(
+  "VerdictClass",
+)({
+  approved: Schema.Boolean,
+}) {}
 
 const decision = RoleSpec.make({
   name: RoleName.make("decision"),
@@ -118,17 +140,24 @@ describe("structured completions through the registry", () => {
       const runtime = yield* (yield* Harnesses).runtime(claude.id);
       for (const role of [
         RoleSpec.make({ ...decision, persistence: "saved" }),
+        RoleSpec.make({ ...decision, persistence: "journaled" }),
         RoleSpec.make({ ...decision, output: "text" }),
       ]) {
         const refused = yield* runtime
           .complete(specFor(role), "Approve?", Verdict)
           .pipe(Effect.flip);
-        assert.strictEqual(refused._tag, "CompletionRefused");
+        assert.strictEqual(refused.reason._tag, "CompletionRefused");
+        assert.include(
+          refused.message,
+          "must return a structured value and keep no conversation",
+          `${role.persistence} ${role.output}`,
+        );
+        assert.deepStrictEqual(refused.usage, Option.none());
       }
       const scalar = yield* runtime
         .complete(specFor(decision), "Approve?", Schema.Boolean)
         .pipe(Effect.flip);
-      assert.strictEqual(scalar._tag, "CompletionRefused");
+      assert.strictEqual(scalar.reason._tag, "CompletionRefused");
       assert.include(scalar.message, "JSON object");
       assert.deepStrictEqual(calls, []);
     }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
@@ -159,23 +188,35 @@ describe("structured completions through the registry", () => {
       const refused = yield* runtime
         .complete(specFor(decision), "Approve?", Verdict)
         .pipe(Effect.flip);
-      assert.strictEqual(refused._tag, "CompletionRefused");
+      assert.strictEqual(refused.reason._tag, "CompletionRefused");
       assert.include(refused.message, "lacks structured-output (No output schema)");
       assert.deepStrictEqual(calls, []);
     }).pipe(Effect.provide(Harnesses.layerFrom(source, runtimes)));
   });
 
-  it.effect("refuses to open a session for a role that runs as a completion", () =>
-    Effect.gen(function* () {
-      const runtime = yield* (yield* Harnesses).runtime(claude.id);
-      const spec = specFor(decision);
-      const policy = yield* continuationPolicy(spec, "Approve?", RestartState.make({}));
-      const refused = yield* runtime
-        .open(spec, StartPrompt.make({ text: "Approve?" }), policy)
-        .pipe(Effect.scoped, Effect.flip);
-      assert.strictEqual(refused._tag, "AgentResultError");
-      assert.include(refused.message, "runs as a completion");
-    }).pipe(Effect.provide(Harnesses.layerFrom(catalog, answering().runtimes))),
+  it.effect(
+    "refuses to open a session for a role that keeps no conversation or returns a value",
+    () =>
+      Effect.gen(function* () {
+        const runtime = yield* (yield* Harnesses).runtime(claude.id);
+        for (const role of [
+          decision,
+          RoleSpec.make({ ...decision, output: "text" }),
+          RoleSpec.make({ ...decision, persistence: "saved" }),
+        ]) {
+          const spec = specFor(role);
+          const policy = yield* continuationPolicy(spec, "Approve?", RestartState.make({}));
+          const refused = yield* runtime
+            .open(spec, StartPrompt.make({ text: "Approve?" }), policy)
+            .pipe(Effect.scoped, Effect.flip);
+          assert.strictEqual(refused._tag, "AgentResultError");
+          assert.include(
+            refused.message,
+            "runs as a completion",
+            `${role.persistence} ${role.output}`,
+          );
+        }
+      }).pipe(Effect.provide(Harnesses.layerFrom(catalog, answering().runtimes))),
   );
 
   it.effect("fails a completion that returns nothing within ten minutes", () => {
@@ -187,8 +228,175 @@ describe("structured completions through the registry", () => {
         .pipe(Effect.flip, Effect.forkChild);
       yield* TestClock.adjust("10 minutes");
       const failure = yield* Fiber.join(fiber);
-      assert.strictEqual(failure._tag, "SessionOperationError");
+      assert.strictEqual(failure.reason._tag, "SessionOperationError");
       assert.include(failure.message, "no completion within 10 minutes");
+    }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
+  });
+});
+
+/** Runtimes whose completion is the shared seam over `run`, recording each JSON Schema sent. */
+const seamWith = (
+  run: (request: CompletionRequest) => Effect.Effect<CompletionReply, HarnessCompletionError>,
+) => {
+  const schemas: Array<CompletionSchema> = [];
+  const complete = structuredCompletion((request) =>
+    Effect.sync(() => schemas.push(request.schema)).pipe(Effect.andThen(run(request))),
+  );
+  const runtimes = catalog.ids.map((id): HarnessRuntime => ({
+    id,
+    preflight: checkedPreflight(() => Effect.void),
+    stop: () => Effect.void,
+    open: () => Effect.die(new Error("The test opens no session")),
+    complete,
+  }));
+  return { schemas, runtimes };
+};
+
+/** Reports the usage of a request that spent `tokens`, then answers with `reply`. */
+const spending =
+  (
+    tokens: number,
+    reply: (request: CompletionRequest) => Effect.Effect<CompletionReply, HarnessCompletionError>,
+  ) =>
+  (request: CompletionRequest) =>
+    request
+      .spent(
+        SessionTokensUpdated.make({
+          session: request.spec.session,
+          totalTokens: TokenCount.make(tokens),
+        }),
+      )
+      .pipe(Effect.andThen(reply(request)));
+
+describe("the structured completion seam", () => {
+  it.effect("sends the root definition of an identified output schema", () => {
+    const { schemas, runtimes } = seamWith(
+      spending(5, () => Effect.succeed(CompletionReply.Value({ value: { approved: true } }))),
+    );
+    return Effect.gen(function* () {
+      const runtime = yield* (yield* Harnesses).runtime(claude.id);
+      const completion = yield* runtime.complete(specFor(decision), "Approve?", VerdictClass);
+      assert.instanceOf(completion.value, VerdictClass);
+      assert.isTrue(completion.value.approved);
+      const named = yield* runtime.complete(
+        specFor(decision),
+        "Approve?",
+        Verdict.annotate({ identifier: "Verdict" }),
+      );
+      assert.deepStrictEqual(named.value, { approved: true });
+      assert.strictEqual(completion.usage.totalTokens, 5);
+      for (const schema of schemas) {
+        assert.strictEqual(schema.type, "object");
+        assert.deepStrictEqual(schema.required, ["approved"]);
+        assert.strictEqual(schema.additionalProperties, false);
+        assert.isUndefined(schema.$ref);
+      }
+      assert.strictEqual(schemas.length, 2);
+    }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
+  });
+
+  const brain = { harness: claude.id, model: ModelId.make("claude-model") };
+  const sessionId = Option.some(AgentSessionId.make("decision-1"));
+  const outcomes: ReadonlyArray<{
+    readonly outcome: string;
+    readonly reply: Effect.Effect<CompletionReply, HarnessCompletionError>;
+    readonly reason: string;
+  }> = [
+    {
+      outcome: "an unknown model",
+      reply: Effect.fail(UnknownModelError.make({ ...brain, message: "No such model" })),
+      reason: "CompletionRefused",
+    },
+    {
+      outcome: "an unsupported effort",
+      reply: Effect.fail(
+        UnsupportedEffortError.make({
+          ...brain,
+          effort: "low",
+          message: "The model doesn't reason",
+        }),
+      ),
+      reason: "CompletionRefused",
+    },
+    {
+      outcome: "an unavailable pool",
+      reply: Effect.fail(
+        PoolUnavailableError.make({
+          ...brain,
+          pool: "apiKeys",
+          message: "No API key",
+        }),
+      ),
+      reason: "CompletionRefused",
+    },
+    {
+      outcome: "a failed result",
+      reply: Effect.fail(AgentResultError.make({ sessionId, message: "The turn failed" })),
+      reason: "SessionOperationError",
+    },
+    {
+      outcome: "a capacity refusal",
+      reply: Effect.fail(AgentCapacityError.make({ sessionId, message: "Overloaded" })),
+      reason: "AgentCapacityError",
+    },
+    {
+      outcome: "a transport failure",
+      reply: Effect.fail(
+        SessionOperationError.make({
+          operation: "stream",
+          sessionId,
+          message: "Output closed",
+          cause: new Error("closed"),
+        }),
+      ),
+      reason: "SessionOperationError",
+    },
+    {
+      outcome: "a declined answer",
+      reply: Effect.succeed(CompletionReply.Declined({ message: "I can't help with that" })),
+      reason: "CompletionRefused",
+    },
+    {
+      outcome: "no value",
+      reply: Effect.succeed(CompletionReply.Missing({ message: "No value" })),
+      reason: "CompletionInvalid",
+    },
+    {
+      outcome: "a final answer that isn't JSON",
+      reply: Effect.succeed(CompletionReply.Answer({ text: "Approved." })),
+      reason: "CompletionInvalid",
+    },
+    {
+      outcome: "a property that the schema doesn't model",
+      reply: Effect.succeed(CompletionReply.Value({ value: { approved: true, extra: "x" } })),
+      reason: "CompletionInvalid",
+    },
+  ];
+
+  for (const { outcome, reply, reason } of outcomes)
+    it.effect(`fails ${outcome} with ${reason} and the tokens spent`, () => {
+      const { runtimes } = seamWith(spending(7, () => reply));
+      return Effect.gen(function* () {
+        const runtime = yield* (yield* Harnesses).runtime(claude.id);
+        const failure = yield* runtime
+          .complete(specFor(decision), "Approve?", Verdict)
+          .pipe(Effect.flip);
+        assert.strictEqual(failure.reason._tag, reason);
+        assert.strictEqual(failure.message, failure.reason.message);
+        assert(Option.isSome(failure.usage), "the failure carries the tokens spent");
+        assert.strictEqual(failure.usage.value.totalTokens, 7);
+      }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
+    });
+
+  it.effect("decodes a final answer whose text is the value", () => {
+    const { runtimes } = seamWith(
+      spending(2, () => Effect.succeed(CompletionReply.Answer({ text: `{"approved":false}` }))),
+    );
+    return Effect.gen(function* () {
+      const runtime = yield* (yield* Harnesses).runtime(claude.id);
+      const completion = yield* runtime.complete(specFor(decision), "Approve?", Verdict);
+      assert.deepStrictEqual(completion.value, { approved: false });
+      assert.strictEqual(completion.usage.totalTokens, 2);
     }).pipe(Effect.provide(Harnesses.layerFrom(catalog, runtimes)));
   });
 });

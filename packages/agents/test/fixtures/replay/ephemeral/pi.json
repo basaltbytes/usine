@@ -14,6 +14,18 @@
         "reasoning": "low",
         "systemPrompt": "Answer by calling the structured_output tool exactly once, with the answer as its arguments. Don't reply with text.",
         "tools": ["structured_output"],
+        "constrainedTools": [
+          {
+            "name": "structured_output",
+            "parameters": {
+              "type": "object",
+              "properties": { "label": { "type": "string", "enum": ["fruit", "vegetable"] } },
+              "required": ["label"],
+              "additionalProperties": false
+            },
+            "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+          }
+        ],
         "messages": [
           { "role": "user", "content": "Classify the word carrot as a fruit or a vegetable." }
         ]

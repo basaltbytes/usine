@@ -17,9 +17,8 @@ import {
   TokenCount,
   type UsdAmount,
 } from "@usine/core/agent/session";
-import { Clock, Deferred, Effect, Layer, Match, Option, Schema, Stream } from "effect";
+import { Clock, Deferred, Effect, Layer, Match, Option, Stream } from "effect";
 import {
-  AgentCapacityError,
   ChildBackend,
   harnessFailure,
   ChildSessionJournal,
@@ -40,13 +39,7 @@ import {
 } from "./sdk.ts";
 import type { PiPool } from "./authentication.ts";
 import { piMessageUsage } from "../usage.ts";
-import { CompletionInvalid } from "../contract.ts";
-import {
-  type CompletionSchema,
-  failedCompletion,
-  refusedLaunch,
-  structuredCompletion,
-} from "../completion.ts";
+import { CompletionReply, type CompletionRequest, structuredCompletion } from "../completion.ts";
 import { piPauseGate, piTurns } from "./turns.ts";
 import { requiredPiPool, splitPiModel } from "./authentication.ts";
 
@@ -249,78 +242,69 @@ const makePiSessions = Effect.gen(function* () {
         ),
       ),
   );
-  const completeJson = Effect.fn("PiRuntime.complete")(
-    function* (spec: SessionSpec, prompt: string, schema: CompletionSchema) {
-      yield* Effect.annotateCurrentSpan({
-        agent: spec.session.agent,
-        effort: spec.session.brain.effort,
-        harness: spec.session.brain.harness,
-        model: spec.session.brain.model,
-        ...parentFields(spec.session),
-        sessionId: spec.session.id,
-      });
-      yield* Effect.logInfo("Starting Pi structured completion");
-      const sentAt = yield* Clock.currentTimeMillis;
-      const result = yield* Effect.tryPromise({
-        try: (signal) =>
-          sdk.complete({
-            model: spec.session.brain.model,
-            thinkingLevel: spec.session.brain.effort,
-            prompt,
-            schema,
-            sentAt,
-            signal,
-          }),
-        catch: (cause) => childError("stream", spec, "Pi structured completion failed", cause),
-      });
-      if (result._tag !== "Completed") return yield* rejected(spec, result);
-      const session = resolvedPi(spec, result.model, result.pool);
-      const message = result.message;
-      const usage = SessionTokensUpdated.make({
+  const completeJson = Effect.fn("PiRuntime.complete")(function* ({
+    spec,
+    prompt,
+    schema,
+    spent,
+  }: CompletionRequest) {
+    yield* Effect.annotateCurrentSpan({
+      agent: spec.session.agent,
+      effort: spec.session.brain.effort,
+      harness: spec.session.brain.harness,
+      model: spec.session.brain.model,
+      ...parentFields(spec.session),
+      sessionId: spec.session.id,
+    });
+    yield* Effect.logInfo("Starting Pi structured completion");
+    const sentAt = yield* Clock.currentTimeMillis;
+    const result = yield* Effect.tryPromise({
+      try: (signal) =>
+        sdk.complete({
+          model: spec.session.brain.model,
+          thinkingLevel: spec.session.brain.effort,
+          prompt,
+          schema,
+          sentAt,
+          signal,
+        }),
+      catch: (cause) => childError("stream", spec, "Pi structured completion failed", cause),
+    });
+    if (result._tag !== "Completed") return yield* rejected(spec, result);
+    const session = resolvedPi(spec, result.model, result.pool);
+    const message = result.message;
+    yield* spent(
+      SessionTokensUpdated.make({
         session,
         ...Option.getOrElse(piMessageUsage(message), () => ({
           totalTokens: TokenCount.make(0),
           costUsd: Option.none<UsdAmount>(),
         })),
+      }),
+    );
+    // Pi ends a request that the provider stopped as a refusal with an error.
+    if (message.stopReason === "error" && message.rawStopReason === "refusal")
+      return CompletionReply.Declined({
+        message: message.errorMessage || "Pi's model declined to answer",
       });
-      if (message.stopReason === "error" || message.stopReason === "aborted") {
-        const failure = harnessFailure(
-          Option.some(session.id),
-          message.errorMessage || `Pi's model request ended with ${message.stopReason}`,
-        );
-        return yield* Schema.is(AgentCapacityError)(failure) ? failure : failedCompletion(failure);
-      }
-      const call = message.content.find(
-        (content) => content.type === "toolCall" && content.name === PI_OUTPUT_TOOL,
+    if (message.stopReason === "error" || message.stopReason === "aborted")
+      return yield* harnessFailure(
+        Option.some(session.id),
+        message.errorMessage || `Pi's model request ended with ${message.stopReason}`,
       );
-      if (call === undefined || call.type !== "toolCall")
-        return yield* CompletionInvalid.make({
-          sessionId: session.id,
-          message: `Pi's model answered without calling ${PI_OUTPUT_TOOL}`,
-        });
-      if (call.argumentsError !== undefined)
-        return yield* CompletionInvalid.make({
-          sessionId: session.id,
-          message: `Pi's model sent ${PI_OUTPUT_TOOL} arguments that aren't a JSON object`,
-        });
-      return { value: call.arguments, usage };
-    },
-    (effect, spec) =>
-      effect.pipe(
-        Effect.catchTags({
-          UnknownModelError: (error) => Effect.fail(refusedLaunch(spec.session.id, error)),
-          UnsupportedEffortError: (error) => Effect.fail(refusedLaunch(spec.session.id, error)),
-          PoolUnavailableError: (error) => Effect.fail(refusedLaunch(spec.session.id, error)),
-        }),
-        Effect.tapError((error) =>
-          Effect.logWarning("Pi structured completion failed", {
-            sessionId: spec.session.id,
-            errorTag: error._tag,
-            message: error.message,
-          }),
-        ),
-      ),
-  );
+    const call = message.content.find(
+      (content) => content.type === "toolCall" && content.name === PI_OUTPUT_TOOL,
+    );
+    if (call === undefined || call.type !== "toolCall")
+      return CompletionReply.Missing({
+        message: `Pi's model answered without calling ${PI_OUTPUT_TOOL}`,
+      });
+    if (call.argumentsError !== undefined)
+      return CompletionReply.Missing({
+        message: `Pi's model sent ${PI_OUTPUT_TOOL} arguments that aren't a JSON object`,
+      });
+    return CompletionReply.Value({ value: call.arguments });
+  });
   const directory = (spec: SessionSpec) => `${spec.cwd}/.usine/pi/sessions`;
   const open = Effect.fn("PiRuntime.open")(function* (
     spec: SessionSpec,

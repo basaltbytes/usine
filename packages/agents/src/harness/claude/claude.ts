@@ -54,7 +54,11 @@ import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { claudeSessionMeter, claudeTokenMeter } from "../usage.ts";
-import { type CompletionSchema, refusedLaunch, structuredCompletion } from "../completion.ts";
+import {
+  type CompletionRequest,
+  type CompletionSchema,
+  structuredCompletion,
+} from "../completion.ts";
 import { readClaudeCompletion } from "./completion.ts";
 import { claudeRateLimits, isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
 import {
@@ -902,48 +906,37 @@ const makeClaudeSessions = Effect.gen(function* () {
       };
     },
   );
-  const completeJson = Effect.fn("ClaudeRuntime.complete")(
-    function* (spec: SessionSpec, prompt: string, schema: CompletionSchema) {
-      yield* Effect.annotateCurrentSpan({
-        agent: spec.session.agent,
-        effort: spec.session.brain.effort,
-        harness: spec.session.brain.harness,
-        model: spec.session.brain.model,
-        ...parentFields(spec.session),
-        sessionId: spec.session.id,
-        worker: spec.worker,
-      });
-      yield* Effect.logInfo("Starting Claude structured completion");
-      const scope = yield* Effect.scope;
-      const launch = yield* launchWithRetries(
-        spec,
-        completionOptions(spec, schema),
-        [userMessage(prompt)],
-        scope,
-      );
-      const pool = yield* billingPool(spec, launch.query);
-      const session = resolvedSession(spec.session, {
-        brain: spec.session.brain,
-        pool: Option.some(pool),
-        endpoint: spec.session.endpoint,
-      });
-      return yield* readClaudeCompletion(spec, session, launch);
-    },
-    (effect, spec) =>
-      effect.pipe(
-        Effect.catchTag("UnknownModelError", (error) =>
-          Effect.fail(refusedLaunch(spec.session.id, error)),
-        ),
-        Effect.tapError((error) =>
-          Effect.logWarning("Claude structured completion failed", {
-            sessionId: spec.session.id,
-            errorTag: error._tag,
-            message: error.message,
-          }),
-        ),
-        Effect.scoped,
-      ),
-  );
+  const completeJson = Effect.fn("ClaudeRuntime.complete")(function* ({
+    spec,
+    prompt,
+    schema,
+    spent,
+  }: CompletionRequest) {
+    yield* Effect.annotateCurrentSpan({
+      agent: spec.session.agent,
+      effort: spec.session.brain.effort,
+      harness: spec.session.brain.harness,
+      model: spec.session.brain.model,
+      ...parentFields(spec.session),
+      sessionId: spec.session.id,
+      worker: spec.worker,
+    });
+    yield* Effect.logInfo("Starting Claude structured completion");
+    const scope = yield* Effect.scope;
+    const launch = yield* launchWithRetries(
+      spec,
+      completionOptions(spec, schema),
+      [userMessage(prompt)],
+      scope,
+    );
+    const pool = yield* billingPool(spec, launch.query);
+    const session = resolvedSession(spec.session, {
+      brain: spec.session.brain,
+      pool: Option.some(pool),
+      endpoint: spec.session.endpoint,
+    });
+    return yield* readClaudeCompletion(spec, session, launch, spent);
+  });
   const stop = Effect.fn("ClaudeRuntime.stop")(function* (spec: SessionSpec) {
     if (isRemoteHost(spec.host))
       yield* stopChildProcess({ ...spec, sessionId: Option.some(spec.session.id) }).pipe(

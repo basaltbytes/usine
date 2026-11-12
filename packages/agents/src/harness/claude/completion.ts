@@ -11,8 +11,8 @@ import {
   Stream,
 } from "effect";
 import { AgentCapacityError, AgentResultError, SessionOperationError } from "../../runtime.ts";
-import { type CompletionJson, failedCompletion } from "../completion.ts";
-import { CompletionInvalid, CompletionRefused, type SessionSpec } from "../contract.ts";
+import { CompletionReply, type CompletionRequest } from "../completion.ts";
+import type { SessionSpec } from "../contract.ts";
 import { claudeTokenMeter } from "../usage.ts";
 import {
   apiErrorRefusal,
@@ -27,22 +27,18 @@ import {
 import { isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
 
 /**
- * Returns the value of a structured completion's result, or why it has none: Claude Code found no
- * value that matches the schema within its retries, the model declined, the provider refused for
- * capacity, or the turn failed.
+ * Returns what a structured completion's result answered, or the failure that ended it: Claude
+ * Code found no value that matches the schema within its retries, the model declined, the
+ * provider refused for capacity, or the turn failed.
  */
 const completionOutcome = (
   sessionId: AgentSessionId,
   result: typeof ClaudeResultMessage.Type,
   providerFailure: Option.Option<AgentCapacityError | AgentResultError>,
-): Result.Result<
-  Schema.Json,
-  CompletionInvalid | CompletionRefused | AgentCapacityError | AgentResultError
-> => {
+): Result.Result<CompletionReply, AgentCapacityError | AgentResultError> => {
   if (result.subtype === "error_max_structured_output_retries")
-    return Result.fail(
-      CompletionInvalid.make({
-        sessionId,
+    return Result.succeed(
+      CompletionReply.Missing({
         message: "Claude Code returned no value that matches the output schema within its retries",
       }),
     );
@@ -59,14 +55,14 @@ const completionOutcome = (
       }),
     );
   if (result.stop_reason === "refusal")
-    return Result.fail(
-      CompletionRefused.make({ sessionId, message: text || "Claude declined to answer" }),
+    return Result.succeed(
+      CompletionReply.Declined({ message: text || "Claude declined to answer" }),
     );
   if (result.structured_output === undefined)
-    return Result.fail(
-      CompletionInvalid.make({ sessionId, message: "Claude returned no structured value" }),
+    return Result.succeed(
+      CompletionReply.Missing({ message: "Claude returned no structured value" }),
     );
-  return Result.succeed(result.structured_output);
+  return Result.succeed(CompletionReply.Value({ value: result.structured_output }));
 };
 
 /** The messages of a Claude Code launch, which a completion reads to its result. */
@@ -79,16 +75,18 @@ export interface CompletionMessages {
 }
 
 /**
- * Reads a completion's messages to its result and returns the value with the usage of `session`.
- * A capacity refusal while the usage limit rejects requests carries the limit's reset time.
+ * Reads a completion's messages to its result and returns what it answered, reporting the usage
+ * of `session` to `spent`. A capacity refusal while the usage limit rejects requests carries the
+ * limit's reset time.
  */
 export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(function* (
   spec: SessionSpec,
   session: AgentSession,
   launch: CompletionMessages,
+  spent: CompletionRequest["spent"],
 ) {
   const tokens = claudeTokenMeter();
-  let usage = SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(0) });
+  yield* spent(SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(0) }));
   let providerFailure = Option.none<AgentCapacityError | AgentResultError>();
   let limitResetsAt = Option.none<DateTime.Utc>();
   let result = Option.none<typeof ClaudeResultMessage.Type>();
@@ -98,11 +96,13 @@ export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(fu
       Effect.gen(function* () {
         const used = tokens.read(message);
         if (Option.isSome(used))
-          usage = SessionTokensUpdated.make({
-            session,
-            totalTokens: used.value.totalTokens,
-            costUsd: used.value.costUsd,
-          });
+          yield* spent(
+            SessionTokensUpdated.make({
+              session,
+              totalTokens: used.value.totalTokens,
+              costUsd: used.value.costUsd,
+            }),
+          );
         if (isRateLimitEvent(message)) limitResetsAt = rejectedUntil(message);
         const retry = decodeApiRetry(message);
         if (Option.isSome(retry)) {
@@ -127,7 +127,7 @@ export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(fu
       cause: new Error("unexpected end of output"),
     });
   const outcome = completionOutcome(session.id, result.value, providerFailure);
-  if (outcome._tag === "Success") return { value: outcome.success, usage } satisfies CompletionJson;
+  if (outcome._tag === "Success") return outcome.success;
   const failure = outcome.failure;
   if (Schema.is(AgentCapacityError)(failure))
     return yield* AgentCapacityError.make({
@@ -135,5 +135,5 @@ export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(fu
       message: failure.message,
       resetsAt: Option.orElse(failure.resetsAt, () => limitResetsAt),
     });
-  return yield* Schema.is(AgentResultError)(failure) ? failedCompletion(failure) : failure;
+  return yield* failure;
 });

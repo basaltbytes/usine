@@ -4,8 +4,7 @@ import { HarnessCatalog } from "./harness.ts";
 import { admitPreflight, type HarnessRuntime } from "./runtime.ts";
 import { SessionSpec } from "./contract.ts";
 import { admitSession } from "./launch.ts";
-import { admitCompletion } from "./completion.ts";
-import { SessionOperationError } from "../runtime.ts";
+import { admitCompletion, timedOutCompletion } from "./completion.ts";
 
 /** How long a structured completion may run before it fails as a stalled operation. */
 const COMPLETION_TIMEOUT = "10 minutes";
@@ -32,7 +31,7 @@ export class UnknownHarnessError extends Schema.TaggedError<
  * A complete catalog of harness descriptors and their runtimes. Each registered runtime opens and
  * stops sessions and runs completions with only its own harness's host variables, and admits each
  * opened session, completion, and preflight brain with the catalog. A completion fails with
- * `SessionOperationError` after 10 minutes.
+ * a `SessionOperationError` reason after 10 minutes.
  */
 export class Harnesses extends Context.Service<
   Harnesses,
@@ -81,12 +80,10 @@ export class Harnesses extends Context.Service<
                 }).pipe(
                   Effect.andThen(
                     Effect.fail(
-                      SessionOperationError.make({
-                        operation: "stream",
-                        sessionId: Option.some(spec.session.id),
-                        message: `${runtime.id} returned no completion within ${COMPLETION_TIMEOUT}`,
-                        cause: new Error("completion timed out"),
-                      }),
+                      timedOutCompletion(
+                        spec,
+                        `${runtime.id} returned no completion within ${COMPLETION_TIMEOUT}`,
+                      ),
                     ),
                   ),
                 ),

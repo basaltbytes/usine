@@ -2,7 +2,7 @@ import {
   AgentSession,
   AgentSessionId,
   HarnessSession,
-  type SessionTokensUpdated,
+  SessionTokensUpdated,
 } from "@usine/core/agent/session";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, type Effect, Schema } from "effect";
@@ -109,7 +109,8 @@ export class CompletionInvalid extends Schema.TaggedError<
 /**
  * Admission, the harness, or its model refused the request: the brain can't serve the role, the
  * model or credential isn't available, or the model declined to answer. The same request fails
- * the same way until its brain, credential, or prompt changes.
+ * the same way until its brain, credential, or prompt changes. A harness that can't tell a
+ * declined answer from another one reports it as `CompletionInvalid`.
  */
 export class CompletionRefused extends Schema.TaggedError<
   CompletionRefused,
@@ -123,10 +124,26 @@ export class CompletionRefused extends Schema.TaggedError<
  * Why a structured completion has no value. `AgentCapacityError` is a provider capacity refusal or
  * usage limit, and `SessionOperationError` a harness process or transport failure.
  */
-export const CompletionError = Schema.Union([
+export const CompletionFailure = Schema.Union([
   CompletionInvalid,
   CompletionRefused,
   AgentCapacityError,
   SessionOperationError,
 ]);
-export type CompletionError = typeof CompletionError.Type;
+export type CompletionFailure = typeof CompletionFailure.Type;
+
+/** A structured completion that has no value, with the tokens it spent before it failed. */
+export class CompletionError extends Schema.TaggedError<
+  CompletionError,
+  Brand.Brand<"@usine/agents/harness/contract/CompletionError">
+>("@usine/agents/CompletionError")("CompletionError", {
+  sessionId: AgentSessionId,
+  reason: CompletionFailure,
+  /**
+   * The tokens and cost spent before the failure, reported as for a successful completion, or
+   * `None` when the completion failed before the harness reported any usage.
+   */
+  usage: Schema.Option(SessionTokensUpdated),
+  /** The message of `reason`. */
+  message: Schema.NonEmptyString,
+}) {}
