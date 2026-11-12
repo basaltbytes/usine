@@ -1,6 +1,7 @@
 import { catalog } from "@usine/agents/harness";
 import { RoleBinding } from "@usine/core/access";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
+import { CoordinatorKind, DEFAULT_COORDINATOR } from "@usine/core/agent";
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
@@ -52,7 +53,12 @@ import {
   SchemaTransformation,
 } from "effect";
 import { IpNetwork } from "effect/net";
-import { nonBlankString, uniqueLabelNames, uniqueRepositoryNames } from "./checks.ts";
+import {
+  eventsWithoutParentBrain,
+  nonBlankString,
+  uniqueLabelNames,
+  uniqueRepositoryNames,
+} from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
 import { DeclaredLabel } from "./label.ts";
 
@@ -680,6 +686,14 @@ export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/
   maxAttemptMinutes: Schema.OptionFromOptionalKey(PositiveInt),
   /** The token limit per attempt, counting the parent and every child, or `None` for no limit. */
   maxAttemptTokens: Schema.OptionFromOptionalKey(PositiveInt),
+  /**
+   * The coordinator kind of attempts whose agent sets none: `session` or `events`. Decoding
+   * defaults to `session`.
+   */
+  coordinator: CoordinatorKind.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_COORDINATOR)),
+    Schema.withConstructorDefault(Effect.succeed(DEFAULT_COORDINATOR)),
+  ),
   /** The parent model for agents that set none, or `None` to let Pi select it. */
   parentModel: Schema.OptionFromOptionalKey(ModelId),
   /** The parent reasoning effort for agents that set none, or `None` to use the child's effort. */
@@ -744,7 +758,7 @@ const SettingsFromYaml = Settings.pipe(
     parentModel: "parent_model",
     parentEffort: "parent_effort",
   }),
-);
+).check(eventsWithoutParentBrain({ parentModel: "parent_model", parentEffort: "parent_effort" }));
 
 /**
  * Decodes snake_case worker settings and checks SSH destination, provisioner, and gateway

@@ -51,3 +51,17 @@ it("preserves required outcome labels when editing another field in a PR loop", 
   if (Result.isFailure(restored)) return;
   expect(restored.success.outcomeLabels).toEqual(["ready-to-merge", "agent-review-findings"]);
 });
+
+it("preserves an agent's coordinator and decision brain through form/text edits", () => {
+  const key = entityKey("agent", "developer");
+  const draft = readForm(
+    key,
+    "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: high\ncoordinator: events\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nImplement the issue.\n",
+  );
+  expect(Result.isSuccess(draft)).toBe(true);
+  if (Result.isFailure(draft)) return;
+  expect(draft.success.coordinator).toBe("events");
+  expect(readForm(key, formText(key, draft.success))).toEqual(draft);
+  const inherited = withField(draft.success, "coordinator", undefined);
+  expect(formText(key, inherited)).not.toContain("coordinator:");
+});

@@ -23,7 +23,7 @@ import { RepositoryDetail } from "~/features/configuration/components/repositori
 import { SettingsPage } from "~/features/configuration/settings.page";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
-import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
+import { AgentFileView, ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import {
   configurationFixture,
@@ -210,7 +210,31 @@ describe("Agents page", () => {
     assert.include(markup, "<li>Keep changes small.</li>");
     assert.include(page, "openai-codex/gpt-5.6-terra From settings.parent_model");
     assert.include(page, "medium Set on this agent");
+    assert.include(page, "Coordinator session From settings.coordinator");
     assert.include(markup, 'href="/configuration/loops/start-dev"');
+  });
+
+  it("shows an Agent on the event-driven coordinator without parent settings", async () => {
+    const configuration = configurationFixture();
+    const page = text(
+      await render(() => (
+        <AgentDetail
+          name="developer"
+          configuration={ConfigurationView.make({
+            ...configuration,
+            agents: configuration.agents.map((agent) =>
+              AgentFileView.make({
+                ...agent,
+                coordinator: "events",
+                resolvedCoordinator: "events",
+              }),
+            ),
+          })}
+        />
+      )),
+    );
+    assert.include(page, "Coordinator events Set on this agent");
+    assert.notInclude(page, "Parent model");
   });
 
   it("shows why an Agent file did not load", async () => {

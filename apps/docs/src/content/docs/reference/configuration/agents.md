@@ -17,8 +17,10 @@ The server builds one harness runtime registry at startup and shares it between 
 | `harness` | `claude`, `codex`, or `pi` | required | Coding-agent harness used by child sessions. |
 | `model` | non-blank string | required | Model ID understood by the harness, with `provider/model` for Pi. |
 | `effort` | effort | required | Reasoning effort of child sessions. |
-| `parent_model` | string | instance setting, then Pi selection | Model for the Pi parent in `provider/model` form. |
-| `parent_effort` | effort | instance setting, then child effort | Reasoning effort of the Pi parent. |
+| `coordinator` | `session` or `events` | instance setting | What coordinates the agent's attempts. See [Coordinator](#coordinator). |
+| `parent_model` | string | instance setting, then Pi selection | Model for the Pi parent in `provider/model` form. Not allowed with `coordinator: events`. |
+| `parent_effort` | effort | instance setting, then child effort | Reasoning effort of the Pi parent. Not allowed with `coordinator: events`. |
+| `decision` | `model` and `effort` | none | Model and effort of the agent's decision sessions, which run on the agent's own harness. No behavior reads it yet. |
 | persona | non-blank Markdown | required | Standing instructions included for the parent and every child. |
 
 For example, create `developer` with harness `codex`, model `gpt-6-astra`, effort `medium`, and this persona:
@@ -31,15 +33,39 @@ Do not merge pull requests.
 
 Effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Claude Code disables thinking for `off` and treats `minimal` as `low`. Codex receives `off` as `none` and checks the selected model's supported efforts. Pi uses the value as its thinking level.
 
+## Coordinator
+
+The coordinator decides what an attempt does next. `coordinator` selects it for each attempt: the agent's value, else the instance's [`coordinator` setting](/reference/configuration/settings/#instance-settings), else `session`. A run uses the agent definition saved when it started; the instance setting applies when each attempt launches. An attempt keeps its coordinator across orchestrator restarts.
+
+- `session`: a parent session coordinates the attempt. See [Parent selection](#parent-selection).
+- `events`: rules applied to the attempt's lifecycle events coordinate it, with no parent session and no parent model credential. The coordinator starts one child with the task and turns the child's report into the attempt's outcome. The attempt details show **No parent session**, and input addressed to the parent goes to the child. See [Message an agent](/guides/message-an-agent/).
+
+An agent that resolves to `events` needs no parent model, effort, or credential, so startup, reloads, and saved edits don't validate them. An instance without a Pi credential starts when every agent resolves to `events`. Configuration imports, reloads, and saved edits refuse `parent_model` or `parent_effort` in the same agent file or `settings` block as `coordinator: events`, and the problem names the field.
+
+For example, this agent runs on the event-driven coordinator:
+
+```yaml
+---
+harness: codex
+model: gpt-6-astra
+effort: medium
+coordinator: events
+decision:
+  model: gpt-6-astra
+  effort: low
+---
+Complete one repository task at a time.
+```
+
 ## Parent selection
 
-Every attempt has a Pi parent in the orchestrator. Its `subagent` tool starts child sessions on the worker using the agent's harness, model, and effort. Children cannot create nested children. The [child-session budget](/reference/configuration/settings/#instance-settings) counts all child starts over the attempt's lifetime.
+An attempt with `coordinator: session` has a Pi parent in the orchestrator. Its `subagent` tool starts child sessions on the worker using the agent's harness, model, and effort. Children cannot create nested children. The [child-session budget](/reference/configuration/settings/#instance-settings) counts all child starts over the attempt's lifetime.
 
 Parent model selection uses the agent override, instance default, Pi's configured default, then the first Pi model with a credential. Parent effort uses the agent override, instance default, then child effort. Pi reads model defaults from `~/.pi/agent` or `PI_CODING_AGENT_DIR` for the Unix user running the orchestrator. With a gateway, the parent uses the first gateway declared by the SSH workers and needs no local provider login. Use `openai-codex/<model>` for its ChatGPT login, or `openai/<model>` and `anthropic/<model>` for its API keys. Without a gateway, an `openai-codex` model requires a local ChatGPT login; other providers require local API keys.
 
-Startup validates each rostered agent's resolved parent model, effort, and credential. An unavailable model, unsupported effort, or missing credential quarantines that agent and its loops and appears in **Needs attention**. The server and operator UI stay available, and other agents continue to run. Correct the parent configuration or credential and reload to restore the agent and its loops.
+Startup validates the resolved parent model, effort, and credential of each rostered agent with `coordinator: session`. An unavailable model, unsupported effort, or missing credential quarantines that agent and its loops and appears in **Needs attention**. The server and operator UI stay available, and other agents continue to run. Correct the parent configuration or credential and reload to restore the agent and its loops.
 
-Configuration imports, reloads, and saved edits validate every agent's resolved parent, including agent overrides and instance defaults, before accepting a revision. A refusal keeps the running configuration unchanged; CLI imports and saved edits also leave the stored revision unchanged. Each attempt checks its parent before creating the conversation, so a later credential change fails only that attempt with `AgentFailure`.
+Configuration imports, reloads, and saved edits validate the resolved parent of every agent with `coordinator: session`, including agent overrides and instance defaults, before accepting a revision. A refusal keeps the running configuration unchanged; CLI imports and saved edits also leave the stored revision unchanged. Each attempt checks its parent before creating the conversation, so a later credential change fails only that attempt with `AgentFailure`.
 
 The parent uses the coordinator role, which requires durable coordination: committed tool intents and results that continue after an orchestrator restart. Pi provides that capability. The `parent_model` and `parent_effort` settings continue to select its brain.
 

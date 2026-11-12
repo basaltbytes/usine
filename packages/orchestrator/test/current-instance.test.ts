@@ -204,6 +204,57 @@ describe("CurrentInstance", () => {
       ),
   );
 
+  it.live(
+    "starts and reloads agents on the event-driven coordinator without a parent credential",
+    () =>
+      withFolder(
+        (root) =>
+          Effect.gen(function* () {
+            const instances = yield* CurrentInstance;
+            const parent = fauxParent([]);
+            const provider = parent.models.getProvider("faux");
+            assert(provider !== undefined);
+            parent.models.setProvider({ ...provider, auth: {} });
+            yield* Layer.build(parentAdmissionLayer).pipe(
+              Effect.provideService(DurableHarness, {
+                ...parent,
+                install: unused,
+                resume: unused,
+                use: unused,
+                subscribe: unused,
+              }),
+            );
+            const started = yield* instances.get;
+            assert.lengthOf(started.agents, 1);
+            assert.lengthOf(started.loops, 1);
+            assert.lengthOf(started.invalidAgents, 0);
+            assert.lengthOf(started.quarantinedLoops, 0);
+
+            yield* writeInstanceFiles(root, [["agents/developer.md", agentFile("gpt-5.6-terra")]]);
+            yield* instances.reload;
+            const reloaded = yield* instances.get;
+            assert.deepStrictEqual(
+              reloaded.agents.map(({ agent }) => agent.brain.model),
+              ["gpt-5.6-terra"],
+            );
+            assert.lengthOf(reloaded.invalidAgents, 0);
+
+            yield* writeInstanceFiles(root, [
+              [
+                "agents/reviewer.md",
+                agentFile("gpt-5.6-sol").replace("---\n", "---\ncoordinator: session\n"),
+              ],
+            ]);
+            const refused = yield* Effect.flip(instances.reload);
+            assert.include(refused.message, 'Agent "reviewer" cannot run as coordinator');
+          }).pipe(Effect.scoped),
+        [
+          ["usine.yaml", `${usineYaml()}settings:\n  coordinator: events\n`],
+          ...initialFiles.filter(([file]) => file !== "usine.yaml"),
+        ],
+      ),
+  );
+
   it.live("validates gateway credentials at startup and reload without a local login", () =>
     withFolder(
       () =>

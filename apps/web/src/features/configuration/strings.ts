@@ -1,5 +1,6 @@
 import type { LoopApproval } from "@usine/config/loop";
 import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
+import { CoordinatorKind } from "@usine/core/agent";
 import type { LoopPermissions } from "@usine/core/loop";
 import { CONTAINER_LIMITS, type ContainerLimit, type WorkerKind } from "@usine/core/worker";
 import type {
@@ -281,8 +282,20 @@ export const editorCopy = {
   revision: (number: number) => `Revision ${number}`,
 };
 
+export const coordinatorCopy = {
+  effect: {
+    session:
+      "A parent session coordinates each attempt, unless the agent file sets coordinator: events.",
+    events:
+      "Rules on lifecycle events coordinate each attempt, with no parent session, unless the agent file sets coordinator: session.",
+  } satisfies Record<CoordinatorKind, string>,
+  label: "Coordinator",
+  agentHint: "Leave blank to use settings.coordinator.",
+  fromSettings: "From settings.coordinator",
+};
+
 export const agentCopy = {
-  parentOverride: "Set on this agent",
+  override: "Set on this agent",
   parentModelUnset: "Not set on this agent or in settings",
   models: "Models",
   modelsNote: "Merged tasks, by the model of the first attempt with this agent",
@@ -366,6 +379,13 @@ export const settingsFormFields = [
     label: "Attempt token limit",
     kind: "number",
     description: "Tokens per attempt, parent and children combined. Leave blank for no ceiling.",
+  },
+  {
+    path: "settings.coordinator",
+    label: "Coordinator",
+    options: CoordinatorKind.literals,
+    description:
+      "What coordinates attempts when the agent sets none: a parent session, or rules on events.",
   },
   {
     path: "settings.parent_model",

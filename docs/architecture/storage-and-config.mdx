@@ -247,7 +247,7 @@ pi-durable opens `.usine/durable.sqlite` through its own connection and defines 
 
 ## Attempt journal
 
-The event-driven coordinator's journal ([#1162](https://github.com/basaltbytes/usine/issues/1162), [#1157](https://github.com/basaltbytes/usine/issues/1157)) lives in the runtime database and stores every attempt whose `RunSpec.parent` is `none`. The `AttemptJournal` port ([journal.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/journal.ts)) has a memory adapter and a SQLite adapter on the application's `SqlClient`, with the `usine_attempt_journal_migrations` ledger:
+The event-driven coordinator's journal ([#1162](https://github.com/basaltbytes/usine/issues/1162), [#1157](https://github.com/basaltbytes/usine/issues/1157)) lives in the runtime database and stores every attempt whose `RunSpec.coordinator` is `events`. The `AttemptJournal` port ([journal.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/journal.ts)) has a memory adapter and a SQLite adapter on the application's `SqlClient`, with the `usine_attempt_journal_migrations` ledger:
 
 | Table                        | Rows                                                                                                                                                                                                 |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -103,6 +103,17 @@ parent_model: claude-sonnet-4-5
 Review the pull request.
 `,
   ],
+  [
+    "agents/triager.md",
+    `---
+harness: codex
+model: gpt-5.6-sol
+effort: low
+coordinator: events
+---
+Label the issue.
+`,
+  ],
   ["agents/broken.md", "---\nharness: [\n---\nNo brain.\n"],
   [
     "loops/start-dev.md",
@@ -386,6 +397,15 @@ describe("Configuration view", () => {
       assert.strictEqual(reviewer.resolvedParentEffort, "xhigh");
       assert.deepStrictEqual(reviewer.loops, ["review"]);
 
+      const triager = view.agents.find(({ name }) => name === "triager");
+      assert.deepStrictEqual(
+        [developer, triager].map((agent) => [agent?.coordinator, agent?.resolvedCoordinator]),
+        [
+          [null, "session"],
+          ["events", "events"],
+        ],
+      );
+
       assert.deepStrictEqual(
         view.invalidAgents.map(({ name, file }) => [name, file]),
         [["broken", "agents/broken.md"]],
@@ -526,6 +546,7 @@ describe("Configuration view", () => {
         maxAttemptTokens: null,
         parentModel: "gpt-5.6-sol",
         parentEffort: null,
+        coordinator: "session",
         operator: "PhilDL",
         webhooks: "endpoint",
         lastHintAt: "2026-10-29T12:00:00.000Z",

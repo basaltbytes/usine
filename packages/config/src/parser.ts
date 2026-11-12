@@ -33,9 +33,9 @@ import {
   UndeclaredTriggerLabelWarning,
   UndeclaredOutcomeLabelWarning,
 } from "./instance/diagnostics.ts";
-import { scheduleWithoutOutcomeLabels } from "./checks.ts";
+import { eventsWithoutParentBrain, scheduleWithoutOutcomeLabels } from "./checks.ts";
 import { LoopFile, loopPath, LoopApproval, LoopPriority, PromptTemplate } from "./loop.ts";
-import { AgentPersona, AgentName } from "@usine/core/agent";
+import { AgentPersona, AgentName, CoordinatorKind, DecisionBrain } from "@usine/core/agent";
 import { IssueTrigger, PullRequestTrigger, ScheduleTrigger, Stream } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
 import { ValidSelector } from "./selector.ts";
@@ -104,11 +104,13 @@ class AgentFrontmatter extends Schema.Class<
   effort: Effort,
   parentModel: Schema.OptionFromOptionalKey(ModelId),
   parentEffort: Schema.OptionFromOptionalKey(Effort),
+  coordinator: Schema.OptionFromOptionalKey(CoordinatorKind),
+  decision: Schema.OptionFromOptionalKey(DecisionBrain),
 }) {}
 
 const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
   Schema.encodeKeys({ parentModel: "parent_model", parentEffort: "parent_effort" }),
-);
+).check(eventsWithoutParentBrain({ parentModel: "parent_model", parentEffort: "parent_effort" }));
 
 /**
  * Serializes `agent` as YAML frontmatter and a Markdown persona, with snake_case keys. The name
@@ -330,6 +332,8 @@ export const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
         effort: frontmatter.effort,
         parentModel: frontmatter.parentModel,
         parentEffort: frontmatter.parentEffort,
+        coordinator: frontmatter.coordinator,
+        decision: frontmatter.decision,
         persona,
       });
     }),

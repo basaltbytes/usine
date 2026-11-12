@@ -3,7 +3,7 @@ import type {
   RecoveredLeftovers,
   RecoverySink,
 } from "@usine/core/attempt/salvage";
-import { Agent } from "@usine/core/agent";
+import { Agent, CoordinatorKind, DEFAULT_COORDINATOR } from "@usine/core/agent";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, type StopReason } from "@usine/core/attempt";
@@ -261,6 +261,10 @@ export class CheckoutRequest extends Schema.Class<
   maxAttemptTokens: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
   /** The Pi parent's reasoning effort. The launch fails if the model doesn't support it. */
   parentEffort: Effort,
+  /** What coordinates the Attempt's children, copied into the RunSpec. */
+  coordinator: CoordinatorKind.pipe(
+    Schema.withConstructorDefault(Effect.succeed(DEFAULT_COORDINATOR)),
+  ),
   /** The ref that unfinished work is pushed to if the Attempt doesn't succeed. */
   salvageRef: SalvageRef,
   /** The previous Attempt's pushed salvage, checked out instead of `revision`. */

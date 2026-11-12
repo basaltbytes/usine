@@ -62,3 +62,33 @@ it.effect("keys the shared check on the instance default parent effort", () =>
     expect(lookups).toHaveBeenCalledTimes(2);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
+
+it.effect("checks no parent brain for agents on the event-driven coordinator", () =>
+  Effect.gen(function* () {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, [
+      [
+        "usine.yaml",
+        "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\nsettings:\n  coordinator: events\n",
+      ],
+      ["agents/alpha.md", agentFile("high")],
+      ["agents/beta.md", agentFile("high", "coordinator: session\nparent_effort: max\n")],
+    ]);
+    const loaded = yield* (yield* ConfigurationFolder).load(root);
+    const parents = fauxParent([]);
+    const lookups = vi.spyOn(parents.models, "getModel");
+
+    const problems = yield* parentAdmissionProblems(loaded, parents);
+
+    expect(problems.map(({ file }) => file)).toEqual(["agents/beta.md"]);
+    expect(lookups).toHaveBeenCalledTimes(1);
+
+    yield* writeInstanceFiles(root, [["agents/beta.md", agentFile("high")]]);
+    lookups.mockClear();
+    const reloaded = yield* (yield* ConfigurationFolder).load(root);
+    const unparented = yield* parentAdmissionProblems(reloaded, parents);
+    expect(unparented).toEqual([]);
+    expect(lookups).not.toHaveBeenCalled();
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);

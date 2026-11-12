@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { CoordinatorKind } from "@usine/core/agent";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
 import { ErrorAlert } from "~/components/error-alert";
 import { Markdown } from "~/components/markdown";
 import { type FormFieldsProps, stringValue } from "~/features/configuration/lib/forms";
 import { capabilitiesQuery } from "~/lib/configuration/capabilities";
-import { formCopy } from "~/features/configuration/strings";
+import { coordinatorCopy, formCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { Fields, FormField } from "./fields";
 
@@ -36,6 +37,13 @@ export const AgentFields = (fields: FormFieldsProps) => {
             description: formCopy.modelHint,
           },
           { path: "effort", label: formCopy.effort, options: capabilities.data?.efforts ?? [] },
+          {
+            path: "coordinator",
+            label: coordinatorCopy.label,
+            options: CoordinatorKind.literals,
+            optional: true,
+            description: coordinatorCopy.agentHint,
+          },
         ]}
       />
       <FormField {...fields} path="persona" label={formCopy.persona} kind="textarea" />

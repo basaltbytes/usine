@@ -13,7 +13,7 @@ usine must work with whichever model provider and login the operator has, on mac
 - **No provider names in generic places.** Don't name a provider or harness in a role's interface, a configuration value, an issue title for a generic feature, or a prerequisite.
 - **One credential.** A feature uses the credential the attempt already has.
 - **One way to call a model.** Every model call goes through the harness contract.
-- **The coordinator applies rules to events.** It replaces the Pi parent session (#1150), with no parent model. Configuration will name it `coordinator: session | events` (#1158). Until #1166 merges, the Pi parent still coordinates attempts.
+- **The coordinator applies rules to events.** It replaces the Pi parent session (#1150), with no parent model. Configuration selects it with `coordinator: session | events` on the instance or an agent (#1158). Until #1166 merges, the Pi parent coordinates `session` attempts.
 - **Names.** The supervisor observes and operates the factory. The orchestrator is the server. The coordinator decides what an attempt does next.
 - **Platform tools first.** For a worker provider, start from the goal and use the platform's own transport, snapshots, and network rules, even when an existing interface has to change.
 - **Storage behind ports.** SQLite and Postgres adapters, with a contract suite per port.

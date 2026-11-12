@@ -16,7 +16,12 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
-import { agentCopy, emptyListCopy, plural } from "~/features/configuration/strings";
+import {
+  agentCopy,
+  coordinatorCopy,
+  emptyListCopy,
+  plural,
+} from "~/features/configuration/strings";
 import { ListEmpty } from "~/features/configuration/components/list-empty";
 import { AgentModels } from "~/features/configuration/components/agent-models";
 import { FileError } from "~/features/configuration/components/file-error";
@@ -165,30 +170,40 @@ const AgentFacts = ({ agent, configuration }: AgentFactsProps) => {
         <code className="font-mono text-xs">{agent.model}</code>
       </Fact>
       <Fact label="Effort">{agent.effort}</Fact>
-      <Fact label="Parent model">
-        {agent.resolvedParentModel === null ? (
-          <Unset>Chosen by Pi</Unset>
-        ) : (
-          <code className="font-mono text-xs">{agent.resolvedParentModel}</code>
-        )}
+      <Fact label={coordinatorCopy.label}>
+        {agent.resolvedCoordinator}
         <Source>
-          {agent.parentModel !== null
-            ? agentCopy.parentOverride
-            : configuration.settings.parentModel !== null
-              ? "From settings.parent_model"
-              : agentCopy.parentModelUnset}
+          {agent.coordinator !== null ? agentCopy.override : coordinatorCopy.fromSettings}
         </Source>
       </Fact>
-      <Fact label="Parent effort">
-        {agent.resolvedParentEffort}
-        <Source>
-          {agent.parentEffort !== null
-            ? agentCopy.parentOverride
-            : configuration.settings.parentEffort !== null
-              ? "From settings.parent_effort"
-              : "Same as effort"}
-        </Source>
-      </Fact>
+      {agent.resolvedCoordinator === "session" && (
+        <>
+          <Fact label="Parent model">
+            {agent.resolvedParentModel === null ? (
+              <Unset>Chosen by Pi</Unset>
+            ) : (
+              <code className="font-mono text-xs">{agent.resolvedParentModel}</code>
+            )}
+            <Source>
+              {agent.parentModel !== null
+                ? agentCopy.override
+                : configuration.settings.parentModel !== null
+                  ? "From settings.parent_model"
+                  : agentCopy.parentModelUnset}
+            </Source>
+          </Fact>
+          <Fact label="Parent effort">
+            {agent.resolvedParentEffort}
+            <Source>
+              {agent.parentEffort !== null
+                ? agentCopy.override
+                : configuration.settings.parentEffort !== null
+                  ? "From settings.parent_effort"
+                  : "Same as effort"}
+            </Source>
+          </Fact>
+        </>
+      )}
       <Fact label="Loops">
         {agent.loops.length === 0 ? (
           <Unset>No loop uses this agent</Unset>

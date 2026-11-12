@@ -1,6 +1,8 @@
 import { jsonKey } from "@usine/core/json-key";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
+import { DecisionBrain } from "@usine/core/agent";
+import { ModelId } from "@usine/core/agent/brain";
 import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -12,7 +14,7 @@ import { LoadedInstance } from "../src/instance/instance.ts";
 import { loopReferenceFailure, referenceIndex } from "../src/instance/references.ts";
 import { ManagedRepo, UsineConfig } from "../src/factory.ts";
 import { LoopFile } from "../src/loop.ts";
-import { formatLoop, ConfigParser } from "../src/parser.ts";
+import { formatAgent, formatLoop, ConfigParser } from "../src/parser.ts";
 import { issueEnvironment, pullRequestEnvironment } from "../src/payload-slices.ts";
 import { matchesSelector } from "../src/selector.ts";
 import { updateFrontmatter, updateYaml, YamlEdit } from "../src/yaml/writer.ts";
@@ -1141,6 +1143,61 @@ workers:
         ]);
         expect(warnings.some((warning) => warning.label === "OPEN")).toBe(false);
       }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("parses the coordinator kind in settings and agent frontmatter", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const unset = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\n",
+      );
+      expect(unset.settings.coordinator).toBe("session");
+      const events = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\nsettings:\n  coordinator: events\n",
+      );
+      expect(events.settings.coordinator).toBe("events");
+
+      const withParent = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          "version: 1\nrepos: []\nsettings:\n  coordinator: events\n  parent_model: openai-codex/gpt-5.6-terra\n  parent_effort: low\n",
+        )
+        .pipe(Effect.flip);
+      expect(withParent.stage).toBe("schema");
+      expect(withParent.details?.map(({ path }) => path)).toEqual([
+        ["settings", "parent_model"],
+        ["settings", "parent_effort"],
+      ]);
+
+      const agent = yield* parser.parseAgentFile(
+        InstancePath.make("agents/developer.md"),
+        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: events\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
+      );
+      expect(Option.getOrNull(agent.agent.coordinator)).toBe("events");
+      expect(Option.getOrNull(agent.agent.decision)).toEqual(
+        DecisionBrain.make({ model: ModelId.make("gpt-5.6-terra"), effort: "low" }),
+      );
+      expect(formatAgent(agent)).toBe(
+        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: events\ndecision:\n  model: gpt-5.6-terra\n  effort: low\n---\nPersona body.",
+      );
+
+      const agentWithParent = yield* parser
+        .parseAgentFile(
+          InstancePath.make("agents/developer.md"),
+          "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: events\nparent_model: openai-codex/gpt-5.6-terra\n---\nPersona body.",
+        )
+        .pipe(Effect.flip);
+      expect(agentWithParent.stage).toBe("schema");
+      expect(agentWithParent.details?.map(({ path }) => path)).toEqual([["parent_model"]]);
+
+      const sessionWithParent = yield* parser.parseAgentFile(
+        InstancePath.make("agents/developer.md"),
+        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\ncoordinator: session\nparent_model: openai-codex/gpt-5.6-terra\n---\nPersona body.",
+      );
+      expect(Option.getOrNull(sessionWithParent.agent.coordinator)).toBe("session");
+    }).pipe(Effect.provide(parserLayer)),
   );
 
   it.effect("parses parent_effort in settings and agent frontmatter as the Effort scale", () =>
