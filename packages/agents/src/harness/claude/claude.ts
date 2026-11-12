@@ -477,9 +477,15 @@ const makeClaudeSessions = Effect.gen(function* () {
       yield* journal.started(reference);
       // Login-lock retries finish before the session starts.
       const startsIdle = policy.restored.paused || Option.isSome(policy.restored.idle);
+      // Claude names a message with a client UUID on each result that consumed it. The layer
+      // doesn't require `Crypto`, and the UUID only has to be unique.
+      // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off
+      const clientId = Effect.sync(() => crypto.randomUUID());
       const prompts = startsIdle
         ? []
-        : Option.toArray(Option.map(startPrompt(start), (text) => userMessage(text)));
+        : yield* Effect.forEach(Option.toArray(startPrompt(start)), (text) =>
+            Effect.map(clientId, (uuid) => userMessage(text, uuid)),
+          );
       let current = yield* launchWithRetries(
         spec,
         options,
@@ -537,8 +543,9 @@ const makeClaudeSessions = Effect.gen(function* () {
         id?: OperatorMessageId,
       ) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+        const uuid = id ?? (yield* clientId);
         yield* Effect.try({
-          try: () => current.input.offer(userMessage(message, id)),
+          try: () => current.input.offer(userMessage(message, uuid)),
           catch: (cause) => operationError("steer", spec, "Can't send a message to Claude", cause),
         });
         if (id === undefined) return;
@@ -577,6 +584,20 @@ const makeClaudeSessions = Effect.gen(function* () {
             queuedTurnStarts.delete(id);
             yield* conversation.read([id], start);
           }
+        });
+      /**
+       * Drops the turn start of each message that the first frame of a turn, which lists `opening`,
+       * doesn't name. Claude didn't start the turn with such a message, so it folds it in later.
+       */
+      const turnOpened = (opening: ReadonlyArray<OperatorMessageId>) =>
+        Effect.gen(function* () {
+          const later = [...queuedTurnStarts.keys()].filter((id) => !opening.includes(id));
+          if (later.length === 0) return;
+          for (const id of later) queuedTurnStarts.delete(id);
+          yield* Effect.logInfo(
+            "Claude started a turn without some sent operator messages; it reads them at a tool result",
+            { sessionId: session.id, later: later.length },
+          );
         });
       yield* Deferred.succeed(boundaryReady, undefined);
       const tools = new Map<string, string>();
@@ -660,6 +681,7 @@ const makeClaudeSessions = Effect.gen(function* () {
             }
             if (Schema.is(ClaudeResultMessage)(message)) yield* readAtResult(ids);
             else {
+              if (betweenTurns && isAssistantMessage(message)) yield* turnOpened(ids);
               for (const id of ids) queuedTurnStarts.delete(id);
               yield* conversation.read(ids, "now");
             }

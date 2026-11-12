@@ -118,7 +118,8 @@
           "role": "user",
           "content": "Reply with exactly REPLAY_DONE. Do not use tools."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_1"
       }
     },
     {

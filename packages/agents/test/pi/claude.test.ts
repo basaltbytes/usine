@@ -28,6 +28,7 @@ import {
   Layer,
   Logger,
   Option,
+  Predicate,
   Queue,
   Ref,
   Schema,
@@ -37,10 +38,16 @@ import {
   Stream,
 } from "effect";
 import { createInterface } from "node:readline";
-import { jsonLine, scriptedOwner } from "../child-host/scripted-owner.ts";
+import { jsonLine, scriptedOwner, scriptedTarget } from "../child-host/scripted-owner.ts";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
-import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
+import {
+  Interrupt,
+  OperatorMessage,
+  OperatorMessageId,
+  Release,
+  Steer,
+} from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
 import { ChildProcessLost } from "../../src/child-host/process.ts";
@@ -1564,6 +1571,282 @@ describe("Claude child backend", () => {
           assert.strictEqual(result.answeredOperator, !tool);
         }).pipe(Effect.scoped),
     );
+
+  it.effect(
+    "leaves a steer unread when it reaches Claude after the result that names the task",
+    () =>
+      Effect.gen(function* () {
+        const { inputs, output, sdk } = yield* typedTurnSdk;
+        const receipts = yield* Queue.unbounded<string>();
+        const result = yield* Effect.gen(function* () {
+          const running = yield* (yield* ChildBackend).launch(request());
+          const { toolRound } = yield* turnDriver(running, () => output);
+          const task = (yield* Queue.take(inputs)).uuid;
+          assert(Schema.is(OperatorMessageId)(task), "the task carries a client UUID");
+          yield* toolRound("bash-1");
+          // Claude has produced the result when the steer arrives, so it queues no turn for it.
+          const steer = Steer.make({ message: "Check the logs" });
+          yield* running.intervene(steer, (delivery) =>
+            Queue.offer(receipts, Option.isSome(delivery) ? "read" : "unread").pipe(Effect.asVoid),
+          );
+          yield* Queue.take(inputs);
+          yield* Queue.offer(output, {
+            type: "result",
+            subtype: "success",
+            result: "Done",
+            queued_turn_count: 0,
+            user_message_uuids: [task],
+          });
+          return yield* running.result;
+        }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+        assert.strictEqual(result.message, "Done");
+        assert.isFalse(result.answeredOperator);
+        const delivered = yield* Queue.clear(receipts);
+        assert.deepStrictEqual(delivered, ["unread"]);
+      }).pipe(Effect.scoped),
+  );
+
+  // The first frame of a turn names the messages that the turn started with. A message that it
+  // leaves out reached Claude after the turn started, so Claude folds it in at a tool result.
+  for (const tool of [true, false])
+    it.effect(
+      `${tool ? "doesn't count" : "counts"} a steer that a turn's first frame leaves out when ${tool ? "a tool call follows" : "no tool call follows"} its fold`,
+      () =>
+        Effect.gen(function* () {
+          const { inputs, output, sdk } = yield* typedTurnSdk;
+          const result = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({ ...request(), held: true }),
+            );
+            const { until, toolRound } = yield* turnDriver(running, () => output);
+            yield* Queue.take(inputs);
+            yield* Queue.offer(output, {
+              type: "result",
+              subtype: "success",
+              result: "Waiting",
+              queued_turn_count: 0,
+            });
+            yield* until("SessionIdle");
+            const question = OperatorMessage.make({ message: "Check the build" });
+            const steer = Steer.make({ message: "Use the cached build" });
+            // Both reach the harness before the first frame of the turn that the question starts.
+            for (const action of [question, steer]) {
+              yield* running.intervene(action, noDelivery);
+              yield* Queue.take(inputs);
+            }
+            yield* Queue.offer(output, {
+              type: "assistant",
+              message: { content: [{ type: "text", text: "Checking the build" }] },
+              user_message_uuids: [question.id],
+            });
+            yield* toolRound("bash-1");
+            if (tool) yield* toolRound("bash-2");
+            yield* Queue.offer(output, {
+              type: "result",
+              subtype: "success",
+              result: "Done",
+              queued_turn_count: 0,
+              user_message_uuids: [question.id, steer.id],
+            });
+            yield* until("SessionIdle");
+            yield* running.intervene(Release.make(), noDelivery);
+            return yield* running.result;
+          }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+          assert.strictEqual(result.message, "Done");
+          assert.strictEqual(result.answeredOperator, !tool);
+        }).pipe(Effect.scoped),
+    );
+
+  // A resumed saved session runs no turn until recovery sends one, so Claude reads a resent steer
+  // when the turn that it starts with the continuation begins.
+  for (const tool of [true, false])
+    it.effect(
+      `${tool ? "doesn't count" : "counts"} a steer resent to a resumed saved session when the turn ${tool ? "calls a tool" : "calls no tool"}`,
+      () =>
+        Effect.gen(function* () {
+          const { inputs, output, sdk } = yield* typedTurnSdk;
+          const steer = Steer.make({ message: "Check the logs" });
+          const result = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(HarnessSession.make({ cwd: request().cwd })),
+                unread: [{ id: steer.id, message: steer.message }],
+              }),
+            );
+            const { toolRound } = yield* turnDriver(running, () => output);
+            const continuation = yield* Queue.take(inputs);
+            assert.isTrue(Schema.is(OperatorMessageId)(continuation.uuid));
+            assert.notStrictEqual(continuation.uuid, steer.id);
+            assert.strictEqual((yield* Queue.take(inputs)).uuid, steer.id);
+            yield* Queue.offer(output, {
+              type: "assistant",
+              message: { content: [{ type: "text", text: "Checking the logs" }] },
+            });
+            if (tool) yield* toolRound("bash-1");
+            yield* Queue.offer(output, {
+              type: "result",
+              subtype: "success",
+              result: "Done",
+              queued_turn_count: 0,
+            });
+            return yield* running.result;
+          }).pipe(Effect.scoped, Effect.provide(claudeChild.pipe(Layer.provide(sdk))));
+          assert.strictEqual(result.message, "Done");
+          assert.strictEqual(result.answeredOperator, !tool);
+        }).pipe(Effect.scoped),
+    );
+
+  /**
+   * A Claude SDK whose remote process owner reports a retained process, with output that the test
+   * writes, and the user messages that the harness sent.
+   */
+  const retainedSdk = Effect.gen(function* () {
+    const inputs = yield* Queue.make<ClaudeUserMessage>();
+    const output = yield* Queue.make<Schema.Json, Cause.Done>();
+    const init = yield* jsonLine({ type: "system", subtype: "init", session_id: "saved-claude" });
+    const { spawner } = yield* scriptedOwner(
+      [
+        { offset: 10, ready: true, sequence: 0, retained: true },
+        { offset: 20, stdout: init.toString("base64") },
+      ],
+      () => Effect.void,
+    );
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (input, options) => {
+        assert(options.spawnClaudeCodeProcess !== undefined);
+        const child = options.spawnClaudeCodeProcess({
+          command: "claude",
+          args: [],
+          env: {},
+          signal: new AbortController().signal,
+        });
+        const lines = createInterface({ input: child.stdout });
+        // The owner reports whether it retained the process before it relays any output.
+        const reattached = new Promise<void>((resolve) => lines.once("line", () => resolve()));
+        void (async () => {
+          for await (const message of input) Queue.offerUnsafe(inputs, message);
+        })();
+        return {
+          ...scripted([]),
+          supportedModels: async () => {
+            await reattached;
+            return [{ value: "sonnet", resolvedModel: "claude-sonnet-4-6" }];
+          },
+          close: () => {
+            lines.close();
+            Queue.endUnsafe(output);
+          },
+          [Symbol.asyncIterator]: () =>
+            Stream.toAsyncIterable(Stream.fromQueue(output))[Symbol.asyncIterator](),
+        };
+      },
+    });
+    // Other commands on the Worker, such as the owner's stop, succeed.
+    const commands = workerCommands(0).layer;
+    const owner = ChildProcessSpawner.make((command) =>
+      command._tag === "StandardCommand" && Predicate.hasProperty(command.options.stdin, "stream")
+        ? spawner.spawn(command)
+        : ChildProcessSpawner.ChildProcessSpawner.pipe(
+            Effect.flatMap((other) => other.spawn(command)),
+            Effect.provide(commands),
+          ),
+    );
+    const layer = claudeChildWith(
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(owner),
+    ).pipe(Layer.provideMerge(sdk));
+    return { inputs, output, layer };
+  });
+
+  /** A request that reattaches the retained process of the saved session `saved-claude`. */
+  const reattach = (fields: Partial<Parameters<typeof ChildRequest.make>[0]> = {}) => {
+    const original = request(undefined, undefined, scriptedTarget.host);
+    return ChildRequest.make({
+      ...original,
+      resume: Option.some(
+        HarnessSession.make({ id: HarnessSessionId.make("saved-claude"), cwd: original.cwd }),
+      ),
+      ...fields,
+    });
+  };
+
+  // A reattached process that runs its task is inside a turn, so Claude folds a steer in at the
+  // next tool result.
+  it.live("counts a steer folded into the turn of a reattached running process", () =>
+    Effect.gen(function* () {
+      const { inputs, output, layer } = yield* retainedSdk;
+      const result = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(reattach());
+        const { toolRound } = yield* turnDriver(running, () => output);
+        const steer = Steer.make({ message: "Check the logs" });
+        yield* running.intervene(steer, noDelivery);
+        assert.strictEqual((yield* Queue.take(inputs)).uuid, steer.id);
+        yield* toolRound("bash-1");
+        yield* Queue.offer(output, {
+          type: "result",
+          subtype: "success",
+          result: "Done",
+          queued_turn_count: 0,
+        });
+        return yield* running.result;
+      }).pipe(Effect.scoped, Effect.provide(layer));
+      assert.strictEqual(result.message, "Done");
+      assert.isTrue(result.answeredOperator);
+    }).pipe(Effect.scoped),
+  );
+
+  // A reattached process that never got its task, or that waits idle under a Hold, runs no turn, so
+  // the next message starts one and Claude reads it before the turn's tool calls.
+  for (const restored of ["unprompted", "idle"] as const)
+    for (const tool of [true, false])
+      it.live(
+        `${tool ? "doesn't count" : "counts"} a message that starts the turn of a reattached ${restored} process when the turn ${tool ? "calls a tool" : "calls no tool"}`,
+        () =>
+          Effect.gen(function* () {
+            const { inputs, output, layer } = yield* retainedSdk;
+            const message = OperatorMessage.make({ message: "Check the logs" });
+            const result = yield* Effect.gen(function* () {
+              const running = yield* (yield* ChildBackend).launch(
+                restored === "unprompted"
+                  ? reattach({
+                      prompted: false,
+                      unread: [{ id: message.id, message: message.message }],
+                    })
+                  : reattach({ held: true, idle: Option.some("Waiting for the logs.") }),
+              );
+              const { until, toolRound } = yield* turnDriver(running, () => output);
+              if (restored === "unprompted") {
+                assert.strictEqual(
+                  (yield* Queue.take(inputs)).message.content,
+                  request().prompt,
+                  "recovery sends the task first",
+                );
+              } else {
+                yield* until("SessionIdle");
+                yield* running.intervene(message, noDelivery);
+              }
+              assert.strictEqual((yield* Queue.take(inputs)).uuid, message.id);
+              yield* Queue.offer(output, {
+                type: "assistant",
+                message: { content: [{ type: "text", text: "Checking the logs" }] },
+              });
+              if (tool) yield* toolRound("bash-1");
+              yield* Queue.offer(output, {
+                type: "result",
+                subtype: "success",
+                result: "Done",
+                queued_turn_count: 0,
+              });
+              if (restored === "idle") {
+                yield* until("SessionIdle");
+                yield* running.intervene(Release.make(), noDelivery);
+              }
+              return yield* running.result;
+            }).pipe(Effect.scoped, Effect.provide(layer));
+            assert.strictEqual(result.message, "Done");
+            assert.strictEqual(result.answeredOperator, !tool);
+          }).pipe(Effect.scoped),
+      );
 
   for (const answered of [true, false])
     it.effect(
