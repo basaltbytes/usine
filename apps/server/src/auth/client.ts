@@ -22,7 +22,7 @@ const parseAddress = (input: string): Option.Option<NetAddress.IpAddress> => {
  * - `no-forwarded-header`: a trusted peer sent no `X-Forwarded-For` header.
  * - `unreadable-forwarded-entry`: a trusted peer's header holds an entry that isn't an IP address.
  */
-export type ConnectionReason =
+type ConnectionReason =
   | "no-connection-address"
   | "untrusted-peer"
   | "no-forwarded-header"
