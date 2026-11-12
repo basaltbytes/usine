@@ -5,6 +5,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Effect, Layer, Logger, Option, Result, Schema } from "effect";
+import { IpNetwork } from "effect/net";
 import { InstanceFolder } from "../src/instance-folder.ts";
 import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
@@ -57,6 +58,21 @@ describe("ConfigParser", () => {
           .parseUsineYaml(file, "version: 1\nrepos: []\nauth:\n  orgins: []\n")
           .pipe(Effect.result);
         expect(Result.isFailure(typo)).toBe(true);
+        expect(config.auth.trustedProxies).toEqual([]);
+        const proxied = yield* parser.parseUsineYaml(
+          file,
+          "version: 1\nrepos: []\nauth:\n  trusted_proxies: [127.0.0.1/32, ::1/128]\n",
+        );
+        expect(proxied.auth.trustedProxies.map(IpNetwork.format)).toEqual([
+          "127.0.0.1/32",
+          "::1/128",
+        ]);
+        for (const proxy of ["127.0.0.1", "10.0.0.1/8", "localhost"]) {
+          const result = yield* parser
+            .parseUsineYaml(file, `version: 1\nrepos: []\nauth:\n  trusted_proxies: ["${proxy}"]\n`)
+            .pipe(Effect.result);
+          expect(Result.isFailure(result), proxy).toBe(true);
+        }
       }).pipe(Effect.provide(parserLayer)),
   );
 
