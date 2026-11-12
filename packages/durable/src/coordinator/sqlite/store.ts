@@ -1,4 +1,4 @@
-import type { ChildSessionCount } from "@usine/core/agent/session";
+import { AgentSessionId, type ChildSessionCount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { StepCompletion } from "@usine/core/step/result";
@@ -16,11 +16,14 @@ import {
   DelegationRecord,
   EncodedDecision,
   EncodedEvent,
+  EncodedIntervention,
   EncodedState,
   EventSequence,
   JournalError,
   JournalRevision,
   LedgerEntry,
+  QueuedInput,
+  Supervision,
 } from "../journal.ts";
 import {
   decided,
@@ -35,7 +38,14 @@ import {
   transitioned,
 } from "../ledger.ts";
 import { migrations } from "./migrations.ts";
-import { coordinationTable, delegationsTable, eventsTable, outboxTable } from "./schema.ts";
+import {
+  coordinationTable,
+  delegationsTable,
+  eventsTable,
+  inputsTable,
+  outboxTable,
+  supervisionTable,
+} from "./schema.ts";
 
 const json = <S extends Schema.Top>(schema: S) => Schema.fromJsonString(Schema.toCodecJson(schema));
 
@@ -48,6 +58,7 @@ const DelegationJson = json(Delegation);
 const ProgressJson = json(ChildProgress);
 const EnvelopeJson = json(AttemptChannel.OutboundEnvelope);
 const ResultJson = json(StepCompletion);
+const InterventionJson = json(EncodedIntervention);
 
 const CoordinationRow = Schema.Struct({
   request: RequestJson,
@@ -57,6 +68,7 @@ const CoordinationRow = Schema.Struct({
   nextOutbound: AttemptChannel.Sequence,
   result: Schema.NullOr(ResultJson),
   unsupervisedMillis: Schema.NullOr(Schema.Finite),
+  nextInbound: AttemptChannel.Sequence,
 });
 const EventRow = Schema.Struct({
   sequence: EventSequence,
@@ -76,6 +88,18 @@ const recordOf = ({ delegation, progress, outcome }: typeof DelegationRow.Type) 
     outcome: Option.fromNullOr(outcome),
   });
 const EnvelopeRow = Schema.Struct({ envelope: EnvelopeJson });
+/** SQLite stores a boolean as 0 or 1. */
+const StoredBoolean = Schema.Literals([0, 1]);
+const SupervisionRow = Schema.Struct({
+  sessionId: AgentSessionId,
+  held: StoredBoolean,
+  paused: StoredBoolean,
+});
+const InputRow = Schema.Struct({
+  inputSequence: AttemptChannel.Sequence,
+  sessionId: AgentSessionId,
+  intervention: InterventionJson,
+});
 
 // Every value written was validated at construction, so an encoding failure is a defect.
 const encode =
@@ -87,6 +111,8 @@ const coordination = getTableName(coordinationTable);
 const events = getTableName(eventsTable);
 const delegations = getTableName(delegationsTable);
 const outbox = getTableName(outboxTable);
+const supervision = getTableName(supervisionTable);
+const inputs = getTableName(inputsTable);
 
 /**
  * Provides the attempt journal on the application's `SqlClient`. Applies its embedded migrations
@@ -120,7 +146,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
     const load = (attemptId: AttemptId) =>
       Effect.gen(function* () {
         const [row] =
-          yield* sql`SELECT request, revision, state, status, next_outbound AS "nextOutbound", result, unsupervised_millis AS "unsupervisedMillis" FROM ${sql(coordination)} WHERE attempt_id = ${attemptId}`;
+          yield* sql`SELECT request, revision, state, status, next_outbound AS "nextOutbound", result, unsupervised_millis AS "unsupervisedMillis", next_inbound AS "nextInbound" FROM ${sql(coordination)} WHERE attempt_id = ${attemptId}`;
         if (row === undefined) return Option.none<CoordinatorSnapshot>();
         const stored = yield* Schema.decodeUnknownEffect(CoordinationRow)(row);
         const ledger =
@@ -134,6 +160,14 @@ export const sqliteAttemptJournalLayer = Layer.effect(
         const reservations =
           yield* sql`SELECT envelope FROM ${sql(outbox)} WHERE attempt_id = ${attemptId} ORDER BY sequence`.pipe(
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(EnvelopeRow))),
+          );
+        const supervised =
+          yield* sql`SELECT session_id AS "sessionId", held, paused FROM ${sql(supervision)} WHERE attempt_id = ${attemptId} ORDER BY session_id`.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SupervisionRow))),
+          );
+        const queued =
+          yield* sql`SELECT sequence AS "inputSequence", session_id AS "sessionId", intervention FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} ORDER BY sequence`.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(InputRow))),
           );
         const applied = ledger.flatMap(({ sequence, event, decision }) =>
           event === null ? [] : [LedgerEntry.make({ sequence, event, decision })],
@@ -154,6 +188,11 @@ export const sqliteAttemptJournalLayer = Layer.effect(
             nextOutbound: stored.nextOutbound,
             result: Option.fromNullOr(stored.result),
             unsupervised: Option.map(Option.fromNullOr(stored.unsupervisedMillis), Duration.millis),
+            supervision: supervised.map(({ sessionId, held, paused }) =>
+              Supervision.make({ sessionId, held: held === 1, paused: paused === 1 }),
+            ),
+            inputs: queued.map((input) => QueuedInput.make(input)),
+            nextInbound: stored.nextInbound,
           }),
         );
       });
@@ -414,6 +453,76 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           );
         },
       ),
+      supervise: Effect.fn("AttemptJournal.supervise")(function* (attemptId, change) {
+        yield* Effect.annotateCurrentSpan({ attemptId, sessionId: change.sessionId });
+        yield* Effect.gen(function* () {
+          yield* coordinationExists(attemptId);
+          yield* sql`DELETE FROM ${sql(supervision)} WHERE attempt_id = ${attemptId} AND session_id = ${change.sessionId}`;
+          if (change.held || change.paused)
+            yield* sql`INSERT INTO ${sql(supervision)} ${sql.insert({
+              attempt_id: attemptId,
+              session_id: change.sessionId,
+              held: change.held ? 1 : 0,
+              paused: change.paused ? 1 : 0,
+            })}`;
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("save the operator's supervision of a child", attemptId),
+          ),
+        );
+      }),
+      queueInput: Effect.fn("AttemptJournal.queueInput")(function* (attemptId, input) {
+        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence: input.inputSequence });
+        yield* Effect.gen(function* () {
+          yield* coordinationExists(attemptId);
+          const intervention = yield* encode(InterventionJson)(input.intervention);
+          yield* sql`DELETE FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${input.inputSequence}`;
+          yield* sql`INSERT INTO ${sql(inputs)} ${sql.insert({
+            attempt_id: attemptId,
+            sequence: input.inputSequence,
+            session_id: input.sessionId,
+            intervention,
+          })}`;
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("queue an operator input", attemptId),
+          ),
+        );
+      }),
+      forgetInput: Effect.fn("AttemptJournal.forgetInput")(function* (attemptId, inputSequence) {
+        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence });
+        return yield* Effect.gen(function* () {
+          yield* coordinationExists(attemptId);
+          const [row] =
+            yield* sql`SELECT sequence FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${inputSequence}`;
+          if (row === undefined) return false;
+          yield* sql`DELETE FROM ${sql(inputs)} WHERE attempt_id = ${attemptId} AND sequence = ${inputSequence}`;
+          return true;
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("forget a queued operator input", attemptId),
+          ),
+        );
+      }),
+      recordInbound: Effect.fn("AttemptJournal.recordInbound")(function* (attemptId, sequence) {
+        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence: sequence });
+        yield* Effect.gen(function* () {
+          yield* coordinationExists(attemptId);
+          yield* sql`UPDATE ${sql(coordination)} SET next_inbound = MAX(next_inbound, ${sequence + 1}) WHERE attempt_id = ${attemptId}`;
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("record an operator input", attemptId),
+          ),
+        );
+      }),
       acknowledge: Effect.fn("AttemptJournal.acknowledge")(function* (attemptId, through) {
         yield* Effect.annotateCurrentSpan({ attemptId, through });
         yield* Effect.gen(function* () {

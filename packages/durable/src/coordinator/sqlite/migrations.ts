@@ -18,4 +18,12 @@ export const migrations = [
       "ALTER TABLE `usine_attempt_delegations` ADD `outcome` text;",
     ],
   ],
+  [
+    "3_20261112040345_coordinator_operator_input",
+    [
+      "CREATE TABLE `usine_attempt_inputs` (\n\t`attempt_id` text NOT NULL,\n\t`sequence` integer NOT NULL,\n\t`session_id` text NOT NULL,\n\t`intervention` text NOT NULL,\n\tCONSTRAINT `usine_attempt_inputs_pk` PRIMARY KEY(`attempt_id`, `sequence`),\n\tCONSTRAINT `fk_usine_attempt_inputs_attempt_id_usine_attempt_coordination_attempt_id_fk` FOREIGN KEY (`attempt_id`) REFERENCES `usine_attempt_coordination`(`attempt_id`)\n);",
+      "CREATE TABLE `usine_attempt_supervision` (\n\t`attempt_id` text NOT NULL,\n\t`session_id` text NOT NULL,\n\t`held` integer NOT NULL,\n\t`paused` integer NOT NULL,\n\tCONSTRAINT `usine_attempt_supervision_pk` PRIMARY KEY(`attempt_id`, `session_id`),\n\tCONSTRAINT `fk_usine_attempt_supervision_attempt_id_usine_attempt_coordination_attempt_id_fk` FOREIGN KEY (`attempt_id`) REFERENCES `usine_attempt_coordination`(`attempt_id`)\n);",
+      "ALTER TABLE `usine_attempt_coordination` ADD `next_inbound` integer DEFAULT 1 NOT NULL;",
+    ],
+  ],
 ] as const;

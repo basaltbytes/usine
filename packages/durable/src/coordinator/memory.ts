@@ -6,6 +6,9 @@ import {
   acknowledged,
   decided,
   delegationOf,
+  inboundRecorded,
+  inputForgotten,
+  inputQueued,
   keptDecision,
   keptDelegationOutcome,
   opened,
@@ -14,6 +17,7 @@ import {
   settled,
   settledDelegation,
   startedDelegation,
+  supervised,
   transitioned,
   unsupervisedRecorded,
   withDelegation,
@@ -156,6 +160,36 @@ export const memoryAttemptJournalLayer = Layer.effect(
           }).pipe(serialized);
         },
       ),
+      supervise: Effect.fn("AttemptJournal.supervise")(function* (attemptId, supervision) {
+        yield* Effect.annotateCurrentSpan({ attemptId, sessionId: supervision.sessionId });
+        yield* Effect.gen(function* () {
+          const previous = yield* stored(attemptId);
+          yield* save(supervised(previous, supervision));
+        }).pipe(serialized);
+      }),
+      queueInput: Effect.fn("AttemptJournal.queueInput")(function* (attemptId, input) {
+        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence: input.inputSequence });
+        yield* Effect.gen(function* () {
+          const previous = yield* stored(attemptId);
+          yield* save(inputQueued(previous, input));
+        }).pipe(serialized);
+      }),
+      forgetInput: Effect.fn("AttemptJournal.forgetInput")(function* (attemptId, inputSequence) {
+        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence });
+        return yield* Effect.gen(function* () {
+          const previous = yield* stored(attemptId);
+          const { forgotten, snapshot } = inputForgotten(previous, inputSequence);
+          if (forgotten) yield* save(snapshot);
+          return forgotten;
+        }).pipe(serialized);
+      }),
+      recordInbound: Effect.fn("AttemptJournal.recordInbound")(function* (attemptId, sequence) {
+        yield* Effect.annotateCurrentSpan({ attemptId, inputSequence: sequence });
+        yield* Effect.gen(function* () {
+          const previous = yield* stored(attemptId);
+          yield* save(inboundRecorded(previous, sequence));
+        }).pipe(serialized);
+      }),
       acknowledge: Effect.fn("AttemptJournal.acknowledge")(function* (attemptId, through) {
         yield* Effect.annotateCurrentSpan({ attemptId, through });
         yield* Effect.gen(function* () {

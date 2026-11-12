@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ChildSessionCount } from "@usine/core/agent/session";
+import { AgentSessionId, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure } from "@usine/core/attempt/failure";
@@ -17,6 +17,7 @@ import {
   Delegation,
   EncodedDecision,
   EncodedEvent,
+  EncodedIntervention,
   EncodedState,
   EventSequence,
   Failed,
@@ -29,9 +30,11 @@ import {
   OutputSaved,
   type ProgressChange,
   Prompted,
+  QueuedInput,
   Reported,
   SessionSaved,
   Settled,
+  Supervision,
   Terminal,
   ToolFinished,
   ToolStarted,
@@ -729,12 +732,34 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
                 .pipe(dies),
               yield* store.reserve(attemptId, [envelope(attemptId, 1)]).pipe(dies),
               yield* store.acknowledge(attemptId, AttemptChannel.Sequence.make(1)).pipe(dies),
+              yield* store
+                .supervise(
+                  attemptId,
+                  Supervision.make({
+                    sessionId: AgentSessionId.make("child"),
+                    held: true,
+                    paused: false,
+                  }),
+                )
+                .pipe(dies),
+              yield* store
+                .queueInput(
+                  attemptId,
+                  QueuedInput.make({
+                    inputSequence: AttemptChannel.Sequence.make(1),
+                    sessionId: AgentSessionId.make("child"),
+                    intervention: EncodedIntervention.make({}),
+                  }),
+                )
+                .pipe(dies),
+              yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(1)).pipe(dies),
+              yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(1)).pipe(dies),
             ];
             return { exits, after: yield* store.load(attemptId) };
           }),
         );
 
-        assert.deepStrictEqual(exits, [true, true, true, true]);
+        assert.deepStrictEqual(exits, [true, true, true, true, true, true, true, true]);
         assert.isTrue(Option.isNone(after));
       }).pipe(Effect.scoped),
     );
@@ -1083,6 +1108,71 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
 
           assert.deepStrictEqual(exits, [true, true, true]);
         }).pipe(Effect.scoped),
+    );
+
+    it.effect("keeps supervision, queued inputs, and the inbound sequence across a reopen", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const request = storedRequest("attempt-supervision");
+        const attemptId = request.spec.attemptId;
+        const first = AgentSessionId.make(`${attemptId}/child/1`);
+        const second = AgentSessionId.make(`${attemptId}/child/2`);
+        const input = (sequence: number, sessionId: AgentSessionId, message: string) =>
+          QueuedInput.make({
+            inputSequence: AttemptChannel.Sequence.make(sequence),
+            sessionId,
+            intervention: EncodedIntervention.make({ action: { _tag: "Steer", message } }),
+          });
+        const forgotten = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(request);
+            yield* store.supervise(
+              attemptId,
+              Supervision.make({ sessionId: second, held: true, paused: false }),
+            );
+            yield* store.supervise(
+              attemptId,
+              Supervision.make({ sessionId: first, held: true, paused: true }),
+            );
+            // A child neither held nor paused has no stored supervision.
+            yield* store.supervise(
+              attemptId,
+              Supervision.make({ sessionId: second, held: false, paused: false }),
+            );
+            yield* store.queueInput(attemptId, input(3, first, "Run the tests."));
+            yield* store.queueInput(attemptId, input(2, first, "Use pnpm."));
+            yield* store.queueInput(attemptId, input(3, first, "Run the unit tests."));
+            yield* store.queueInput(attemptId, input(4, second, "Check the lockfile."));
+            yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(4));
+            // An earlier sequence keeps the later next inbound sequence.
+            yield* store.recordInbound(attemptId, AttemptChannel.Sequence.make(2));
+            return [
+              yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(4)),
+              yield* store.forgetInput(attemptId, AttemptChannel.Sequence.make(4)),
+            ];
+          }),
+        );
+        const reopened = yield* using(
+          fixture,
+          journal.pipe(Effect.flatMap((journal) => journal.load(attemptId))),
+        );
+
+        assert.deepStrictEqual(forgotten, [true, false]);
+        assert.deepStrictEqual(
+          Option.map(reopened, ({ supervision, inputs, nextInbound }) => ({
+            supervision,
+            inputs,
+            nextInbound,
+          })),
+          Option.some({
+            supervision: [Supervision.make({ sessionId: first, held: true, paused: true })],
+            inputs: [input(2, first, "Use pnpm."), input(3, first, "Run the unit tests.")],
+            nextInbound: AttemptChannel.Sequence.make(5),
+          }),
+        );
+      }).pipe(Effect.scoped),
     );
 
     it.effect("records the result and keeps the longest unsupervised time across a reopen", () =>
