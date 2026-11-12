@@ -216,8 +216,9 @@ const recordingSpans =
 
 /**
  * Returns each `CurrentInstance.step` span in `spans` as the step log it should match. A span that
- * never ended has outcome `open`; a span outside a `CurrentInstance.commit` or
- * `CurrentInstance.reload` span has outcome `orphaned`.
+ * never ended has outcome `open`; a span outside a `CurrentInstance.commit`,
+ * `CurrentInstance.reload`, or `CurrentInstance.registerParentAdmission` span has outcome
+ * `orphaned`.
  */
 const stepSpans = (spans: ReadonlyArray<Tracer.Span>): Array<StepLog> =>
   spans
@@ -235,7 +236,11 @@ const stepSpans = (spans: ReadonlyArray<Tracer.Span>): Array<StepLog> =>
         step,
         durationMillis: Number((endTime - startTime) / 1_000_000n),
         outcome: !ancestors.some((name) =>
-          ["CurrentInstance.commit", "CurrentInstance.reload"].includes(name),
+          [
+            "CurrentInstance.commit",
+            "CurrentInstance.reload",
+            "CurrentInstance.registerParentAdmission",
+          ].includes(name),
         )
           ? "orphaned"
           : Exit.isSuccess(exit)
@@ -254,6 +259,9 @@ const unordered = (steps: ReadonlyArray<StepLog>) =>
       left.durationMillis - right.durationMillis ||
       left.outcome.localeCompare(right.outcome),
   );
+
+/** The step that `revisionFixture` logs when it registers the coordinator brain check. */
+const startupCheck: StepLog = { step: "coordinator-brains", durationMillis: 0, outcome: "passed" };
 
 const savedSteps = (wait: number, preflight = 0): Array<StepLog> =>
   [
@@ -355,6 +363,7 @@ it.effect("refuses a save whose coordinator brain check is slow and stores no re
     const unchanged = yield* current.get;
     expect(unchanged).toBe(initial);
     expect(steps).toEqual([
+      startupCheck,
       ...savedSteps(0).slice(0, 4),
       { step: "coordinator-brains", durationMillis: 10_000, outcome: "failed" },
     ]);
@@ -383,7 +392,10 @@ it.effect("logs a refused coordinator brain as a failed step and stores no revis
     expect((yield* store.read).number).toBe(revision.number);
     const unchanged = yield* current.get;
     expect(unchanged).toBe(initial);
+    // The fixture and this test each register a check, and each registration logs its startup check.
     expect(steps).toEqual([
+      startupCheck,
+      startupCheck,
       ...savedSteps(0).slice(0, 4),
       { step: "coordinator-brains", durationMillis: 0, outcome: "failed" },
     ]);
@@ -424,7 +436,7 @@ it.effect("logs every step of a save that waits behind a running save", () => {
     yield* Fiber.join(second);
 
     expect((yield* store.read).number).toBe(revision.number + 2);
-    expect(steps).toEqual([...savedSteps(0, 2_000), ...savedSteps(2_000)]);
+    expect(steps).toEqual([startupCheck, ...savedSteps(0, 2_000), ...savedSteps(2_000)]);
     expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
   }).pipe(
     Effect.scoped,
@@ -485,6 +497,7 @@ it.effect("logs the brain check of a save whose caller gives up before the time 
     yield* Fiber.interrupt(saving);
 
     expect(steps).toEqual([
+      startupCheck,
       ...savedSteps(0).slice(0, 4),
       { step: "coordinator-brains", durationMillis: 5_000, outcome: "interrupted" },
     ]);
@@ -510,6 +523,7 @@ it.effect("refuses a reload whose coordinator brain check is slow and logs a pas
     const unchanged = yield* current.get;
     expect(unchanged).toBe(initial);
     expect(steps).toEqual([
+      startupCheck,
       { step: "wait", durationMillis: 0, outcome: "passed" },
       { step: "read", durationMillis: 0, outcome: "passed" },
       { step: "restart", durationMillis: 0, outcome: "passed" },
@@ -528,6 +542,32 @@ it.effect("refuses a reload whose coordinator brain check is slow and logs a pas
       "apply",
     ]);
   }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
+});
+
+it.effect("logs the startup coordinator brain check as a step", () => {
+  const steps: Array<StepLog> = [];
+  const spans: Array<Tracer.Span> = [];
+  return Effect.gen(function* () {
+    const { current } = yield* revisionFixture;
+    steps.length = 0;
+    spans.length = 0;
+    const registering = yield* current
+      .registerParentAdmission(() => Effect.sleep("3 seconds").pipe(Effect.as([])))
+      .pipe(Effect.forkScoped);
+    yield* Effect.repeat(Effect.yieldNow, { times: 10 });
+    yield* TestClock.adjust("3 seconds");
+    yield* Fiber.join(registering);
+
+    expect(steps).toEqual([
+      { step: "coordinator-brains", durationMillis: 3_000, outcome: "passed" },
+    ]);
+    expect(stepSpans(spans)).toEqual(steps);
+  }).pipe(
+    Effect.scoped,
+    Effect.withLogger(stepLogger(steps)),
+    recordingSpans(spans),
+    Effect.provide(NodeServices.layer),
+  );
 });
 
 it.effect("keeps following stored revisions after one times out its brain check", () => {

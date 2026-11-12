@@ -494,7 +494,7 @@ export class CurrentInstance extends Context.Service<
             );
             yield* Effect.gen(function* () {
               const loaded = yield* SubscriptionRef.get(current);
-              const problems = yield* admit(loaded);
+              const problems = yield* timedStep("coordinator-brains", admit(loaded));
               if (problems.length === 0) return;
               const refused = new Set(problems.map(({ file }) => file));
               const agents = loaded.agents.filter(
