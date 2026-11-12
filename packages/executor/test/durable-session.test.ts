@@ -25,10 +25,10 @@ const workspace = AttemptWorkspace.make({
   }),
 });
 
-const workspaceFor = (parent: AttemptChannel.RunSpec["parent"]) =>
+const workspaceFor = (coordinator: AttemptChannel.RunSpec["coordinator"]) =>
   AttemptWorkspace.make({
     ...workspace,
-    spec: AttemptChannel.RunSpec.make({ ...workspace.spec, parent }),
+    spec: AttemptChannel.RunSpec.make({ ...workspace.spec, coordinator }),
   });
 
 const checkout: DurableCheckout = {
@@ -169,9 +169,9 @@ describe("durable session settlement", () => {
   }
 
   // The Pi parent and the event-driven coordinator leave the Attempt to the executor's decision.
-  for (const parent of ["pi", "none"] as const)
+  for (const coordinator of ["session", "events"] as const)
     it.live(
-      `leaves a drained task unsettled when its terminal relay fails (parent: ${parent})`,
+      `leaves a drained task unsettled when its terminal relay fails (coordinator: ${coordinator})`,
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
@@ -202,14 +202,14 @@ describe("durable session settlement", () => {
                     )
                   : Effect.void,
             };
-            if (parent === "none")
+            if (coordinator === "events")
               yield* Effect.forkChild(
                 Effect.flatMap(Effect.service(StubChildren), ({ next }) =>
                   Effect.flatMap(next, (child) => child.reply("Done.")),
                 ),
               );
             const launched = yield* session
-              .launch(workspaceFor(parent), sink, checkout)
+              .launch(workspaceFor(coordinator), sink, checkout)
               .pipe(Effect.forkChild);
             yield* Deferred.await(terminal);
             const drainResult = yield* session.drain(request.attemptId, "The worker is stopping");

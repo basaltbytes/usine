@@ -276,7 +276,7 @@ export class BrainRefused extends Schema.TaggedError<BrainRefused>()("BrainRefus
 
 `AdmittedBrain` carries the chosen model route and pool. The launch records them on the session, so accounting reads the pool instead of computing it again. Callers:
 
-1. Configuration load and reload: every agent's child brain against `coding-agent` on every worker that can run it, and the parent brain against `coordinator`. The parent is checked at startup, not when the first attempt starts.
+1. Configuration load and reload: every agent's child brain against `coding-agent` on every worker that can run it, and, for an agent with `coordinator: session`, the parent brain against `coordinator`. The parent is checked at startup, not when the first attempt starts.
 2. Executor preflight: `admitBrain`, then `runtime(id).preflight` on the worker for the admitted route. A route through a gateway or an attempt key checks the binary and version only; a host login also checks the login. The adapter decides, replacing `harnessBinaryProbe` and the gateway dispatch.
 3. Launch: the coordinator start and the `subagent` tool call `admitBrain` again as a guard, since a gateway reload can change a slot's kind (ADR 0013, amendment of 2026-10-22).
 
@@ -406,7 +406,7 @@ Grouped for asking two or three at a time. Each has a recommendation.
 
 1. Harness IDs are an open set validated by the registry.
 2. The coordinator requires `durable-coordination`, which only Pi declares today. The journaled decorator (step 11) waits until a vendor-harness coordinator is worth its cost.
-3. Keep `parent_model` and `parent_effort`; add `parent_harness` only with a second adapter that declares `durable-coordination`.
+3. Keep `parent_model` and `parent_effort` for `coordinator: session`; add `parent_harness` only with a second adapter that declares `durable-coordination`. Configuration names no harness: `coordinator: session | events` selects the coordinator on the instance and per agent, and `coordinator: events` refuses `parent_model` and `parent_effort` (2026-11-11, #1158). An agent's optional `decision: { model, effort }` runs on the agent's own harness.
 4. OpenAI-compatible endpoints and local models use the `apiKeys` pool, with the endpoint name recorded on the session.
 5. OpenCode may use a ChatGPT login from the start, against the recommendation above.
 6. Gateway slots are keyed by wire protocol, in step 8.

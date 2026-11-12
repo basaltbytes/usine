@@ -62,6 +62,7 @@ const configuration = ConfigurationView.make({
     maxAttemptTokens: null,
     parentModel: null,
     parentEffort: null,
+    coordinator: "session",
     operator: null,
     webhooks: "off",
     lastHintAt: null,

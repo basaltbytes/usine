@@ -31,6 +31,46 @@ it.effect(
     }),
 );
 
+it.effect("refuses parent overrides beside coordinator: events in an agent form", () =>
+  Effect.gen(function* () {
+    const key = ConfigurationEntityKey.make({
+      kind: "agent",
+      identifier: ConfigurationEntityId.make("developer"),
+    });
+    const value = yield* parseConfigurationForm(
+      key,
+      "---\nharness: codex\nmodel: custom-model\neffort: high\ncoordinator: events\n---\n# Persona\n",
+    );
+    expect(value).toMatchObject({ coordinator: "events" });
+    const accepted = yield* validateConfigurationForm(key, value);
+    expect(accepted).toEqual(value);
+    const error = yield* validateConfigurationForm(key, {
+      ...value,
+      parentModel: { _tag: "Some", value: "parent-model" },
+    }).pipe(Effect.flip);
+    expect(error.details).toEqual([expect.objectContaining({ path: ["parentModel"] })]);
+  }),
+);
+
+it.effect("refuses parent defaults beside coordinator: events in the settings form", () =>
+  Effect.gen(function* () {
+    const key = ConfigurationEntityKey.make({
+      kind: "settings",
+      identifier: ConfigurationEntityId.make("instance"),
+    });
+    const value = { version: 2, settings: { coordinator: "events" } };
+    const accepted = yield* validateConfigurationForm(key, value);
+    expect(accepted).toEqual(value);
+    const error = yield* validateConfigurationForm(key, {
+      ...value,
+      settings: { coordinator: "events", parent_effort: "low" },
+    }).pipe(Effect.flip);
+    expect(error.details).toEqual([
+      expect.objectContaining({ path: ["settings", "parent_effort"] }),
+    ]);
+  }),
+);
+
 it.effect(
   "uses worker cross-field rules and rejects secret values instead of environment variable names",
   () =>

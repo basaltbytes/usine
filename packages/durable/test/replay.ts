@@ -3,7 +3,7 @@
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
-import { Agent, AgentPersona, type ParentKind } from "@usine/core/agent";
+import { Agent, AgentPersona, type CoordinatorKind } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
 import { RunSpec } from "@usine/core/attempt/channel";
 import { GatewayCredentialKind } from "@usine/core/worker";
@@ -84,11 +84,12 @@ const routedRuntime = (storage: string, journal: string, parent: ReadonlyArray<P
  * Pi parent, whose transcript both replays read.
  */
 export const restartReplays = (mode: "record" | "replay"): void => {
-  const parents: ReadonlyArray<ParentKind> = mode === "record" ? ["pi"] : ["pi", "none"];
+  const kinds: ReadonlyArray<CoordinatorKind> =
+    mode === "record" ? ["session"] : ["session", "events"];
   for (const provider of providers)
     for (const scenario of ["restart", "credential-changed"] as const)
-      for (const parent of parents) {
-        const coordinated = parent === "none";
+      for (const coordinator of kinds) {
+        const coordinated = coordinator === "events";
         it.live.skipIf(mode === "record" && recordingModel(provider) === undefined)(
           `${mode} ${provider}: ${scenario} through the ${coordinated ? "coordinator" : "Pi parent"}`,
           () =>
@@ -112,7 +113,7 @@ export const restartReplays = (mode: "record" | "replay"): void => {
                   worker: fixture.request.worker,
                   spec: RunSpec.make({
                     ...original.spec,
-                    parent,
+                    coordinator,
                     parentModel: coordinated ? Option.none() : original.spec.parentModel,
                     task: AttemptTask.make(waitingPrompt),
                     agent: Agent.make({

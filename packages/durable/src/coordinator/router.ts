@@ -20,7 +20,7 @@ const infra = (error: JournalError) => InfraFailure.make({ message: error.messag
  * Provides `AttemptRuntime` over the Pi parent's runtime and the event-driven coordinator. An
  * Attempt stays on the runtime that started it: `execute` sends it to the coordinator if the
  * attempt journal has it, to the Pi runtime if pi-durable has it, and otherwise by its
- * `RunSpec.parent`. The other operations look the Attempt up in the attempt journal and fall back
+ * `RunSpec.coordinator`. The other operations look the Attempt up in the attempt journal and fall back
  * to the Pi runtime. A Worker notice for an Attempt that neither runtime has yet waits for its
  * `execute` call.
  */
@@ -68,7 +68,7 @@ export const routerLayer = Layer.effect(
             Effect.catchTag("JournalError", (error) => Effect.fail(infra(error))),
           );
           const runtime = Option.getOrElse(found, () =>
-            request.spec.parent === "none" ? coordinator : pi,
+            request.spec.coordinator === "events" ? coordinator : pi,
           );
           executing.set(attemptId, runtime);
           const kept = waiting.get(attemptId) ?? [];
@@ -76,8 +76,8 @@ export const routerLayer = Layer.effect(
           for (const notice of kept) yield* runtime.notify(attemptId, notice);
           yield* Effect.logInfo("Routed the Attempt to its coordinator", {
             attemptId,
-            coordinator: runtime === coordinator ? "event-driven" : "pi",
-            parent: request.spec.parent,
+            runtime: runtime === coordinator ? "event-driven" : "pi",
+            coordinator: request.spec.coordinator,
             reattached: Option.isSome(found),
             notices: kept.length,
           });

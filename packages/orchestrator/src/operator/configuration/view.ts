@@ -9,6 +9,8 @@ import { visibleRepository, visibleLoop } from "../access.ts";
 import {
   AgentPersona,
   AgentName,
+  CoordinatorKind,
+  resolveCoordinator,
   resolveParentEffort,
   resolveParentModel,
 } from "@usine/core/agent";
@@ -154,6 +156,10 @@ export class AgentFileView extends Schema.Class<
   resolvedParentModel: Schema.NullOr(ModelId),
   /** The file's parent effort, else `settings.parent_effort`, else `effort`. */
   resolvedParentEffort: Effort,
+  /** The file's coordinator kind, or null if it sets none. */
+  coordinator: Schema.NullOr(CoordinatorKind),
+  /** The file's coordinator kind, else `settings.coordinator`. */
+  resolvedCoordinator: CoordinatorKind,
   /** The standing instructions supplied to the agent. */
   persona: AgentPersona,
   /** The loaded Loops that use this Agent. */
@@ -462,6 +468,8 @@ export class SettingsView extends Schema.Class<
   parentModel: Schema.NullOr(ModelId),
   /** The instance default parent reasoning effort, or null to use the agent effort. */
   parentEffort: Schema.NullOr(Effort),
+  /** The coordinator kind of attempts whose agent sets none. */
+  coordinator: CoordinatorKind,
   /** The configured operator login, or null when unset. */
   operator: Schema.NullOr(OperatorLogin),
   /** The hint delivery mode: disabled, GitHub delivery polling, or an HTTP endpoint. */
@@ -714,6 +722,8 @@ const makeOperatorConfiguration = Effect.gen(function* () {
           resolveParentModel(file.agent, config.settings.parentModel),
         ),
         resolvedParentEffort: resolveParentEffort(file.agent, config.settings.parentEffort),
+        coordinator: Option.getOrNull(file.coordinator),
+        resolvedCoordinator: resolveCoordinator(file.agent, config.settings.coordinator),
         persona: file.persona,
         loops: instance.loops.filter(({ agent }) => agent === file.name).map(({ name }) => name),
       }),
@@ -780,6 +790,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         maxAttemptTokens: Option.getOrNull(settings.maxAttemptTokens),
         parentModel: Option.getOrNull(settings.parentModel),
         parentEffort: Option.getOrNull(settings.parentEffort),
+        coordinator: settings.coordinator,
         operator: Option.getOrNull(config.operator),
         webhooks: webhooks.mode,
         lastHintAt: Option.getOrNull(Option.map(lastHint, DateTime.formatIso)),

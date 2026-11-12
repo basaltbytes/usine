@@ -26,4 +26,10 @@ export const migrations = [
       "ALTER TABLE `usine_attempt_coordination` ADD `next_inbound` integer DEFAULT 1 NOT NULL;",
     ],
   ],
+  [
+    "4_20261112151829_coordinator_kind",
+    [
+      "-- RunSpec.parent (`pi` or `none`) became RunSpec.coordinator (`session` or `events`).\nUPDATE `usine_attempt_coordination` SET `request` = json_set(json_remove(`request`, '$.spec.parent'), '$.spec.coordinator', CASE json_extract(`request`, '$.spec.parent') WHEN 'none' THEN 'events' ELSE 'session' END) WHERE json_type(`request`, '$.spec.parent') IS NOT NULL;",
+    ],
+  ],
 ] as const;

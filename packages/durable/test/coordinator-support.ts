@@ -13,7 +13,7 @@ export const coordinated = (attemptId: string, maxChildren = 3) => {
   const request = attemptRequest(attemptId, maxChildren);
   return AttemptRequest.make({
     ...request,
-    spec: AttemptChannel.RunSpec.make({ ...request.spec, parent: "none" }),
+    spec: AttemptChannel.RunSpec.make({ ...request.spec, coordinator: "events" }),
   });
 };
 

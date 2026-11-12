@@ -15,8 +15,9 @@ Fields in this table belong to `settings`.
 | `max_children` | integer ≥ 1 | `4` | Child sessions one attempt can start over its lifetime, including sequential sessions. |
 | `max_attempt_minutes` | integer ≥ 1 | unlimited | Wall-clock minutes per attempt, excluding operator holds and orchestrator downtime. |
 | `max_attempt_tokens` | integer ≥ 1 | unlimited | Tokens per attempt across the parent and all children. |
-| `parent_model` | string | Pi selection | Parent model in `provider/model` form for agents without an override. |
-| `parent_effort` | effort | agent effort | Parent reasoning effort for agents without an override. |
+| `coordinator` | `session` or `events` | `session` | What coordinates attempts of agents without an override: a parent session, or rules on lifecycle events. See [Coordinator](/reference/configuration/agents/#coordinator). |
+| `parent_model` | string | Pi selection | Parent model in `provider/model` form for agents without an override. Not allowed with `coordinator: events`. |
+| `parent_effort` | effort | agent effort | Parent reasoning effort for agents without an override. Not allowed with `coordinator: events`. |
 | `upgrade_channel` | `latest` or `next` | `latest` | npm channel checked for global installations managed by systemd or launchd. |
 | `upgrade_mode` | `off`, `propose`, or `automatic` | `propose` | Disable upgrade checks, offer upgrades, or upgrade after admitted attempts finish. |
 
