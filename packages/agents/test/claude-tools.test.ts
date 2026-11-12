@@ -9,15 +9,21 @@ import { AgentSessionId, RoleName, RoleSession } from "@usine/core/agent/session
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Layer, Option, Schema, Semaphore, Stream } from "effect";
 import { Tool, Toolkit } from "effect/ai";
-import { LocalProcess } from "../src/child-host/child-host.ts";
+import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
+import { ChildProcessLost } from "../src/child-host/process.ts";
 import { AdmissionContext, AdmittedBrain } from "../src/harness/admission.ts";
 import { claudeRuntime } from "../src/harness/claude/claude.ts";
-import { ClaudeSdk, type ClaudeToolServer } from "../src/harness/claude/sdk.ts";
+import {
+  ClaudeSdk,
+  type ClaudeQueryOptions,
+  type ClaudeToolServer,
+} from "../src/harness/claude/sdk.ts";
 import { continuationPolicy } from "../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt } from "../src/harness/contract.ts";
 import { RolePlacements, RoleSpec } from "../src/harness/role.ts";
 import { HostLoginLock, RestartState, WorkingDirectory } from "../src/runtime.ts";
 import type { HostToolResult } from "../src/harness/tools.ts";
+import { collectLogs } from "./logs.ts";
 
 const PREFIX = "mcp__usine__";
 /** A name that fits the API's 64 characters on its own, but not after Claude Code's prefix. */
@@ -139,6 +145,7 @@ const fakeClaude = (observed: Observed, waiting: Promise<void>) =>
 describe("Claude Code usine tool sets", () => {
   it.effect("list aliases that fit Claude Code, run calls by alias, and cancel calls", () => {
     const observed: Observed = { results: [], interrupted: false };
+    const logs = collectLogs(["Info"]);
     let started = () => {};
     const waiting = new Promise<void>((resolve) => {
       started = resolve;
@@ -180,6 +187,11 @@ describe("Claude Code usine tool sets", () => {
       ]);
       assert.strictEqual(observed.cancelled, "rejected", "a cancelled call rejects");
       assert.isTrue(observed.interrupted, "cancelling a call interrupts its handler");
+      assert.deepInclude(
+        logs.records.map(({ message }) => message),
+        ["Usine tool call was cancelled", { tool: "wait" }],
+        "a cancelled call is logged",
+      );
       const calls = events.flatMap((event) =>
         event._tag === "ToolStarted" || event._tag === "ToolFinished" ? [event] : [],
       );
@@ -192,7 +204,84 @@ describe("Claude Code usine tool sets", () => {
       );
     }).pipe(
       Effect.scoped,
-      Effect.provide([fakeClaude(observed, waiting), handlers, loginLock, NodeServices.layer]),
+      Effect.provide([
+        fakeClaude(observed, waiting),
+        handlers,
+        loginLock,
+        logs.layer,
+        NodeServices.layer,
+      ]),
     );
+  });
+
+  it.effect("serve the usine tools to the process that resumes a lost remote session", () => {
+    const opened: Array<{ options: ClaudeQueryOptions; server: Option.Option<ClaudeToolServer> }> =
+      [];
+    const results: Array<HostToolResult> = [];
+    const remote = SessionSpec.make({
+      ...spec,
+      host: RemoteShell.make({
+        ssh: { command: "ssh", args: [] },
+        sshEnvironment: {},
+        destination: "worker.example",
+      }),
+    });
+    // The first process stops after its start; the resumed one calls a usine tool and finishes.
+    const lostOnce = Layer.succeed(ClaudeSdk)({
+      open: (_input, options, server) => {
+        opened.push({ options, server });
+        const launch = opened.length;
+        return {
+          close: () => undefined,
+          interrupt: () => Promise.resolve(),
+          usesApiKey: () => Promise.resolve(false),
+          supportedModels: () =>
+            Promise.resolve([{ value: "sonnet", resolvedModel: "claude-sonnet-4-6" }]),
+          async *[Symbol.asyncIterator]() {
+            yield { type: "system", subtype: "init", session_id: "claude-tools-2" };
+            if (launch === 1) throw ChildProcessLost.make({ exitCode: 255, stderrTail: "" });
+            assert(Option.isSome(server));
+            const dotted = server.value.tools[0]?.name;
+            assert(dotted !== undefined);
+            results.push(
+              await server.value.call(
+                dotted,
+                Option.some({ name: "greeting" }),
+                new AbortController().signal,
+              ),
+            );
+            yield { type: "assistant", message: { content: [{ type: "text", text: "Done." }] } };
+            yield { type: "result", subtype: "success", result: "Done." };
+          },
+        };
+      },
+    });
+    const handlers = tools.toLayer({
+      "notes.read": ({ name }) => Effect.succeed(`note ${name}`),
+      [LONG]: ({ name }) => Effect.succeed(`long note ${name}`),
+      wait: () => Effect.never,
+    });
+    return Effect.gen(function* () {
+      const runtime = yield* claudeRuntime;
+      const policy = yield* continuationPolicy(remote, "Read the notes", RestartState.make({}));
+      const native = yield* runtime.open(
+        remote,
+        StartPrompt.make({ text: "Read the notes" }),
+        policy,
+        tools,
+      );
+      yield* Stream.runDrain(native.running.events);
+      assert.lengthOf(opened, 2, "the lost process is relaunched once");
+      const [first, second] = opened;
+      assert(first !== undefined && second !== undefined);
+      assert.isString(second.options.resume, "the relaunch resumes the saved session");
+      assert(Option.isSome(first.server) && Option.isSome(second.server));
+      assert.deepStrictEqual(
+        second.server.value.tools.map(({ name }) => name),
+        first.server.value.tools.map(({ name }) => name),
+        "the relaunched process lists the same usine tools",
+      );
+      assert.deepStrictEqual(results, [{ isError: false, text: "note greeting" }]);
+    }).pipe(Effect.scoped, Effect.provide([lostOnce, handlers, loginLock, NodeServices.layer]));
   });
 });

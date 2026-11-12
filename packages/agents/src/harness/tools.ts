@@ -65,6 +65,10 @@ type ToolFailure = AiError.AiError | Error | Schema.Json;
 /** What a handler returns, or a typed failure of the call. */
 type ToolOutcome = Tool.HandlerResult<Tool.Any>["result"] | ToolFailure;
 
+/** The `callId` log and span field of a call that the harness identified. */
+const callIdField = (callId: Option.Option<string>) =>
+  Option.match(callId, { onNone: () => ({}), onSome: (id) => ({ callId: id }) });
+
 /** Encodes a value of one of a tool's schemas as JSON. */
 type JsonEncoder = (value: ToolOutcome) => Effect.Effect<Schema.Json, Schema.SchemaError>;
 
@@ -128,10 +132,7 @@ export const hostToolSet = <Tools extends Record<string, Tool.Any>>(
         parameters: Tool.getJsonSchema(tool),
         call: Effect.fn("HostTools.call")(
           function* (input: Schema.Json, callId: Option.Option<string>) {
-            yield* Effect.annotateCurrentSpan({
-              tool: tool.name,
-              ...Option.match(callId, { onNone: () => ({}), onSome: (id) => ({ callId: id }) }),
-            });
+            yield* Effect.annotateCurrentSpan({ tool: tool.name, ...callIdField(callId) });
             const params = yield* decodeParameters(input).pipe(
               Effect.flatMap(encodeParameters),
               Effect.result,
@@ -170,8 +171,14 @@ export const hostToolSet = <Tools extends Record<string, Tool.Any>>(
             }
             return { isError: false, text: yield* jsonText(encoded.success) };
           },
-          (effect) =>
+          (effect, _input, callId) =>
             effect.pipe(
+              Effect.onInterrupt(() =>
+                Effect.logInfo("Usine tool call was cancelled", {
+                  tool: tool.name,
+                  ...callIdField(callId),
+                }),
+              ),
               Effect.catchDefect((defect) =>
                 Effect.logError("Usine tool handler died", {
                   tool: tool.name,

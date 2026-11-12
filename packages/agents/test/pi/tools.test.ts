@@ -24,6 +24,7 @@ import {
 } from "../../src/harness/pi/sdk.ts";
 import { RolePlacements, RoleSpec } from "../../src/harness/role.ts";
 import { RestartState, WorkingDirectory } from "../../src/runtime.ts";
+import { collectLogs } from "../logs.ts";
 
 // A usine tool that takes the name of Pi's own `read` tool, which Pi can't carry.
 const Read = Tool.make("read", {
@@ -202,6 +203,7 @@ describe("Pi usine tool sets", () => {
         ),
     });
     let cancelled: "rejected" | "resolved" | "pending" | undefined;
+    const logs = collectLogs(["Info"]);
     return Effect.gen(function* () {
       yield* runPi(kit, waitHandlers, async (options) => {
         const definition = options.hostTools[0];
@@ -222,6 +224,11 @@ describe("Pi usine tool sets", () => {
       });
       assert.strictEqual(cancelled, "rejected", "a cancelled call rejects");
       assert.isTrue(interrupted, "cancelling a call interrupts its handler");
-    });
+      assert.deepInclude(
+        logs.records.map(({ message }) => message),
+        ["Usine tool call was cancelled", { tool: "wait", callId: "call-1" }],
+        "a cancelled call is logged",
+      );
+    }).pipe(Effect.provide(logs.layer));
   });
 });
