@@ -12637,7 +12637,8 @@
             }
           },
           "required": true
-        }
+        },
+        "x-usine-permission": "operate"
       }
     },
     "/api/runs/{runId}/retry": {
