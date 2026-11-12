@@ -13,7 +13,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
 import { type AttemptResult, AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { type AttemptHub, attemptHubs } from "../src/attempt/hubs.ts";
-import { childSessionId, parentSessionId } from "../src/attempt/parent.ts";
+import { childSessionId, parentSessionId } from "../src/attempt/sessions.ts";
 import { relayAttempt } from "../src/attempt/relay.ts";
 import { DurableHarness } from "../src/harness.ts";
 import { layer } from "../src/testing.ts";

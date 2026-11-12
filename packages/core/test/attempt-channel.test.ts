@@ -371,12 +371,15 @@ describe("attempt channel", () => {
       const storedSpec = yield* Schema.decodeUnknownEffect(AttemptChannel.RunSpec)(
         Object.fromEntries(
           Object.entries(decodedValue2).filter(
-            ([key]) => key !== "preparedAt" && key !== "botLogin",
+            ([key]) => !["preparedAt", "botLogin", "parent", "outcomeLabels"].includes(key),
           ),
         ),
       );
       assert(Option.isNone(storedSpec.preparedAt));
       assert(Option.isNone(storedSpec.botLogin));
+      // An Attempt stored before the event-driven coordinator reattaches to its Pi parent.
+      assert.strictEqual(storedSpec.parent, "pi");
+      assert.deepStrictEqual(storedSpec.outcomeLabels, []);
       const started = SessionStarted.make({
         session,
         prompt: Option.some("Exact task\n\n  Preserve whitespace.\n"),

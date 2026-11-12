@@ -1,6 +1,7 @@
 import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
   AgentBlockedError,
+  type ChildBackend,
   AgentCapacityError,
   AgentQuestionError,
   AgentResultError,
@@ -35,11 +36,15 @@ import {
   Schema,
   Stream,
 } from "effect";
-import type { DurableHarnessError } from "../../harness.ts";
-import type { AttemptHub } from "../hubs.ts";
-import { childSessionId, parentSessionId } from "../parent.ts";
-import type { ExtensionServices } from "../services.ts";
-import { type DelegationJournal, SavedChild } from "./journal.ts";
+import type { JournalError } from "../../coordinator/journal.ts";
+import { childSessionId, parentSessionId } from "../sessions.ts";
+import {
+  type DelegationCall,
+  type DelegationHub,
+  type DelegationJournal,
+  type ReservedChildReport,
+  SavedChild,
+} from "./journal.ts";
 
 const Reported = Schema.TaggedStruct("Reported", {
   sessionId: AgentSessionId,
@@ -81,8 +86,9 @@ export type DelegationOutcome = typeof DelegationOutcome.Type;
 /** One delegation of the Attempt's rendered task to a child. */
 export interface Delegation {
   readonly spec: AttemptChannel.RunSpec;
-  readonly hub: AttemptHub;
+  readonly hub: DelegationHub;
   readonly journal: DelegationJournal;
+  readonly call: DelegationCall;
   /** Supplemental context or a focused assignment within the rendered task. */
   readonly assignment: string;
 }
@@ -97,7 +103,7 @@ const taskExcerpt = (task: string): string => {
 };
 
 /** Registers the child in `hub.children` until the scope closes. */
-const register = (hub: AttemptHub, child: RunningSession) =>
+const register = (hub: DelegationHub, child: RunningSession) =>
   Effect.acquireRelease(
     Effect.sync(() => {
       hub.children.set(child.session.id, child);
@@ -113,58 +119,55 @@ const reservedReports = [
 ] as const;
 
 /**
- * Runs one child from launch, or from its saved conversation on a replay, to its outcome. Counts
- * the delegation against the child-session budget, restores the saved child's supervision and
- * unread operator inputs, forwards the child's events to the Attempt's hub, and records reserved
- * reports and infrastructure failures in the Attempt record. A new delegation clears the
- * infrastructure failure of a child that no delegation in this process started.
+ * Runs one child from launch, or from its saved conversation on a replay, to its outcome. The
+ * journal's owner numbers the delegation and applies the child-session budget. Restores the saved
+ * child's supervision and unread operator inputs, forwards the child's events to the Attempt's
+ * hub, and reports reserved reports and infrastructure failures to `call`.
  *
- * Fails with `DurableHarnessError` when the journal fails outside a progress checkpoint, and with
+ * Fails with `JournalError` when the journal fails outside a progress checkpoint, and with
  * `AgentSessionError` when a new delegation's child fails to launch or ends without a report; a
  * resumed delegation returns `Interrupted` instead.
  */
 export const delegate = Effect.fn("Delegation.delegate")(function* (
-  services: Pick<ExtensionServices, "hubs" | "backend">,
-  { spec, hub, journal, assignment }: Delegation,
+  backend: ChildBackend["Service"],
+  { spec, hub, journal, call, assignment }: Delegation,
 ) {
   const parentId = parentSessionId(spec.attemptId);
   const excerpt = taskExcerpt(assignment);
-  const start = yield* journal.start(
-    ChildSessionBudget.make(spec.maxChildren),
-    (blocker) => blocker.kind === "infra" && !hub.childSpawns.has(blocker.sessionId),
-  );
-  const { resumed, progress: previous } = start;
-  const attemptedChildren = ChildSessionCount.make(start.count);
+  const start = yield* journal.start;
+  if (start._tag === "Refused") {
+    yield* Effect.annotateCurrentSpan({
+      attemptId: spec.attemptId,
+      attemptedChildren: start.attempted,
+      maxChildren: start.max,
+    });
+    yield* Effect.logWarning("Child session budget exceeded", {
+      attemptedChildren: start.attempted,
+      maxChildren: start.max,
+      parentSessionId: parentId,
+      taskExcerpt: excerpt,
+    });
+    return BudgetExceeded.make({ attempted: start.attempted, max: start.max });
+  }
+  const { resumed, progress: previous, count: attemptedChildren } = start;
   yield* Effect.annotateCurrentSpan({
     attemptId: spec.attemptId,
     attemptedChildren,
     maxChildren: spec.maxChildren,
     parentSessionId: parentId,
   });
-  if (attemptedChildren > spec.maxChildren) {
-    yield* Effect.logWarning("Child session budget exceeded", {
-      attemptedChildren,
-      maxChildren: spec.maxChildren,
-      parentSessionId: parentId,
-      taskExcerpt: excerpt,
-    });
-    return BudgetExceeded.make({
-      attempted: attemptedChildren,
-      max: ChildSessionBudget.make(spec.maxChildren),
-    });
-  }
   const sessionId = childSessionId(spec.attemptId, attemptedChildren);
   /** Runs `effect` until the delegation aborts. On abort, runs `onAbort` and interrupts. */
   const untilAborted = <A, E, R>(effect: Effect.Effect<A, E, R>, onAbort: Effect.Effect<void, E>) =>
     Effect.raceFirst(
       effect,
-      journal.aborted.pipe(
+      call.aborted.pipe(
         Effect.annotateLogs({ sessionId }),
         Effect.andThen(onAbort),
         Effect.andThen(Effect.interrupt),
       ),
     );
-  const checkpoint = <A>(effect: Effect.Effect<A, DurableHarnessError>) =>
+  const checkpoint = <A>(effect: Effect.Effect<A, JournalError>) =>
     effect.pipe(
       Effect.tapError((error) =>
         Effect.logWarning("Child progress checkpoint failed; event forwarding continues", {
@@ -178,11 +181,10 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     );
   const interrupted = (reason: string) =>
     Effect.gen(function* () {
-      const output = (yield* journal.retainedOutput) || previous.output;
+      const output = (yield* call.retainedOutput) || previous.output;
       hub.childSpawns.delete(sessionId);
       yield* journal.releaseSupervision(sessionId);
-      yield* services.hubs.event(
-        hub,
+      yield* hub.event(
         SessionFinished.make({
           session: ChildSession.make({
             id: sessionId,
@@ -243,7 +245,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
         inputs: unsettled.size,
       });
       for (const input of unsettled.values())
-        yield* services.hubs.delivery(hub, {
+        yield* hub.delivery({
           _tag: "Delivery",
           inputSequence: input.inputSequence,
           intervention: input.intervention,
@@ -254,7 +256,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
   );
   if (Result.isFailure(restoredInputs))
     return yield* interrupted("the saved operator messages no longer decode");
-  if (resumed) yield* checkpoint(journal.output(previous.output));
+  if (resumed) yield* checkpoint(call.output(previous.output));
   const decoded = yield* Option.match(previous.saved, {
     onNone: () => Effect.succeedNone,
     onSome: (value) => Schema.decodeUnknownEffect(SavedChild)(value).pipe(Effect.asSome),
@@ -265,13 +267,6 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
   if (resumed && Option.isNone(saved))
     return yield* interrupted("the child did not commit a saved conversation");
   hub.childSpawns.add(sessionId);
-  if (Option.isSome(start.superseded)) {
-    yield* Effect.logInfo("New delegation supersedes the previous child's infrastructure failure", {
-      attemptId: spec.attemptId,
-      sessionId,
-      previousChildSessionId: start.superseded.value,
-    });
-  }
   if (!(yield* Deferred.isDone(hub.attached))) {
     yield* Effect.logInfo(
       "Waiting for execute to supply the Attempt's child host and environment before spawning a child",
@@ -354,7 +349,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     }),
   });
   if (Option.isSome(saved) && saved.value.session.brain.harness !== spec.agent.brain.harness) {
-    const stopped = yield* services.backend.stop(childRequest).pipe(
+    const stopped = yield* backend.stop(childRequest).pipe(
       Effect.provideService(ChildSessionLifecycle, lifecycle),
       Effect.tapError((error) =>
         Effect.logError("Could not stop the saved child before refusing continuation", {
@@ -390,39 +385,23 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
   );
   const recordInfrastructureFailure = (error: AgentSessionError) =>
     !resumed && (error._tag === "SessionOperationError" || error._tag === "SessionInterruptedError")
-      ? journal
-          .recordBlocker(
-            { sessionId, message: error.message, kind: "infra" },
-            (current) => current.kind === "infra",
-          )
-          .pipe(
-            Effect.mapError((cause) =>
-              SessionOperationError.make({
-                operation: "stream",
-                sessionId: Option.some(sessionId),
-                message: cause.message,
-                cause,
-              }),
-            ),
-            Effect.flatMap((recorded) =>
-              Effect.logWarning("Child infrastructure failure requires an automatic retry", {
-                attemptId: spec.attemptId,
-                sessionId,
-                message: error.message,
-              }).pipe(
-                Effect.andThen(
-                  recorded
-                    ? Effect.void
-                    : Effect.logInfo(
-                        "Kept the Attempt's first child infrastructure failure ahead of this one",
-                        { attemptId: spec.attemptId, sessionId },
-                      ),
-                ),
-              ),
-            ),
-          )
+      ? Effect.logWarning("Child infrastructure failure requires an automatic retry", {
+          attemptId: spec.attemptId,
+          sessionId,
+          message: error.message,
+        }).pipe(
+          Effect.andThen(call.infrastructureFailed(sessionId, error.message)),
+          Effect.mapError((cause) =>
+            SessionOperationError.make({
+              operation: "stream",
+              sessionId: Option.some(sessionId),
+              message: cause.message,
+              cause,
+            }),
+          ),
+        )
       : Effect.void;
-  const journalError = (cause: DurableHarnessError) =>
+  const journalError = (cause: JournalError) =>
     SessionOperationError.make({
       operation: "launch",
       sessionId: Option.some(sessionId),
@@ -468,7 +447,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
         );
         if (input === undefined) return Effect.void;
         unsettled.delete(input.inputSequence);
-        return services.hubs.delivery(hub, {
+        return hub.delivery({
           _tag: "Delivery",
           inputSequence: input.inputSequence,
           intervention: input.intervention,
@@ -488,7 +467,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     // Annotate logs with the Attempt because a delegation runs outside the Attempt's fiber. An
     // abort interrupts a launch that is still waiting through retry delays.
     const child = yield* untilAborted(
-      services.backend
+      backend
         .launch(childRequest)
         .pipe(
           Effect.provideService(ChildSessionLifecycle, lifecycle),
@@ -505,14 +484,10 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
       Exit.isFailure(exit)
         ? Effect.logWarning("Child session ended before returning a result", {
             sessionId: session.id,
-          }).pipe(
-            Effect.andThen(
-              services.hubs.event(hub, SessionFinished.make({ session: child.session })),
-            ),
-          )
+          }).pipe(Effect.andThen(hub.event(SessionFinished.make({ session: child.session }))))
         : Effect.void,
     );
-    yield* journal.publish({ childSessionId: session.id });
+    yield* call.publish({ childSessionId: session.id });
     let cumulativeUsage = childRequest.usage;
     const forward = (event: AgentSessionEvent) =>
       Effect.gen(function* () {
@@ -550,7 +525,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
             }),
           ).pipe(Effect.orDie);
           yield* checkpoint(journal.saveSession(recovery, { beforePrompt: false }));
-          yield* checkpoint(journal.publish({ childSessionId: session.id, saved: recovery }));
+          yield* checkpoint(call.publish({ childSessionId: session.id, saved: recovery }));
         }
         if (event._tag === "SessionTokensUpdated") {
           cumulativeUsage = Option.some(event);
@@ -560,14 +535,14 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
           yield* checkpoint(journal.saveUsage(usage));
         }
         if (event._tag === "TextOutput") {
-          yield* checkpoint(journal.output(`${event.text}\n`));
-          yield* checkpoint(journal.saveOutput);
+          yield* checkpoint(call.output(`${event.text}\n`));
+          yield* checkpoint(Effect.flatMap(call.retainedOutput, journal.saveOutput));
         }
         const recorded =
           event._tag === "SessionStarted" && !resumed
             ? SessionStarted.make({ ...event, prompt: Option.some(childRequest.prompt) })
             : event;
-        yield* services.hubs.event(hub, recorded);
+        yield* hub.event(recorded);
       });
     // These errors end the stream with the same report the child's result contains, so they are
     // ignored here.
@@ -588,56 +563,34 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     );
     yield* Fiber.join(forwarding);
     yield* journal.holdEnded(session.id);
-    if (resumed) {
-      const cleared = yield* journal.clearBlocker(
-        (blocker) => blocker.kind === "infra" && blocker.sessionId === session.id,
-      );
-      if (cleared)
-        yield* Effect.logInfo("Recovered child's report replaces its infrastructure failure", {
-          attemptId: spec.attemptId,
-          sessionId: session.id,
-        });
-    }
+    if (resumed) yield* call.recovered(session.id);
     return yield* Result.match(outcome, {
       onFailure: (report) =>
         Effect.gen(function* () {
-          const kind = Match.valueTags(report, {
-            AgentResultError: () => "failed" as const,
-            AgentCapacityError: () => "capacity" as const,
-            AgentBlockedError: () => "blocked" as const,
-            AgentQuestionError: () => "question" as const,
-          });
-          const resetsAt =
-            report._tag === "AgentCapacityError"
-              ? Option.map(report.resetsAt, DateTime.formatIso)
-              : Option.none<string>();
-          yield* Effect.logInfo("Child session returned a reserved report to the Pi parent", {
+          const reserved: ReservedChildReport = {
+            kind: Match.valueTags(report, {
+              AgentResultError: () => "failed" as const,
+              AgentCapacityError: () => "capacity" as const,
+              AgentBlockedError: () => "blocked" as const,
+              AgentQuestionError: () => "question" as const,
+            }),
+            message: report.message,
+            resetsAt:
+              report._tag === "AgentCapacityError"
+                ? Option.map(report.resetsAt, DateTime.formatIso)
+                : Option.none(),
+          };
+          yield* Effect.logInfo("Child session returned a reserved report", {
             sessionId: session.id,
-            kind,
-            resetsAt: Option.getOrUndefined(resetsAt),
+            kind: reserved.kind,
+            resetsAt: Option.getOrUndefined(reserved.resetsAt),
           });
-          const first = yield* journal.recordBlocker(
-            {
-              sessionId: session.id,
-              message: report.message,
-              kind,
-              ...Option.match(resetsAt, {
-                onNone: () => ({}),
-                onSome: (value) => ({ resetsAt: value }),
-              }),
-            },
-            () => true,
-          );
-          if (!first) {
-            yield* Effect.logInfo("Kept the Attempt's first child report ahead of this one", {
-              sessionId: session.id,
-            });
-          }
-          yield* services.hubs.event(hub, SessionFinished.make({ session: child.session }));
+          yield* call.reserved(session.id, reserved);
+          yield* hub.event(SessionFinished.make({ session: child.session }));
           return Reserved.make({ sessionId: session.id, report });
         }),
       onSuccess: (result) =>
-        Effect.logInfo("Child session returned to the Pi parent", { sessionId: session.id }).pipe(
+        Effect.logInfo("Child session returned its report", { sessionId: session.id }).pipe(
           Effect.as(Reported.make({ sessionId: session.id, report: result.message })),
         ),
     });

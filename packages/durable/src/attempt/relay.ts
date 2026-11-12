@@ -28,17 +28,13 @@ import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableHarness, DurableHarnessError } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, hasStarted, HoldDoc } from "./documents.ts";
 import { entryEvents, ledgerUsage } from "./events.ts";
-import {
-  type AttemptHub,
-  type AttemptHubs,
-  type ChildDelivery,
-  keepNotice,
-  type RelayItem,
-  type RelayProgress,
-} from "./hubs.ts";
+import type { ChildDelivery } from "./delegation/journal.ts";
+import { keepNotice } from "./notices.ts";
+import { type AttemptHub, type AttemptHubs, type RelayItem, type RelayProgress } from "./hubs.ts";
 import { SubagentDoc } from "./child.ts";
 import { settledOf } from "./outcome.ts";
-import { childSessionId, parentSession, parentSessionId } from "./parent.ts";
+import { parentSession } from "./parent.ts";
+import { childSessionId, parentSessionId } from "./sessions.ts";
 import { queueParentSteer } from "./steering.ts";
 
 const PAGE = 64;

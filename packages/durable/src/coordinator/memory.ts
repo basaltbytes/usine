@@ -1,15 +1,22 @@
 import type { AttemptId } from "@usine/core/attempt";
 import { Effect, HashMap, Layer, Option, Ref, Semaphore } from "effect";
 
-import { AttemptJournal, type CoordinatorSnapshot } from "./journal.ts";
+import { AttemptJournal, CoordinatorSnapshot } from "./journal.ts";
 import {
   acknowledged,
   decided,
+  delegationOf,
   keptDecision,
+  keptDelegationOutcome,
   opened,
+  progressed,
   reserved,
   settled,
+  settledDelegation,
+  startedDelegation,
   transitioned,
+  unsupervisedRecorded,
+  withDelegation,
 } from "./ledger.ts";
 
 /**
@@ -100,6 +107,55 @@ export const memoryAttemptJournalLayer = Layer.effect(
           yield* save(next);
         }).pipe(serialized);
       }),
+      startDelegation: Effect.fn("AttemptJournal.startDelegation")(function* (attemptId, number) {
+        yield* Effect.annotateCurrentSpan({ attemptId, delegation: number });
+        return yield* Effect.gen(function* () {
+          const previous = yield* stored(attemptId);
+          const record = yield* delegationOf(previous, number);
+          const result = startedDelegation(record);
+          yield* save(withDelegation(previous, result.record));
+          return result.started;
+        }).pipe(serialized);
+      }),
+      saveProgress: Effect.fn("AttemptJournal.saveProgress")(function* (attemptId, number, change) {
+        yield* Effect.annotateCurrentSpan({ attemptId, delegation: number, change: change._tag });
+        yield* Effect.gen(function* () {
+          const previous = yield* stored(attemptId);
+          const record = yield* delegationOf(previous, number).pipe(
+            Effect.flatMap((current) => progressed(current, change)),
+          );
+          yield* save(withDelegation(previous, record));
+        }).pipe(serialized);
+      }),
+      settleDelegation: Effect.fn("AttemptJournal.settleDelegation")(
+        function* (attemptId, number, outcome) {
+          yield* Effect.annotateCurrentSpan({ attemptId, delegation: number });
+          return yield* Effect.gen(function* () {
+            const previous = yield* stored(attemptId);
+            const record = yield* delegationOf(previous, number);
+            const result = settledDelegation(record, outcome);
+            if (result.record !== record) yield* save(withDelegation(previous, result.record));
+            else yield* keptDelegationOutcome(attemptId, number, result.recorded, outcome);
+            return result.recorded;
+          }).pipe(serialized);
+        },
+      ),
+      recordResult: Effect.fn("AttemptJournal.recordResult")(function* (attemptId, result) {
+        yield* Effect.annotateCurrentSpan({ attemptId });
+        yield* Effect.gen(function* () {
+          const previous = yield* stored(attemptId);
+          yield* save(CoordinatorSnapshot.make({ ...previous, result: Option.some(result) }));
+        }).pipe(serialized);
+      }),
+      recordUnsupervised: Effect.fn("AttemptJournal.recordUnsupervised")(
+        function* (attemptId, unsupervised) {
+          yield* Effect.annotateCurrentSpan({ attemptId });
+          yield* Effect.gen(function* () {
+            const previous = yield* stored(attemptId);
+            yield* save(unsupervisedRecorded(previous, unsupervised));
+          }).pipe(serialized);
+        },
+      ),
       acknowledge: Effect.fn("AttemptJournal.acknowledge")(function* (attemptId, through) {
         yield* Effect.annotateCurrentSpan({ attemptId, through });
         yield* Effect.gen(function* () {
@@ -121,6 +177,21 @@ export const memoryAttemptJournalLayer = Layer.effect(
             return yield* Effect.logInfo("Attempt journal already settled", { attemptId });
           yield* save(next.value);
           yield* Effect.logInfo("Attempt journal settled", { attemptId });
+        }).pipe(serialized);
+      }),
+      settleOpen: Effect.fn("AttemptJournal.settleOpen")(function* (attemptId) {
+        yield* Effect.annotateCurrentSpan({ attemptId });
+        return yield* Effect.gen(function* () {
+          const all = yield* Ref.get(journals);
+          const stored = HashMap.get(all, attemptId);
+          if (Option.isNone(stored)) return Option.none();
+          const { status } = stored.value;
+          const next = settled(stored.value);
+          if (status._tag === "Open" && Option.isSome(next)) {
+            yield* save(next.value);
+            yield* Effect.logInfo("Open attempt journal settled", { attemptId });
+          }
+          return Option.some(status);
         }).pipe(serialized);
       }),
     });

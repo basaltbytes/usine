@@ -1,3 +1,4 @@
+import { AgentName } from "@usine/core/agent";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import {
   AgentFailure,
@@ -8,6 +9,8 @@ import {
   ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
+import { OutcomeLabels } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
 import { type Brand, Match, Option, Schema } from "effect";
 
 /** The supplemental context of an Attempt's first child. */
@@ -77,6 +80,8 @@ export class ChildAtCapacity extends Schema.TaggedClass<
 >("@usine/durable/coordinator/ChildAtCapacity")("ChildAtCapacity", {
   child: ChildSessionCount,
   message: Schema.NonEmptyString,
+  /** The time the provider's usage limit resets, or `None` if the provider didn't report one. */
+  resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}
 
 /** Child `child` failed to launch or lost its transport. */
@@ -111,7 +116,35 @@ export type CoordinatorEvent = typeof CoordinatorEvent.Type;
 
 type ChildEvent = Exclude<CoordinatorEvent, AttemptStarted>;
 
-/** What a handler knows when it decides about `event`. */
+/** How a delegation ended, read from the event that ended it. */
+export const DelegationEnd = Schema.Literals([
+  "reported",
+  "blocked",
+  "question",
+  "failed",
+  "interrupted",
+  "capacity",
+  "infrastructure",
+  "over-budget",
+]);
+export type DelegationEnd = typeof DelegationEnd.Type;
+
+/** One delegation of the Attempt as a handler sees it. */
+export class DelegationSummary extends Schema.Class<
+  DelegationSummary,
+  Brand.Brand<"@usine/durable/attempt/coordinator/rules/DelegationSummary">
+>("@usine/durable/coordinator/DelegationSummary")({
+  child: ChildSessionCount,
+  status: Schema.Literals(["intended", "running", "ended"]),
+  end: Schema.OptionFromNullOr(DelegationEnd),
+  /** The child's final report or the reason it ended, shortened. */
+  report: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
+/**
+ * What a handler knows when it decides about `event`, read from the attempt journal. Every field
+ * other than `event` is bounded; see `buildAttemptContext`.
+ */
 export class AttemptContext extends Schema.Class<
   AttemptContext,
   Brand.Brand<"@usine/durable/attempt/coordinator/rules/AttemptContext">
@@ -119,6 +152,18 @@ export class AttemptContext extends Schema.Class<
   /** The event being handled, always about the Attempt's latest child. */
   event: CoordinatorEvent,
   maxChildren: ChildSessionBudget,
+  repository: RepositoryName,
+  agent: AgentName,
+  /** The start of the rendered task. */
+  task: Schema.String,
+  /** The labels the engine verifies on the Item after a success. */
+  outcomeLabels: OutcomeLabels,
+  /** Whether the engine verifies the Attempt's pull request against the Loop's CI policy. */
+  requiresCi: Schema.Boolean,
+  /** The Attempt's delegations in child order, without the report that `event` carries. */
+  delegations: Schema.Array(DelegationSummary),
+  /** The end of the latest child's retained output. */
+  output: Schema.String,
 }) {}
 
 /** Starts the Attempt's first child. */
@@ -154,8 +199,14 @@ export const Failed = Schema.TaggedStruct("Failed", { message: Schema.NonEmptySt
 /** Fails the Attempt with an infrastructure failure, which the engine retries from salvage. */
 export const InfraFailed = Schema.TaggedStruct("InfraFailed", { message: Schema.NonEmptyString });
 
-/** Fails the Attempt with a provider capacity refusal, which the engine retries after a delay. */
-export const AtCapacity = Schema.TaggedStruct("AtCapacity", { message: Schema.NonEmptyString });
+/**
+ * Fails the Attempt with a provider capacity refusal, which the engine retries after a delay, or at
+ * `resetsAt` if the provider reported when its usage limit resets.
+ */
+export const AtCapacity = Schema.TaggedStruct("AtCapacity", {
+  message: Schema.NonEmptyString,
+  resetsAt: Schema.optionalKey(Schema.DateTimeUtcFromString),
+});
 
 /** Fails the Attempt because admission refused a child over the budget. */
 const OverBudget = Schema.TaggedStruct("OverBudget", { attempted: ChildSessionCount });
@@ -287,7 +338,13 @@ export const ruleFor = (event: CoordinatorEvent, context: AttemptContext): Decis
         : InfraFailed.make({
             message: `Child ${child} was interrupted and couldn't resume, and the ${context.maxChildren}-child budget has no room for a replacement: ${reason}`,
           }),
-    ChildAtCapacity: ({ message }): Decision => AtCapacity.make({ message }),
+    ChildAtCapacity: ({ message, resetsAt }): Decision =>
+      AtCapacity.make(
+        Option.match(resetsAt, {
+          onNone: () => ({ message }),
+          onSome: (value) => ({ message, resetsAt: value }),
+        }),
+      ),
     ChildFailed: ({ message }): Decision => InfraFailed.make({ message }),
     BudgetExceeded: ({ attempted }): Decision => OverBudget.make({ attempted }),
   });
@@ -361,7 +418,8 @@ const resolve = (
     Question: ({ question }) => fail(QuestionFailure.make({ question })),
     Failed: ({ message }) => fail(AgentFailure.make({ message })),
     InfraFailed: ({ message }) => fail(InfraFailure.make({ message, cause: message })),
-    AtCapacity: ({ message }) => fail(ProviderCapacityFailure.make({ message })),
+    AtCapacity: ({ message, resetsAt }) =>
+      fail(ProviderCapacityFailure.make({ message, resetsAt: Option.fromUndefinedOr(resetsAt) })),
   });
 };
 

@@ -9,7 +9,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, type StopReason } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
-import { LoopName, LoopPermissions } from "@usine/core/loop";
+import { LoopName, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId, type Run } from "@usine/core/run";
@@ -282,6 +282,11 @@ export class CheckoutRequest extends Schema.Class<
    * success without a CI handoff verifies the pull request of the checkout's branch on origin.
    */
   requiresCi: Schema.Boolean,
+  /**
+   * The labels the Item must carry after a successful Attempt, copied into the RunSpec; empty
+   * disables the check.
+   */
+  outcomeLabels: OutcomeLabels.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
   /**
    * The author and committer of every commit that the Attempt's parent and children make. Their
    * environment sets it, so no git config on the Worker's machine applies.

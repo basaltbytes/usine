@@ -8,6 +8,10 @@ import { childDispatcherLayer } from "@usine/agents/children";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
+import { routerLayer } from "./coordinator/router.ts";
+import { CoordinatorRuntime } from "./coordinator/runtime.ts";
+import { sqliteAttemptJournalLayer } from "./coordinator/sqlite/store.ts";
+import { WakeUp } from "./coordinator/wake-up.ts";
 import {
   type DurableHarnessOptions,
   durableError,
@@ -88,11 +92,15 @@ export const harnessLayer = (instanceDirectory: InstanceDirectory, access?: Pare
 export const childBackendLayer: Layer.Layer<ChildBackend, never, Harnesses> = childDispatcherLayer;
 
 /**
- * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every
- * unfinished Attempt.
+ * Provides the Node `AttemptRuntime` with the real child backends: the Pi parent's runtime on
+ * `.usine/durable.sqlite`, and the event-driven coordinator, whose attempt journal migrates and
+ * uses the runtime database's `SqlClient`. Building it resumes every unfinished Pi Attempt.
  */
 export const layer = (instanceDirectory: InstanceDirectory, access?: ParentModelAccess) =>
-  attemptRuntimeLayer.pipe(
+  routerLayer.pipe(
+    Layer.provide(Layer.mergeAll(attemptRuntimeLayer, CoordinatorRuntime.layer)),
+    Layer.provide(WakeUp.rules),
+    Layer.provide(sqliteAttemptJournalLayer),
     Layer.provideMerge(harnessLayer(instanceDirectory, access)),
     Layer.provide(childBackendLayer),
   );

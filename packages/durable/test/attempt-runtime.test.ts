@@ -66,7 +66,7 @@ import {
   ResultRecorded,
 } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
-import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as attemptRuntimeLayer } from "../src/testing.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
 import {
   DurableHarness,
@@ -2423,6 +2423,64 @@ describe("durable AttemptRuntime", () => {
       }).pipe(Effect.scoped),
     );
   }
+
+  it.live("keeps the first child report when a later child reports too", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/1157-first-report");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
+        yield* (yield* (yield* StubChildren).next).block("The repository is archived.");
+        yield* (yield* (yield* StubChildren).next).ask("Which branch should I use?");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          BlockedFailure.make({ message: "The repository is archived." }),
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("Publish the package"),
+              delegate("Try another way"),
+              answer("The children could not publish."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps the first child infrastructure failure when a later child crashes too", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/1157-first-crash");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
+        yield* (yield* (yield* StubChildren).next).crash("first transport lost");
+        yield* (yield* (yield* StubChildren).next).crash("second transport lost");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.strictEqual(failure.message, "first transport lost");
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("Complete the task"),
+              delegate("Try again"),
+              answer("Both children lost their transport."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
 
   it.live("ends the Attempt with the parent's own blocker", () =>
     Effect.gen(function* () {

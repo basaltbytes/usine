@@ -71,6 +71,16 @@ const pushed = StepResult.make({
 const required = () =>
   Submission.make({ ...submission({ number: 1 }), ciPolicy: Option.some(policy) });
 
+/** Returns the pending queues whose newest Event is a CI fix. */
+const ciFixQueues = (store: RunStore["Service"]) =>
+  store.pendingQueues.pipe(
+    Effect.map((queues) =>
+      queues
+        .map(({ queued }) => queued)
+        .filter(({ submission }) => Option.isSome(submission.ciFailureHead)),
+    ),
+  );
+
 it.live.each(["verified", "unverified"] as const)(
   "a %s CI handoff either waits or records a retryable infrastructure failure",
   (verification) =>
@@ -511,7 +521,7 @@ it.live(
             yield* store.recordAndClaim(older, RunId.make("older-ci-fix"));
             const blocked = yield* store.recordAndClaim(current, RunId.make("current-ci-fix"));
             assert(blocked.result._tag === "CycleBlocked");
-            const waitingForReset = yield* store.pendingCiFixes;
+            const waitingForReset = yield* ciFixQueues(store);
             assert.deepStrictEqual(waitingForReset, []);
             yield* store.revoke(current.loop, current.itemKey);
             const answer = approvalEvent(1);
@@ -519,7 +529,7 @@ it.live(
             assert.deepStrictEqual(replayed, [current.event.id]);
             const repeated = yield* budgets.reset(blocked.result.ask.id, answer);
             assert.deepStrictEqual(repeated, []);
-            const pending = yield* store.pendingCiFixes;
+            const pending = yield* ciFixQueues(store);
             assert.strictEqual(pending.length, 1);
             assert.strictEqual(pending[0]?.submission.event.id, current.event.id);
             assert.strictEqual(pending[0]?.submission.cycleGeneration, 1);
@@ -582,7 +592,7 @@ it.live.each(["required", "none"] as const)(
           assert(revoked.run.state._tag === "Canceled");
           assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
           assert.deepStrictEqual(revoked.attempts, []);
-          const pending = yield* store.pendingCiFixes;
+          const pending = yield* ciFixQueues(store);
           assert.deepStrictEqual(pending, []);
         }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
       ),
@@ -647,10 +657,10 @@ it.live("a suppressed CI fix stays queued until the operator resolves the blocke
         });
         const blocked = yield* store.recordAndClaim(queued, RunId.make("queued-ci-fix"));
         assert.strictEqual(blocked.result._tag, "Suppressed");
-        const suppressed = yield* store.pendingCiFixes;
+        const suppressed = yield* ciFixQueues(store);
         assert.deepStrictEqual(suppressed, []);
         yield* store.resolveFailure(runId, started.execution.attempt.id, Option.none());
-        assert.strictEqual((yield* store.pendingCiFixes)[0]?.submission.event.id, queued.event.id);
+        assert.strictEqual((yield* ciFixQueues(store))[0]?.submission.event.id, queued.event.id);
       }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
     ),
   ),
@@ -751,15 +761,17 @@ it.live.each([
                   ),
                 ),
             );
-            const whileRunning = yield* store.pendingCiFixes;
+            const whileRunning = yield* ciFixQueues(store);
             assert.deepStrictEqual(whileRunning, []);
             yield* store.finishAttempt(
               started.execution.attempt,
               Result.succeed(stepResult("first")),
             );
 
-            const fixes = yield* store.pendingCiFixes;
-            const continuations = yield* store.pendingContinuations;
+            const queues = yield* store.pendingQueues;
+            const fixes = queues
+              .map(({ queued }) => queued)
+              .filter(({ submission }) => Option.isSome(submission.ciFailureHead));
             const next = yield* store.nextQueued(sourceId);
             assert(Option.isSome(next));
             assert.strictEqual(next.value.submission.event.id, newer.event.id);
@@ -770,11 +782,13 @@ it.live.each([
                 fixes.map(({ submission, eventIds }) => [submission.event.id, eventIds]),
                 [[newer.event.id, [newer.event.id, older.event.id]]],
               );
-              assert.deepStrictEqual(continuations, []);
             } else {
               assert.deepStrictEqual(fixes, []);
-              assert.deepStrictEqual(continuations, [sourceId]);
             }
+            assert.deepStrictEqual(
+              queues.map(({ closedRunId }) => closedRunId),
+              [Option.some(sourceId)],
+            );
           }).pipe(Effect.provide(storage)),
         );
 

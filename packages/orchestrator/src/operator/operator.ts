@@ -1020,6 +1020,7 @@ const makeOperator = Effect.gen(function* () {
   const polling = yield* PollingTriggers;
   const githubChanges = yield* RunGitHubChanges;
   const ci = yield* CiMonitor;
+  const scope = yield* Effect.scope;
 
   const dismissNeed = Effect.fn("Operator.dismissNeed")(function* (
     instance: LoadedInstance,
@@ -1256,7 +1257,20 @@ const makeOperator = Effect.gen(function* () {
   const unpause = Effect.fn("Operator.unpause")(function* (loop: LoopName) {
     yield* requirePermission("operate", loopScope(loop));
     yield* Effect.annotateCurrentSpan({ loop });
-    return yield* controls.unpause(loop);
+    const state = yield* controls.unpause(loop);
+    // A paused Loop holds its queued CI fixes; admit them now instead of at the next reconcile.
+    // The request doesn't wait for their GitHub rechecks.
+    yield* runs.admitCiFixes.pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not admit the queued CI fixes after unpausing the Loop; the periodic reconcile retries them",
+          { loop, errorTag: error._tag },
+        ),
+      ),
+      Effect.ignore,
+      Effect.forkIn(scope),
+    );
+    return state;
   });
 
   const moveBoardItem = Effect.fn("Operator.moveBoardItem")(

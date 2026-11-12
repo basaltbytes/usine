@@ -27,6 +27,7 @@ import { GitHubItemWriter } from "@usine/github/item-writer";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer } from "effect";
+import type { SqlClient } from "effect/sql";
 import { gitHubCredentialLayer } from "./credentials.ts";
 import { parentAdmissionLayer } from "./current-instance/parents.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
@@ -89,7 +90,7 @@ export const runtimeLayer = (
   instanceDirectory: InstanceDirectory,
   instanceId: InstanceId,
   database: Layer.Layer<
-    RunDatabase | StepOutputStore | TranscriptCodec,
+    RunDatabase | StepOutputStore | TranscriptCodec | SqlClient.SqlClient,
     EnginePersistenceError
   > = localSqliteLayer(instanceDirectory),
 ) => {
@@ -120,6 +121,8 @@ export const runtimeLayer = (
     (runtime) => parentAdmissionLayer.pipe(Layer.provideMerge(runtime)),
     Layer.provideMerge(harnessesLive),
     Layer.provideMerge(hostLoginLockLayer),
+    // The event-driven coordinator keeps its attempt journal in the runtime database.
+    Layer.provide(database),
     Layer.provide(NodeServices.layer),
   );
   const engine = Layer.unwrap(

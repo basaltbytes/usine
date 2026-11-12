@@ -111,6 +111,12 @@ export interface QueuedEvents {
   readonly triggerMatchEventIds: ReadonlyArray<EventId>;
 }
 
+/** An admissible queue, with the newest closed Run of its Loop's Item, if any. */
+export interface PendingQueue {
+  readonly queued: QueuedEvents;
+  readonly closedRunId: Option.Option<RunId>;
+}
+
 const newestRunFirst = (left: RunSummaryRow, right: RunSummaryRow) =>
   DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
   right.runId.localeCompare(left.runId);
@@ -400,6 +406,7 @@ export const queriesFor = (
       parentModel: Option.fromNullishOr(storedRun.parentModel),
       permissions: route.permissions,
       ciPolicy: Option.fromNullishOr(route.ciPolicy),
+      outcomeLabels: route.outcomeLabels,
     });
   });
 
@@ -1169,10 +1176,9 @@ export const queriesFor = (
 
   /**
    * Returns the Loops' Items with a current queued Event and no open Run, excluding Items waiting
-   * for a cycle-budget reset or under a suppression. `ciFix` limits the Items to those with a
-   * queued CI fix.
+   * for a cycle-budget reset or under a suppression.
    */
-  const admissibleItems = Effect.fn("RunStoreQueries.admissibleItems")(function* (ciFix: boolean) {
+  const admissibleItems = Effect.fn("RunStoreQueries.admissibleItems")(function* () {
     const items = yield* database
       .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
       .from(triggerEvents)
@@ -1188,7 +1194,6 @@ export const queriesFor = (
       )
       .where(
         and(
-          ciFix ? isNotNull(triggerEvents.ciFailureHead) : undefined,
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
           isNull(itemCycleBudgets.askJson),
@@ -1208,32 +1213,48 @@ export const queriesFor = (
     return unblocked.flat();
   });
 
-  // The queues whose newest Event is a CI fix; `pendingContinuations` takes the others.
-  const pendingCiFixes = Effect.fn("RunStoreQueries.pendingCiFixes")(function* () {
-    const items = yield* admissibleItems(true);
-    const queues = yield* Effect.forEach(items, ({ loop, itemKey }) => queuedOn(loop, itemKey));
-    return queues.flatMap((queued) =>
-      Option.isSome(queued) && Option.isSome(queued.value.submission.ciFailureHead)
-        ? [queued.value]
-        : [],
-    );
+  /** Returns the queued Events of a Loop's Item, or `None` during a suppression. */
+  const unsuppressedQueue = Effect.fn("RunStoreQueries.unsuppressedQueue")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+  ) {
+    const suppression = yield* loopItemQueries(database).suppression(loop, itemKey);
+    if (Option.isSome(suppression)) {
+      yield* Effect.logInfo("Queued Events wait while a suppression keeps the Item", {
+        suppressedBy: suppression.value.runId,
+        loop,
+        itemKey,
+      });
+      return Option.none<QueuedEvents>();
+    }
+    return yield* queuedOn(loop, itemKey);
   });
 
   const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: RunId) {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
     if (current === undefined) return Option.none<QueuedEvents>();
-    const suppression = yield* loopItemQueries(database).suppression(current.loop, current.itemKey);
-    if (Option.isSome(suppression)) {
-      yield* Effect.logInfo("Queued Events wait while a suppression keeps the Item", {
-        runId,
-        suppressedBy: suppression.value.runId,
-        loop: current.loop,
-        itemKey: current.itemKey,
+    return yield* unsuppressedQueue(current.loop, current.itemKey);
+  });
+
+  /**
+   * Returns the queued Events of a Loop's Item, or `None` while the Item has an open Run or a
+   * suppression, either of which refuses the claim.
+   */
+  const admissibleQueue = Effect.fn("RunStoreQueries.admissibleQueue")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+  ) {
+    const blocking = yield* blockingRun(loop, itemKey);
+    if (blocking[0] !== undefined) {
+      yield* Effect.logInfo("Queued Events wait behind the Item's open Run", {
+        openRunId: blocking[0].runId,
+        loop,
+        itemKey,
       });
       return Option.none<QueuedEvents>();
     }
-    return yield* queuedOn(current.loop, current.itemKey);
+    return yield* unsuppressedQueue(loop, itemKey);
   });
 
   const runIdsToDrive = Effect.fn("RunStoreQueries.runIdsToDrive")(function* () {
@@ -1247,15 +1268,13 @@ export const queriesFor = (
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
 
-  // The newest closed Run of each queue whose newest Event is a trigger match; `pendingCiFixes`
-  // takes the queues whose newest Event is a CI fix.
-  const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
-    const items = yield* admissibleItems(false);
-    const closed = yield* Effect.forEach(items, ({ loop, itemKey }) =>
+  /** Returns the queue of every admissible Item, with the newest closed Run of its Loop's Item. */
+  const pendingQueues = Effect.fn("RunStoreQueries.pendingQueues")(function* () {
+    const items = yield* admissibleItems();
+    const queues = yield* Effect.forEach(items, ({ loop, itemKey }) =>
       Effect.gen(function* () {
         const queued = yield* queuedOn(loop, itemKey);
-        if (Option.isNone(queued) || Option.isSome(queued.value.submission.ciFailureHead))
-          return [];
+        if (Option.isNone(queued)) return [];
         const rows = yield* database
           .select({ runId: runs.runId })
           .from(runs)
@@ -1264,10 +1283,16 @@ export const queriesFor = (
           .orderBy(desc(runs.openedAt), desc(runs.runId))
           .limit(1)
           .execute();
-        return yield* decodeRunIds(rows);
+        const closed = yield* decodeRunIds(rows);
+        return [
+          {
+            queued: queued.value,
+            closedRunId: Option.fromNullishOr(closed[0]?.runId),
+          } satisfies PendingQueue,
+        ];
       }),
     );
-    return closed.flat().map(({ runId }) => runId);
+    return queues.flat();
   });
 
   /**
@@ -1378,11 +1403,10 @@ export const queriesFor = (
     ignoredEvent,
     newestReopening,
     nextQueued,
-    queuedOn,
+    admissibleQueue,
     reopenedEvent,
     recordRunAgain,
-    pendingContinuations,
-    pendingCiFixes,
+    pendingQueues,
     recordSettings,
     recordTriggerEvent,
     runIdsToDrive,

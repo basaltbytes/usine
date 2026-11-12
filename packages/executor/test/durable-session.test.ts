@@ -8,7 +8,7 @@ import { RunawayFailure } from "@usine/core/attempt/failure";
 import { PullRequest } from "@usine/core/step/result";
 import { CommitSha } from "@usine/core/repository";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { answer, layer, PARENT_MODEL } from "@usine/durable/testing";
+import { answer, layer, PARENT_MODEL, StubChildren } from "@usine/durable/testing";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect";
 import { durableSessionFor, type DurableCheckout } from "../src/durable-session.ts";
 import { AttemptWorkspace, WorktreePath } from "../src/executor.ts";
@@ -24,6 +24,12 @@ const workspace = AttemptWorkspace.make({
     preparedAt: Option.none(),
   }),
 });
+
+const workspaceFor = (parent: AttemptChannel.RunSpec["parent"]) =>
+  AttemptWorkspace.make({
+    ...workspace,
+    spec: AttemptChannel.RunSpec.make({ ...workspace.spec, parent }),
+  });
 
 const checkout: DurableCheckout = {
   host: LocalProcess.make(),
@@ -162,50 +168,64 @@ describe("durable session settlement", () => {
     );
   }
 
-  it.live("leaves a drained task unsettled when its terminal relay fails", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-drain-",
-      });
-      yield* Effect.gen(function* () {
-        const runtime = yield* AttemptRuntime;
-        const terminal = yield* Deferred.make<void>();
-        const draining = yield* Deferred.make<void>();
-        const session = yield* durableSessionFor({ interruptGrace: "1 second" }).pipe(
-          Effect.provideService(AttemptRuntime, {
-            ...runtime,
-            cancel: (attemptId) =>
-              Deferred.succeed(draining, undefined).pipe(Effect.andThen(runtime.cancel(attemptId))),
-          }),
-        );
-        const sink: AttemptChannel.Sink = {
-          ...recording().sink,
-          append: (_direction, envelope) =>
-            envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Final"
-              ? Deferred.succeed(terminal, undefined).pipe(
-                  Effect.andThen(Deferred.await(draining)),
-                  Effect.andThen(RunawayFailure.make({ ceiling: "tokens" })),
-                )
-              : Effect.void,
-        };
-        const launched = yield* session.launch(workspace, sink, checkout).pipe(Effect.forkChild);
-        yield* Deferred.await(terminal);
-        const drainResult = yield* session.drain(request.attemptId, "The worker is stopping");
-        assert.isTrue(drainResult);
-        const failure = yield* Fiber.join(launched).pipe(Effect.flip);
-        assert.strictEqual(failure._tag, "InfraFailure");
-        const live = yield* runtime.isLive(request.attemptId);
-        assert.isTrue(live);
-        const currentFinished = yield* runtime.finished(request.attemptId);
-        assert.isTrue(Option.isNone(currentFinished));
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          layer({ database: `${directory}/durable.sqlite`, parent: [answer("Done.")] }),
-        ),
-      );
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
+  // The Pi parent and the event-driven coordinator leave the Attempt to the executor's decision.
+  for (const parent of ["pi", "none"] as const)
+    it.live(
+      `leaves a drained task unsettled when its terminal relay fails (parent: ${parent})`,
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const directory = yield* fs.makeTempDirectoryScoped({
+            directory: sqliteTempDirectory(),
+            prefix: "usine-drain-",
+          });
+          yield* Effect.gen(function* () {
+            const runtime = yield* AttemptRuntime;
+            const terminal = yield* Deferred.make<void>();
+            const draining = yield* Deferred.make<void>();
+            const session = yield* durableSessionFor({ interruptGrace: "1 second" }).pipe(
+              Effect.provideService(AttemptRuntime, {
+                ...runtime,
+                cancel: (attemptId) =>
+                  Deferred.succeed(draining, undefined).pipe(
+                    Effect.andThen(runtime.cancel(attemptId)),
+                  ),
+              }),
+            );
+            const sink: AttemptChannel.Sink = {
+              ...recording().sink,
+              append: (_direction, envelope) =>
+                envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Final"
+                  ? Deferred.succeed(terminal, undefined).pipe(
+                      Effect.andThen(Deferred.await(draining)),
+                      Effect.andThen(RunawayFailure.make({ ceiling: "tokens" })),
+                    )
+                  : Effect.void,
+            };
+            if (parent === "none")
+              yield* Effect.forkChild(
+                Effect.flatMap(Effect.service(StubChildren), ({ next }) =>
+                  Effect.flatMap(next, (child) => child.reply("Done.")),
+                ),
+              );
+            const launched = yield* session
+              .launch(workspaceFor(parent), sink, checkout)
+              .pipe(Effect.forkChild);
+            yield* Deferred.await(terminal);
+            const drainResult = yield* session.drain(request.attemptId, "The worker is stopping");
+            assert.isTrue(drainResult);
+            const failure = yield* Fiber.join(launched).pipe(Effect.flip);
+            assert.strictEqual(failure._tag, "InfraFailure");
+            const live = yield* runtime.isLive(request.attemptId);
+            assert.isTrue(live);
+            const currentFinished = yield* runtime.finished(request.attemptId);
+            assert.isTrue(Option.isNone(currentFinished));
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              layer({ database: `${directory}/durable.sqlite`, parent: [answer("Done.")] }),
+            ),
+          );
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
 });
