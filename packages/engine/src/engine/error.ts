@@ -20,7 +20,14 @@ export class RunOperationRejectedError extends Schema.TaggedError<
   /** The run on which the operator requested the action. */
   runId: RunId,
   /** The requested operator action. */
-  operation: Schema.Literals(["approve", "retry", "resolveFailure", "runAgain", "cancel"]),
+  operation: Schema.Literals([
+    "approve",
+    "retry",
+    "resolveFailure",
+    "applyCiLabels",
+    "runAgain",
+    "cancel",
+  ]),
   /** The stored run state that does not allow the action. */
   state: Schema.String,
 }) {}

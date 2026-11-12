@@ -190,6 +190,9 @@ export const needDetailsLabel = "Details";
 export const needOpenItemLabel = "Open item";
 export const needOpenRunLabel = "Open run";
 export const needOpenFixRunLabel = "Open fix run";
+/** Explains the action that applies the completion labels of a CI wait that didn't finish. */
+export const applyCiLabelsDescription =
+  "After CI on the same head passes, apply the labels that the CI wait records and mark the failure resolved";
 const fixRunProgress = {
   Pending: "continues the work",
   Waiting: "continues the work",

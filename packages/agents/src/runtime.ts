@@ -120,6 +120,14 @@ const restartFields = {
   idle: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /**
+   * Whether the restored idle report replies to an operator message or steer that the session read
+   * after its last tool call (ADR 0018).
+   */
+  idleAnsweredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 };
 
 /**
@@ -175,6 +183,14 @@ export class SessionResult extends Schema.Class<
 >("@usine/agents/SessionResult")({
   /** The final answer returned after the session finishes its work. */
   message: Schema.NonEmptyString,
+  /**
+   * Whether the final answer replies to an operator message or steer that the session read after
+   * its last tool call (ADR 0018).
+   */
+  answeredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 }) {}
 
 /** An error for a model ID that the harness cannot resolve. */

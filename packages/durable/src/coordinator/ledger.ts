@@ -6,6 +6,8 @@ import type { StoredRequest } from "../attempt-runtime.ts";
 
 import {
   ChildProgress,
+  type QueuedInput,
+  type Supervision,
   type CoordinationStatus,
   CoordinatorSnapshot,
   DelegationRecord,
@@ -193,6 +195,9 @@ export const opened = (request: StoredRequest) =>
     nextOutbound: AttemptChannel.Sequence.make(1),
     result: Option.none(),
     unsupervised: Option.none(),
+    supervision: [],
+    inputs: [],
+    nextInbound: AttemptChannel.Sequence.make(1),
   });
 
 /** Returns delegation `number`, or dies if no transition decided it. */
@@ -259,7 +264,10 @@ const changed = (progress: ChildProgress, change: ProgressChange): ChildProgress
       ToolFinished: ({ callId }) => ({
         inFlight: progress.inFlight.filter((call) => call.callId !== callId),
       }),
-      IdleSaved: ({ report }) => ({ idle: report }),
+      IdleSaved: ({ report, answeredOperator }) => ({
+        idle: report,
+        idleAnsweredOperator: Option.isSome(report) && answeredOperator,
+      }),
       OutputSaved: ({ output }) => ({ output }),
     }),
   });
@@ -326,4 +334,43 @@ export const unsupervisedRecorded = (
         onSome: (kept) => Duration.max(kept, unsupervised),
       }),
     ),
+  });
+
+/** Returns the snapshot with `supervision` replacing the session's stored supervision. */
+export const supervised = (snapshot: CoordinatorSnapshot, supervision: Supervision) =>
+  CoordinatorSnapshot.make({
+    ...snapshot,
+    supervision: [
+      ...snapshot.supervision.filter(({ sessionId }) => sessionId !== supervision.sessionId),
+      ...(supervision.held || supervision.paused ? [supervision] : []),
+    ].sort((left, right) => left.sessionId.localeCompare(right.sessionId)),
+  });
+
+/** Returns the snapshot with `input` replacing a queued input of the same sequence. */
+export const inputQueued = (snapshot: CoordinatorSnapshot, input: QueuedInput) =>
+  CoordinatorSnapshot.make({
+    ...snapshot,
+    inputs: [
+      ...snapshot.inputs.filter(({ inputSequence }) => inputSequence !== input.inputSequence),
+      input,
+    ].sort((left, right) => left.inputSequence - right.inputSequence),
+  });
+
+/** Returns whether input `inputSequence` was queued, and the snapshot without it. */
+export const inputForgotten = (
+  snapshot: CoordinatorSnapshot,
+  inputSequence: AttemptChannel.Sequence,
+) => {
+  const inputs = snapshot.inputs.filter((input) => input.inputSequence !== inputSequence);
+  return {
+    forgotten: inputs.length < snapshot.inputs.length,
+    snapshot: CoordinatorSnapshot.make({ ...snapshot, inputs }),
+  };
+};
+
+/** Returns the snapshot whose next inbound sequence follows `sequence`, unless it is later. */
+export const inboundRecorded = (snapshot: CoordinatorSnapshot, sequence: AttemptChannel.Sequence) =>
+  CoordinatorSnapshot.make({
+    ...snapshot,
+    nextInbound: AttemptChannel.Sequence.make(Math.max(snapshot.nextInbound, sequence + 1)),
   });

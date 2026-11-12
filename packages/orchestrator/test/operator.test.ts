@@ -1,4 +1,6 @@
+import { idleCiMonitor } from "./support/ci.ts";
 import { jsonKey } from "@usine/core/json-key";
+import { CiHandoff } from "@usine/core/ci";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { boardHistory } from "./support/run-reader.ts";
 import { summarizeRun } from "@usine/engine/run-reader";
@@ -765,6 +767,7 @@ const testLayer = (
     MarcbachmannCelLayer,
     workerStatus,
     Layer.succeed(UnconfirmedStops)({ list: unconfirmedStops }),
+    idleCiMonitor,
   );
   return Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provide(dependencies));
 };
@@ -1784,6 +1787,57 @@ describe("Operator", () => {
             ),
           ),
         );
+      }
+    }),
+  );
+
+  it.effect("offers CI labels in Needs attention only for a failure that kept a CI handoff", () =>
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const original = snapshot.attempts[0];
+      assert(original !== undefined);
+      const handoff = CiHandoff.make({
+        pullRequest: ItemNumber.make(828),
+        head: CommitSha.make("a".repeat(40)),
+        fixLoop: loopName,
+        timeoutSeconds: 1800,
+        onGreen: [],
+      });
+      for (const unfinishedCi of [Option.none<CiHandoff>(), Option.some(handoff)]) {
+        const failed = RunSnapshot.make({
+          ...snapshot,
+          run: Run.make({ ...snapshot.run, state: RunState.Failed.make({ unfinishedCi }) }),
+          attempts: [
+            Attempt.make({
+              ...original,
+              outcome: Option.some(
+                AttemptFailed.make({
+                  failure: InfraFailure.make({
+                    message: "CI did not settle within 1800 seconds.",
+                    cause: null,
+                  }),
+                }),
+              ),
+            }),
+          ],
+        });
+        yield* Effect.gen(function* () {
+          const overview = yield* (yield* Operator).overview(fixtureInstance);
+
+          const need = overview.needsYou.find((entry) => entry._tag === "RunFailureNeed");
+          assert(need?._tag === "RunFailureNeed");
+          if (Option.isSome(unfinishedCi)) {
+            assert.strictEqual(need.unfinishedCiAttemptId, original.id);
+          } else {
+            // Other failures keep the attention revision they had before the key existed.
+            assert.isFalse("unfinishedCiAttemptId" in need);
+            assert.notInclude(attentionKey(need).revision, "unfinishedCiAttemptId");
+          }
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, failed)));
       }
     }),
   );

@@ -236,6 +236,7 @@ export const harness = (
       undoDismissNeed: () => unused,
       resetCycleBudget: () => unused,
       resolveFailure: () => unused,
+      applyCiLabels: () => unused,
       retry: () => unused,
       agents: Effect.die("unused"),
       editAndRetry: () => unused,

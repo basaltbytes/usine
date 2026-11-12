@@ -1,6 +1,6 @@
 import { assert } from "@effect/vitest";
 import { AgentSessionId, RoleName, RoleSession } from "@usine/core/agent/session";
-import { Effect, FileSystem, Option, Result, Schema } from "effect";
+import { type Crypto, Effect, FileSystem, Option, Result, Schema } from "effect";
 import { admitBrain, AdmissionContext } from "../../src/harness/admission.ts";
 import type { CredentialRoute, Placement } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
@@ -159,7 +159,11 @@ export const openCompletionFixture = (
     const runtime: Effect.Effect<
       HarnessRuntime,
       never,
-      ClaudeSdk | CodexAppServer | HostLoginLock | ChildProcessSpawner.ChildProcessSpawner
+      | ClaudeSdk
+      | CodexAppServer
+      | HostLoginLock
+      | ChildProcessSpawner.ChildProcessSpawner
+      | Crypto.Crypto
     > = provider === "claude" ? claudeRuntime : codexRuntime;
     return {
       save: fixture.save,

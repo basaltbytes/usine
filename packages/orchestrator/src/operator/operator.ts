@@ -8,6 +8,7 @@ import { upgradeAttentionFor } from "./upgrade.ts";
 import { WorkerPreflightView, workerPreflightView } from "./preflight.ts";
 export { WorkerPreflightView } from "./preflight.ts";
 import { WebhookHealth } from "../webhooks.ts";
+import { CiMonitor, type CiNotPassedError } from "../ci.ts";
 import { webhookAttentionFor } from "./webhooks.ts";
 import type { ConfigurationStoreError } from "@usine/config/configuration";
 import { groupProjectViews } from "./projects.ts";
@@ -176,6 +177,7 @@ export type BoardMoveError =
 /** A failure to observe or change runs, tasks, loop state, or operator acknowledgements. */
 export type OperatorError =
   | AccessDenied
+  | CiNotPassedError
   | WorkerPreflightRejectedError
   | LoopNotFoundError
   | RosterAgentNotFoundError
@@ -526,15 +528,19 @@ const makeOperatorObservation = Effect.gen(function* () {
           );
           continue;
         }
+        const failed = {
+          id: `run-failure:${run.id}:${attempt.id}`,
+          repository: run.repository,
+          runId: run.id,
+          loop: run.loop,
+          failure: attempt.outcome.failure,
+          fixRun: fixRuns.get(run.id) ?? null,
+        };
+        // The key stays absent for other failures, so their attention revisions don't change.
         needsYou.push(
-          RunFailureNeed.make({
-            id: `run-failure:${run.id}:${attempt.id}`,
-            repository: run.repository,
-            runId: run.id,
-            loop: run.loop,
-            failure: attempt.outcome.failure,
-            fixRun: fixRuns.get(run.id) ?? null,
-          }),
+          RunFailureNeed.make(
+            run.canApplyCiLabels ? { ...failed, unfinishedCiAttemptId: attempt.id } : failed,
+          ),
         );
       }
     }
@@ -1013,6 +1019,7 @@ const makeOperator = Effect.gen(function* () {
   const boardMoves = yield* BoardMoves;
   const polling = yield* PollingTriggers;
   const githubChanges = yield* RunGitHubChanges;
+  const ci = yield* CiMonitor;
   const scope = yield* Effect.scope;
 
   const dismissNeed = Effect.fn("Operator.dismissNeed")(function* (
@@ -1090,6 +1097,17 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
     const actor = yield* requestActor(instance.config.operator);
     yield* runs.resolveFailure(runId, attemptId, actor);
+  });
+
+  const applyCiLabels = Effect.fn("Operator.applyCiLabels")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    attemptId: AttemptId,
+  ) {
+    yield* requireRunOperation(instance, runId);
+    yield* Effect.annotateCurrentSpan({ runId, attemptId });
+    const actor = yield* requestActor(instance.config.operator);
+    yield* ci.applyLabelsAfterGreen(runId, attemptId, actor);
   });
 
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
@@ -1405,6 +1423,7 @@ const makeOperator = Effect.gen(function* () {
     pause,
     retry,
     resolveFailure,
+    applyCiLabels,
     editAndRetry,
     runAgain,
     intervene,
@@ -1446,6 +1465,17 @@ export class Operator extends Context.Service<
     ) => Effect.Effect<void, OperatorError>;
     /** Resolves attention for the displayed failed Attempt. Rejects stale requests. */
     readonly resolveFailure: (
+      instance: LoadedInstance,
+      runId: RunId,
+      attemptId: AttemptId,
+    ) => Effect.Effect<void, OperatorError>;
+    /**
+     * Applies the completion labels of a Run whose CI wait ended because CI on its head didn't
+     * finish, once CI on that head has passed, and resolves the displayed failed Attempt. Fails with
+     * `CiNotPassedError` while CI on the head hasn't passed in full or after its pull request closed
+     * without a merge.
+     */
+    readonly applyCiLabels: (
       instance: LoadedInstance,
       runId: RunId,
       attemptId: AttemptId,
@@ -1521,6 +1551,7 @@ export class Operator extends Context.Service<
   );
 }
 
+export { CiNotPassedError } from "../ci.ts";
 export {
   ProjectStatus,
   ProjectView,

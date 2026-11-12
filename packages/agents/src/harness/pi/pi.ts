@@ -210,6 +210,7 @@ const makePiSessions = Effect.gen(function* () {
               held: policy.restored.held,
               paused: policy.restored.paused,
               idle: policy.restored.idle,
+              idleAnsweredOperator: policy.restored.idleAnsweredOperator,
               unread: policy.restored.unread,
               sdk: started.session,
               channel,

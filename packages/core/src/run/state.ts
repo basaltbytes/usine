@@ -108,7 +108,15 @@ export class HandedOff extends Schema.TaggedClass<
 /** A Run whose last Attempt failed without an auto-retry; the failure is stored on the Attempt. */
 export class Failed extends Schema.TaggedClass<Failed, Brand.Brand<"@usine/core/run/state/Failed">>(
   "RunState/Failed",
-)("Failed", {}) {}
+)("Failed", {
+  /**
+   * The handoff of a CI wait that ended because CI on its head didn't finish, so that the operator
+   * can apply its completion labels after CI on that head passes; `None` for other failures.
+   */
+  unfinishedCi: Schema.OptionFromOptionalKey(CiHandoff).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+}) {}
 
 /** A closed run with the reason no further attempt should start. */
 export class Canceled extends Schema.TaggedClass<
@@ -166,6 +174,12 @@ export const operatorActions = (state: RunState) => ({
   canRetry: state._tag === "Failed",
   /** Whether the run is failed; callers also check whether its latest failure is already resolved. */
   canResolveFailure: state._tag === "Failed",
+  /**
+   * Whether the run failed because CI on its head didn't finish, so the operator can apply its
+   * completion labels after CI on that head passes; callers also check whether its latest failure
+   * is already resolved.
+   */
+  canApplyCiLabels: state._tag === "Failed" && Option.isSome(state.unfinishedCi),
   /** Whether the run is open and permits operator cancellation. */
   canCancel: isOpen(state),
   /** Whether the run succeeded or was canceled, permitting a new run for the same item state. */

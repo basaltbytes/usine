@@ -42,6 +42,7 @@ import {
   type DelegationCall,
   type DelegationHub,
   type DelegationJournal,
+  type QueuedChildInput,
   type ReservedChildReport,
   SavedChild,
 } from "./journal.ts";
@@ -50,6 +51,8 @@ const Reported = Schema.TaggedStruct("Reported", {
   sessionId: AgentSessionId,
   /** The child's final message. */
   report: Schema.String,
+  /** Whether the final message replies to the operator (ADR 0018). */
+  answeredOperator: Schema.Boolean,
 });
 
 const Reserved = Schema.TaggedStruct("Reserved", {
@@ -206,15 +209,10 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
   const restoredInputs = resumed
     ? yield* hub.routing.withPermits(1)(
         Effect.gen(function* () {
-          const queued = yield* journal.queuedInputs(sessionId);
-          const decoded = yield* Effect.forEach(queued, (input) =>
-            Schema.decodeEffect(AttemptChannel.Intervention)(input.intervention).pipe(
-              Effect.map((intervention) => ({
-                inputSequence: AttemptChannel.Sequence.make(input.inputSequence),
-                intervention,
-              })),
-            ),
-          ).pipe(Effect.result);
+          const decoded = yield* journal.queuedInputs(sessionId).pipe(
+            Effect.map((queued) => Result.succeed<ReadonlyArray<QueuedChildInput>>(queued)),
+            Effect.catchTag("SchemaError", (error) => Effect.succeed(Result.fail(error))),
+          );
           if (Result.isSuccess(decoded))
             for (const input of decoded.success) hub.childInputs.add(input.inputSequence);
           return decoded;
@@ -336,6 +334,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
     held,
     paused,
     idle,
+    idleAnsweredOperator: Option.isSome(idle) && previous.idleAnsweredOperator,
     prompted: previous.prompted,
     continuations: previous.continuations,
     inFlight: previous.inFlight,
@@ -503,7 +502,9 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
           event._tag === "SessionFinished"
         )
           yield* checkpoint(
-            journal.saveIdle(event._tag === "SessionIdle" ? event.message : Option.none()),
+            event._tag === "SessionIdle"
+              ? journal.saveIdle(event.message, event.answeredOperator)
+              : journal.saveIdle(Option.none(), false),
           );
         if (
           event._tag === "SessionStarted" &&
@@ -590,8 +591,17 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
           return Reserved.make({ sessionId: session.id, report });
         }),
       onSuccess: (result) =>
-        Effect.logInfo("Child session returned its report", { sessionId: session.id }).pipe(
-          Effect.as(Reported.make({ sessionId: session.id, report: result.message })),
+        Effect.logInfo("Child session returned its report", {
+          sessionId: session.id,
+          answeredOperator: result.answeredOperator,
+        }).pipe(
+          Effect.as(
+            Reported.make({
+              sessionId: session.id,
+              report: result.message,
+              answeredOperator: result.answeredOperator,
+            }),
+          ),
         ),
     });
   }).pipe(Effect.scoped);

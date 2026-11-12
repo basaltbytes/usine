@@ -21,6 +21,7 @@ import {
 } from "@usine/core/agent/session";
 import {
   type Cause,
+  Crypto,
   DateTime,
   Deferred,
   Duration,
@@ -208,6 +209,7 @@ const makeClaudeSessions = Effect.gen(function* () {
   const sdk = yield* ClaudeSdk;
   const logins = yield* HostLoginLock;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const crypto = yield* Crypto.Crypto;
 
   /**
    * Acquires the spec's Claude login lock in a fiber of the current scope and returns an effect
@@ -509,12 +511,18 @@ const makeClaudeSessions = Effect.gen(function* () {
       yield* checkContinuationHome(spec, start, home, defaultHome);
       yield* journal.started(reference);
       // Login-lock retries finish before the session starts.
+      const startsIdle = policy.restored.paused || Option.isSome(policy.restored.idle);
+      // Claude names a message with a client UUID on each result that consumed it.
+      const clientId = crypto.randomUUIDv4().pipe(Effect.orDie);
+      const prompts = startsIdle
+        ? []
+        : yield* Effect.forEach(Option.toArray(startPrompt(start)), (text) =>
+            Effect.map(clientId, (uuid) => userMessage(text, uuid)),
+          );
       let current = yield* launchWithRetries(
         spec,
         options,
-        policy.restored.paused || Option.isSome(policy.restored.idle)
-          ? []
-          : Option.toArray(Option.map(startPrompt(start), (text) => userMessage(text))),
+        prompts,
         scope,
         start._tag === "StartResume" ? "resume" : undefined,
       );
@@ -543,16 +551,35 @@ const makeClaudeSessions = Effect.gen(function* () {
         });
       const submitted =
         current.retained && !unprompted ? policy.restored.unread.map(({ id }) => id) : [];
+      /**
+       * The tool-call count where each submitted message starts a turn of its own. Claude reads such
+       * a message when that turn starts, before its tool calls.
+       */
+      const queuedTurnStarts = new Map<OperatorMessageId, number>();
+      /**
+       * Whether Claude runs no turn, from a result until the next assistant message. A message sent
+       * then starts the next turn instead of joining a running one.
+       */
+      let betweenTurns = current.retained ? unprompted || startsIdle : prompts.length === 0;
       const send = Effect.fn("ClaudeRuntime.send")(function* (
         message: string,
         id?: OperatorMessageId,
       ) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+        const uuid = id ?? (yield* clientId);
         yield* Effect.try({
-          try: () => current.input.offer(userMessage(message, id)),
+          try: () => current.input.offer(userMessage(message, uuid)),
           catch: (cause) => operationError("steer", spec, "Can't send a message to Claude", cause),
         });
-        if (id !== undefined) submitted.push(id);
+        if (id === undefined) return;
+        submitted.push(id);
+        if (!betweenTurns) return;
+        const calls = yield* channel.toolCalls;
+        queuedTurnStarts.set(id, calls);
+        yield* Effect.logInfo("Claude reads the operator message when its next turn starts", {
+          sessionId: session.id,
+          toolCalls: calls,
+        });
       });
       const conversation = yield* sessionConversation({
         session,
@@ -560,6 +587,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         held: policy.restored.held,
         paused: policy.restored.paused,
         idle: policy.restored.idle,
+        idleAnsweredOperator: policy.restored.idleAnsweredOperator,
         unread: policy.restored.unread,
         submitted,
         // A message sent during a turn is queued until a tool call returns or the turn ends.
@@ -568,6 +596,32 @@ const makeClaudeSessions = Effect.gen(function* () {
         beforeFinish: Effect.void,
       });
       boundary = conversation.awaitUnpaused;
+      /** Reports `ids` as read by a result: at their queued turn's start, or where the turn folded them. */
+      const readAtResult = (ids: ReadonlyArray<OperatorMessageId>) =>
+        Effect.gen(function* () {
+          const folded = ids.filter((id) => !queuedTurnStarts.has(id));
+          if (folded.length > 0) yield* conversation.read(folded, "turn");
+          for (const id of ids) {
+            const start = queuedTurnStarts.get(id);
+            if (start === undefined) continue;
+            queuedTurnStarts.delete(id);
+            yield* conversation.read([id], start);
+          }
+        });
+      /**
+       * Drops the turn start of each message that the first frame of a turn, which lists `opening`,
+       * doesn't name. Claude didn't start the turn with such a message, so it folds it in later.
+       */
+      const turnOpened = (opening: ReadonlyArray<OperatorMessageId>) =>
+        Effect.gen(function* () {
+          const later = [...queuedTurnStarts.keys()].filter((id) => !opening.includes(id));
+          if (later.length === 0) return;
+          for (const id of later) queuedTurnStarts.delete(id);
+          yield* Effect.logInfo(
+            "Claude started a turn without some sent operator messages; it reads them at a tool result",
+            { sessionId: session.id, later: later.length },
+          );
+        });
       yield* Deferred.succeed(boundaryReady, undefined);
       const tools = new Map<string, string>();
       const usage = claudeSessionMeter(
@@ -631,7 +685,12 @@ const makeClaudeSessions = Effect.gen(function* () {
               const id = submitted[index];
               if (id !== undefined && ids.includes(id)) submitted.splice(index, 1);
             }
-            yield* conversation.read(ids);
+            if (Schema.is(ClaudeResultMessage)(message)) yield* readAtResult(ids);
+            else {
+              if (betweenTurns && isAssistantMessage(message)) yield* turnOpened(ids);
+              for (const id of ids) queuedTurnStarts.delete(id);
+              yield* conversation.read(ids, "now");
+            }
           }
           const limits = yield* readRateLimits(message);
           if (Option.isSome(limits)) yield* channel.emit(limits.value);
@@ -642,6 +701,7 @@ const makeClaudeSessions = Effect.gen(function* () {
               resetsAt: DateTime.formatIso(reported.rejectedUntil.value),
             });
           if (Option.isSome(reported.retry)) return yield* reportRetry(reported.retry.value);
+          if (isAssistantMessage(message)) betweenTurns = false;
           if (retrying && isAssistantMessage(message)) yield* reportRecovery();
           if (Schema.is(ClaudeCompletionHeader)(message)) {
             const update = yield* decodeCompletionUpdate(message).pipe(
@@ -689,6 +749,7 @@ const makeClaudeSessions = Effect.gen(function* () {
             yield* channel.emit(event);
           }
           if (!Schema.is(ClaudeResultMessage)(message)) return;
+          betweenTurns = true;
           completedTurn = Option.none();
           retries = 0;
           retrying = false;
@@ -730,10 +791,14 @@ const makeClaudeSessions = Effect.gen(function* () {
                 read: read.length,
                 queuedTurns: message.queued_turn_count,
               });
-              yield* conversation.read(read);
+              yield* readAtResult(read);
             }
           }
           if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
+            // The last unread messages start the queued turns, which run after this result.
+            const calls = yield* channel.toolCalls;
+            for (const id of submitted.slice(-message.queued_turn_count))
+              queuedTurnStarts.set(id, calls);
             yield* Effect.logInfo("Claude child has queued user turns", {
               sessionId: session.id,
               queuedTurns: message.queued_turn_count,
@@ -815,6 +880,9 @@ const makeClaudeSessions = Effect.gen(function* () {
           launchWithRetries(spec, { ...resumeOptions, resume: reference.id }, [], scope, "replace"),
         );
         submitted.length = 0;
+        queuedTurnStarts.clear();
+        // The new process runs no turn until recovery sends one.
+        betweenTurns = true;
         yield* conversation.recover(
           policy,
           [...tools].map(([callId, tool]) => ({ callId, tool })),

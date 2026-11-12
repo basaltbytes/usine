@@ -13,7 +13,7 @@ import type { CommitSha } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { sql } from "drizzle-orm";
-import { DateTime, Effect, Match } from "effect";
+import { DateTime, Effect, Match, Option } from "effect";
 import { jsonExtract } from "../database/dialect.ts";
 import type { RunDatabase } from "../database/database.ts";
 import { runs } from "../database/schema.ts";
@@ -68,8 +68,8 @@ export const ciQueries = (
         const state = Match.valueTags(resolution, {
           CiPassed: () => RunState.Succeeded.make(),
           CiFailed: () => RunState.Failed.make(),
-          CiTimedOut: () => RunState.Failed.make(),
-          CiIncomplete: () => RunState.Failed.make(),
+          CiTimedOut: () => RunState.Failed.make({ unfinishedCi: Option.some(handoff) }),
+          CiIncomplete: () => RunState.Failed.make({ unfinishedCi: Option.some(handoff) }),
           CiHandedOff: ({ reason, fixRunId }) =>
             RunState.HandedOff.make({
               reason,

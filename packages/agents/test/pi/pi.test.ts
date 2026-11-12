@@ -355,6 +355,114 @@ describe("Pi child backend", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("doesn't count a steer that Pi reads before a tool call that starts at once", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const emit = (event: PiSessionEvent) => {
+        for (const listener of listeners) listener(event);
+      };
+      let endTurn: (() => void) | undefined;
+      const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            harnessSession: Option.none(),
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            tools: childTools,
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              // Pi starts the steer's message and then a tool call before `steer` returns, so the
+              // forked read waits for the intervention to finish and runs after the tool started.
+              steer: (text) => {
+                emit({
+                  type: "message_start",
+                  message: { role: "user", content: [{ type: "text", text }], timestamp: 0 },
+                });
+                emit({
+                  type: "tool_execution_start",
+                  toolCallId: "call-1",
+                  toolName: "bash",
+                  args: { command: "pnpm test" },
+                });
+                return Promise.resolve("queued" as const);
+              },
+              prompt: () =>
+                new Promise<void>((resolve) => {
+                  endTurn = resolve;
+                }),
+            },
+          }),
+      });
+      const result = yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(childRequest);
+        const reads: Array<Option.Option<AttemptChannel.InterventionState>> = [];
+        yield* running.intervene(
+          AttemptChannel.Steer.make({ message: "Run the tests too." }),
+          (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+        );
+        for (let spin = 0; reads.length === 0 || endTurn === undefined; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        endTurn?.();
+        return yield* running.result;
+      }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+      assert.isFalse(result.answeredOperator);
+    }).pipe(Effect.scoped),
+  );
+
+  for (const answered of [true, false])
+    it.effect(
+      `restores whether a held idle Pi report ${answered ? "answers" : "doesn't answer"} the operator`,
+      () =>
+        Effect.gen(function* () {
+          const sdk = Layer.succeed(PiSdk)({
+            complete: noCompletion,
+            start: () =>
+              Promise.resolve({
+                _tag: "Started",
+                harnessSession: Option.none(),
+                model: childRequest.session.brain.model,
+                pool: "apiKeys",
+                tools: childTools,
+                session: {
+                  messages: [],
+                  dispose: () => {},
+                  abort: () => Promise.resolve(),
+                  subscribe: () => () => {},
+                  steer: () => Promise.resolve("handled" as const),
+                  prompt: () => new Promise<void>(() => {}),
+                },
+              }),
+          });
+          const result = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...childRequest,
+                held: true,
+                idle: Option.some("The tests need a database."),
+                idleAnsweredOperator: answered,
+              }),
+            );
+            yield* running.intervene(AttemptChannel.Release.make(), noDelivery);
+            return yield* running.result;
+          }).pipe(Effect.scoped, Effect.provide(piChildLayer.pipe(Layer.provideMerge(sdk))));
+          assert.strictEqual(result.message, "The tests need a database.");
+          assert.strictEqual(result.answeredOperator, answered);
+        }).pipe(Effect.scoped),
+    );
+
   it.effect("reports one read for a Pi message start that arrives twice", () =>
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];

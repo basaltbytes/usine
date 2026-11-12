@@ -45,15 +45,19 @@ export class AttemptRequest extends Schema.Class<
   ),
 }) {}
 
-/** The parent's final report, without the harvested commits, pull requests, and comments. */
+/**
+ * The Attempt's final report from its parent, or from its child without a parent session, without
+ * the harvested commits, pull requests, and comments.
+ */
 export class AttemptReport extends Schema.Class<
   AttemptReport,
   Brand.Brand<"@usine/durable/attempt-runtime/AttemptReport">
 >("@usine/durable/AttemptReport")({
   message: Schema.NonEmptyString,
   /**
-   * Whether the parent's last turn replied to an operator message or steer and delegated nothing
-   * after it. Decodes as `false` for older reports.
+   * Whether the report replies to an operator message or steer with no work after it: the Pi
+   * parent delegated nothing, or the child started no tool call. Decodes as `false` for older
+   * reports.
    */
   answeredOperator: Schema.Boolean.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(false)),
@@ -73,7 +77,7 @@ export const harvestedResult = (
   report.answeredOperator && facts.length === 0 && outputs.length === 0
     ? Result.fail(
         AgentFailure.make({
-          message: `The parent ended with an answer to the operator, and the attempt produced no commit, pull request, comment, or step output. Answer: ${report.message}`,
+          message: `The attempt ended with an answer to the operator and produced no commit, pull request, comment, or step output. Answer: ${report.message}`,
         }),
       )
     : Result.succeed(
