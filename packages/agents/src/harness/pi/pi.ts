@@ -3,16 +3,16 @@ import {
   checkContinuationHome,
   type ContinuationPolicy,
 } from "../continuation.ts";
+import { type SessionSpec, type Start } from "../contract.ts";
+import { parentFields, resolvedSession, startPrompt, startReference } from "../adapter.ts";
 import { HarnessCatalog } from "../harness.ts";
-import { admitChild } from "../launch.ts";
 import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 import { Harness, BrainSpec } from "@usine/core/agent/brain";
-import { ChildSession, EndpointName, SessionStarted } from "@usine/core/agent/session";
+import { EndpointName, SessionStarted } from "@usine/core/agent/session";
 import { Deferred, Effect, Layer, Match, Option, Stream } from "effect";
 import {
-  type ChildRequest,
   ChildBackend,
   ChildSessionJournal,
   PoolUnavailableError,
@@ -38,13 +38,13 @@ export {
 
 const childError = (
   operation: SessionOperationError["operation"],
-  request: ChildRequest,
+  spec: SessionSpec,
   message: string,
   cause: unknown,
 ) =>
   SessionOperationError.make({
     operation,
-    sessionId: Option.some(request.session.id),
+    sessionId: Option.some(spec.session.id),
     message,
     cause,
   });
@@ -67,25 +67,24 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
 
 const piCatalog = HarnessCatalog.make({ descriptors: [pi] });
 
-const makePiChild = Effect.gen(function* () {
+const makePiSessions = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
-  const start = Effect.fn("PiRuntime.start")(
+  const startSession = Effect.fn("PiRuntime.start")(
     function* (
-      request: ChildRequest,
+      spec: SessionSpec,
       storage: PiSessionStorage,
       prompt: Option.Option<string>,
       policy: ContinuationPolicy,
     ) {
       yield* Effect.annotateCurrentSpan({
-        agent: request.session.agent,
-        effort: request.session.brain.effort,
-        harness: request.session.brain.harness,
-        model: request.session.brain.model,
-        parentSessionId: request.session.parentId,
-        sessionId: request.session.id,
+        agent: spec.session.agent,
+        effort: spec.session.brain.effort,
+        harness: spec.session.brain.harness,
+        model: spec.session.brain.model,
+        ...parentFields(spec.session),
+        sessionId: spec.session.id,
       });
-      yield* admitChild(piCatalog, request);
       yield* Effect.logInfo(
         "Starting Pi child session",
         Match.valueTags(storage, {
@@ -98,26 +97,26 @@ const makePiChild = Effect.gen(function* () {
       return yield* usePiStart(
         (signal) =>
           sdk.start({
-            cwd: request.cwd,
+            cwd: spec.cwd,
             storage,
-            environment: Option.some(request.environment),
+            environment: Option.some(spec.environment),
             extensions: [gate.extension],
-            model: request.session.brain.model,
+            model: spec.session.brain.model,
             signal,
-            thinkingLevel: request.session.brain.effort,
+            thinkingLevel: spec.session.brain.effort,
           }),
-        (cause) => childError("launch", request, "Pi child session failed to start", cause),
+        (cause) => childError("launch", spec, "Pi child session failed to start", cause),
         (acquired) =>
           Effect.gen(function* () {
             const started = acquired.result;
             if (started._tag === "UnknownModel") {
               yield* Effect.logError("Pi child rejected an unknown model", {
-                model: request.session.brain.model,
+                model: spec.session.brain.model,
               });
               return yield* UnknownModelError.make({
                 harness: Harness.make("pi"),
-                model: request.session.brain.model,
-                message: `Pi has no model "${request.session.brain.model}"`,
+                model: spec.session.brain.model,
+                message: `Pi has no model "${spec.session.brain.model}"`,
               });
             }
             if (started._tag === "UnsupportedEffort") {
@@ -154,16 +153,12 @@ const makePiChild = Effect.gen(function* () {
                 }),
               }),
             });
-            const session = ChildSession.make({
-              id: request.session.id,
-              parentId: request.session.parentId,
-              agent: request.session.agent,
+            const session = resolvedSession(spec.session, {
               brain: BrainSpec.make({
                 harness: Harness.make("pi"),
                 model: started.model,
-                effort: request.session.brain.effort,
+                effort: spec.session.brain.effort,
               }),
-              gatewayCredential: request.session.gatewayCredential,
               pool: Option.some(started.pool),
               endpoint:
                 started.pool === "apiKeys"
@@ -187,7 +182,7 @@ const makePiChild = Effect.gen(function* () {
               started.session,
               session,
               channel,
-              request.usage,
+              policy.restored.usage,
             );
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
@@ -196,10 +191,10 @@ const makePiChild = Effect.gen(function* () {
             );
             const controls = yield* piTurns({
               session,
-              held: request.held,
-              paused: request.paused,
-              idle: request.idle,
-              unread: request.unread,
+              held: policy.restored.held,
+              paused: policy.restored.paused,
+              idle: policy.restored.idle,
+              unread: policy.restored.unread,
               sdk: started.session,
               channel,
               gate,
@@ -207,7 +202,7 @@ const makePiChild = Effect.gen(function* () {
               policy,
               lastText: subscription.lastText,
               error: (operation, cause) =>
-                childError(operation, request, `Pi child ${operation} failed`, cause),
+                childError(operation, spec, `Pi child ${operation} failed`, cause),
             });
             const running = {
               session,
@@ -219,11 +214,11 @@ const makePiChild = Effect.gen(function* () {
           }),
       );
     },
-    (effect, request, storage) =>
+    (effect, spec, storage) =>
       effect.pipe(
         Effect.tapError((error) =>
           Effect.logError("Pi child session failed to start", {
-            sessionId: request.session.id,
+            sessionId: spec.session.id,
             storage: storage._tag,
             errorTag: error._tag,
             message: error.message,
@@ -231,46 +226,47 @@ const makePiChild = Effect.gen(function* () {
         ),
       ),
   );
-  const directory = (request: ChildRequest) => `${request.cwd}/.usine/pi/sessions`;
+  const directory = (spec: SessionSpec) => `${spec.cwd}/.usine/pi/sessions`;
   const open = Effect.fn("PiRuntime.open")(function* (
-    request: ChildRequest,
-    prompt: Option.Option<string>,
+    spec: SessionSpec,
+    start: Start,
     policy: ContinuationPolicy,
   ) {
     yield* checkContinuationHome(
-      request,
-      Option.some(directory(request)),
-      Option.some(directory(request)),
+      spec,
+      start,
+      Option.some(directory(spec)),
+      Option.some(directory(spec)),
     );
-    return yield* start(
-      request,
-      Option.match(request.resume, {
-        onNone: () => ({ _tag: "Create" as const, directory: directory(request) }),
+    return yield* startSession(
+      spec,
+      Option.match(startReference(start), {
+        onNone: () => ({ _tag: "Create" as const, directory: directory(spec) }),
         onSome: (saved) => ({
           _tag: "Resume" as const,
-          directory: directory(request),
+          directory: directory(spec),
           id: saved.id,
         }),
       }),
-      prompt,
+      startPrompt(start),
       policy,
     );
   });
-  return childContinuation({ open, stop: (_request: ChildRequest) => Effect.void });
+  return {
+    open,
+    stop: (_spec: SessionSpec) => Effect.void,
+  } satisfies Pick<HarnessRuntime, "open" | "stop">;
 });
 
 /** Provides `ChildBackend` for local child sessions using API keys or a ChatGPT subscription. Requires `PiSdk`; remote hosts fail with `AgentResultError`. */
-export const piChildLayer = Layer.effect(ChildBackend, makePiChild);
+export const piChildLayer = Layer.effect(
+  ChildBackend,
+  Effect.map(makePiSessions, (sessions) => childContinuation(piCatalog, sessions)),
+);
 
-/** Combines preflight, scoped launch, and saved-conversation resume. */
+/** Combines preflight and scoped sessions, new or reopened from a saved conversation. */
 export const piRuntime = Effect.gen(function* () {
-  const child = yield* makePiChild;
+  const sessions = yield* makePiSessions;
   const preflight = yield* piPreflight;
-  return {
-    id: pi.id,
-    preflight,
-    launch: child.launch,
-    resume: child.resume,
-    stop: child.stop,
-  } satisfies HarnessRuntime;
+  return { id: pi.id, preflight, ...sessions } satisfies HarnessRuntime;
 });

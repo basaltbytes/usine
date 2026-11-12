@@ -144,13 +144,15 @@ export const FirstTimeRight = ({ statistics }: FirstTimeRightProps) => {
           format={(value) => perTaskLabel(value, 1)}
         />
       </Figure>
-      <p className="col-span-2 text-xs text-muted-foreground">
-        {memoryKillsLine(
-          statistics.memoryKills,
-          statistics.memoryKillAttempts,
-          statistics.repeatedMemoryKillAttempts,
-        )}
-      </p>
+      {statistics.memoryKills > 0 && (
+        <p className="col-span-2 text-xs text-muted-foreground">
+          {memoryKillsLine(
+            statistics.memoryKills,
+            statistics.memoryKillAttempts,
+            statistics.repeatedMemoryKillAttempts,
+          )}
+        </p>
+      )}
     </div>
   );
 };

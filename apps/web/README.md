@@ -308,7 +308,7 @@ If the machine has its own Chromium, such as a worker built by [`infra/hetzner/c
 
 The tests use up to about 4.7 GiB of memory, roughly half in Vitest's process and most of the rest in Chromium. The root `pnpm check`, `pnpm build`, and `pnpm test` commands serialize Turborepo tasks to keep concurrent TypeScript checks and builds within the same container limit. Give an attempt container that runs them at least 6 GiB (`memory_mib: 6144`), and run one such attempt at a time on a machine with 7.7 GiB, such as a Hetzner cx33 or cpx32. Two runs at once on that machine make it swap even when each container's limit allows them: browser tests time out, and the kernel kills processes for memory. The run page totals the processes the kernel killed for memory across an attempt's containers and separately gives the memory limit of the last container with recorded kills.
 
-Attempt outcomes list available kernel task names and host PIDs for processes killed for memory, plus a count of kills whose process details are unavailable. The First time right block also shows memory kills, affected attempts, and attempts with repeated kills across the completed tasks in the selected statistics window.
+Attempt outcomes list available kernel task names and host PIDs for processes killed for memory, plus a count of kills whose process details are unavailable. The First time right block also shows memory kills, affected attempts, and attempts with repeated kills across the completed tasks in the selected statistics window, and hides the line when there are none. A worker's page lists its last machine preflight's findings, such as a kernel log that the SSH user can't read.
 
 ## Stack
 

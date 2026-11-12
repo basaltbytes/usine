@@ -342,6 +342,7 @@ ${["missing-token", "unreachable", "outdated"]
               CLAUDE_CONFIG_DIR: `${directory}/custom claude`,
               PATH: path,
             },
+            placement: "local",
             credential: "host-login",
             worker: WorkerName.make("test-worker"),
             machine: Option.none(),

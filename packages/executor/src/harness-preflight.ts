@@ -1,5 +1,6 @@
 import type { ChildHost } from "@usine/agents/child-host";
-import { Harnesses, ProbeTarget } from "@usine/agents/harness/node";
+import type { CredentialRoute, Placement } from "@usine/agents/harness";
+import { Harnesses, hostPlacement, ProbeTarget } from "@usine/agents/harness/node";
 import { preflight } from "@usine/agents/preflight";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessReadiness } from "@usine/core/agent/capability";
@@ -53,18 +54,22 @@ export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness
 
 /**
  * Returns a probe that checks one brain where `host` runs children, with `environment` as the
- * child's environment (ADR 0011). A timeout or unreachable host is a retryable infrastructure
- * error.
+ * child's environment (ADR 0011), over `credential`. `placement` defaults to the host's kind; a
+ * sandbox shell passes `sandbox`. A timeout or unreachable host is a retryable infrastructure error.
  */
 export const agentsHarnessProbe =
   (
     harnesses: Harnesses["Service"],
     host: ChildHost,
     environment: Readonly<Record<string, string>>,
-    credential: ProbeTarget["credential"] = "host-login",
+    credential: CredentialRoute = "host-login",
+    placement: Placement = hostPlacement(host),
   ): HarnessProbe =>
   (brain, { worker, machine }) =>
-    preflight(brain, ProbeTarget.make({ host, environment, worker, machine, credential })).pipe(
+    preflight(
+      brain,
+      ProbeTarget.make({ host, environment, placement, credential, worker, machine }),
+    ).pipe(
       Effect.mapError((cause) =>
         ExecutorOperationError.make({
           operation: "preflight",

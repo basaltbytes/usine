@@ -84,21 +84,14 @@ export class ChildSessionJournal extends Context.Service<
   );
 }
 
-/** A task delegated to one child, with its session and the checkout it shares with the parent. */
-export class ChildRequest extends Schema.Class<
-  ChildRequest,
-  Brand.Brand<"@usine/agents/runtime/ChildRequest">
->("@usine/agents/ChildRequest")({
-  /** The child identity, parent session, and brain spec selected for the delegated task. */
-  session: ChildSession,
-  /** The checkout directory on `host`. */
-  cwd: WorkingDirectory,
-  /** The complete instructions to send as the child's first message. */
-  prompt: Schema.NonEmptyString,
-  /** The saved conversation to continue in this checkout instead of starting a new one. */
-  resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
-  ),
+/** Usage that the orchestrator committed for a session before it reopened the conversation. */
+const CommittedUsage = Schema.Struct({
+  totalTokens: TokenCount,
+  costUsd: Schema.OptionFromNullOr(UsdAmount),
+  processUsage: Schema.optionalKey(SessionTokensUpdated.fields.processUsage),
+});
+
+const restartFields = {
   /**
    * Whether the native process acknowledged the task prompt before the restart. Only Claude records
    * it; Codex reads the thread's turns, and Pi saves a conversation only after its first user
@@ -115,22 +108,48 @@ export class ChildRequest extends Schema.Class<
   unread: Schema.Array(QueuedOperatorMessage).pipe(
     Schema.withConstructorDefault(Effect.succeed([])),
   ),
-  /** Cumulative usage committed before the orchestrator resumed this child. */
-  usage: Schema.OptionFromOptionalKey(
-    Schema.Struct({
-      totalTokens: TokenCount,
-      costUsd: Schema.OptionFromNullOr(UsdAmount),
-      processUsage: Schema.optionalKey(SessionTokensUpdated.fields.processUsage),
-    }),
-  ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
-  /** Keeps the child addressable after a turn until the operator releases its persisted Hold. */
+  /** Cumulative usage committed before the orchestrator reopened the session. */
+  usage: Schema.OptionFromOptionalKey(CommittedUsage).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+  /** Keeps the session addressable after a turn until the operator releases its persisted Hold. */
   held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
-  /** Waits for operator guidance before starting a turn in a restored paused child. */
+  /** Waits for operator guidance before starting a turn in a restored paused session. */
   paused: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
-  /** Restores an idle child's completed report without starting another turn. */
+  /** Restores an idle session's completed report without starting another turn. */
   idle: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+};
+
+/**
+ * The conversation state that a saved session had when the orchestrator stopped. The continuation
+ * policy owns it; `RestartState.make({})` is a session without a restart.
+ */
+export class RestartState extends Schema.Class<
+  RestartState,
+  Brand.Brand<"@usine/agents/runtime/RestartState">
+>("@usine/agents/RestartState")(restartFields) {}
+
+/**
+ * A task delegated to one child, with its session and the checkout it shares with the parent. The
+ * child continuation builds a `SessionSpec` and a `RestartState` from it.
+ */
+export class ChildRequest extends Schema.Class<
+  ChildRequest,
+  Brand.Brand<"@usine/agents/runtime/ChildRequest">
+>("@usine/agents/ChildRequest")({
+  /** The child identity, parent session, and brain spec selected for the delegated task. */
+  session: ChildSession,
+  /** The checkout directory on `host`. */
+  cwd: WorkingDirectory,
+  /** The complete instructions to send as the child's first message. */
+  prompt: Schema.NonEmptyString,
+  /** The saved conversation to continue in this checkout instead of starting a new one. */
+  resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
+  ),
+  ...restartFields,
   /**
    * The complete environment of the child process and its commands: the worker's allowlisted
    * variables plus the attempt's credential configuration, with nothing inherited from the launching

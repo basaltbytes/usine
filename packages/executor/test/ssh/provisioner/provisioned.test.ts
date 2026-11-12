@@ -7,6 +7,7 @@ import { RunId } from "@usine/core/run";
 import {
   ProvisionerTimings,
   ProvisionerReuse,
+  ProvisionerSeconds,
   MachineAttemptLimit,
   MachineMaxAge,
   ContainerCpus,
@@ -338,7 +339,11 @@ describe("Provisioned SSH Worker", () => {
         assert.deepStrictEqual(
           grant.checked,
           Option.some(
-            MachineCheck.make({ brains: [TEST_AGENT.brain], containerLimits: Option.none() }),
+            MachineCheck.make({
+              brains: [TEST_AGENT.brain],
+              containerLimits: Option.none(),
+              findings: [],
+            }),
           ),
         );
         const statuses = yield* machines.machines;
@@ -396,6 +401,24 @@ describe("Provisioned SSH Worker", () => {
       );
     },
   );
+
+  it.live("reports a kernel log that the SSH user can't read in the machine check", () => {
+    const machine = fakeMachine();
+    machine.state.docker = "running";
+    machine.state.kernelMemory = "unreadable";
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const grant = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, [
+        TEST_AGENT.brain,
+      ]);
+      assert(Option.isSome(grant.checked), "the new machine was checked");
+      const { findings } = grant.checked.value;
+      assert.strictEqual(findings.length, 1);
+      assert.include(findings[0], "can't read the kernel journal or ring buffer");
+      assert.include(findings[0], "systemd-journal");
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
+  });
 
   it.live("gives the API key to the Attempt's container on docker run's standard input", () => {
     const machine = fakeMachine();
@@ -524,6 +547,7 @@ describe("Provisioned SSH Worker", () => {
       Effect.gen(function* () {
         const machine = fakeMachine();
         machine.state.docker = "running";
+        machine.state.kernelMemory = "readable";
         machine.state.memoryGib = 8;
         const providers = fakeProviders();
         providers.hetzner.startingReads = 0;
@@ -573,6 +597,7 @@ describe("Provisioned SSH Worker", () => {
                     pids: ContainerPids.make(60976),
                   }),
                 ),
+                findings: [],
               }),
             ),
           );
@@ -1075,6 +1100,44 @@ describe("Provisioned SSH Worker", () => {
       Effect.provide(runtimeOf(machine, providers, keyed).pipe(Layer.provideMerge(logs.layer))),
     );
   });
+
+  it.live(
+    "warns at preflight that a boxd Worker ignores its provisioner.reuse and defers checks as without reuse",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const logs = capturedLogs();
+      const reused: SshWorkerAddress = {
+        ...boxdAddress,
+        machine: {
+          _tag: "Provisioned",
+          provisioner: boxdSettings({
+            timings: ProvisionerTimings.make({ sshWait: ProvisionerSeconds.make(1) }),
+            ignoredReuse: Option.some(
+              ProvisionerReuse.make({
+                attempts: MachineAttemptLimit.make(5),
+                maxAge: MachineMaxAge.make("2h"),
+              }),
+            ),
+          }),
+        },
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        assert.isTrue(
+          logs.warnings.some((line) =>
+            line.includes(`Worker \\"${WORKER}\\" sets provisioner.reuse, which usine ignores`),
+          ),
+        );
+        assert(Option.isSome(report.deferred));
+        assert.match(report.deferred.value, /^Checked on the first machine/);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtimeOf(machine, providers, reused).pipe(Layer.provideMerge(logs.layer))),
+      );
+    },
+  );
 
   it.live("refuses a Boat Worker whose identity file has no public key", () => {
     const machine = fakeMachine();

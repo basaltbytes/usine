@@ -249,8 +249,13 @@ const exitingHost = (code: number) =>
   });
 
 describe("Claude child backend", () => {
-  for (const home of ["configured", "default"] as const) {
-    it.effect(`refuses a saved remote child with a changed ${home} home`, () => {
+  const changed = {
+    configured: "configured home",
+    default: "default home",
+    checkout: "checkout",
+  } as const;
+  for (const home of ["configured", "default", "checkout"] as const) {
+    it.effect(`refuses a saved remote child with a changed ${changed[home]}`, () => {
       const original = request();
       const worker = workerCommands(0);
       let opened = false;
@@ -270,19 +275,28 @@ describe("Claude child backend", () => {
                 environment:
                   home === "configured"
                     ? { ...original.environment, CLAUDE_CONFIG_DIR: "/new-claude" }
-                    : { ...original.environment, HOME: "/new-home" },
+                    : home === "default"
+                      ? { ...original.environment, HOME: "/new-home" }
+                      : original.environment,
                 resume: Option.some(
                   HarnessSession.make({
                     id: HarnessSessionId.make("saved-claude"),
-                    cwd: original.cwd,
-                    home: Option.some(home === "configured" ? "/old-claude" : "/old-home/.claude"),
+                    cwd: home === "checkout" ? "/workspace/old-checkout" : original.cwd,
+                    home:
+                      home === "checkout"
+                        ? Option.none()
+                        : Option.some(home === "configured" ? "/old-claude" : "/old-home/.claude"),
                   }),
                 ),
               }),
             )
             .pipe(Effect.flip);
-          assert.strictEqual(error._tag, "ContinuationMismatchError");
-          assert.include(error.message, "home mismatch");
+          assert(error._tag === "ContinuationMismatchError");
+          assert.strictEqual(error.field, home === "checkout" ? "cwd" : "home");
+          assert.include(
+            error.message,
+            home === "checkout" ? "saved /workspace/old-checkout" : "home mismatch",
+          );
           assert.deepStrictEqual(worker.commands, []);
           assert.isFalse(opened, "refusal cannot start another Claude process");
         }),

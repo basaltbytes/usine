@@ -26,6 +26,7 @@ import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { idleTriggersLayer } from "../src/idle-triggers.ts";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { ConfigurationView, OperatorConfiguration } from "../src/operator/configuration/view.ts";
+import { workerPreflightView } from "../src/operator/preflight.ts";
 import { PollCycle, PollingTriggers } from "../src/polling-triggers.ts";
 import { recordPreflight, unchecked, WorkerStatus } from "../src/worker-status.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
@@ -218,6 +219,9 @@ const controls = Layer.succeed(LoopControl)({
   ]),
 });
 
+const kernelLogFinding =
+  "The SSH user can't read the kernel journal or ring buffer on usine@eu-1, so out-of-memory kills record no process names. Add the user to the systemd-journal group.";
+
 const claudeLoggedOut = WorkerCapabilityError.make({
   worker: local,
   capability: "harness-login",
@@ -274,7 +278,11 @@ const workers = Layer.succeed(WorkerStatus)({
         unchecked(WorkerName.make("eu-1")),
         [claude],
         startedAt,
-        Result.succeed({ ...fullPreflight, containerLimits: Option.some(limits) }),
+        Result.succeed({
+          ...fullPreflight,
+          containerLimits: Option.some(limits),
+          findings: [kernelLogFinding],
+        }),
       ),
     ];
   }),
@@ -419,6 +427,8 @@ describe("Configuration view", () => {
       });
       assert.deepStrictEqual(onSsh.containerLimits, { cpus: 1.16, memoryMib: 2389, pids: 20325 });
       assert.isNull(onLocal.containerLimits);
+      assert.deepStrictEqual(onSsh.findings, [kernelLogFinding]);
+      assert.deepStrictEqual(onLocal.findings, []);
       assert.deepStrictEqual(onSsh.gateway, {
         domain: "gw.internal",
         destination: "usine-gateway",
@@ -432,6 +442,19 @@ describe("Configuration view", () => {
       assert.include(encoded, "USINE_GATEWAY_ADMIN_TOKEN");
       assert.notInclude(encoded, '"adminToken"');
     }),
+  );
+
+  it.effect("carries each Worker's preflight findings into its preflight view", () =>
+    Effect.gen(function* () {
+      const preflights = yield* (yield* WorkerStatus).preflights;
+      assert.deepStrictEqual(
+        preflights.map(workerPreflightView).map(({ worker, findings }) => ({ worker, findings })),
+        [
+          { worker: local, findings: [] },
+          { worker: WorkerName.make("eu-1"), findings: [kernelLogFinding] },
+        ],
+      );
+    }).pipe(Effect.provide(workers)),
   );
 
   it.effect("shows each repository's lanes in order with their labels as GitHub has them", () =>

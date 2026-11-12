@@ -1,51 +1,62 @@
 import { Clock, Effect, Option, Result, Scope, Exit } from "effect";
 import {
+  type AgentSession,
   type AgentSessionEvent,
-  type ChildSession,
   type HarnessSession,
   ToolFinished,
 } from "@usine/core/agent/session";
 import {
+  type ChildBackendService,
   ChildRequest,
   ChildSessionJournal,
   ContinuationLimitError,
   ContinuationMismatchError,
   SessionInterruptedError,
   type AgentSessionError,
-  type ChildBackendService,
   type InterruptedTool,
   type QueuedOperatorMessage,
+  type RestartState,
   type RunningSession,
 } from "../runtime.ts";
-import type { HarnessRuntime, ReopenedSession } from "./runtime.ts";
+import {
+  type NativeSession,
+  type SessionSpec,
+  type Start,
+  StartPrompt,
+  StartResume,
+} from "./contract.ts";
+import { startReference } from "./adapter.ts";
+import type { HarnessCatalog } from "./harness.ts";
+import { admitChild, childAdmissionContext, childRestart, childSpec } from "./launch.ts";
+import type { HarnessRuntime } from "./runtime.ts";
 
 export const checkContinuation = Effect.fn("HarnessContinuation.check")(function* (
-  request: ChildRequest,
+  spec: SessionSpec,
   field: ContinuationMismatchError["field"],
   saved: Option.Option<string>,
   current: Option.Option<string>,
 ) {
-  yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, field });
+  const sessionId = spec.session.id;
+  yield* Effect.annotateCurrentSpan({ sessionId, field });
   if (Option.getOrNull(saved) === Option.getOrNull(current)) return;
-  const message = `Cannot resume ${request.session.brain.harness}: ${field} mismatch (saved ${Option.getOrElse(saved, () => "default")}, current ${Option.getOrElse(current, () => "default")})`;
-  yield* Effect.logWarning("Saved child continuation refused", {
-    sessionId: request.session.id,
-    field,
-    message,
-  });
-  return yield* ContinuationMismatchError.make({ sessionId: request.session.id, field, message });
+  const message = `Cannot resume ${spec.session.brain.harness}: ${field} mismatch (saved ${Option.getOrElse(saved, () => "default")}, current ${Option.getOrElse(current, () => "default")})`;
+  yield* Effect.logWarning("Saved child continuation refused", { sessionId, field, message });
+  return yield* ContinuationMismatchError.make({ sessionId, field, message });
 });
 
+/** Refuses to reopen a saved conversation from another checkout or harness home. */
 export const checkContinuationHome = Effect.fn("HarnessContinuation.home")(function* (
-  request: ChildRequest,
+  spec: SessionSpec,
+  start: Start,
   home: Option.Option<string>,
   defaultHome: Option.Option<string>,
 ) {
-  if (Option.isNone(request.resume)) return;
-  const saved = request.resume.value;
-  yield* checkContinuation(request, "cwd", Option.some(saved.cwd), Option.some(request.cwd));
+  const reference = startReference(start);
+  if (Option.isNone(reference)) return;
+  const saved = reference.value;
+  yield* checkContinuation(spec, "cwd", Option.some(saved.cwd), Option.some(spec.cwd));
   yield* checkContinuation(
-    request,
+    spec,
     "home",
     Option.orElse(saved.home, () => defaultHome),
     home,
@@ -83,7 +94,7 @@ export interface ContinuationState {
 
 /** Decides whether recovery needs a turn, without spending a child-session budget slot. */
 export const continuationPlan = (
-  session: ChildSession,
+  session: AgentSession,
   state: ContinuationState,
   history: ReadonlyArray<number>,
   now: number,
@@ -104,7 +115,12 @@ export const continuationPlan = (
   return Result.succeed({ continue: true, history: [...recent, now] });
 };
 
+/**
+ * The continuation decorator's part of an open session: the state restored from before a restart,
+ * and the decisions for reopening and recovering the native conversation.
+ */
 export interface ContinuationPolicy {
+  readonly restored: RestartState;
   readonly reopen: <A, R>(
     native: Effect.Effect<A, AgentSessionError, R>,
   ) => Effect.Effect<A, AgentSessionError, R>;
@@ -117,20 +133,30 @@ export interface ContinuationPolicy {
   ) => Effect.Effect<void, AgentSessionError>;
 }
 
-const makePolicy = Effect.fn("HarnessContinuation.make")(function* (request: ChildRequest) {
+/**
+ * Makes the continuation policy of `spec`. `task` is the first input that recovery sends when the
+ * native history confirms that no input was saved.
+ */
+export const continuationPolicy = Effect.fn("HarnessContinuation.make")(function* (
+  spec: SessionSpec,
+  task: string,
+  restored: RestartState,
+) {
   const journal = yield* ChildSessionJournal.current;
-  let history = request.continuations;
+  const session = spec.session;
+  let history = restored.continuations;
   return {
+    restored,
     reopen: <A, R>(native: Effect.Effect<A, AgentSessionError, R>) =>
       native.pipe(
         Effect.catchTag("SessionOperationError", (error) =>
           Effect.logWarning("Native child resume failed", {
-            sessionId: request.session.id,
+            sessionId: session.id,
             message: error.message,
           }).pipe(
             Effect.andThen(
               SessionInterruptedError.make({
-                sessionId: request.session.id,
+                sessionId: session.id,
                 message: `The saved native conversation could not be reopened: ${error.message}`,
                 cause: Option.some(error),
               }),
@@ -139,20 +165,18 @@ const makePolicy = Effect.fn("HarnessContinuation.make")(function* (request: Chi
         ),
       ),
     recover: Effect.fn("HarnessContinuation.recover")(function* (state, tools, unread, emit, send) {
-      yield* Effect.annotateCurrentSpan({ sessionId: request.session.id });
+      yield* Effect.annotateCurrentSpan({ sessionId: session.id });
       for (const tool of tools)
         yield* emit(
           ToolFinished.make({
-            session: request.session,
+            session,
             ...tool,
             output: "The session was interrupted before this call returned",
             isError: true,
           }),
         );
       const now = yield* Clock.currentTimeMillis;
-      const plan = yield* Effect.fromResult(
-        continuationPlan(request.session, state, history, now),
-      ).pipe(
+      const plan = yield* Effect.fromResult(continuationPlan(session, state, history, now)).pipe(
         Effect.tapError((error) =>
           Effect.logWarning("Child continuation refused", {
             sessionId: error.sessionId,
@@ -162,7 +186,7 @@ const makePolicy = Effect.fn("HarnessContinuation.make")(function* (request: Chi
       );
       if (!plan.continue) {
         yield* Effect.logInfo("Recovered child waits for operator guidance", {
-          sessionId: request.session.id,
+          sessionId: session.id,
           ...state,
           unread: unread.length,
         });
@@ -171,77 +195,79 @@ const makePolicy = Effect.fn("HarnessContinuation.make")(function* (request: Chi
       yield* journal.continued(plan.history);
       history = plan.history;
       yield* Effect.logInfo("Continuing interrupted child work", {
-        sessionId: request.session.id,
+        sessionId: session.id,
         continuations: history.length,
         tools: tools.length,
         unread: unread.length,
       });
-      yield* send(state.empty === true ? request.prompt : CONTINUATION_MESSAGE);
+      yield* send(state.empty === true ? task : CONTINUATION_MESSAGE);
       for (const message of unread) yield* send(message.message, message.id);
     }),
   } satisfies ContinuationPolicy;
 });
 
-export interface NativeSession extends ReopenedSession {
-  readonly recover: (
-    tools: ReadonlyArray<InterruptedTool>,
-  ) => Effect.Effect<void, AgentSessionError>;
-}
-
-export interface ChildAdapter {
-  readonly open: (
+/** The child role over a harness runtime: launch, saved-conversation resume, and stop. */
+export interface ChildSessions extends ChildBackendService {
+  /** Reopens a saved conversation without sending a prompt; `None` means it was unavailable. */
+  readonly resume: (
     request: ChildRequest,
-    prompt: Option.Option<string>,
-    policy: ContinuationPolicy,
-  ) => Effect.Effect<NativeSession, AgentSessionError, Scope.Scope>;
-  readonly stop: ChildBackendService["stop"];
+    reference: HarnessSession,
+  ) => Effect.Effect<Option.Option<NativeSession>, AgentSessionError, Scope.Scope>;
 }
 
-/** Keeps native reopening separate from continuation decisions for every harness. */
+/**
+ * Builds child sessions over `runtime`: admits each request with `catalog`, turns it into a session
+ * spec and its restart state, and keeps native reopening separate from continuation decisions.
+ */
 export const childContinuation = (
-  adapter: ChildAdapter,
-): ChildBackendService & Pick<HarnessRuntime, "resume"> => {
+  catalog: HarnessCatalog,
+  runtime: Pick<HarnessRuntime, "open" | "stop">,
+): ChildSessions => {
   const reopen = Effect.fn("HarnessContinuation.reopen")(function* (
-    request: ChildRequest,
+    spec: SessionSpec,
     reference: HarnessSession,
     policy: ContinuationPolicy,
   ) {
     yield* Effect.annotateCurrentSpan({
-      sessionId: request.session.id,
+      sessionId: spec.session.id,
       harnessSessionId: reference.id,
     });
     const parent = yield* Effect.scope;
     const scope = yield* Scope.fork(parent);
-    return yield* adapter
-      .open(
-        ChildRequest.make({ ...request, resume: Option.some(reference) }),
-        Option.none(),
-        policy,
-      )
-      .pipe(
-        Scope.provide(scope),
-        Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
-        Effect.asSome,
-        Effect.catchTag("SessionOperationError", (error) =>
-          Effect.logWarning("Saved native conversation could not be reopened", {
-            sessionId: request.session.id,
-            message: error.message,
-          }).pipe(Effect.as(Option.none<NativeSession>())),
-        ),
-      );
+    return yield* runtime.open(spec, StartResume.make({ reference }), policy).pipe(
+      Scope.provide(scope),
+      Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+      Effect.asSome,
+      Effect.catchTag("SessionOperationError", (error) =>
+        Effect.logWarning("Saved native conversation could not be reopened", {
+          sessionId: spec.session.id,
+          message: error.message,
+        }).pipe(Effect.as(Option.none<NativeSession>())),
+      ),
+    );
+  });
+  /** Admits `request` and returns its spec and continuation policy. */
+  const prepare = Effect.fn("HarnessContinuation.prepare")(function* (request: ChildRequest) {
+    const admitted = yield* admitChild(catalog, request);
+    const spec = childSpec(request, admitted.context);
+    const policy = yield* continuationPolicy(spec, request.prompt, childRestart(request));
+    return { spec, policy };
   });
   return {
-    stop: adapter.stop,
+    stop: (request) => runtime.stop(childSpec(request, childAdmissionContext(catalog, request))),
     resume: Effect.fn("HarnessContinuation.resume")(function* (request, reference) {
-      const policy = yield* makePolicy(request);
-      return yield* reopen(request, reference, policy);
+      const { spec, policy } = yield* prepare(
+        ChildRequest.make({ ...request, resume: Option.some(reference) }),
+      );
+      return yield* reopen(spec, reference, policy);
     }),
     launch: Effect.fn("HarnessContinuation.launch")(function* (request) {
       yield* Effect.annotateCurrentSpan({ sessionId: request.session.id });
-      const policy = yield* makePolicy(request);
+      const { spec, policy } = yield* prepare(request);
       if (Option.isNone(request.resume))
-        return (yield* adapter.open(request, Option.some(request.prompt), policy)).running;
-      const reopened = yield* reopen(request, request.resume.value, policy);
+        return (yield* runtime.open(spec, StartPrompt.make({ text: request.prompt }), policy))
+          .running;
+      const reopened = yield* reopen(spec, request.resume.value, policy);
       if (Option.isNone(reopened))
         return yield* SessionInterruptedError.make({
           sessionId: request.session.id,

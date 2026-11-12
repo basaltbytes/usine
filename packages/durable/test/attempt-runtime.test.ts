@@ -34,7 +34,12 @@ import { ItemNumber } from "@usine/core/item";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import { Commit, StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { ChildBackend, ChildSessionLifecycle, SessionOperationError } from "@usine/agents/runtime";
+import {
+  ChildBackend,
+  ChildRequest,
+  ChildSessionLifecycle,
+  SessionOperationError,
+} from "@usine/agents/runtime";
 import {
   Context,
   DateTime,
@@ -175,9 +180,24 @@ describe("durable AttemptRuntime", () => {
               Harnesses.layerFrom(activeCatalog, [
                 {
                   id,
-                  launch: stub.launch,
-                  resume: () => Effect.succeedNone,
-                  stop: stub.stop,
+                  // Rebuilds the admitted child's request for the stub backend.
+                  open: (spec, start, { restored }) =>
+                    Effect.gen(function* () {
+                      assert(spec.session._tag === "ChildSession" && start._tag === "StartPrompt");
+                      const request = ChildRequest.make({
+                        ...restored,
+                        session: spec.session,
+                        prompt: start.text,
+                        cwd: spec.cwd,
+                        environment: spec.environment,
+                        host: spec.host,
+                        worker: spec.worker,
+                        machine: spec.machine,
+                      });
+                      const running = yield* stub.launch(request);
+                      return { running, active: false, recover: () => Effect.void };
+                    }),
+                  stop: () => Effect.void,
                   preflight: () => Effect.succeed(HarnessReady.make({ harness: id })),
                 },
               ]),

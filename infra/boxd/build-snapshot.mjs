@@ -9,8 +9,9 @@ import { Boxd, Machine } from "@boxd-sh/sdk";
 import { boxdEgress } from "./egress.mjs";
 
 const USAGE =
-  "Usage: build-snapshot.mjs [--size 1x4|2x8|4x16|8x32] [--region <id>] [--endpoint <url>] <snapshot-name>";
-const SIZES = ["1x4", "2x8", "4x16", "8x32"];
+  "Usage: build-snapshot.mjs [--size <vcpu>x<GiB>] [--region <id>] [--endpoint <url>] <snapshot-name>";
+/** The pattern of `BoxdSize` in `@usine/core/worker`, so `provisioner.size` can name the size. */
+const SIZE = /^[1-9][0-9]{0,3}x[1-9][0-9]{0,5}$/u;
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const REGION = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
 const IMAGE = /^[A-Za-z0-9./:@_-]+$/u;
@@ -86,7 +87,10 @@ export const parseOptions = (argv, env) => {
   const [snapshot] = positionals;
   if (!NAME.test(snapshot))
     throw new UsageError(`Invalid snapshot name ${JSON.stringify(snapshot)}`);
-  if (!SIZES.includes(values.size)) throw new UsageError(`Invalid size ${values.size}`);
+  if (!SIZE.test(values.size))
+    throw new UsageError(
+      `Invalid size ${JSON.stringify(values.size)}: pass <vcpu>x<GiB>, such as 2x8`,
+    );
   if (values.region !== undefined && !REGION.test(values.region))
     throw new UsageError(`Invalid region ${JSON.stringify(values.region)}`);
   if (values.endpoint !== undefined && values.endpoint.trim() === "")

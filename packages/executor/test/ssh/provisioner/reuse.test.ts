@@ -33,12 +33,11 @@ const second = AttemptId.make("second/execute/1");
 const third = AttemptId.make("third/execute/1");
 const reuseAddress = (address: SshWorkerAddress): SshWorkerAddress => {
   assert(address.machine._tag === "Provisioned");
+  const { provisioner } = address.machine;
+  assert(provisioner.provider !== "boxd", "a boxd provisioner has no reuse policy");
   return {
     ...address,
-    machine: {
-      ...address.machine,
-      provisioner: { ...address.machine.provisioner, reuse: Option.some(policy) },
-    },
+    machine: { ...address.machine, provisioner: { ...provisioner, reuse: Option.some(policy) } },
   };
 };
 const machineFixture = () => {
@@ -48,7 +47,8 @@ const machineFixture = () => {
   return machine;
 };
 
-for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
+// A boxd restore takes under a second, so a boxd provisioner has no reuse policy.
+for (const address of [hetznerAddress, boatAddress]) {
   assert(address.machine._tag === "Provisioned");
   const provider = address.machine.provisioner.provider;
   describe(`${provider} machine reuse`, () => {
@@ -103,14 +103,7 @@ for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
           );
           assert.include(reset.line, "/codex'");
           assert.include(reset.line, "/claude'", "reset removes orphan Claude session directories");
-          if (provider === "boxd") providers.boxd.timers.length = 0;
           const reused = yield* machines.create(WORKER, MACHINE_RUN, second, [TEST_AGENT.brain]);
-          if (provider === "boxd") {
-            assert.deepStrictEqual(providers.boxd.timers, [
-              { id: first.id, kind: "hibernate", seconds: 0 },
-              { id: first.id, kind: "suspend", seconds: 0 },
-            ]);
-          }
           assert.isTrue(records.has(second));
           assert.strictEqual(reused.id, first.id);
           assert.notEqual(reused.hold, first.hold);
@@ -119,11 +112,7 @@ for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
           const assignment = providers.calls.find(
             ({ method }) => method === (provider === "boat" ? "PATCH" : "PUT"),
           );
-          const json1 = jsonKey(
-            provider === "boxd"
-              ? [...providers.boxd.machines.values()].map((machine) => machine.labels)
-              : assignment?.body,
-          );
+          const json1 = jsonKey(assignment?.body);
           assert.include(json1, attemptTag(second));
           yield* machines.release(first.hold);
           assert.strictEqual(
@@ -195,6 +184,73 @@ for (const address of [hetznerAddress, boatAddress, boxdAddress]) {
     });
   });
 }
+
+// A boxd worker stored before reuse was ignored still carries the setting, which must not apply.
+const ignoredReuseAddress: SshWorkerAddress = (() => {
+  assert(boxdAddress.machine._tag === "Provisioned");
+  const { provisioner } = boxdAddress.machine;
+  assert(provisioner.provider === "boxd");
+  return {
+    ...boxdAddress,
+    machine: {
+      ...boxdAddress.machine,
+      provisioner: { ...provisioner, ignoredReuse: Option.some(policy) },
+    },
+  };
+})();
+
+it.live("deletes a released boxd machine and creates a new one for the next attempt", () => {
+  const machine = machineFixture();
+  const providers = fakeProviders();
+  return Effect.gen(function* () {
+    const machines = yield* WorkerMachines;
+    const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
+    yield* machines.release(first.hold);
+    const held = yield* machines.machines;
+    assert.lengthOf(held, 0);
+    assert.isFalse(providers.boxd.machines.has(first.id));
+    const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
+    assert.notEqual(next.id, first.id);
+    yield* machines.release(next.hold);
+  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
+});
+
+it.live(
+  "creates a boxd machine without container isolation although the worker stores reuse",
+  () => {
+    const machine = machineFixture();
+    machine.state.docker = "absent";
+    const providers = fakeProviders();
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
+      assert.isTrue(providers.boxd.machines.has(first.id));
+      yield* machines.release(first.hold);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
+  },
+);
+
+it.live(
+  "checks a new boxd machine only after the check interval although the worker stores reuse",
+  () => {
+    const machine = machineFixture();
+    const providers = fakeProviders();
+    const memoryChecks = () =>
+      machine.state.calls.filter(({ line }) => line === "exec 'cat' '/proc/meminfo'").length;
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const first = yield* machines.create(WORKER, MACHINE_RUN, request.attemptId, []);
+      assert.isTrue(Option.isSome(first.checked));
+      assert.strictEqual(memoryChecks(), 1);
+      yield* machines.release(first.hold);
+      const next = yield* machines.create(WORKER, MACHINE_RUN, second, []);
+      assert.notEqual(next.id, first.id);
+      assert.isTrue(Option.isNone(next.checked), "the second machine is within the check interval");
+      assert.strictEqual(memoryChecks(), 1);
+      yield* machines.release(next.hold);
+    }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, ignoredReuseAddress)));
+  },
+);
 
 it.effect("retires an idle machine at its age limit without waiting for another attempt", () => {
   const machine = machineFixture();

@@ -4,10 +4,12 @@ import { assert, it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { childContinuation } from "@usine/agents/continuation";
+import { catalog, HarnessCatalog, HarnessDescriptor } from "@usine/agents/harness";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Harness } from "@usine/core/agent/brain";
 import {
   ChildBackend,
+  type ChildRequest,
   ChildSessionJournal,
   SessionInterruptedError,
   SessionOperationError,
@@ -268,15 +270,24 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
             Effect.gen(function* () {
               const services = yield* Effect.context<ChildBackend | StubChildren>();
               const backend = Context.get(services, ChildBackend);
-              const shared = childContinuation({
-                stop: backend.stop,
-                open: (request) =>
-                  Effect.gen(function* () {
-                    const running = yield* backend.launch(request);
-                    if (Option.isSome(request.resume)) yield* running.result;
-                    return { running, active: false, recover: () => Effect.void };
-                  }),
+              // Admits every recorded harness on any route, as the stub backend does.
+              const claude = catalog.descriptors.find(({ id }) => id === "claude");
+              assert(claude !== undefined);
+              const admitting = HarnessCatalog.make({
+                descriptors: catalog.descriptors.map((descriptor) =>
+                  HarnessDescriptor.make({ ...descriptor, capabilities: claude.capabilities }),
+                ),
               });
+              const shared = (request: ChildRequest) =>
+                childContinuation(admitting, {
+                  stop: () => backend.stop(request),
+                  open: (_spec, start) =>
+                    Effect.gen(function* () {
+                      const running = yield* backend.launch(request);
+                      if (start._tag === "StartResume") yield* running.result;
+                      return { running, active: false, recover: () => Effect.void };
+                    }),
+                });
               return Context.add(services, ChildBackend, {
                 ...backend,
                 launch: (request) =>
@@ -293,13 +304,15 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
                         Effect.andThen(backend.launch(request)),
                       )
                     : recovery === "resume-crashes-then-replacement"
-                      ? shared.launch(request).pipe(
-                          Effect.tapError((error) =>
-                            Effect.sync(() => {
-                              assert.strictEqual(error._tag, "SessionInterruptedError");
-                            }),
-                          ),
-                        )
+                      ? shared(request)
+                          .launch(request)
+                          .pipe(
+                            Effect.tapError((error) =>
+                              Effect.sync(() => {
+                                assert.strictEqual(error._tag, "SessionInterruptedError");
+                              }),
+                            ),
+                          )
                       : backend.launch(request),
                 stop: (request) =>
                   backend.stop(request).pipe(
