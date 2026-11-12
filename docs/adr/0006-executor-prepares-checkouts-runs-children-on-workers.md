@@ -9,7 +9,7 @@ For each attempt, the executor:
 
 Coordination runs in the orchestrator and stores activity, as versioned attempt channel envelopes, before the transcript shows it. After an orchestrator restart, the engine reattaches a live attempt to its checkout and saved child sessions without spending a retry.
 
-Built: the Pi parent, a pi-durable task in the orchestrator, coordinates every attempt (ADR 0005). Decided, not built: the event-driven coordinator replaces it behind the same executor contract (#1150, removal in #1166).
+Built: two coordinators, the Pi parent as a pi-durable task in the orchestrator (ADR 0005) and the event-driven coordinator for `RunSpec.parent: none` (#1157). Decided, not built: the second replaces the first (#1158, #1166).
 
 ## Considered options
 

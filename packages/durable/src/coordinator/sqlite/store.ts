@@ -1,15 +1,19 @@
+import type { ChildSessionCount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { StepCompletion } from "@usine/core/step/result";
 import { getTableName } from "drizzle-orm";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { Migrator, SqlClient } from "effect/sql";
 
 import { StoredRequest } from "../../attempt-runtime.ts";
 import {
   AttemptJournal,
+  ChildProgress,
   CoordinationStatus,
   CoordinatorSnapshot,
   Delegation,
+  DelegationRecord,
   EncodedDecision,
   EncodedEvent,
   EncodedState,
@@ -18,7 +22,18 @@ import {
   JournalRevision,
   LedgerEntry,
 } from "../journal.ts";
-import { decided, keptDecision, opened, reserved, settled, transitioned } from "../ledger.ts";
+import {
+  decided,
+  keptDecision,
+  keptDelegationOutcome,
+  opened,
+  progressed,
+  reserved,
+  settled,
+  settledDelegation,
+  startedDelegation,
+  transitioned,
+} from "../ledger.ts";
 import { migrations } from "./migrations.ts";
 import { coordinationTable, delegationsTable, eventsTable, outboxTable } from "./schema.ts";
 
@@ -30,7 +45,9 @@ const StatusJson = json(CoordinationStatus);
 const EventJson = json(EncodedEvent);
 const DecisionJson = json(EncodedDecision);
 const DelegationJson = json(Delegation);
+const ProgressJson = json(ChildProgress);
 const EnvelopeJson = json(AttemptChannel.OutboundEnvelope);
+const ResultJson = json(StepCompletion);
 
 const CoordinationRow = Schema.Struct({
   request: RequestJson,
@@ -38,13 +55,26 @@ const CoordinationRow = Schema.Struct({
   state: Schema.NullOr(StateJson),
   status: StatusJson,
   nextOutbound: AttemptChannel.Sequence,
+  result: Schema.NullOr(ResultJson),
+  unsupervisedMillis: Schema.NullOr(Schema.Finite),
 });
 const EventRow = Schema.Struct({
   sequence: EventSequence,
   event: Schema.NullOr(EventJson),
   decision: DecisionJson,
 });
-const DelegationRow = Schema.Struct({ delegation: DelegationJson });
+const DelegationRow = Schema.Struct({
+  delegation: DelegationJson,
+  progress: Schema.NullOr(ProgressJson),
+  outcome: Schema.NullOr(EventJson),
+});
+
+const recordOf = ({ delegation, progress, outcome }: typeof DelegationRow.Type) =>
+  DelegationRecord.make({
+    ...delegation,
+    progress: Option.fromNullOr(progress),
+    outcome: Option.fromNullOr(outcome),
+  });
 const EnvelopeRow = Schema.Struct({ envelope: EnvelopeJson });
 
 // Every value written was validated at construction, so an encoding failure is a defect.
@@ -90,7 +120,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
     const load = (attemptId: AttemptId) =>
       Effect.gen(function* () {
         const [row] =
-          yield* sql`SELECT request, revision, state, status, next_outbound AS "nextOutbound" FROM ${sql(coordination)} WHERE attempt_id = ${attemptId}`;
+          yield* sql`SELECT request, revision, state, status, next_outbound AS "nextOutbound", result, unsupervised_millis AS "unsupervisedMillis" FROM ${sql(coordination)} WHERE attempt_id = ${attemptId}`;
         if (row === undefined) return Option.none<CoordinatorSnapshot>();
         const stored = yield* Schema.decodeUnknownEffect(CoordinationRow)(row);
         const ledger =
@@ -98,7 +128,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(EventRow))),
           );
         const children =
-          yield* sql`SELECT delegation FROM ${sql(delegations)} WHERE attempt_id = ${attemptId} ORDER BY number`.pipe(
+          yield* sql`SELECT delegation, progress, outcome FROM ${sql(delegations)} WHERE attempt_id = ${attemptId} ORDER BY number`.pipe(
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(DelegationRow))),
           );
         const reservations =
@@ -119,9 +149,11 @@ export const sqliteAttemptJournalLayer = Layer.effect(
             pendingDecision: Option.fromUndefinedOr(pending[0]).pipe(
               Option.map(({ decision }) => decision),
             ),
-            delegations: children.map(({ delegation }) => delegation),
+            delegations: children.map(recordOf),
             outbox: reservations.map(({ envelope }) => envelope),
             nextOutbound: stored.nextOutbound,
+            result: Option.fromNullOr(stored.result),
+            unsupervised: Option.map(Option.fromNullOr(stored.unsupervisedMillis), Duration.millis),
           }),
         );
       });
@@ -147,6 +179,33 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           }),
         { discard: true },
       );
+    const delegationRow = (attemptId: AttemptId, number: ChildSessionCount) =>
+      Effect.gen(function* () {
+        const [row] =
+          yield* sql`SELECT delegation, progress, outcome FROM ${sql(delegations)} WHERE attempt_id = ${attemptId} AND number = ${number}`;
+        if (row === undefined)
+          return yield* Effect.die(new Error(`Attempt ${attemptId} has no delegation ${number}`));
+        const decoded = yield* Schema.decodeUnknownEffect(DelegationRow)(row);
+        return recordOf(decoded);
+      });
+    const updateProgress = (attemptId: AttemptId, record: DelegationRecord) =>
+      Effect.gen(function* () {
+        const progress = yield* Option.match(record.progress, {
+          onNone: () => Effect.succeed(null),
+          onSome: (value) => encode(ProgressJson)(value),
+        });
+        yield* sql`UPDATE ${sql(delegations)} SET progress = ${progress} WHERE attempt_id = ${attemptId} AND number = ${record.number}`;
+      });
+    const coordinationExists = (attemptId: AttemptId) =>
+      Effect.gen(function* () {
+        const [row] =
+          yield* sql`SELECT unsupervised_millis AS "unsupervisedMillis" FROM ${sql(coordination)} WHERE attempt_id = ${attemptId}`;
+        if (row === undefined)
+          return yield* Effect.die(new Error(`Attempt ${attemptId} has no journal`));
+        return yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ unsupervisedMillis: Schema.NullOr(Schema.Finite) }),
+        )(row);
+      });
     const updateCoordination = (snapshot: CoordinatorSnapshot) =>
       Effect.gen(function* () {
         const state = yield* Option.match(snapshot.state, {
@@ -219,7 +278,7 @@ export const sqliteAttemptJournalLayer = Layer.effect(
             for (const intent of step.intents) {
               if (intent._tag !== "Delegate") continue;
               const delegation = yield* encode(DelegationJson)(intent.delegation);
-              yield* sql`INSERT INTO ${sql(delegations)} ${sql.insert({ attempt_id: attemptId, number: intent.delegation.number, delegation })}`;
+              yield* sql`INSERT INTO ${sql(delegations)} ${sql.insert({ attempt_id: attemptId, number: intent.delegation.number, delegation, progress: null, outcome: null })}`;
             }
             yield* insertEnvelopes(attemptId, step.outbound);
             return next;
@@ -278,6 +337,83 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           ),
         );
       }),
+      startDelegation: Effect.fn("AttemptJournal.startDelegation")(function* (attemptId, number) {
+        yield* Effect.annotateCurrentSpan({ attemptId, delegation: number });
+        return yield* Effect.gen(function* () {
+          const previous = yield* delegationRow(attemptId, number);
+          const result = startedDelegation(previous);
+          if (result.record !== previous) yield* updateProgress(attemptId, result.record);
+          return result.started;
+        }).pipe(
+          transaction,
+          Effect.catchTag(["SqlError", "SchemaError"], failure("start a delegation", attemptId)),
+        );
+      }),
+      saveProgress: Effect.fn("AttemptJournal.saveProgress")(function* (attemptId, number, change) {
+        yield* Effect.annotateCurrentSpan({ attemptId, delegation: number, change: change._tag });
+        yield* Effect.gen(function* () {
+          const record = yield* delegationRow(attemptId, number).pipe(
+            Effect.flatMap((current) => progressed(current, change)),
+          );
+          yield* updateProgress(attemptId, record);
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("save a delegation's progress", attemptId),
+          ),
+        );
+      }),
+      settleDelegation: Effect.fn("AttemptJournal.settleDelegation")(
+        function* (attemptId, number, outcome) {
+          yield* Effect.annotateCurrentSpan({ attemptId, delegation: number });
+          return yield* Effect.gen(function* () {
+            const previous = yield* delegationRow(attemptId, number);
+            const result = settledDelegation(previous, outcome);
+            if (result.record !== previous) {
+              const encoded = yield* encode(EventJson)(outcome);
+              yield* sql`UPDATE ${sql(delegations)} SET outcome = ${encoded} WHERE attempt_id = ${attemptId} AND number = ${number}`;
+            } else yield* keptDelegationOutcome(attemptId, number, result.recorded, outcome);
+            return result.recorded;
+          }).pipe(
+            transaction,
+            Effect.catchTag(
+              ["SqlError", "SchemaError"],
+              failure("record a delegation's outcome", attemptId),
+            ),
+          );
+        },
+      ),
+      recordResult: Effect.fn("AttemptJournal.recordResult")(function* (attemptId, result) {
+        yield* Effect.annotateCurrentSpan({ attemptId });
+        yield* Effect.gen(function* () {
+          yield* coordinationExists(attemptId);
+          const encoded = yield* encode(ResultJson)(result);
+          yield* sql`UPDATE ${sql(coordination)} SET result = ${encoded} WHERE attempt_id = ${attemptId}`;
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("record the Attempt's result", attemptId),
+          ),
+        );
+      }),
+      recordUnsupervised: Effect.fn("AttemptJournal.recordUnsupervised")(
+        function* (attemptId, unsupervised) {
+          yield* Effect.annotateCurrentSpan({ attemptId });
+          yield* Effect.gen(function* () {
+            const { unsupervisedMillis } = yield* coordinationExists(attemptId);
+            const millis = Math.max(unsupervisedMillis ?? 0, Duration.toMillis(unsupervised));
+            yield* sql`UPDATE ${sql(coordination)} SET unsupervised_millis = ${millis} WHERE attempt_id = ${attemptId}`;
+          }).pipe(
+            transaction,
+            Effect.catchTag(
+              ["SqlError", "SchemaError"],
+              failure("record the Attempt's unsupervised time", attemptId),
+            ),
+          );
+        },
+      ),
       acknowledge: Effect.fn("AttemptJournal.acknowledge")(function* (attemptId, through) {
         yield* Effect.annotateCurrentSpan({ attemptId, through });
         yield* Effect.gen(function* () {
@@ -309,6 +445,26 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           Effect.catchTag(
             ["SqlError", "SchemaError"],
             failure("settle the attempt journal", attemptId),
+          ),
+        );
+      }),
+      settleOpen: Effect.fn("AttemptJournal.settleOpen")(function* (attemptId) {
+        yield* Effect.annotateCurrentSpan({ attemptId });
+        return yield* Effect.gen(function* () {
+          const stored = yield* load(attemptId);
+          if (Option.isNone(stored)) return Option.none();
+          const { status } = stored.value;
+          const next = settled(stored.value);
+          if (status._tag === "Open" && Option.isSome(next)) {
+            yield* updateCoordination(next.value);
+            yield* Effect.logInfo("Open attempt journal settled", { attemptId });
+          }
+          return Option.some(status);
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("settle the open attempt journal", attemptId),
           ),
         );
       }),

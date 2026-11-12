@@ -9,7 +9,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { Context, Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
-import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as runtimeLayer } from "../src/testing.ts";
 import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
 import {
   answer,

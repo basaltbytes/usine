@@ -1,7 +1,9 @@
 import { assert, describe, expect, it } from "@effect/vitest";
+import { AgentName } from "@usine/core/agent";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import { RepositoryName } from "@usine/core/repository";
 import { AttemptFailure } from "@usine/core/attempt/failure";
-import { Effect, Exit, Option, Schema } from "effect";
+import { DateTime, Effect, Exit, Option, Schema } from "effect";
 import {
   apply,
   AtCapacity,
@@ -37,7 +39,17 @@ import {
 const child = ChildSessionCount.make;
 
 const contextFor = (event: CoordinatorEvent, maxChildren = 3) =>
-  AttemptContext.make({ event, maxChildren: ChildSessionBudget.make(maxChildren) });
+  AttemptContext.make({
+    event,
+    maxChildren: ChildSessionBudget.make(maxChildren),
+    repository: RepositoryName.make("basaltbytes/usine"),
+    agent: AgentName.make("developer"),
+    task: "Fix the flaky durable test.",
+    outcomeLabels: [],
+    requiresCi: false,
+    delegations: [],
+    output: "",
+  });
 
 /** Handles `event` as the coordinator does: the rule unless `decision` is given, then clamp and apply. */
 const handle = (
@@ -158,34 +170,48 @@ describe("coordinator rules", () => {
     }),
   );
 
-  it.effect("ChildAtCapacity, ChildFailed, and BudgetExceeded fail with their failures", () =>
-    Effect.gen(function* () {
-      const cases: ReadonlyArray<readonly [CoordinatorEvent, EncodedFailure]> = [
-        [
-          ChildAtCapacity.make({ child: child(1), message: "HTTP 529" }),
-          { _tag: "ProviderCapacityFailure", message: "HTTP 529" },
-        ],
-        [
-          ChildFailed.make({ child: child(1), message: "ssh: closed" }),
-          { _tag: "InfraFailure", message: "ssh: closed", cause: "ssh: closed" },
-        ],
-        [
-          BudgetExceeded.make({ child: child(1), attempted: child(3) }),
-          { _tag: "ChildSessionBudgetFailure", maxChildren: 2, attemptedChildren: 3 },
-        ],
-      ];
-      for (const [event, failure] of cases) {
-        const [, intents] = handle(startedState(), event, { maxChildren: 2 });
-        const intent = yield* intentOf(intents);
-        assert.deepStrictEqual(intent, { failed: failure }, event._tag);
-      }
-    }),
+  it.effect(
+    "ChildAtCapacity, ChildFailed, and BudgetExceeded fail with their failures, keeping resetsAt",
+    () =>
+      Effect.gen(function* () {
+        const cases: ReadonlyArray<readonly [CoordinatorEvent, EncodedFailure]> = [
+          [
+            ChildAtCapacity.make({ child: child(1), message: "HTTP 529", resetsAt: Option.none() }),
+            { _tag: "ProviderCapacityFailure", message: "HTTP 529" },
+          ],
+          [
+            ChildAtCapacity.make({
+              child: child(1),
+              message: "Usage limit reached",
+              resetsAt: Option.some(DateTime.makeUnsafe("2026-11-11T18:00:00Z")),
+            }),
+            {
+              _tag: "ProviderCapacityFailure",
+              message: "Usage limit reached",
+              resetsAt: "2026-11-11T18:00:00.000Z",
+            },
+          ],
+          [
+            ChildFailed.make({ child: child(1), message: "ssh: closed" }),
+            { _tag: "InfraFailure", message: "ssh: closed", cause: "ssh: closed" },
+          ],
+          [
+            BudgetExceeded.make({ child: child(1), attempted: child(3) }),
+            { _tag: "ChildSessionBudgetFailure", maxChildren: 2, attemptedChildren: 3 },
+          ],
+        ];
+        for (const [event, failure] of cases) {
+          const [, intents] = handle(startedState(), event, { maxChildren: 2 });
+          const intent = yield* intentOf(intents);
+          assert.deepStrictEqual(intent, { failed: failure }, event._tag);
+        }
+      }),
   );
 
   it("clamp keeps every typed fact's rule over a model's decision", () => {
     const events: ReadonlyArray<CoordinatorEvent> = [
       reservedReport("question", "Which base branch?"),
-      ChildAtCapacity.make({ child: child(1), message: "HTTP 529" }),
+      ChildAtCapacity.make({ child: child(1), message: "HTTP 529", resetsAt: Option.none() }),
       ChildFailed.make({ child: child(1), message: "ssh: closed" }),
       BudgetExceeded.make({ child: child(1), attempted: child(4) }),
     ];
@@ -582,6 +608,9 @@ describe("coordinator rules", () => {
                   },
                   "message": {
                     "minLength": 1,
+                    "type": "string",
+                  },
+                  "resetsAt": {
                     "type": "string",
                   },
                 },

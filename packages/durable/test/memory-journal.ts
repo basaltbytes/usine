@@ -1,21 +1,29 @@
+import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { Deferred, Effect, Option } from "effect";
 import type {
-  ChildBlocker,
+  DelegationCall,
   DelegationDetails,
   DelegationJournal,
   DelegationProgress,
   QueuedChildInput,
+  ReservedChildReport,
   SavedChild,
 } from "../src/attempt/delegation/journal.ts";
+
+/** What a delegation reported to its call about a child's end. */
+export type CallReport =
+  | { readonly _tag: "Reserved"; readonly sessionId: string; readonly report: ReservedChildReport }
+  | { readonly _tag: "Infrastructure"; readonly sessionId: string; readonly message: string }
+  | { readonly _tag: "Recovered"; readonly sessionId: string };
 
 /** The Attempt-wide state that a delegation reads and changes. */
 export interface MemoryAttempt {
   children: number;
-  blocker: Option.Option<ChildBlocker>;
   refused: Option.Option<{ readonly attempted: number; readonly max: number }>;
   held: Array<string>;
   paused: Array<string>;
   queued: Array<QueuedChildInput & { readonly child: string }>;
+  reports: Array<CallReport>;
 }
 
 /** The saved state of one delegation. */
@@ -31,11 +39,11 @@ export interface MemoryDelegation {
 
 const emptyAttempt = (): MemoryAttempt => ({
   children: 0,
-  blocker: Option.none(),
   refused: Option.none(),
   held: [],
   paused: [],
   queued: [],
+  reports: [],
 });
 
 const emptyDelegation = (): MemoryDelegation => ({
@@ -49,12 +57,14 @@ const emptyDelegation = (): MemoryDelegation => ({
 });
 
 /**
- * A `DelegationJournal` that keeps one delegation and its Attempt in memory. Operations never fail.
- * `release` ends the operator's Hold of a child.
+ * A `DelegationJournal` and its `DelegationCall` that keep one delegation and its Attempt in
+ * memory. `start` counts the delegation as the Attempt's next one within `budget`. Operations
+ * never fail. `release` ends the operator's Hold of a child.
  */
 export const memoryJournal = (
   attempt: MemoryAttempt = emptyAttempt(),
   delegation: MemoryDelegation = emptyDelegation(),
+  budget = 3,
 ) => {
   const running: Array<string> = [];
   const published: Array<DelegationDetails> = [];
@@ -69,49 +79,25 @@ export const memoryJournal = (
     prompted: delegation.prompted,
   });
   const journal: DelegationJournal = {
-    start: (budget, supersedes) =>
-      Effect.sync(() => {
-        if (Option.isSome(delegation.count))
-          return {
-            count: delegation.count.value,
-            resumed: true,
-            progress: progress(),
-            superseded: Option.none(),
-          };
-        const saved = progress();
-        attempt.children += 1;
-        delegation.count = Option.some(attempt.children);
-        if (attempt.children > budget) {
-          if (Option.isNone(attempt.refused))
-            attempt.refused = Option.some({ attempted: attempt.children, max: budget });
-          return {
-            count: attempt.children,
-            resumed: false,
-            progress: saved,
-            superseded: Option.none(),
-          };
-        }
-        const superseded = Option.filter(attempt.blocker, supersedes);
-        if (Option.isSome(superseded)) attempt.blocker = Option.none();
+    start: Effect.sync(() => {
+      if (Option.isSome(delegation.count))
         return {
-          count: attempt.children,
-          resumed: false,
-          progress: saved,
-          superseded: Option.map(superseded, ({ sessionId }) => sessionId),
-        };
-      }),
-    recordBlocker: (blocker, keeps) =>
-      Effect.sync(() => {
-        if (Option.exists(attempt.blocker, keeps)) return false;
-        attempt.blocker = Option.some(blocker);
-        return true;
-      }),
-    clearBlocker: (accept) =>
-      Effect.sync(() => {
-        if (!Option.exists(attempt.blocker, accept)) return false;
-        attempt.blocker = Option.none();
-        return true;
-      }),
+          _tag: "Admitted",
+          count: ChildSessionCount.make(delegation.count.value),
+          resumed: true,
+          progress: progress(),
+        } as const;
+      const saved = progress();
+      attempt.children += 1;
+      delegation.count = Option.some(attempt.children);
+      const count = ChildSessionCount.make(attempt.children);
+      if (attempt.children > budget) {
+        if (Option.isNone(attempt.refused))
+          attempt.refused = Option.some({ attempted: attempt.children, max: budget });
+        return { _tag: "Refused", attempted: count, max: ChildSessionBudget.make(budget) } as const;
+      }
+      return { _tag: "Admitted", count, resumed: false, progress: saved } as const;
+    }),
     queuedInputs: (sessionId) =>
       Effect.sync(() => attempt.queued.filter(({ child }) => child === sessionId)),
     supervision: (sessionId) =>
@@ -162,19 +148,34 @@ export const memoryJournal = (
       Effect.sync(() => {
         delegation.idle = report;
       }),
+    saveOutput: (output) =>
+      Effect.sync(() => {
+        delegation.output = output;
+      }),
+  };
+  const call: DelegationCall = {
     output: (chunk) =>
       Effect.sync(() => {
         running.push(chunk);
       }),
-    saveOutput: Effect.sync(() => {
-      delegation.output = running.join("");
-    }),
     retainedOutput: Effect.sync(() => running.join("")),
     publish: (details) =>
       Effect.sync(() => {
         published.push(details);
       }),
     aborted: Effect.never,
+    infrastructureFailed: (sessionId, message) =>
+      Effect.sync(() => {
+        attempt.reports.push({ _tag: "Infrastructure", sessionId, message });
+      }),
+    reserved: (sessionId, report) =>
+      Effect.sync(() => {
+        attempt.reports.push({ _tag: "Reserved", sessionId, report });
+      }),
+    recovered: (sessionId) =>
+      Effect.sync(() => {
+        attempt.reports.push({ _tag: "Recovered", sessionId });
+      }),
   };
   const release = (sessionId: string) =>
     Effect.gen(function* () {
@@ -183,5 +184,5 @@ export const memoryJournal = (
         if (waiter.sessionId === sessionId) yield* Deferred.succeed(waiter.ended, undefined);
         else waiting.push(waiter);
     });
-  return { journal, attempt, delegation, published, release };
+  return { journal, call, attempt, delegation, published, release };
 };

@@ -11,7 +11,7 @@ import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Schema } f
 import { openFixture, providers, recordingModel } from "../../agents/test/replay/fixture.ts";
 import { waitingPrompt, waitScript } from "../../agents/test/replay/scenarios.ts";
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
-import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as runtimeLayer } from "../src/testing.ts";
 import { durableError, layer as harnessLayer } from "../src/harness.ts";
 import { answer, delegate, fauxParent, type ParentStep } from "../src/testing.ts";
 import { attemptRequest, recordingSink, temporaryDatabase } from "./support.ts";

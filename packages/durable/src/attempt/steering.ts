@@ -5,7 +5,7 @@ import { Effect, Option, Schema } from "effect";
 import { durableError, type DurableHarness } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
-import { parentSessionId } from "./parent.ts";
+import { parentSessionId } from "./sessions.ts";
 
 const encodeIntervention = Schema.encodeEffect(AttemptChannel.Intervention);
 

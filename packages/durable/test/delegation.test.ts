@@ -13,31 +13,32 @@ import { attemptRequest } from "./support.ts";
 // SAFETY: the hub uses the task ID only as a lookup key; no durable task backs these tests.
 const ATTEMPT_TASK = 1 as TaskId;
 
-/**
- * Starts one delegation with an attached `execute` call and returns its fiber. With `hubs`, the
- * delegation joins the Attempt's existing hub, as a parallel delegation of the same Attempt does.
- */
-const start = (
-  attemptId: string,
-  memory: ReturnType<typeof memoryJournal>,
-  options: {
-    readonly maxChildren?: number;
-    readonly hubs?: Effect.Success<typeof attemptHubs>;
-  } = {},
-) =>
+/** Starts one delegation with an attached `execute` call and returns its fiber. */
+const start = (attemptId: string, memory: ReturnType<typeof memoryJournal>) =>
   Effect.gen(function* () {
-    const request = attemptRequest(attemptId, options.maxChildren ?? 3);
-    const hubs = options.hubs ?? (yield* attemptHubs);
+    const request = attemptRequest(attemptId);
+    const hubs = yield* attemptHubs;
     const hub = yield* hubs.hub(request.spec.attemptId, ATTEMPT_TASK);
     yield* Deferred.succeed(hub.attached, request);
     const backend = yield* ChildBackend;
     const fiber = yield* Effect.forkChild(
-      delegate(
-        { hubs, backend },
-        { spec: request.spec, hub, journal: memory.journal, assignment: "Finish the task" },
-      ),
+      delegate(backend, {
+        spec: request.spec,
+        hub: {
+          children: hub.children,
+          childSpawns: hub.childSpawns,
+          childInputs: hub.childInputs,
+          routing: hub.routing,
+          attached: hub.attached,
+          event: (event) => hubs.event(hub, event),
+          delivery: (delivery) => hubs.delivery(hub, delivery),
+        },
+        journal: memory.journal,
+        call: memory.call,
+        assignment: "Finish the task",
+      }),
     );
-    return { fiber, hub, hubs };
+    return { fiber, hub };
   });
 
 describe("delegate", () => {
@@ -62,7 +63,7 @@ describe("delegate", () => {
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 
-  it.effect("returns a reserved report as Reserved and records it as the child blocker", () =>
+  it.effect("returns a reserved report as Reserved and reports it to the call", () =>
     Effect.gen(function* () {
       const memory = memoryJournal();
       const { fiber } = yield* start("delegation/reserved", memory);
@@ -75,38 +76,17 @@ describe("delegate", () => {
       assert.strictEqual(outcome.sessionId, child.request.session.id);
       assert.strictEqual(outcome.report._tag, "AgentBlockedError");
       assert.strictEqual(outcome.report.message, "The repository is archived.");
-      assert.deepStrictEqual(
-        memory.attempt.blocker,
-        Option.some({
+      assert.deepStrictEqual(memory.attempt.reports, [
+        {
+          _tag: "Reserved",
           sessionId: child.request.session.id,
-          message: "The repository is archived.",
-          kind: "blocked" as const,
-        }),
-      );
-    }).pipe(Effect.provide(stubChildBackendLayer)),
-  );
-
-  it.effect("keeps the Attempt's first reserved report when a later child also reserves one", () =>
-    Effect.gen(function* () {
-      const first = {
-        sessionId: "parent:delegation/first-report:child:1",
-        message: "The repository is archived.",
-        kind: "blocked" as const,
-      };
-      const memory = memoryJournal();
-      memory.attempt.children = 1;
-      memory.attempt.blocker = Option.some(first);
-      const { fiber } = yield* start("delegation/first-report", memory);
-      const child = yield* (yield* StubChildren).next;
-      yield* child.ask("Which branch should I use?");
-      const outcome = yield* Fiber.join(fiber);
-
-      assert.strictEqual(outcome._tag, "Reserved");
-      if (outcome._tag !== "Reserved") return;
-      assert.strictEqual(outcome.sessionId, child.request.session.id);
-      assert.strictEqual(outcome.report._tag, "AgentQuestionError");
-      assert.strictEqual(outcome.report.message, "Which branch should I use?");
-      assert.deepStrictEqual(memory.attempt.blocker, Option.some(first));
+          report: {
+            kind: "blocked",
+            message: "The repository is archived.",
+            resetsAt: Option.none(),
+          },
+        },
+      ]);
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 
@@ -131,36 +111,6 @@ describe("delegate", () => {
       const outcome = yield* Fiber.join(fiber);
       assert.deepStrictEqual(outcome, { _tag: "Reported", sessionId, report: "Finished." });
     }).pipe(Effect.provide(stubChildBackendLayer), Effect.timeout("10 seconds")),
-  );
-
-  it.effect(
-    "keeps the Attempt's first infrastructure failure when a parallel child also crashes",
-    () =>
-      Effect.gen(function* () {
-        const first = memoryJournal();
-        const second = memoryJournal(first.attempt);
-        const children = yield* StubChildren;
-        const one = yield* start("delegation/two-crashes", first);
-        const firstChild = yield* children.next;
-        const two = yield* start("delegation/two-crashes", second, { hubs: one.hubs });
-        const secondChild = yield* children.next;
-
-        yield* firstChild.crash("first transport lost");
-        yield* Fiber.join(one.fiber).pipe(Effect.flip);
-        yield* secondChild.crash("second transport lost");
-        const error = yield* Fiber.join(two.fiber).pipe(Effect.flip);
-
-        assert.strictEqual(error._tag, "SessionOperationError");
-        assert.strictEqual(first.attempt.children, 2);
-        assert.deepStrictEqual(
-          first.attempt.blocker,
-          Option.some({
-            sessionId: firstChild.request.session.id,
-            message: "first transport lost",
-            kind: "infra" as const,
-          }),
-        );
-      }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 
   it.effect("returns Interrupted for a resumed delegation without a saved conversation", () =>
@@ -188,9 +138,9 @@ describe("delegate", () => {
 
   it.effect("returns BudgetExceeded without launching a child past the budget", () =>
     Effect.gen(function* () {
-      const memory = memoryJournal();
+      const memory = memoryJournal(undefined, undefined, 1);
       memory.attempt.children = 1;
-      const { fiber, hub } = yield* start("delegation/budget", memory, { maxChildren: 1 });
+      const { fiber, hub } = yield* start("delegation/budget", memory);
       const outcome = yield* Fiber.join(fiber);
 
       assert.deepStrictEqual(outcome, {
@@ -213,14 +163,13 @@ describe("delegate", () => {
       const error = yield* Fiber.join(fiber).pipe(Effect.flip);
 
       assert.strictEqual(error._tag, "SessionOperationError");
-      assert.deepStrictEqual(
-        memory.attempt.blocker,
-        Option.some({
+      assert.deepStrictEqual(memory.attempt.reports, [
+        {
+          _tag: "Infrastructure",
           sessionId: child.request.session.id,
           message: "unexpected end of output",
-          kind: "infra" as const,
-        }),
-      );
+        },
+      ]);
     }).pipe(Effect.provide(stubChildBackendLayer)),
   );
 });
