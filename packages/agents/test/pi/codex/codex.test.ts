@@ -583,6 +583,62 @@ describe("Codex child backend", () => {
     ).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
   });
 
+  for (const answered of [true, false])
+    it.effect(
+      `restores whether a held idle Codex report ${answered ? "answers" : "doesn't answer"} the operator`,
+      () =>
+        Effect.gen(function* () {
+          const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+          const saved = HarnessSession.make({
+            id: HarnessSessionId.make("held-codex"),
+            cwd: request().cwd,
+          });
+          const responses = new Map(
+            Object.entries({
+              ...successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+              "thread/resume": { modelProvider: "openai", thread: { id: saved.id, turns: [] } },
+            }),
+          );
+          const server = Layer.succeed(CodexAppServer)({
+            stop: () => Effect.void,
+            open: () =>
+              Effect.succeed({
+                notifications: Stream.fromQueue(notifications),
+                notify: () => Effect.void,
+                close: Queue.end(notifications).pipe(Effect.asVoid),
+                request: (_operation, method) =>
+                  Effect.sync(() => {
+                    const response = responses.get(method);
+                    assert(response !== undefined);
+                    return response;
+                  }),
+              }),
+          });
+          const result = yield* Effect.gen(function* () {
+            const running = yield* (yield* ChildBackend).launch(
+              ChildRequest.make({
+                ...request(),
+                resume: Option.some(saved),
+                environment: {
+                  ...request().environment,
+                  ...Option.match(saved.home, {
+                    onNone: () => ({}),
+                    onSome: (home) => ({ CODEX_HOME: home }),
+                  }),
+                },
+                held: true,
+                idle: Option.some("The tests need a database."),
+                idleAnsweredOperator: answered,
+              }),
+            );
+            yield* running.intervene(Release.make(), noDelivery);
+            return yield* running.result;
+          }).pipe(Effect.provide(codexChildLayer.pipe(Layer.provide(server))));
+          assert.strictEqual(result.message, "The tests need a database.");
+          assert.strictEqual(result.answeredOperator, answered);
+        }).pipe(Effect.scoped),
+    );
+
   for (const supervision of ["paused", "held-idle", "held-idle-steer"] as const) {
     it.effect(`restores a ${supervision} Codex child without starting a turn`, () =>
       Effect.gen(function* () {

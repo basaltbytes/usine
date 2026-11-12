@@ -10,6 +10,7 @@ export const coordinationTable = sqliteTable("usine_attempt_coordination", {
   nextOutbound: integer("next_outbound").notNull(),
   result: text("result"),
   unsupervisedMillis: integer("unsupervised_millis"),
+  nextInbound: integer("next_inbound").notNull().default(1),
 });
 
 /** The ledger. A row without an event holds a decision whose transition hasn't committed. */
@@ -49,6 +50,34 @@ export const outboxTable = sqliteTable(
       .references(() => coordinationTable.attemptId),
     sequence: integer("sequence").notNull(),
     envelope: text("envelope").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.sequence] })],
+);
+
+/** The children that the operator holds or pauses. A child with neither has no row. */
+export const supervisionTable = sqliteTable(
+  "usine_attempt_supervision",
+  {
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => coordinationTable.attemptId),
+    sessionId: text("session_id").notNull(),
+    held: integer("held", { mode: "boolean" }).notNull(),
+    paused: integer("paused", { mode: "boolean" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.sessionId] })],
+);
+
+/** Operator inputs that children queued and haven't reported read or unread. */
+export const inputsTable = sqliteTable(
+  "usine_attempt_inputs",
+  {
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => coordinationTable.attemptId),
+    sequence: integer("sequence").notNull(),
+    sessionId: text("session_id").notNull(),
+    intervention: text("intervention").notNull(),
   },
   (table) => [primaryKey({ columns: [table.attemptId, table.sequence] })],
 );

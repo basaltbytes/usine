@@ -7,6 +7,8 @@ type SubagentRecord = {
   output: string;
   /** Absent on older delegations; the child had no committed idle report. */
   idle?: string | null;
+  /** Absent on older delegations; their idle report didn't answer the operator. */
+  idleAnsweredOperator?: boolean;
   continuations?: Array<number>;
   inFlight?: Array<{ callId: string; tool: string }>;
   /** Absent on older delegations, which saved the conversation only after the prompt. */

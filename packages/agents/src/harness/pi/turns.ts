@@ -44,6 +44,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   readonly held: boolean;
   readonly paused: boolean;
   readonly idle: Option.Option<string>;
+  readonly idleAnsweredOperator: boolean;
   readonly unread: ReadonlyArray<QueuedOperatorMessage>;
   readonly sdk: PiSession;
   readonly channel: SessionChannel;
@@ -128,6 +129,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
     held: options.held,
     paused: options.paused,
     idle: options.idle,
+    idleAnsweredOperator: options.idleAnsweredOperator,
     unread: options.unread,
     send: (message, activity, id) =>
       activity === "idle" || !launched
@@ -147,7 +149,12 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
     const index = pending.findIndex((message) => message.message === text.value);
     if (index < 0) return;
     const [message] = pending.splice(index, 1);
-    if (message !== undefined) Effect.runForkWith(context)(conversation.read([message.id]));
+    // The read is forked, so the tool count is taken now: a tool call that Pi starts next is
+    // queued before the forked read runs.
+    if (message !== undefined)
+      Effect.runForkWith(context)(
+        conversation.read([message.id], options.channel.toolCallsUnsafe()),
+      );
   });
   yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
   options.gate.set(conversation.awaitUnpaused);

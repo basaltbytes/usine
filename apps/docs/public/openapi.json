@@ -51810,6 +51810,9 @@
           "message": {
             "type": "string",
             "minLength": 1
+          },
+          "answeredOperator": {
+            "type": "boolean"
           }
         },
         "required": [

@@ -118,7 +118,8 @@
           "role": "user",
           "content": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_1"
       }
     },
     {
@@ -462,7 +463,8 @@
           "role": "user",
           "content": "usine lost its connection to this session and resumed it. Your last step may not have finished: check the worktree and any command you started before you go on. Then continue the task and end with your final answer. If the task is done, give your final answer again."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_2"
       }
     },
     {

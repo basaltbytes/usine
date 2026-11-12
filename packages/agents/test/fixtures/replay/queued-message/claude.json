@@ -118,7 +118,8 @@
           "role": "user",
           "content": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
         },
-        "parent_tool_use_id": null
+        "parent_tool_use_id": null,
+        "uuid": "$OPERATOR_1"
       }
     },
     {
@@ -330,7 +331,7 @@
           "content": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
         },
         "parent_tool_use_id": null,
-        "uuid": "$OPERATOR_1"
+        "uuid": "$OPERATOR_2"
       }
     },
     {

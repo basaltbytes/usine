@@ -54,6 +54,7 @@ describe("delegate", () => {
         _tag: "Reported",
         sessionId: child.request.session.id,
         report: "Finished.",
+        answeredOperator: false,
       });
       assert.strictEqual(memory.attempt.children, 1);
       assert.deepStrictEqual(memory.delegation.count, Option.some(1));
@@ -109,7 +110,12 @@ describe("delegate", () => {
 
       yield* memory.release(sessionId);
       const outcome = yield* Fiber.join(fiber);
-      assert.deepStrictEqual(outcome, { _tag: "Reported", sessionId, report: "Finished." });
+      assert.deepStrictEqual(outcome, {
+        _tag: "Reported",
+        sessionId,
+        report: "Finished.",
+        answeredOperator: false,
+      });
     }).pipe(Effect.provide(stubChildBackendLayer), Effect.timeout("10 seconds")),
   );
 

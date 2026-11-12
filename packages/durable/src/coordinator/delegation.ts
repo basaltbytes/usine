@@ -1,7 +1,7 @@
 import type { ChildRequest } from "@usine/agents/runtime";
 import type { ChildSessionCount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 import type {
   DelegationCall,
@@ -11,6 +11,8 @@ import type {
 import {
   type AttemptJournal,
   ContinuationsSaved,
+  decodeIntervention,
+  Supervision,
   IdleSaved,
   OutputSaved,
   type ProgressChange,
@@ -20,6 +22,7 @@ import {
   ToolStarted,
   UsageSaved,
 } from "./journal.ts";
+import type { Supervisor } from "./supervision.ts";
 
 /** The characters of a child's output that the coordinator retains, from its end. */
 const RETAINED_OUTPUT_CHARACTERS = 50_000;
@@ -31,11 +34,12 @@ const asJson = (
 
 /**
  * The journal of delegation `number`, which the transition that decided it numbered within the
- * child-session budget, so `start` never refuses it. The coordinator refuses operator input, so no
- * child is held or paused and none has queued input.
+ * child-session budget, so `start` never refuses it. The child's supervision and queued operator
+ * input come from the attempt journal.
  */
 export const journalDelegation = (
   journal: AttemptJournal["Service"],
+  supervisor: Supervisor,
   attemptId: AttemptId,
   number: ChildSessionCount,
 ): DelegationJournal => {
@@ -49,10 +53,30 @@ export const journalDelegation = (
         progress,
       })),
     ),
-    queuedInputs: () => Effect.succeed([]),
-    supervision: () => Effect.succeed({ held: false, paused: false }),
+    queuedInputs: (sessionId) =>
+      journal.load(attemptId).pipe(
+        Effect.flatMap((snapshot) =>
+          Effect.forEach(
+            Option.match(snapshot, {
+              onNone: () => [],
+              onSome: ({ inputs }) => inputs.filter((input) => input.sessionId === sessionId),
+            }),
+            (input) =>
+              decodeIntervention(input.intervention).pipe(
+                Effect.map((intervention) => ({
+                  inputSequence: input.inputSequence,
+                  intervention,
+                })),
+              ),
+          ),
+        ),
+      ),
+    supervision: (sessionId) =>
+      supervisor.of(sessionId).pipe(Effect.map(({ held, paused }) => ({ held, paused }))),
+    // A held child keeps its result until the operator releases it (`ChildRequest.held`).
     holdEnded: () => Effect.void,
-    releaseSupervision: () => Effect.void,
+    releaseSupervision: (sessionId) =>
+      supervisor.supervise(Supervision.make({ sessionId, held: false, paused: false })),
     saveSession: (saved, { beforePrompt }) =>
       asJson(saved).pipe(
         Effect.flatMap((json) => save(SessionSaved.make({ saved: json, beforePrompt }))),
@@ -63,17 +87,21 @@ export const journalDelegation = (
       asJson(usage).pipe(Effect.flatMap((json) => save(UsageSaved.make({ usage: json })))),
     toolStarted: (callId, tool) => save(ToolStarted.make({ callId, tool })),
     toolFinished: (callId) => save(ToolFinished.make({ callId })),
-    saveIdle: (report) => save(IdleSaved.make({ report })),
+    saveIdle: (report, answeredOperator) => save(IdleSaved.make({ report, answeredOperator })),
     saveOutput: (output) => save(OutputSaved.make({ output })),
   };
 };
 
 /**
- * One delegation that the coordinator runs. It keeps the end of the child's output in memory and
- * ends when `aborted` completes. The coordinator turns the delegation's outcome into its next
- * event, so a reserved report or an infrastructure failure needs no record here.
+ * One delegation that the coordinator runs. It keeps the end of the child's output in memory,
+ * runs `published` when the child is live, and ends when `aborted` completes. The coordinator
+ * turns the delegation's outcome into its next event, so a reserved report or an infrastructure
+ * failure needs no record here.
  */
-export const coordinatorCall = (aborted: Effect.Effect<void>): DelegationCall => {
+export const coordinatorCall = (
+  aborted: Effect.Effect<void>,
+  published: Effect.Effect<void>,
+): DelegationCall => {
   let output = "";
   return {
     output: (chunk) =>
@@ -81,8 +109,8 @@ export const coordinatorCall = (aborted: Effect.Effect<void>): DelegationCall =>
         output = `${output}${chunk}`.slice(-RETAINED_OUTPUT_CHARACTERS);
       }),
     retainedOutput: Effect.sync(() => output),
-    // No tool call shows the delegation's details.
-    publish: () => Effect.void,
+    // No tool call shows the delegation's details; a publish means the child is live.
+    publish: () => published,
     aborted,
     infrastructureFailed: () => Effect.void,
     reserved: () => Effect.void,

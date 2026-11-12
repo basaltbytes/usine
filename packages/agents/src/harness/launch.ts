@@ -175,5 +175,6 @@ export const childRestart = (request: ChildRequest): RestartState =>
       "held",
       "paused",
       "idle",
+      "idleAnsweredOperator",
     ]),
   );

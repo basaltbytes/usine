@@ -78,6 +78,8 @@ import {
   Transition,
 } from "./journal.ts";
 import { type Outbox, outboxFor, startedWithoutParent } from "./outbox.ts";
+import { type Interventions, interventionsFor } from "./interventions.ts";
+import { type Supervisor, supervisorFor } from "./supervision.ts";
 import { RecordedDecision, WakeUp } from "./wake-up.ts";
 
 /** The in-process state of one Attempt that the event-driven coordinator runs. */
@@ -87,7 +89,8 @@ interface CoordinatorHub {
   readonly children: Map<AgentSessionId, RunningSession>;
   readonly childSpawns: Set<string>;
   readonly childInputs: Set<number>;
-  readonly routing: Semaphore.Semaphore;
+  readonly supervisor: Supervisor;
+  readonly interventions: Interventions;
   /** Completes with the request of the attached `execute` call; replaced when it detaches. */
   attached: Deferred.Deferred<AttemptRequest>;
   /** Completes when the attached `execute` call detaches; replaced when it does. */
@@ -119,8 +122,8 @@ const nonEmpty = (text: string, fallback: string) => (text.trim() === "" ? fallb
 /** Returns the event that ends delegation `child` with `outcome`. */
 const eventOf = (child: ChildSessionCount, outcome: DelegationOutcome): CoordinatorEvent =>
   Match.valueTags(outcome, {
-    Reported: ({ report }): CoordinatorEvent =>
-      ChildReported.make({ child, report, answeredOperator: false, reserved: Option.none() }),
+    Reported: ({ report, answeredOperator }): CoordinatorEvent =>
+      ChildReported.make({ child, report, answeredOperator, reserved: Option.none() }),
     Reserved: ({ report }): CoordinatorEvent =>
       Match.valueTags(report, {
         AgentCapacityError: ({ message, resetsAt }): CoordinatorEvent =>
@@ -201,6 +204,8 @@ const make = Effect.gen(function* () {
   const journal = yield* AttemptJournal;
   const backend = yield* ChildBackend;
   const wakeUp = yield* WakeUp;
+  // The runtime's scope, which owns the delivery fibers of every Attempt.
+  const scope = yield* Effect.scope;
   const creation = yield* Semaphore.make(1);
   const hubs = new Map<AttemptId, CoordinatorHub>();
 
@@ -209,13 +214,22 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const existing = hubs.get(attemptId);
         if (existing !== undefined) return existing;
+        const outbox = yield* outboxFor(journal, attemptId);
+        const children = new Map<AgentSessionId, RunningSession>();
+        const childInputs = new Set<number>();
+        const supervisor = supervisorFor(journal, attemptId);
         const created: CoordinatorHub = {
           attemptId,
-          outbox: yield* outboxFor(journal, attemptId),
-          children: new Map(),
+          outbox,
+          children,
           childSpawns: new Set(),
-          childInputs: new Set(),
-          routing: yield* Semaphore.make(1),
+          childInputs,
+          supervisor,
+          interventions: yield* interventionsFor(
+            journal,
+            { attemptId, outbox, children, childInputs, supervisor },
+            scope,
+          ),
           attached: yield* Deferred.make<AttemptRequest>(),
           detached: yield* Deferred.make<void>(),
           canceled: yield* Deferred.make<void>(),
@@ -247,17 +261,12 @@ const make = Effect.gen(function* () {
     children: hub.children,
     childSpawns: hub.childSpawns,
     childInputs: hub.childInputs,
-    routing: hub.routing,
+    routing: hub.interventions.routing,
     get attached() {
       return hub.attached;
     },
     event: (event) => hub.outbox.relay([AttemptChannel.SessionEvent.make({ event })]),
-    // The coordinator restores no queued input, so no child reports one.
-    delivery: (delivery) =>
-      Effect.logWarning("Dropped an operator input receipt the coordinator never queued", {
-        attemptId: hub.attemptId,
-        inputSequence: delivery.inputSequence,
-      }),
+    delivery: hub.interventions.delivery,
   });
 
   /**
@@ -316,9 +325,10 @@ const make = Effect.gen(function* () {
     const running = yield* delegate(backend, {
       spec: snapshot.request.spec,
       hub: delegationHub(hub),
-      journal: journalDelegation(journal, attemptId, record.number),
+      journal: journalDelegation(journal, hub.supervisor, attemptId, record.number),
       call: coordinatorCall(
         Effect.raceFirst(Deferred.await(hub.canceled), Deferred.await(stopping)),
+        hub.interventions.childChanged,
       ),
       assignment: Option.getOrElse(record.assignment, () => FIRST_ASSIGNMENT),
     }).pipe(Effect.forkChild({ startImmediately: true }));
@@ -370,7 +380,8 @@ const make = Effect.gen(function* () {
         new Error(`Attempt ${hub.attemptId} delegates child ${state.child} without its record`),
       );
     return yield* Option.match(record.outcome, {
-      onNone: () => runDelegation(hub, snapshot, record),
+      onNone: () =>
+        runDelegation(hub, snapshot, record).pipe(Effect.ensuring(hub.interventions.childChanged)),
       onSome: (outcome) =>
         Effect.logInfo("Handling the outcome the child recorded before a restart", {
           attemptId: hub.attemptId,
@@ -475,17 +486,20 @@ const make = Effect.gen(function* () {
     }
     const encodedEvent = yield* encodeEvent(event).pipe(Effect.orDie);
     const encodedState = yield* encodeState(next).pipe(Effect.orDie);
-    return yield* hub.outbox.commit(payloads, (outbound) =>
-      journal.transition(
-        attemptId,
-        snapshot.revision,
-        Transition.make({
-          event: EncodedEvent.make(encodedEvent),
-          decision: encodedDecision,
-          state: EncodedState.make(encodedState),
-          intents,
-          outbound,
-        }),
+    // Under the routing permit, so an operator input's receipts don't straddle the transition.
+    return yield* hub.interventions.routing.withPermits(1)(
+      hub.outbox.commit(payloads, (outbound) =>
+        journal.transition(
+          attemptId,
+          snapshot.revision,
+          Transition.make({
+            event: EncodedEvent.make(encodedEvent),
+            decision: encodedDecision,
+            state: EncodedState.make(encodedState),
+            intents,
+            outbound,
+          }),
+        ),
       ),
     );
   });
@@ -498,6 +512,7 @@ const make = Effect.gen(function* () {
       if (snapshot.status._tag !== "Open") return snapshot;
       const state = yield* stateOf(snapshot);
       const event = yield* nextEvent(hub, snapshot, state);
+      yield* hub.interventions.settle;
       // Reload: the delegation saved progress that the context reads.
       const current = yield* loaded(hub.attemptId);
       if (current.status._tag !== "Open") {
@@ -563,6 +578,7 @@ const make = Effect.gen(function* () {
                 hub.canceled = yield* Deferred.make<void>();
                 hub.sinkFailed = yield* Deferred.make<void>();
                 yield* Deferred.succeed(detached, undefined);
+                yield* hub.interventions.childChanged;
               })
             : Effect.void,
         );
@@ -605,8 +621,18 @@ const make = Effect.gen(function* () {
               "The canceled Attempt's coordinator failed while it stopped; the cancel still applies",
               { cause: Cause.pretty(ended.cause) },
             );
-          if ((yield* hub.outbox.started) && !(yield* hub.outbox.ended))
+          if ((yield* hub.outbox.started) && !(yield* hub.outbox.ended)) {
+            // The stopped children's unread inputs get their rejection before the channel ends.
+            yield* hub.interventions.settle.pipe(
+              Effect.catch((failure) =>
+                Effect.logWarning(
+                  "Could not reject the unread operator inputs of the canceled Attempt",
+                  { errorTag: failure._tag, message: failure.message },
+                ),
+              ),
+            );
             yield* hub.outbox.emit([AttemptChannel.Interrupted.make()]);
+          }
           yield* Effect.logInfo("The canceled Attempt stopped its children");
           return yield* canceledFailure();
         }
@@ -731,20 +757,24 @@ const make = Effect.gen(function* () {
     Effect.catchTag("JournalError", (error) => Effect.fail(infra(error))),
   );
 
-  const intervene = Effect.fn("CoordinatorRuntime.intervene")(function* (
-    attemptId: AttemptId,
-    intervention: AttemptChannel.Intervention,
-  ) {
-    yield* Effect.annotateCurrentSpan({ attemptId, action: intervention.action._tag });
-    yield* Effect.logWarning("The event-driven coordinator refused operator input", {
-      attemptId,
-      target: intervention.target._tag,
-      action: intervention.action._tag,
-    });
-    return yield* AgentFailure.make({
-      message: "This attempt runs without a parent session and doesn't accept operator input yet",
-    });
-  });
+  const intervene = Effect.fn("CoordinatorRuntime.intervene")(
+    function* (attemptId: AttemptId, intervention: AttemptChannel.Intervention) {
+      yield* Effect.annotateCurrentSpan({ attemptId, action: intervention.action._tag });
+      const hub = hubs.get(attemptId);
+      if (hub === undefined) {
+        yield* Effect.logWarning("Operator input addressed an Attempt with no live channel", {
+          action: intervention.action._tag,
+        });
+        return yield* AgentFailure.make({ message: "This attempt has no live channel" });
+      }
+      yield* hub.interventions.intervene(intervention);
+    },
+    (effect, attemptId) =>
+      effect.pipe(
+        Effect.catchTag("JournalError", (error) => Effect.fail(infra(error))),
+        Effect.annotateLogs({ attemptId }),
+      ),
+  );
 
   const attachedTo = Effect.fn("CoordinatorRuntime.attached")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -836,7 +866,8 @@ const make = Effect.gen(function* () {
  * `WakeUp`, whose decision the coordinator records, checks with the rules' `clamp`, and commits
  * with its effects and envelopes in one journal transition. Delegations run after their transition
  * commits, and an `execute` call after a restart resumes the open delegation from the journal.
- * Operator input is refused.
+ * Operator input goes to its target child, or to the live child for input addressed to the
+ * parent; the journal keeps each child's Hold, pause, and queued input across restarts.
  */
 export class CoordinatorRuntime extends Context.Service<
   CoordinatorRuntime,
