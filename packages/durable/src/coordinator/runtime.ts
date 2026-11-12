@@ -1,4 +1,10 @@
-import { AgentSessionError, ChildBackend, type RunningSession } from "@usine/agents/runtime";
+import {
+  type AgentReport,
+  AgentSessionError,
+  ChildBackend,
+  reportText,
+  type RunningSession,
+} from "@usine/agents/runtime";
 import type { AgentSessionId, ChildSessionCount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -66,6 +72,7 @@ import {
   type Intent,
   type JournalError,
   Reported,
+  type StaleRevision,
   Transition,
 } from "./journal.ts";
 import { type Outbox, outboxFor, startedWithoutParent } from "./outbox.ts";
@@ -115,9 +122,9 @@ const eventOf = (child: ChildSessionCount, outcome: DelegationOutcome): Coordina
             message: nonEmpty(message, "The model provider refused the child for lack of capacity"),
             resetsAt,
           }),
-        AgentBlockedError: ({ message }) => reservedEvent(child, "blocked", message),
-        AgentQuestionError: ({ message }) => reservedEvent(child, "question", message),
-        AgentResultError: ({ message }) => reservedEvent(child, "failed", message),
+        AgentBlockedError: (blocked) => reservedEvent(child, "blocked", blocked),
+        AgentQuestionError: (question) => reservedEvent(child, "question", question),
+        AgentResultError: (failed) => reservedEvent(child, "failed", failed),
       }),
     Interrupted: ({ reason }): CoordinatorEvent =>
       ChildInterrupted.make({ child, reason: nonEmpty(reason, "the child stopped") }),
@@ -127,14 +134,14 @@ const eventOf = (child: ChildSessionCount, outcome: DelegationOutcome): Coordina
 const reservedEvent = (
   child: ChildSessionCount,
   kind: ReservedReport["kind"],
-  message: string,
+  report: AgentReport,
 ): CoordinatorEvent =>
   ChildReported.make({
     child,
-    report: `[usine:${kind}]\n${message}`,
+    report: reportText(report),
     answeredOperator: false,
     reserved: Option.some(
-      ReservedReport.make({ kind, message: nonEmpty(message, BLANK_REPORT_MESSAGE) }),
+      ReservedReport.make({ kind, message: nonEmpty(report.message, BLANK_REPORT_MESSAGE) }),
     ),
   });
 
@@ -400,16 +407,36 @@ const make = Effect.gen(function* () {
       // Reload: the delegation saved progress that the context reads.
       const current = yield* loaded(hub.attemptId);
       yield* handle(hub, current, state, event).pipe(
-        Effect.catchTag("StaleRevision", (stale) =>
-          Effect.die(
-            new Error(
-              `Attempt ${stale.attemptId} changed during its transition: expected revision ${stale.expected}, found ${stale.actual}`,
-            ),
-          ),
-        ),
+        Effect.catchTag("StaleRevision", (stale) => staleTransition(hub, stale)),
       );
     }
   });
+
+  /**
+   * Interrupts `drive` after a cancel refused its transition, or returns so that `drive` reloads a
+   * journal settled before the cancel signaled. Dies for any other concurrent change.
+   */
+  const staleTransition = (hub: CoordinatorHub, stale: StaleRevision) =>
+    Effect.gen(function* () {
+      const found = { expected: stale.expected, actual: stale.actual };
+      if (yield* Deferred.isDone(hub.canceled)) {
+        yield* Effect.logInfo(
+          "The cancel settled the journal before this transition; it stops",
+          found,
+        );
+        return yield* Effect.interrupt;
+      }
+      const latest = yield* loaded(hub.attemptId);
+      if (latest.status._tag === "Settled") {
+        yield* Effect.logInfo("The journal was settled before this transition; it stops", found);
+        return;
+      }
+      return yield* Effect.die(
+        new Error(
+          `Attempt ${stale.attemptId} changed during its transition: expected revision ${stale.expected}, found ${stale.actual}`,
+        ),
+      );
+    });
 
   /** Attaches `io`, relays the Attempt to its outcome, and returns it. */
   const relay = (
@@ -456,7 +483,12 @@ const make = Effect.gen(function* () {
           Effect.raceFirst(hub.outbox.failed.pipe(Effect.flatMap(Effect.fail))),
           Effect.exit,
         );
-        if (yield* Deferred.isDone(hub.canceled)) {
+        // A cancel settles the journal before it signals, so `drive` can find it settled first.
+        const settledByCancel =
+          Exit.isSuccess(ended) &&
+          ended.value.status._tag === "Settled" &&
+          Option.isNone(outcomeOf(ended.value));
+        if (settledByCancel || (yield* Deferred.isDone(hub.canceled))) {
           if (Exit.isFailure(ended) && !Cause.hasInterruptsOnly(ended.cause))
             yield* Effect.logWarning(
               "The canceled Attempt's coordinator failed while it stopped; the cancel still applies",
@@ -612,35 +644,29 @@ const make = Effect.gen(function* () {
   const cancel = Effect.fn("CoordinatorRuntime.cancel")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
-      const snapshot = yield* journal.load(attemptId);
-      if (Option.isNone(snapshot)) {
+      // The coordinator has no canceled status, so the cancel settles an open journal. It does so
+      // before the children stop, so a process stop after that can't resume the Attempt.
+      const found = yield* journal.settleOpen(attemptId);
+      if (Option.isNone(found)) {
         yield* Effect.logInfo("The Attempt has no coordinator journal; nothing to cancel");
         return;
       }
+      const status = found.value._tag;
+      if (status === "Open")
+        yield* Effect.logInfo("The canceled Attempt had no outcome; its journal is settled");
+      else
+        yield* Effect.logInfo(
+          "The canceled Attempt has an outcome; its caller decides to settle it",
+          { status },
+        );
       const hub = hubs.get(attemptId);
-      if (hub !== undefined && (yield* hub.outbox.attached)) {
-        const detached = hub.detached;
+      // Read before `attached`: an execute call that detaches after the check still completes it.
+      const detached = hub?.detached;
+      if (hub !== undefined && detached !== undefined && (yield* hub.outbox.attached)) {
         yield* Effect.logInfo("Canceling the coordinated Attempt; its children stop");
         yield* Deferred.succeed(hub.canceled, undefined);
         yield* Deferred.await(detached);
       } else yield* Effect.logInfo("No execute call relays the Attempt; nothing to stop");
-      const current = yield* journal.load(attemptId);
-      const status = Option.match(current, {
-        onNone: () => "none",
-        onSome: ({ status }) => status._tag,
-      });
-      // The coordinator has no canceled status, so an open journal is settled to end the Attempt.
-      if (status === "Open") {
-        yield* journal.settle(attemptId);
-        yield* Effect.logInfo("The canceled Attempt had no outcome; its journal is settled");
-        return;
-      }
-      yield* Effect.logInfo(
-        "The canceled Attempt has an outcome; its caller decides to settle it",
-        {
-          status,
-        },
-      );
     },
     (effect, attemptId) =>
       effect.pipe(

@@ -369,5 +369,13 @@ export class AttemptJournal extends Context.Service<
      * later transition commits. Idempotent; does nothing for an Attempt that was never opened.
      */
     readonly settle: (attemptId: AttemptId) => Effect.Effect<void, JournalError>;
+    /**
+     * Settles the Attempt without an outcome if it is `Open`, like `settle`, and returns the status
+     * it found. Leaves a `Terminal` or `Settled` Attempt unchanged. Returns `None` for an Attempt
+     * that was never opened.
+     */
+    readonly settleOpen: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<CoordinationStatus>, JournalError>;
   }
 >()("@usine/durable/coordinator/journal/AttemptJournal") {}

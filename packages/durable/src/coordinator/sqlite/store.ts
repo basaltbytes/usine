@@ -448,6 +448,26 @@ export const sqliteAttemptJournalLayer = Layer.effect(
           ),
         );
       }),
+      settleOpen: Effect.fn("AttemptJournal.settleOpen")(function* (attemptId) {
+        yield* Effect.annotateCurrentSpan({ attemptId });
+        return yield* Effect.gen(function* () {
+          const stored = yield* load(attemptId);
+          if (Option.isNone(stored)) return Option.none();
+          const { status } = stored.value;
+          const next = settled(stored.value);
+          if (status._tag === "Open" && Option.isSome(next)) {
+            yield* updateCoordination(next.value);
+            yield* Effect.logInfo("Open attempt journal settled", { attemptId });
+          }
+          return Option.some(status);
+        }).pipe(
+          transaction,
+          Effect.catchTag(
+            ["SqlError", "SchemaError"],
+            failure("settle the open attempt journal", attemptId),
+          ),
+        );
+      }),
     });
   }),
 );

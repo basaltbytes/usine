@@ -433,6 +433,87 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
       }).pipe(Effect.scoped),
     );
 
+    it.effect("settles only an open Attempt with settleOpen, even beside a transition", () =>
+      Effect.gen(function* () {
+        const fixture = yield* adapter.fixture;
+        const open = storedRequest("attempt-settle-open");
+        const finished = storedRequest("attempt-settle-open-finished");
+        const racing = storedRequest("attempt-settle-open-racing");
+        const outcome = Reported.make({ report: AttemptReport.make({ message: "Opened #1." }) });
+        const finishing = step("ChildReported", {
+          decision: "Complete",
+          intents: [Finish.make({ outcome })],
+        });
+        const result = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            yield* store.open(open);
+            yield* store.open(finished);
+            yield* store.open(racing);
+            yield* store.transition(finished.spec.attemptId, revision(0), finishing);
+            const first = yield* store.settleOpen(open.spec.attemptId);
+            const again = yield* store.settleOpen(open.spec.attemptId);
+            const late = yield* store
+              .transition(open.spec.attemptId, revision(0), step("AttemptStarted"))
+              .pipe(Effect.flip);
+            const terminal = yield* store.settleOpen(finished.spec.attemptId);
+            const never = yield* store.settleOpen(AttemptId.make("attempt-never-opened"));
+            const [settled, transitioned] = yield* Effect.all(
+              [
+                store.settleOpen(racing.spec.attemptId),
+                store.transition(racing.spec.attemptId, revision(0), finishing).pipe(Effect.exit),
+              ],
+              { concurrency: "unbounded" },
+            ).pipe(Effect.provideService(References.MaxOpsBeforeYield, 8));
+            return { first, again, late, terminal, never, settled, transitioned };
+          }),
+        );
+        const reopened = yield* using(
+          fixture,
+          Effect.gen(function* () {
+            const store = yield* journal;
+            return {
+              open: yield* store.load(open.spec.attemptId),
+              finished: yield* store.load(finished.spec.attemptId),
+              racing: yield* store.load(racing.spec.attemptId),
+            };
+          }),
+        );
+        const statusOf = (snapshot: Option.Option<CoordinatorSnapshot>) =>
+          Option.map(snapshot, ({ status, revision }) => ({ status, revision }));
+
+        assert.deepStrictEqual(result.first, Option.some(Open.make({})));
+        assert.deepStrictEqual(result.again, Option.some(Settled.make({ outcome: Option.none() })));
+        assert.strictEqual(result.late._tag, "StaleRevision");
+        assert.deepStrictEqual(
+          statusOf(reopened.open),
+          Option.some({ status: Settled.make({ outcome: Option.none() }), revision: revision(1) }),
+        );
+        assert.deepStrictEqual(result.terminal, Option.some(Terminal.make({ outcome })));
+        assert.deepStrictEqual(
+          statusOf(reopened.finished),
+          Option.some({ status: Terminal.make({ outcome }), revision: revision(1) }),
+        );
+        assert.isTrue(Option.isNone(result.never));
+        // Either order is valid, but settleOpen must never settle a committed outcome.
+        assert.deepStrictEqual(
+          statusOf(reopened.racing),
+          Option.some(
+            Exit.isSuccess(result.transitioned)
+              ? { status: Terminal.make({ outcome }), revision: revision(1) }
+              : { status: Settled.make({ outcome: Option.none() }), revision: revision(1) },
+          ),
+        );
+        assert.deepStrictEqual(
+          result.settled,
+          Option.some(
+            Exit.isSuccess(result.transitioned) ? Terminal.make({ outcome }) : Open.make({}),
+          ),
+        );
+      }).pipe(Effect.scoped),
+    );
+
     it.effect("stores a failed outcome", () =>
       Effect.gen(function* () {
         const fixture = yield* adapter.fixture;
@@ -925,6 +1006,12 @@ export const attemptJournalContract = (adapter: JournalAdapter) =>
               const store = yield* journal;
               const resumed = yield* store.startDelegation(attemptId, first);
               yield* store.saveProgress(attemptId, first, Prompted.make({}));
+              // A resumed launch saves its session before the prompt again; the receipt stays.
+              yield* store.saveProgress(
+                attemptId,
+                first,
+                SessionSaved.make({ saved, beforePrompt: true }),
+              );
               const kept = yield* store.settleDelegation(attemptId, first, reported);
               const later = yield* store.settleDelegation(
                 attemptId,

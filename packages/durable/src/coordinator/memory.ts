@@ -179,6 +179,21 @@ export const memoryAttemptJournalLayer = Layer.effect(
           yield* Effect.logInfo("Attempt journal settled", { attemptId });
         }).pipe(serialized);
       }),
+      settleOpen: Effect.fn("AttemptJournal.settleOpen")(function* (attemptId) {
+        yield* Effect.annotateCurrentSpan({ attemptId });
+        return yield* Effect.gen(function* () {
+          const all = yield* Ref.get(journals);
+          const stored = HashMap.get(all, attemptId);
+          if (Option.isNone(stored)) return Option.none();
+          const { status } = stored.value;
+          const next = settled(stored.value);
+          if (status._tag === "Open" && Option.isSome(next)) {
+            yield* save(next.value);
+            yield* Effect.logInfo("Open attempt journal settled", { attemptId });
+          }
+          return Option.some(status);
+        }).pipe(serialized);
+      }),
     });
   }),
 );
