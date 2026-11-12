@@ -2,7 +2,7 @@ import { Source } from "@usine/expression/expression-engine";
 import { makeExpressionEngine } from "@usine/expression/marcbachmann-cel";
 import { assert, describe, it } from "@effect/vitest";
 import { LabelLaneSource, Lane, LaneName, StateLaneSource } from "@usine/config/board";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { LoopFile, PriorityValue, evaluateLoopPriority } from "@usine/config/loop";
 import { WorkerName } from "@usine/core/worker";
 import { Array as EffectArray, Effect, Option, Schema } from "effect";

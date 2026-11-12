@@ -14,7 +14,7 @@ import {
 } from "@usine/core/agent";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { CycleLimit } from "@usine/core/cycle-budget";
-import { LoopName, LoopPermissions } from "@usine/core/loop";
+import { LoopName, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
@@ -39,7 +39,8 @@ import { LaneItemState, LaneName } from "@usine/config/board";
 import { RegistryTag, type ManagedRepo, type Worker } from "@usine/config/factory";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
-import { DeclaredLabel, canonicalLabelName, GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
+import { DeclaredLabel } from "@usine/config/label";
 import { LoopApproval, LoopPriority, PromptTemplate, loopPath } from "@usine/config/loop";
 import { boardRepositories, Project, matchesLoop } from "@usine/config/project";
 import { Cron, TimeZone, Stream } from "@usine/config/trigger";
@@ -111,6 +112,10 @@ export class LoopFileView extends Schema.Class<
   paused: Schema.Boolean,
   /** Labels the trigger compares against that `usine.yaml` doesn't declare in `labels`. */
   undeclaredLabels: Schema.Array(GitHubLabelName),
+  /** Labels that prove a completed run; empty when the agent's completion is enough. */
+  outcomeLabels: OutcomeLabels,
+  /** Outcome labels that `usine.yaml` doesn't declare in `labels`. */
+  undeclaredOutcomeLabels: Schema.Array(GitHubLabelName),
 }) {}
 
 /** A Loop file that failed to load and opens no Runs, with the failed stage and reason. */
@@ -657,11 +662,12 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       (repository) => repositoryView(instance, repository, findings),
       { concurrency: 4 },
     );
-    const undeclared = (loop: LoopName) =>
+    const undeclared = (
+      loop: LoopName,
+      tag: "UndeclaredTriggerLabelWarning" | "UndeclaredOutcomeLabelWarning",
+    ) =>
       instance.warnings.flatMap((warning) =>
-        warning._tag === "UndeclaredTriggerLabelWarning" && warning.loop === loop
-          ? [warning.label]
-          : [],
+        warning._tag === tag && warning.loop === loop ? [warning.label] : [],
       );
     const loops = instance.loops.map((loop) =>
       LoopFileView.make({
@@ -690,7 +696,9 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         agent: loop.agent,
         prompt: loop.body,
         paused: paused.has(loop.name),
-        undeclaredLabels: undeclared(loop.name),
+        undeclaredLabels: undeclared(loop.name, "UndeclaredTriggerLabelWarning"),
+        outcomeLabels: loop.outcomeLabels,
+        undeclaredOutcomeLabels: undeclared(loop.name, "UndeclaredOutcomeLabelWarning"),
       }),
     );
     const agents = instance.agents.map((file) =>

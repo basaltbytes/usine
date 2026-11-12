@@ -29,7 +29,7 @@ import {
 } from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { Agent, resolveParentModel } from "@usine/core/agent";
 import { AttemptContext, AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";

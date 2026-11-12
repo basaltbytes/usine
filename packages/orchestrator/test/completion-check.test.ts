@@ -7,6 +7,7 @@ import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/atte
 import { Event } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
+import { GitHubLabelName } from "@usine/core/label";
 import { jsonKey } from "@usine/core/json-key";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -96,7 +97,9 @@ const review = (itemKey: ItemKey = gitHubItemKey(repository, 1)) =>
     ...submission(1),
     repository,
     itemKey,
-    outcomeLabels: ["ready-to-merge", "agent-review-findings", "ready-for-review"],
+    outcomeLabels: ["ready-to-merge", "agent-review-findings", "ready-for-review"].map((label) =>
+      GitHubLabelName.make(label),
+    ),
   });
 
 const label = (name: string) =>

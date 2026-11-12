@@ -2,7 +2,7 @@ import { ProjectId } from "@usine/core/project";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { type Brand, Effect, Schema } from "effect";
 import { LaneSource, Lane } from "../board.ts";
-import { canonicalLabelName } from "../label.ts";
+import { canonicalLabelName } from "@usine/core/label";
 import { nonBlankString, uniqueRepositoryNames } from "../checks.ts";
 
 const laneSourceKey = (source: LaneSource): string =>

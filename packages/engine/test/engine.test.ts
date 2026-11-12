@@ -1,5 +1,6 @@
 import { StepCompletion } from "@usine/core/step/result";
 import { jsonKey } from "@usine/core/json-key";
+import { GitHubLabelName } from "@usine/core/label";
 import { EnginePersistenceError } from "../src/engine/error.ts";
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { NodeServices } from "@effect/platform-node";
@@ -1416,7 +1417,7 @@ describe("store failures in a Run's fiber", () => {
           const accepted = yield* engine.submit(
             Submission.make({
               ...submission({ number: 1, item: "verified" }),
-              outcomeLabels: ["passed"],
+              outcomeLabels: [GitHubLabelName.make("passed")],
             }),
           );
           assert(accepted._tag === "Claimed");

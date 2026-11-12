@@ -9,6 +9,7 @@ import {
 import { SalvageRetained } from "@usine/core/attempt/salvage";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
+import { GitHubLabelName } from "@usine/core/label";
 import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Comment, StepCompletion, StepResult } from "@usine/core/step/result";
@@ -57,7 +58,7 @@ const rejecting = (verified: Array<Attempt>) =>
 
 const requiringLabels = Submission.make({
   ...submission({ number: 1 }),
-  outcomeLabels: ["passed", "findings"],
+  outcomeLabels: [GitHubLabelName.make("passed"), GitHubLabelName.make("findings")],
 });
 
 it.live.each(["missing", "present", "blocked", "disabled"] as const)(

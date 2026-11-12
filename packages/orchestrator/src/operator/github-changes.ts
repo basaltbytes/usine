@@ -4,7 +4,7 @@ import type { Worker } from "@usine/config/factory";
 import { BotLogin } from "@usine/core/worker";
 import { githubBotLogin } from "@usine/executor";
 import { LaneName } from "@usine/config/board";
-import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
 import { type Attempt, AttemptId, AttemptWindow, windowHolds, windowOf } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import { type BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";

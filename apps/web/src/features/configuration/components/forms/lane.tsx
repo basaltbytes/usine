@@ -1,4 +1,4 @@
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DotsSixVerticalIcon, ArrowUpIcon, ArrowDownIcon } from "@phosphor-icons/react";

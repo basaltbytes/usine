@@ -3,7 +3,7 @@ import type { ChangeAudience } from "@usine/core/changes";
 import { type AgentFile, InvalidAgent } from "@usine/config/agent";
 import type { Worker as ConfigWorker } from "@usine/config/factory";
 import type { LoadedInstance } from "@usine/config/instance";
-import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
 import { QuarantinedLoop } from "@usine/config/loop";
 import { AgentName } from "@usine/core/agent";
 import { ProjectId } from "@usine/core/project";
