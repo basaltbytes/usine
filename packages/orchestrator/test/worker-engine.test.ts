@@ -13,7 +13,7 @@ import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { hostLoginLockLayer } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Option, Schema } from "effect";
+import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Logger, Option, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
@@ -140,15 +140,24 @@ describe("Worker engine selection", () => {
     }),
   );
 
-  it.live("refuses a configuration whose Workers are all exe.dev, naming the Worker", () =>
+  it.live("refuses all-exe.dev Workers, naming the first, before it selects an executor", () =>
     Effect.gen(function* () {
+      const messages: Array<unknown> = [];
       const failure = yield* startupFailure([
         { name: "exe-one", kind: "exe.dev" },
         { name: "exe-two", kind: "exe.dev" },
-      ]);
+      ]).pipe(
+        Effect.withLogger(
+          Logger.make<unknown, void>(({ message }) => {
+            messages.push(Array.isArray(message) ? message[0] : message);
+          }),
+        ),
+      );
       assert(failure._tag === "UnsupportedWorkerError", failure._tag);
       assert.strictEqual(failure.worker, "exe-one");
       assert.strictEqual(failure.kind, "exe.dev");
+      assert.include(messages, "Refused an exe.dev Worker, which no executor runs");
+      assert.notInclude(messages, "Running Attempts with the local executor");
     }),
   );
 

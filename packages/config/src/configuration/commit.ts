@@ -227,8 +227,8 @@ export const commit = (
   );
 
 /**
- * Applies changes like `commit`, but accepts exe.dev workers, so that revisions stored before
- * the store refused them still replay.
+ * Applies changes like `commit`, but accepts exe.dev workers. Use it for revisions that the store
+ * already accepted, such as those stored before the store refused exe.dev workers.
  */
 export const replay = (
   parser: ConfigParser["Service"],

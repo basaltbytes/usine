@@ -5,11 +5,13 @@ description: Worker connections, containers, gateways, provisioners, and Cloudfl
 
 Manage workers in **Configuration > Workers**, or edit an existing worker with `usine config edit worker <name>`. All workers in an instance must use the same executor kind. Without an explicit worker list, an instance has one local worker named `local` with one slot.
 
-This version of usine doesn't run `exe.dev` workers. Saving one in the configuration fails, and `usine up` refuses a stored one before it starts, with the same message:
+This version of usine doesn't run `exe.dev` workers. Saving one in the configuration fails. When `usine up` starts running attempts, it refuses a stored one and stops. Both refusals use the same message:
 
 ```text
 Worker "<name>" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.
 ```
+
+Without GitHub App credentials, `usine up` still starts in setup mode, which runs no attempts. Setup mode accepts no worker change, so change the worker's kind with `usine config edit worker <name>`, or remove the worker with `usine config import`. Then restart `usine up`.
 
 ## Worker
 
