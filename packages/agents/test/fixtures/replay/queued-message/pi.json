@@ -1,0 +1,1097 @@
+{
+  "protocol": "pi-provider-stream",
+  "harnessVersion": "1.4.0",
+  "model": "openai/gpt-5.6-luna",
+  "scenario": "queued-message",
+  "environment": { "HOME": "$HOME", "PATH": "$PATH" },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "pi:1",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "{\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\"command"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "command",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\"command"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\":\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node" },
+              "partialJson": "{\"command\":\"node"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "node",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait" },
+              "partialJson": "{\"command\":\"node wait"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": " wait",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.c" },
+              "partialJson": "{\"command\":\"node wait.c"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": ".c",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.c" },
+              "partialJson": "{\"command\":\"node wait.c"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "js",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\",\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "timeout",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\":",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "null",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "}",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_end",
+        "contentIndex": 0,
+        "toolCall": {
+          "type": "toolCall",
+          "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+          "name": "bash",
+          "arguments": { "command": "node wait.cjs", "timeout": null }
+        },
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "done",
+        "reason": "toolUse",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 1496,
+            "output": 25,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 1521,
+            "cost": {
+              "input": 0.0002992,
+              "output": 0.000029999999999999997,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0003292
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794443773564,
+          "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075",
+          "rawStopReason": "completed",
+          "durationMs": 1298
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "pi:2",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+                "name": "bash",
+                "arguments": { "command": "node wait.cjs", "timeout": null }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 1496,
+              "output": 25,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 1521,
+              "cost": {
+                "input": 0.0002992,
+                "output": 0.000029999999999999997,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0003292
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_02d458f9f50acfa7016af509fde99c87d2bd4a4fcda9b10075",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "call_d4c8ea43cf3044459503d98653240a06|fc_02d458f9f50acfa7016af509fe817087d2a3b8184554df9a54",
+            "toolName": "bash",
+            "content": [{ "type": "text", "text": "(no output)" }],
+            "isError": false
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443774920
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "text_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443774920,
+          "responseId": "resp_02d458f9f50acfa7016af509ff765c87d29285ab0e87144c0c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "RE",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443774920,
+          "responseId": "resp_02d458f9f50acfa7016af509ff765c87d29285ab0e87144c0c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "PLAY",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443774920,
+          "responseId": "resp_02d458f9f50acfa7016af509ff765c87d29285ab0e87144c0c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "_GUID",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_GUIDED" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443774920,
+          "responseId": "resp_02d458f9f50acfa7016af509ff765c87d29285ab0e87144c0c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "ED",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_GUIDED" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443774920,
+          "responseId": "resp_02d458f9f50acfa7016af509ff765c87d29285ab0e87144c0c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "text_end",
+        "contentIndex": 0,
+        "content": "REPLAY_GUIDED",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_GUIDED",
+              "textSignature": "{\"v\":1,\"id\":\"msg_02d458f9f50acfa7016af509ffe7fc87d287bb776b9803b04a\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 149,
+            "output": 8,
+            "cacheRead": 1408,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 1565,
+            "cost": {
+              "input": 0.000029800000000000003,
+              "output": 0.0000096,
+              "cacheRead": 0.00002816,
+              "cacheWrite": 0,
+              "total": 0.00006756000000000001
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443774920,
+          "responseId": "resp_02d458f9f50acfa7016af509ff765c87d29285ab0e87144c0c",
+          "rawStopReason": "completed"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "done",
+        "reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_GUIDED",
+              "textSignature": "{\"v\":1,\"id\":\"msg_02d458f9f50acfa7016af509ffe7fc87d287bb776b9803b04a\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 149,
+            "output": 8,
+            "cacheRead": 1408,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 1565,
+            "cost": {
+              "input": 0.000029800000000000003,
+              "output": 0.0000096,
+              "cacheRead": 0.00002816,
+              "cacheWrite": 0,
+              "total": 0.00006756000000000001
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443774920,
+          "responseId": "resp_02d458f9f50acfa7016af509ff765c87d29285ab0e87144c0c",
+          "rawStopReason": "completed",
+          "durationMs": 1208
+        }
+      }
+    }
+  ]
+}

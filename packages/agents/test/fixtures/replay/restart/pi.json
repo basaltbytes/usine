@@ -1,0 +1,2416 @@
+{
+  "protocol": "pi-provider-stream",
+  "harnessVersion": "1.4.0",
+  "model": "openai/gpt-5.6-luna",
+  "scenario": "restart",
+  "environment": { "HOME": "$HOME", "PATH": "$PATH" },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "pi:1",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "thinking_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "thinking", "thinking": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "thinking_delta",
+        "contentIndex": 0,
+        "delta": "**Confirming usage of bash exact command**",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            { "type": "thinking", "thinking": "**Confirming usage of bash exact command**" }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "thinking_delta",
+        "contentIndex": 0,
+        "delta": "\n\n",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "thinking_end",
+        "contentIndex": 0,
+        "content": "**Confirming usage of bash exact command**",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": ""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_start",
+        "contentIndex": 1,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "{\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\"command"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "command",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "" },
+              "partialJson": "{\"command\":\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\":\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node" },
+              "partialJson": "{\"command\":\"node"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "node",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait" },
+              "partialJson": "{\"command\":\"node wait"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": " wait",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.c" },
+              "partialJson": "{\"command\":\"node wait.c"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": ".c",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "js",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\",\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "timeout",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\":",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "null",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "}",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "toolcall_end",
+        "contentIndex": 1,
+        "toolCall": {
+          "type": "toolCall",
+          "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+          "name": "bash",
+          "arguments": { "command": "node wait.cjs", "timeout": null }
+        },
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/events",
+      "payload": {
+        "type": "done",
+        "reason": "toolUse",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Confirming usage of bash exact command**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 1495,
+            "output": 39,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 12,
+            "totalTokens": 1534,
+            "cost": {
+              "input": 0.000299,
+              "output": 0.0000468,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0003458
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794443883232,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769",
+          "rawStopReason": "completed",
+          "durationMs": 1573
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "pi:2",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "**Confirming usage of bash exact command**",
+                "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+                "name": "bash",
+                "arguments": { "command": "node wait.cjs", "timeout": null }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 1495,
+              "output": 39,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 12,
+              "totalTokens": 1534,
+              "cost": {
+                "input": 0.000299,
+                "output": 0.0000468,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0003458
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:2/events",
+      "payload": {
+        "type": "error",
+        "reason": "error",
+        "error": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "error",
+          "errorMessage": "This operation was aborted",
+          "timestamp": 1794443884825,
+          "durationMs": 0
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "pi:3",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "**Confirming usage of bash exact command**",
+                "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+                "name": "bash",
+                "arguments": { "command": "node wait.cjs", "timeout": null }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 1495,
+              "output": 39,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 12,
+              "totalTokens": 1534,
+              "cost": {
+                "input": 0.000299,
+                "output": 0.0000468,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0003458
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "usine resumed this saved conversation after an interruption. Check the checkout and the results of any commands or tool calls you started before repeating work. Continue the task and return your final report. If the task is complete, return the final report again."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "thinking_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "thinking", "thinking": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "thinking_delta",
+        "contentIndex": 0,
+        "delta": "**Planning node wait.cjs execution**",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "thinking", "thinking": "**Planning node wait.cjs execution**" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "thinking_delta",
+        "contentIndex": 0,
+        "delta": "\n\n",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            { "type": "thinking", "thinking": "**Planning node wait.cjs execution**\n\n" }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "thinking_end",
+        "contentIndex": 0,
+        "content": "**Planning node wait.cjs execution**",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": ""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_start",
+        "contentIndex": 1,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "{\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\"command"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "command",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\"command"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\":\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node" },
+              "partialJson": "{\"command\":\"node"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "node",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait" },
+              "partialJson": "{\"command\":\"node wait"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": " wait",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.c" },
+              "partialJson": "{\"command\":\"node wait.c"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": ".c",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.c" },
+              "partialJson": "{\"command\":\"node wait.c"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "js",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\",\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "timeout",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "\":",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "null",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 1,
+        "delta": "}",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "toolcall_end",
+        "contentIndex": 1,
+        "toolCall": {
+          "type": "toolCall",
+          "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+          "name": "bash",
+          "arguments": { "command": "node wait.cjs", "timeout": null }
+        },
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:3/events",
+      "payload": {
+        "type": "done",
+        "reason": "toolUse",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "**Planning node wait.cjs execution**",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+            },
+            {
+              "type": "toolCall",
+              "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 193,
+            "output": 129,
+            "cacheRead": 1408,
+            "cacheWrite": 0,
+            "reasoning": 102,
+            "totalTokens": 1730,
+            "cost": {
+              "input": 0.0000386,
+              "output": 0.0001548,
+              "cacheRead": 0.00002816,
+              "cacheWrite": 0,
+              "total": 0.00022155999999999999
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794443884848,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd",
+          "rawStopReason": "completed",
+          "durationMs": 3147
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "pi:4",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "**Confirming usage of bash exact command**",
+                "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6c0c5487d2a41e8ad9629b9fa9\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Confirming usage of bash exact command**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9QpsU18QP-PzAkquG-AE6XZVNSwtPuRjpQsKyBKfE1jQNk1ZkkX7BKC9tD36YZyD83aNgx9U80Apg6N1bFYi6LdDRuCe_gJIqk9aX6kmvfQ9kd_7fsY52DTXlUgmFwfizJp0bVXs8W9J-IYiQfygWpy0sRc9-UqtwxdDtIi8maXBxYdb5JRiyrCOnSGNzYc8C6idJoodIlMH3iU-BhhNhuG0fNvcnYnc2NrvXPBBIAfLlqWAa_QmAZIeY9nUG0ZwkZFB6upDqdGvvvaJBO3_d-SB1AjcSLVsHbVnE9FG9_cbBFmqYjh3ysON7Aj4ke9Y4U0mleyOJKNtrjlfjBBsNZQouRdrog57O8YMLQBoG3FGR1KZUl52mZBNE4oSMEco0TVbjDVM06X6-RntVOBTkkX5u5Z_d9Aedg8QEq2Q-Un7_KDQUiSYn6H8bVVqOUi-xpSOQMUSpttnSK2SqziQjke-kKZJA1gQsB44XehM_kNJY_dBN96h50B2SVHFawjc8J3tlWD1Pa4GnnU90tldJz-rptbBJ7uaf0MTpRjgTeE3C7y-O8uOYrc0PaqhY7RNEgfuYnSVxGRiPOxtOnrfSem6TJAx8pKfbkQFW_97eOxVjDlIN_6-RR-kSGymsht-AQHX9rQZQCwA0gmMsRweOGQTdPylMEik_Im-SDXUZGo3Wd77FROiXFqSXdJJXApgf72XWYN1ZQ0evqOWki3IG-X-8t6PGJY4-125ZMs4LGJakfu8VUJ0rhOe9qhzoj9_2chTv3MHwNvmOnQHBeWm6QE03NuzPoptDgrKkeD1DYo-F8O3a3zyFa1dgDfcOZXLccNjiC77r7ggziVb97yQO-cDsGXaqmLUQAcceMLdVcrB6cWq5AtJEM3jGVRk-h9WhNE7CJeHbD550VesqTwxB5IDnG5oisIca92YNTRRZJS77buq4CBNm0QRF2bGNH5WEZ0X-TFcKU8jMkDBlhXi0V3Cyh4sR-HXnBE1sC2J8jbk9rFApIgfSbSVbTjbktMz9g8zKI_OFqYQG_U6Y52YdXzPPdlpNVAFAgijtf3eyMqqNMwJfE-GkH0BxIoRfLEU5l6UzwVcHnKKRg0YRCjAl3TyUqM0FrTLPp431ggWFL5M4fJYKZRy6rMQ26UOZYaOMDWBidxhAVf-85D-54TU37RPW6TC24Cgau9PwSqOacvDWzKVAz0EamrwyLHx5k5pReN4IAaLbdGehhR-rH4Rp9wpBgn2j0gtYfEZAIQ8CkvgsJTtUMPkDqVOf6VyFQuO8BcOIElXSgMnkTFVSpl1hdEWdHldTrtli3NpMF2AQJoY-s3Vx2J_vUFUBdm7-tFfQFI2FLh3FT4CmC6ntspTlACGV4ujk43b--uC88xMPPhkexkC1wj39CcmGz-RhZykTXXwA7KsnXxizbHtCDjoWAIM5yqMKFbjxBTBqYgCqDJDwvqUIPvuqNHliRFzpD4vUoPyCyxgjLZsL17BUCs0nvvDwGbFqIsD8TZm5xVJHK-gZOd010u4LTZ7MeqnOg4Ul76SAkjsLDe3zDdax7Q75es9z6nafIs9jrtoLvndEsa-Bn46eZ32RGRHiLZnmsRApHefhPS2k04b1DaC1xBjGoX3KmdYDw9Nt7nPMSPfz0bAECOXKRJz5Z33drBH8kAMA9A2wBHhUeNWjtEKbvFuX26a8wQlKmN5xuODwd3Y9HiiAB0-6dBlXErDSgfJcIPDk9VwJsq3Suoa7Cls3TjH7-srjXdgbvWtXb5TNRFqwpmlp6Sbw1jQNn6gs0nhMe3QPodhGZc3okAAiIY64MuROhqgzS1-45Kcy8ot416jsoZJ6u8=\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_0113908337d8472a965f8b92fd899c12|fc_0e5c1d9a43dc0828016af50a6c97d887d2aac9de764300c18a",
+                "name": "bash",
+                "arguments": { "command": "node wait.cjs", "timeout": null }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 1495,
+              "output": 39,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 12,
+              "totalTokens": 1534,
+              "cost": {
+                "input": 0.000299,
+                "output": 0.0000468,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0003458
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_0e5c1d9a43dc0828016af50a6ba40c87d2bdc7350789f9e769",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "usine resumed this saved conversation after an interruption. Check the checkout and the results of any commands or tool calls you started before repeating work. Continue the task and return your final report. If the task is complete, return the final report again."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "**Planning node wait.cjs execution**",
+                "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_0e5c1d9a43dc0828016af50a6d9fe087d28270d7db7fb93483\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**Planning node wait.cjs execution**\"}],\"content\":[],\"encrypted_content\":\"gAAAAABq9Qpvt5txtI1nUxVSH7hlouLWl-b_qUh3nDX8783t1OFAO78a7XtB2ukToCxT565KwnjxxqAXQPN55v0IfbDl-izw8QnMh1lqe9-7eh9BN4HeDIAgt5I5Pjm3Vp-SobfQdrmwY1A7Qt2REfd0qMCyLp_jmvT93KlXv3xTXPPZ5Q_qW3Sya8vlOxj2dCyNIUBYyV6-NhdIHTPfSZbp-Ww4W972CAIR6J_4Nayw1_3-9ukQ_O9FLYvE1hXdRZw9nGOgkDxrQHaCaXyXd0kT6lET4s2U9TYofJH_OesLOLJK3Eu2Z-FW-bVKw443knX3U_TCRoubfvz26rfJBSnJEdoaPj585b0ExlHYTqvCjdFR68URlarVE19EczHN51LG8yGFHf89NRnXkhx_xgd7UXKXxF91HwLIo8RkQYWFtFfStK1zxogbeONO2VfxoQrltZ1OSrMRKqC9K_bzX26Y0c1ci7nrYX3999yQdCCb2l1jdAQqAWifH-S2j1_pz9UNRd50Yk1AlRjz1Hp732etYC3Ucf_mgDekUcFOTsTmf80tdSmZVK2qnoi-4RY2k_VzZEBNP65YG0MObFBDaBVPvABPvupQAcv2UA9fTMREG-_pknrEWA1R-6P2VTZ4e3oHw-BNs4oRsaBC5Oi7IO7XuKiMpAtNKZhLK8x-ytRrQ3AzVhVi-LAukK2b1hyJyPH4nXJtbLZAYaaLRpc0tcmI_bglWxgEOspiwq8c33KXelY3WySw_rzF78AUNGBKvIczPh_I_T5VexQ1IMdMdc2qDjAFt9PTBEf4s7zDTx65v5HURxSkDKEDyV1Hx2D4bKUTsIPzmcI1_PMNtsv2ki2T4FFG1w8MKSQG9dKESZ91xzT04lcL-uq3q0ZdcD8sj92VJFBZ7-h_G6F7zYk1kku6c-xhRwd6bRqa0UTS5qQt1mEmpUvmrMsfF4CXXho-XSYnLDVzsI_nTlWNdKYPJBtF9CwOX0qD_RsXTbv9G6h2IR0TREuCndY5cBFiuXR1l72ThXc7ee4SxGcEAo7b1wVIJiViIY4nIjDUsSz-2H-GxKq4g0oqNNgEY0IGE3NZImPRRg14iVzBFw6ua24lPNf_tEiDH8OgcIxQxEufrexvBU45gAPoNFNaIKiRGtpEa3U0Zm5TtRiwV-DqS1ge1IMAlowYj94bijIMObjHiDqL9akC2mFZkr1uBSIC2Wg61UvH2RnsUnSQIWIHM1mElDUkdorpzCamZxwWO6FL1U-xVMhzv9kyidgkYkFwAjgYMfzzWaZE1QHUv-y6C102UFtrIknj03FtOx-MfgxQO2ymQTi0KlJGFeEzEXXfIsHCwGMLZeg5W0slDzyisOcBkGPuriBd1XJhJ14Hp_S-gQ9noLQROmX4pa86FlFBaIf3GeCnQVY63bonSOfIUP3fmTKTGqAQ4M791AUIWwXX9XnE_55THYbwhpFvvfSE6uGc9dBNa-U_6obfCJNmS0D9AxNzOHTyazgiMlB_50rYj_v0jlqERvI02UqvKRVP0FFk0Fpl1G1iq3kHs8bVPzX3T95SuDFEaVf05Rw89xUsGfnoy8ylIpFoYAV3DFNE7VqhMERE5YfecIw1nCD6Cul5opr0nysqqTsrNykt1I1BSrRI3VnJyHdZ0uUI89h1rVkUN28DhT7UgbuS-UtOJYw-0UnhUu_gunxvmNpUkGzkohLDM2RKlL-BgntoRHzepyWT3d7cvaD-CxDxl6BDL7iYHiSAicweZOzbFKZ1-Ix4K2p6ViFpzErDfZMRFcAxJwMcL4YDaCy_xvnlS0inSuT4BxoFUE-XHL1wul2uHlZAzJSdG6i60FBQVUnQz5-OXMmhhFL3aFgQA3Lo_MmfCaeLsq3XsOe3i_2Wzjy1Obfhek48M4adVpoPUtKNk6biwgsz1vqOgAOw-ZnTN1gnheKNF1LiwvkUD5emcZZdn5Wt36P4Q6CIp1qp6SreWVtAR6wL0AmZ93U9TqAlLdMo9Z-tCneae81VAV0yoQ121Nl2AM-UNipEFnjycEi4LfAVjPQCUfuy9zwIsykiezsXtDjBdnzCDrSMYUFhf_6qmwlp9wHucoWLUPgQk7nfILzvGC5Vab22WIQsVCSuaUTdOQJ_gAOCaUvH8_8wz3OEzqxmPFEVVbUFigHU9SatCuoFOOCBLJi8XVbZHK7RYpQtPqobQZxxOsjAUhWJURtWYJ1c5-POxvjVrwGiXhapuv4KK1Qh3BmvVF-IEB-Fdr75KWJFwlobI83_lPQRyufO6AEAB7BHgiSPKL4R2qELDIK6Zc8rHUJIl9yF-kONAvJdAm-sZ_8t4BYl1PEhGkThXz4aaxKAn1UcWPZteoJ9Zv2_Im1UVcoOkDyn0UikrvMlBTVlmMpnYZCm2ynGqGch8C3MiJsxDXN6e06QHc0ujAXvML8T7DF41UwZ__a1fquJbmYMjlFXh-6SfIVlBWMa6nECG90fAskXfzIbyrdFhwwtf7ZV9zmSIA6Hi43zkp9paIleFHRCKGBwnW_CLydPvwTX-UCGNqDtVUdvIfznGPusrOPYJhmI_kf39AU9i8jXDfNLWotJ84sm0MFwSrSUfdVaN734Pu5VoPXegI_HpZZ4hmP7hZA5QU1RS6kOiQs1u6enS3Rb3Oa5kt7rlJDPo5AN1zEWSxOn6XhoVawzgB69U7ZoJTEdeeXeZ1FLks3rKfLld8tGGXI8I4q2yXCLYNdPOHc5GU2BOmf1rx94xIsGowa0wkDEWsjfjgGq3ib94HmyMo2Ji7XDLh-eVqfM67WeZdk46Nrcu2semG_7Tm9b85-AsLJTnk57LxSseF0_ulf_aI1Uvh-zS2caAUEyHLfVwvwtD_1MGzU_1UzcKEkpZVkvdZXc9b_G8jsJ3aZtErDLnGIsRK20YUkPutKFkWfFK4fEqmd6EJJyiGA0zyWe6skI_TcG9nte88NoW1PpRl4nMxv1Zyk0VKkNg1dHWbEIsjM9bA0rGTvM-KmIQP29sobrnQ6Ug4fMHAe13WgfLc3_EWKcAc5unkqxlg==\"}"
+              },
+              {
+                "type": "toolCall",
+                "id": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+                "name": "bash",
+                "arguments": { "command": "node wait.cjs", "timeout": null }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 193,
+              "output": 129,
+              "cacheRead": 1408,
+              "cacheWrite": 0,
+              "reasoning": 102,
+              "totalTokens": 1730,
+              "cost": {
+                "input": 0.0000386,
+                "output": 0.0001548,
+                "cacheRead": 0.00002816,
+                "cacheWrite": 0,
+                "total": 0.00022155999999999999
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_0e5c1d9a43dc0828016af50a6d359087d2ae9eb186a26969fd",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "call_e1c28bb3f934438ab20446e7f4c1eca0|fc_0e5c1d9a43dc0828016af50a6fb4f487d2b713a5ee73de7ab4",
+            "toolName": "bash",
+            "content": [{ "type": "text", "text": "(no output)" }],
+            "isError": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:4/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443888059
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:4/events",
+      "payload": {
+        "type": "text_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443888059,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a707f3087d290755c3af0a012b8"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:4/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "RE",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443888059,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a707f3087d290755c3af0a012b8"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:4/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "PLAY",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443888059,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a707f3087d290755c3af0a012b8"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:4/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "_DONE",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_DONE" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443888059,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a707f3087d290755c3af0a012b8"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:4/events",
+      "payload": {
+        "type": "text_end",
+        "contentIndex": 0,
+        "content": "REPLAY_DONE",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_DONE",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0e5c1d9a43dc0828016af50a710db487d2b2482457d0a753c9\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443888059,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a707f3087d290755c3af0a012b8"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:4/events",
+      "payload": {
+        "type": "done",
+        "reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_DONE",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0e5c1d9a43dc0828016af50a710db487d2b2482457d0a753c9\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 336,
+            "output": 7,
+            "cacheRead": 1408,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 1751,
+            "cost": {
+              "input": 0.00006720000000000001,
+              "output": 0.0000084,
+              "cacheRead": 0.00002816,
+              "cacheWrite": 0,
+              "total": 0.00010376000000000001
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443888059,
+          "responseId": "resp_0e5c1d9a43dc0828016af50a707f3087d290755c3af0a012b8",
+          "rawStopReason": "completed",
+          "durationMs": 1204
+        }
+      }
+    }
+  ]
+}
