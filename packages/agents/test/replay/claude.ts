@@ -81,12 +81,12 @@ export const claudeTransport = (
       // session's tool server and checks its results.
       const recordedTools = Option.map(tools, (server): ClaudeToolServer => ({
         ...server,
-        call: async (name, toolInput, signal) => {
+        call: async (name, toolInput, callId, signal) => {
           tape.inbound(`${port}/tools`, {
             name,
             ...Option.match(toolInput, { onNone: () => ({}), onSome: (json) => ({ input: json }) }),
           });
-          const result = await server.call(name, toolInput, signal);
+          const result = await server.call(name, toolInput, callId, signal);
           tape.outbound(`${port}/tools`, json(encode(result)));
           return result;
         },
@@ -101,6 +101,7 @@ export const claudeTransport = (
             const result = await server.call(
               call.name,
               Option.fromUndefinedOr(call.input),
+              Option.none(),
               new AbortController().signal,
             );
             tape.outbound(`${port}/tools`, json(encode(result)));

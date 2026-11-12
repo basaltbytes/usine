@@ -459,7 +459,7 @@ const makeClaudeSessions = Effect.gen(function* () {
               description: tool.description,
               inputSchema: tool.parameters,
             })),
-            call: (name, input, signal) => run(call(name, input, Option.none()), { signal }),
+            call: (name, input, callId, signal) => run(call(name, input, callId), { signal }),
           })
         : Option.none();
     /** The toolkit name of a usine tool, or the name that Claude Code reports for its own. */

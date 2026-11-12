@@ -73,12 +73,13 @@ export interface ClaudeToolServer {
   readonly tools: ReadonlyArray<ClaudeTool>;
   /**
    * Runs one call of the tool `name`, whose `input` is `None` when Claude Code's arguments aren't
-   * JSON. A failed call resolves with an error result; the promise rejects only when `signal`
-   * aborts or the session stops.
+   * JSON. `callId` is the call's `tool_use` ID, when Claude Code sends it. A failed call resolves
+   * with an error result; the promise rejects only when `signal` aborts or the session stops.
    */
   readonly call: (
     name: string,
     input: Option.Option<Schema.Json>,
+    callId: Option.Option<string>,
     signal: AbortSignal,
   ) => Promise<HostToolResult>;
 }
@@ -127,6 +128,9 @@ const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schem
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
   decodeVendorMessage(serializeVendorValue(message));
 
+/** Claude Code sends each MCP tool call's `tool_use` ID in its `_meta`. */
+const decodeToolUseId = Schema.decodeUnknownOption(Schema.String);
+
 /**
  * Returns an MCP server that lists `server`'s tools with their own JSON Schemas and runs their
  * calls. The Agent SDK connects it to the Claude Code process over the query's control messages.
@@ -150,6 +154,7 @@ const toolServer = (server: ClaudeToolServer): McpServer => {
     const result = await server.call(
       request.params.name,
       decodeHostToolInput(request.params.arguments ?? {}),
+      decodeToolUseId(request.params._meta?.["claudecode/toolUseId"]),
       extra.signal,
     );
     return { content: [{ type: "text", text: result.text }], isError: result.isError };

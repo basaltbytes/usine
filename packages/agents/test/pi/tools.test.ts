@@ -131,6 +131,8 @@ const runPi = <Tools extends Record<string, Tool.Any>, R>(
 // SAFETY: a usine tool reads nothing from Pi's tool context.
 const toolContext = {} as ExtensionToolContext;
 
+const CANCELLED = "Usine tool call was cancelled";
+
 describe("Pi usine tool sets", () => {
   it.effect("list only the toolkit's tools and report them under the toolkit's names", () =>
     Effect.gen(function* () {
@@ -185,13 +187,14 @@ describe("Pi usine tool sets", () => {
 
   it.effect("interrupt the handler of a call that Pi cancels", () => {
     const Wait = Tool.make("wait", { description: "Waits until the call is cancelled." });
-    const kit = Toolkit.make(Wait);
+    const kit = Toolkit.make(Read, Wait);
     let interrupted = false;
     let started = () => {};
     const waiting = new Promise<void>((resolve) => {
       started = resolve;
     });
     const waitHandlers = kit.toLayer({
+      read: ({ name }) => Effect.succeed(`note ${name}`),
       wait: () =>
         Effect.sync(() => started()).pipe(
           Effect.andThen(Effect.never),
@@ -206,8 +209,9 @@ describe("Pi usine tool sets", () => {
     const logs = collectLogs(["Info"]);
     return Effect.gen(function* () {
       yield* runPi(kit, waitHandlers, async (options) => {
-        const definition = options.hostTools[0];
-        assert(definition !== undefined);
+        const [read, definition] = options.hostTools;
+        assert(read !== undefined && definition !== undefined);
+        await read.execute("call-0", { name: "greeting" }, undefined, undefined, toolContext);
         const controller = new AbortController();
         const call = definition.execute("call-1", {}, controller.signal, undefined, toolContext);
         await waiting;
@@ -224,10 +228,12 @@ describe("Pi usine tool sets", () => {
       });
       assert.strictEqual(cancelled, "rejected", "a cancelled call rejects");
       assert.isTrue(interrupted, "cancelling a call interrupts its handler");
-      assert.deepInclude(
-        logs.records.map(({ message }) => message),
-        ["Usine tool call was cancelled", { tool: "wait", callId: "call-1" }],
-        "a cancelled call is logged",
+      assert.deepStrictEqual(
+        logs.records
+          .map(({ message }) => message)
+          .filter((message) => Array.isArray(message) && message[0] === CANCELLED),
+        [[CANCELLED, { tool: "wait", callId: "call-1" }]],
+        "only the cancelled call is logged",
       );
     }).pipe(Effect.provide(logs.layer));
   });

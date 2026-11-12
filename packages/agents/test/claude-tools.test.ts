@@ -26,6 +26,7 @@ import type { HostToolResult } from "../src/harness/tools.ts";
 import { collectLogs } from "./logs.ts";
 
 const PREFIX = "mcp__usine__";
+const CANCELLED = "Usine tool call was cancelled";
 /** A name that fits the API's 64 characters on its own, but not after Claude Code's prefix. */
 const LONG = "n".repeat(64 - PREFIX.length + 1);
 
@@ -108,10 +109,20 @@ const fakeClaude = (observed: Observed, waiting: Promise<void>) =>
         assert(dotted !== undefined && long !== undefined && wait !== undefined);
         for (const name of [dotted, long])
           observed.results.push(
-            await tools.call(name, Option.some({ name: "greeting" }), new AbortController().signal),
+            await tools.call(
+              name,
+              Option.some({ name: "greeting" }),
+              Option.some(`toolu_${name}`),
+              new AbortController().signal,
+            ),
           );
         const controller = new AbortController();
-        const call = tools.call(wait, Option.some({}), controller.signal);
+        const call = tools.call(
+          wait,
+          Option.some({}),
+          Option.some("toolu_wait"),
+          controller.signal,
+        );
         await waiting;
         controller.abort();
         observed.cancelled = await Promise.race([
@@ -187,10 +198,12 @@ describe("Claude Code usine tool sets", () => {
       ]);
       assert.strictEqual(observed.cancelled, "rejected", "a cancelled call rejects");
       assert.isTrue(observed.interrupted, "cancelling a call interrupts its handler");
-      assert.deepInclude(
-        logs.records.map(({ message }) => message),
-        ["Usine tool call was cancelled", { tool: "wait" }],
-        "a cancelled call is logged",
+      assert.deepStrictEqual(
+        logs.records
+          .map(({ message }) => message)
+          .filter((message) => Array.isArray(message) && message[0] === CANCELLED),
+        [[CANCELLED, { tool: "wait", callId: "toolu_wait" }]],
+        "only the cancelled call is logged, with its call ID",
       );
       const calls = events.flatMap((event) =>
         event._tag === "ToolStarted" || event._tag === "ToolFinished" ? [event] : [],
@@ -247,6 +260,7 @@ describe("Claude Code usine tool sets", () => {
               await server.value.call(
                 dotted,
                 Option.some({ name: "greeting" }),
+                Option.none(),
                 new AbortController().signal,
               ),
             );

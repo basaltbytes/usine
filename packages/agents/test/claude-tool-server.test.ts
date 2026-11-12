@@ -68,9 +68,19 @@ describe("Claude Code tool server", () => {
         executable,
         scriptedClaude(responses, [
           { method: "tools/list", params: {} },
-          { method: "tools/call", params: { name: "read_note", arguments: { name: "greeting" } } },
+          {
+            method: "tools/call",
+            params: {
+              name: "read_note",
+              arguments: { name: "greeting" },
+              _meta: { "claudecode/toolUseId": "toolu_greeting" },
+            },
+          },
           { method: "tools/call", params: { name: "read_note", arguments: { name: "draft" } } },
-          { method: "tools/call", params: { name: "read_note", arguments: { title: "greeting" } } },
+          {
+            method: "tools/call",
+            params: { name: "read_note", arguments: { title: "greeting" } },
+          },
         ]),
       );
       chmodSync(executable, 0o755);
@@ -80,11 +90,17 @@ describe("Claude Code tool server", () => {
       const sdk = yield* ClaudeSdk.pipe(Effect.provide(claudeSdkLive));
       const context = yield* Effect.context<never>();
       const run = Effect.runPromiseWith(context);
+      const callIds: Array<Option.Option<string>> = [];
       // Stays open until the turn result arrives, as a session's input does.
       const input = new AsyncInput();
       const query = sdk.open(
         input,
-        { cwd, pathToClaudeCodeExecutable: executable, settingSources: [], persistSession: false },
+        {
+          cwd,
+          pathToClaudeCodeExecutable: executable,
+          settingSources: [],
+          persistSession: false,
+        },
         Option.some({
           name: "usine",
           tools: bound.tools.map((tool) => ({
@@ -92,7 +108,10 @@ describe("Claude Code tool server", () => {
             description: tool.description,
             inputSchema: tool.parameters,
           })),
-          call: (name, toolInput) => run(call(name, toolInput, Option.none())),
+          call: (name, toolInput, callId) => {
+            callIds.push(callId);
+            return run(call(name, toolInput, callId));
+          },
         }),
       );
       yield* Effect.promise(async () => {
@@ -127,6 +146,11 @@ describe("Claude Code tool server", () => {
         content: [{ type: "text", text: '{"missing":"draft"}' }],
         isError: true,
       });
+      assert.sameDeepMembers(
+        callIds,
+        [Option.some("toolu_greeting"), Option.none(), Option.none()],
+        "a call carries the tool use ID that Claude Code sends",
+      );
       const rejected = yield* Schema.decodeUnknownEffect(CallResult)(invalid);
       assert.isTrue(rejected.isError);
       assert.include(rejected.content[0].text, "Invalid parameters for tool 'read_note'");
