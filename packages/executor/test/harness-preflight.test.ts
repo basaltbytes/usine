@@ -88,6 +88,7 @@ describe("injected harness registry", () => {
           id,
           stop: () => Effect.die("preflight must not stop a child"),
           open: () => Effect.die("preflight must not open a session"),
+          complete: () => Effect.die("preflight must not run a completion"),
           preflight: (brain, target) =>
             Effect.sync(() => {
               targets.push(target);

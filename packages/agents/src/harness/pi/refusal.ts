@@ -1,5 +1,5 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
-import { DateTime, Option } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { AgentCapacityError, type AgentResultError, harnessFailure } from "../../runtime.ts";
 
 // Pi's ChatGPT subscription provider states the wait until the limit resets in whole minutes when
@@ -47,3 +47,20 @@ export const piFailure = (
     return AgentCapacityError.make({ sessionId: Option.some(sessionId), message });
   return harnessFailure(Option.some(sessionId), message);
 };
+
+/**
+ * Classifies the error that ended a Pi turn with `piFailure`, and logs a capacity refusal or
+ * usage limit with its reset time. A session and a completion both classify a failed turn here.
+ */
+export const failedPiTurn = Effect.fn("PiRuntime.failedTurn")(function* (
+  sessionId: AgentSessionId,
+  turn: { readonly errorMessage: string; readonly timestamp: number },
+) {
+  const failure = piFailure(sessionId, turn);
+  if (Schema.is(AgentCapacityError)(failure))
+    yield* Effect.logWarning("Pi turn ended on a provider capacity refusal or usage limit", {
+      sessionId,
+      resetsAt: Option.getOrUndefined(Option.map(failure.resetsAt, DateTime.formatIso)),
+    });
+  return failure;
+});

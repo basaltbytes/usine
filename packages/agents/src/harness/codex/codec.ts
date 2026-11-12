@@ -1,13 +1,14 @@
 import {
   AgentSessionId,
-  type RateLimitsSnapshot,
+  RateLimitsSnapshot,
   RateLimitWindow as CoreRateLimitWindow,
 } from "@usine/core/agent/session";
 import { DateTime, Effect, Option, Schema } from "effect";
 import {
   AgentMessageItem,
-  type ErrorNotification,
+  ErrorNotification,
   isCodexErrorCode,
+  type RateLimitsUpdated,
   type RateLimitWindow,
   ToolItem,
   type TurnCompleted,
@@ -139,11 +140,22 @@ export const toolName = (item: typeof ToolItem.Type): string => {
 };
 
 /** Converts a rate-limit window, with reset timestamps in UTC and absent values as `None`. */
-export const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
+const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
   CoreRateLimitWindow.make({
     usedPercent: window.usedPercent,
     windowDurationMinutes: Option.fromNullishOr(window.windowDurationMins),
     resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
+  });
+
+/** Converts the account's rate-limit snapshot from `account/rateLimits/updated`. */
+export const rateLimitsSnapshot = (
+  snapshot: (typeof RateLimitsUpdated.Type)["rateLimits"],
+): RateLimitsSnapshot =>
+  RateLimitsSnapshot.make({
+    limitId: Option.fromNullishOr(snapshot.limitId),
+    limitName: Option.fromNullishOr(snapshot.limitName),
+    primary: Option.fromNullishOr(snapshot.primary).pipe(Option.map(rateLimitWindow)),
+    secondary: Option.fromNullishOr(snapshot.secondary).pipe(Option.map(rateLimitWindow)),
   });
 
 /**
@@ -229,3 +241,37 @@ export const turnFailure = (
     ? AgentCapacityError.make({ sessionId: Option.some(sessionId), message })
     : AgentResultError.make({ sessionId: Option.some(sessionId), message });
 };
+
+/**
+ * Classifies the failed turn `turn` with `turnFailure`, and logs a capacity refusal or usage
+ * limit with its reset time. A session and a completion both end a failed turn here.
+ */
+export const failedTurn = Effect.fn("CodexRuntime.failedTurn")(function* (
+  sessionId: AgentSessionId,
+  turn: (typeof TurnCompleted.Type)["turn"],
+  message: string,
+  rateLimits: Option.Option<RateLimitsSnapshot>,
+) {
+  const failure = turnFailure(sessionId, turn.error, message, rateLimits);
+  if (Schema.is(AgentCapacityError)(failure))
+    yield* Effect.logWarning("Codex turn ended on a provider capacity refusal or usage limit", {
+      sessionId,
+      turnId: turn.id,
+      codexErrorInfo: turn.error?.codexErrorInfo,
+      resetsAt: Option.getOrUndefined(Option.map(failure.resetsAt, DateTime.formatIso)),
+    });
+  return failure;
+});
+
+/** The server notification methods with no session event equivalent; they are only logged. */
+export const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
+  "error",
+  "warning",
+  "configWarning",
+  "deprecationNotice",
+  "guardianWarning",
+  "model/rerouted",
+]);
+
+/** Decodes a provider error notification, which reports whether Codex retries. */
+export const decodeRetry = Schema.decodeUnknownOption(ErrorNotification);

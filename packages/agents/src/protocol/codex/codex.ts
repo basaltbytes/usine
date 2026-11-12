@@ -152,6 +152,8 @@ export const TurnStartParams = Schema.Struct({
     Schema.NullOr(Schema.Struct({ type: Schema.Literal("dangerFullAccess") })),
   ),
   effort: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** The JSON Schema that constrains the turn's final assistant message. */
+  outputSchema: Schema.optionalKey(Schema.Json),
 });
 export type TurnStartParams = typeof TurnStartParams.Type;
 

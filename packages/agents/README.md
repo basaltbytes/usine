@@ -12,7 +12,7 @@ The Pi child backend uses the Pi packages pinned together at 1.4.0, matching the
 
 A role is a `RoleSpec` value in the module that owns it: its name, the placements and credential routes it accepts with the reason it refuses the rest, whether it keeps the harness's own tools, whether it runs a usine tool set, whether its conversation is saved, journaled, or ephemeral, whether it takes interventions, and whether it returns text or a structured value. `requirements(role)` derives the harness capabilities from those fields: a usine tool set needs `usine-tools`, closed native tools need `closed-tools`, structured output needs `structured-output`, an ephemeral session needs `ephemeral`, a journaled one needs `durable-coordination`, interventions need `steer` and `interrupt`, and every session needs `token-usage`. A journaled session takes its tools from the journal, so it needs no `usine-tools` or `closed-tools`. `codingAgent` runs on workers with any credential route; the coordinator is declared with the parent in `@usine/durable`.
 
-`admitBrain(catalog, role, brain, context, { reopens })` checks a role at a placement and credential route without IO. `reopens` adds `resume-session` for a session that reopens a saved conversation. A refusal lists each missing capability, placement, or credential route with the reason that the role or the descriptor gives. `AdmittedBrain` carries the role, brain, route, and the billing pool that the route determines: `gateway-api-key` sets `apiKeys`, `gateway-subscription` sets the plan of the provider that the descriptor's worker credential names, and every other route, or a subscription on a descriptor that names no provider such as Pi, leaves the pool to the harness at launch. Each descriptor declares supported capabilities and reasons for absent capabilities per route, including `plan-windows` for Claude Code and Codex subscription routes. A descriptor declares only the capabilities whose contract scenarios its adapter passes, so no harness declares `usine-tools`, `closed-tools`, `structured-output`, or `ephemeral`.
+`admitBrain(catalog, role, brain, context, { reopens })` checks a role at a placement and credential route without IO. `reopens` adds `resume-session` for a session that reopens a saved conversation. A refusal lists each missing capability, placement, or credential route with the reason that the role or the descriptor gives. `AdmittedBrain` carries the role, brain, route, and the billing pool that the route determines: `gateway-api-key` sets `apiKeys`, `gateway-subscription` sets the plan of the provider that the descriptor's worker credential names, and every other route, or a subscription on a descriptor that names no provider such as Pi, leaves the pool to the harness at launch. Each descriptor declares supported capabilities and reasons for absent capabilities per route, including `plan-windows` for Claude Code and Codex subscription routes. A descriptor declares only the capabilities whose contract scenarios its adapter passes. Every harness declares `structured-output` and `ephemeral`, which its completion scenarios prove, and none declares `usine-tools` or `closed-tools`.
 
 `workerImageInputs(catalog)` returns the worker npm packages and image tag from each descriptor's `worker.install`, in catalog order. Harnesses bundled in the orchestrator have no worker packages and don't contribute to the tag. Run `pnpm worker-image:generate` from the repository root after changing installation requirements. It builds the catalog and updates both Dockerfiles, Hetzner cloud-init, and `infra/worker-image/tag.txt`, with pnpm at the root `packageManager` version. `pnpm check` rejects stale generated inputs. Claude Code preflight accepts any installed version; the image install version doesn't restrict worker readiness.
 
@@ -28,7 +28,7 @@ import { harnessesLive } from "@usine/agents/harness/node";
 const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(harnessesLive));
 ```
 
-`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. Registered runtimes open and stop sessions with only their own harness's host variables. They admit each opened session's brain for the role in its spec at its placement and credential route, adding `resume-session` for a `StartResume`, and admit preflight brains as coding agents with that catalog. A `HarnessRuntime` has an ID, `preflight(brain, target)`, `open(spec, start, continuation)`, and `stop(spec)`; it names no role.
+`harnessesLayer` uses supplied SDK services; `harnessesLive` supplies the production SDKs. Both layers retain `HarnessRegistrationError` in their error channel. Custom compositions use `Harnesses.layerFrom(catalog, runtimes)`. Registered runtimes open and stop sessions with only their own harness's host variables. They admit each opened session's brain for the role in its spec at its placement and credential route, adding `resume-session` for a `StartResume`, and admit preflight brains as coding agents with that catalog. A `HarnessRuntime` has an ID, `preflight(brain, target)`, `open(spec, start, continuation)`, `complete(spec, prompt, output)`, and `stop(spec)`; it names no role. A session always saves its conversation and returns text, so `open` refuses a role whose conversation is ephemeral or whose output is structured. Only a role that is both, ephemeral and structured, runs as a completion; `complete` refuses the others too.
 
 `/harness/contract` exports the role-neutral session input. A `SessionSpec` holds the session identity (`ParentSession`, `ChildSession`, or `RoleSession`), the placement and credential route, the host, worker, provisioned machine, checkout, and environment. `StartPrompt` starts a conversation with its first message; `StartResume` reopens a saved `HarnessSession` without sending one. `open` returns a `NativeSession`: the running session, whether a reopened process was already in a turn, and the recovery of interrupted tool calls. Adapters read only the spec, the start, and the continuation policy, so a role other than the child opens a session the same way. Open it through `Harnesses`, which admits the spec before the adapter starts:
 
@@ -44,6 +44,35 @@ const openSession = (spec: SessionSpec, prompt: string) =>
     const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
     const policy = yield* continuationPolicy(spec, prompt, RestartState.make({}));
     return yield* runtime.open(spec, StartPrompt.make({ text: prompt }), policy);
+  });
+```
+
+`complete(spec, prompt, output)` sends one prompt and returns a `Completion`: the value that the `output` schema decodes, and its usage as a `SessionTokensUpdated` whose session records the brain that ran and the billing pool. The output's JSON form must be an object, and every field needs a value, because strict provider modes require every property. Admission requires the role in the spec to return a structured value and keep no conversation, so it needs `structured-output` and `ephemeral`. A completion saves no conversation and returns no session reference. Each adapter sends the output's JSON Schema, with closed objects and the root definition of an identified schema or `Schema.Class` inlined, and reports what its harness answered and the tokens it spent. `structuredCompletion` then decodes the value with the schema, rejecting properties that the schema doesn't model, and classifies and logs every failure in one place:
+
+- **Claude Code**: `query()` with no built-in tools, `outputFormat`, `permissionMode: "dontAsk"`, and `persistSession: false`. Claude Code offers the model only its `StructuredOutput` tool, checks the tool input against the schema, and asks again on a mismatch; a result past those retries fails with `CompletionInvalid`.
+- **Codex**: an ephemeral thread with a read-only sandbox and a turn with `outputSchema`. The turn's final answer is parsed as JSON.
+- **Pi**: one model request through Pi's model runtime and its credential routes, with no session and one `structured_output` tool whose parameters are the schema. A provider sends the tool in strict mode when its API and the schema allow it.
+
+A completion fails with `CompletionError`. Its `usage` carries the tokens and cost spent before the failure, as a `SessionTokensUpdated` like a successful completion's, or `None` when the harness reported none, as for a refusal at admission. Its `reason` is one of these:
+
+- `CompletionInvalid` for a value that the schema rejects, or none.
+- `CompletionRefused` when admission, the model, or its credential rules the request out, or the model declines. Claude Code and Pi report a declined answer when the provider marks it as a refusal. Codex reports no refusal, and some Pi providers send one as text, so there a declined answer fails as `CompletionInvalid`.
+- `AgentCapacityError` for a provider capacity refusal or usage limit, with the limit's reset time when the harness reports one, as for a session.
+- `SessionOperationError` for a harness failure, or after 10 minutes without a value.
+
+The caller names no harness:
+
+```ts
+import { Effect, Schema } from "effect";
+import type { SessionSpec } from "@usine/agents/harness/contract";
+import { Harnesses } from "@usine/agents/harness/node";
+
+const Verdict = Schema.Struct({ approved: Schema.Boolean, reason: Schema.String });
+
+const decide = (spec: SessionSpec, prompt: string) =>
+  Effect.gen(function* () {
+    const runtime = yield* (yield* Harnesses).runtime(spec.session.brain.harness);
+    return yield* runtime.complete(spec, prompt, Verdict);
   });
 ```
 
@@ -182,7 +211,7 @@ It accepts Codex CLI **0.164.0 (or 0.159.0 through 0.159.3)** (`supportedCodexVe
 
 ## Transport replay tests
 
-`pnpm --filter @usine/agents test` replays recorded Claude SDK messages, Codex app-server JSON-RPC traffic, and Pi provider streams through the real adapters, conversation controls, and session channels. CI runs this suite on every pull request. The fixtures cover simple turns, steering, messages queued during a tool call, interrupt and guidance, holds and release, transport loss and recovery, and a process that exits before its first message. Pi runs in process, so it records at the model runtime's stream, runs its tools for real in both modes, and has no transport-loss or early-exit fixture; its restart fixture stops the session during a command and reopens the saved conversation.
+`pnpm --filter @usine/agents test` replays recorded Claude SDK messages, Codex app-server JSON-RPC traffic, and Pi provider streams through the real adapters, conversation controls, and session channels. CI runs this suite on every pull request. The fixtures cover simple turns, steering, messages queued during a tool call, interrupt and guidance, holds and release, transport loss and recovery, a process that exits before its first message, and, for all three harnesses, structured completions. The `structured-result` replay decodes the recorded value. Rewritten outside the schema, with an unmodeled property, or as each harness's refusal, capacity, and failure outcomes, it fails with the matching `CompletionError` reason and the recorded usage. Pi's transcript records the output tool's parameters and `constrainedSampling`; the `ephemeral` replay checks that the harness's conversation store doesn't change and that the completion has no session reference. Pi runs in process, so it records at the model runtime's stream, runs its tools for real in both modes, and has no transport-loss or early-exit fixture; its restart fixture stops the session during a command and reopens the saved conversation.
 
 `test/contract/capabilities.ts` maps each capability to the scenarios that prove it, or, for a capability that no session scenario shows, such as `model-check`, to the suites that check it for each harness. The contract suite fails when a descriptor declares a capability whose scenarios have no replayed fixture for that harness, or that no suite checks for that harness. It also checks that admission refuses every lacking capability with the descriptor's reason. Simple replays also check reported tokens and, where declared, USD.
 

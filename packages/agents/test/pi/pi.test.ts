@@ -57,6 +57,9 @@ import {
 } from "../../src/harness/pi/sdk.ts";
 import { resolvePiPool } from "../../src/harness/pi/authentication.ts";
 
+/** Fails a Pi completion that the test doesn't expect. */
+const noCompletion = () => Promise.reject(new Error("The test runs no completion"));
+
 const noDelivery: OnDelivery = () => Effect.void;
 const childTools = ["read", "bash", "edit", "write"];
 
@@ -193,6 +196,7 @@ describe("Pi child backend", () => {
       subscribe: () => () => {},
     };
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: () =>
         Promise.resolve({
           _tag: "Started",
@@ -231,6 +235,7 @@ describe("Pi child backend", () => {
       const fork = Effect.runForkWith(context);
       let opens = 0;
       const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
         start: () => {
           opens += 1;
           return Promise.resolve({
@@ -293,6 +298,7 @@ describe("Pi child backend", () => {
       const listeners: Array<(event: PiSessionEvent) => void> = [];
       const steered: Array<string> = [];
       const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
         start: () =>
           Promise.resolve({
             _tag: "Started",
@@ -357,6 +363,7 @@ describe("Pi child backend", () => {
       };
       let endTurn: (() => void) | undefined;
       const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
         start: () =>
           Promise.resolve({
             _tag: "Started",
@@ -421,6 +428,7 @@ describe("Pi child backend", () => {
       () =>
         Effect.gen(function* () {
           const sdk = Layer.succeed(PiSdk)({
+            complete: noCompletion,
             start: () =>
               Promise.resolve({
                 _tag: "Started",
@@ -459,6 +467,7 @@ describe("Pi child backend", () => {
     Effect.gen(function* () {
       const listeners: Array<(event: PiSessionEvent) => void> = [];
       const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
         start: () =>
           Promise.resolve({
             _tag: "Started",
@@ -565,6 +574,7 @@ describe("Pi child backend", () => {
     };
     const effectiveModel = ModelId.make(model);
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: (found) => {
         options = found;
         return Promise.resolve({
@@ -653,6 +663,7 @@ describe("Pi child backend", () => {
       },
     };
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: () =>
         Promise.resolve({
           _tag: "Started",
@@ -710,6 +721,7 @@ describe("Pi child backend", () => {
   it.effect("refuses a remote host before starting the Pi SDK", () => {
     let started = false;
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: () => {
         started = true;
         return Promise.resolve({ _tag: "UnknownModel" });
@@ -740,6 +752,7 @@ describe("Pi child backend", () => {
 
   it.effect("surfaces an unknown configured child model as a typed failure", () => {
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: () => Promise.resolve({ _tag: "UnknownModel" }),
     });
     return Effect.scoped(
@@ -770,6 +783,7 @@ describe("Pi child backend", () => {
   ] as const) {
     it.effect(`rejects ${started.model} with ${started._tag}`, () => {
       const sdk = Layer.succeed(PiSdk)({
+        complete: noCompletion,
         start: () => Promise.resolve(started),
       });
       return Effect.scoped(
@@ -853,6 +867,7 @@ describe("Pi child backend", () => {
   it.effect("disposes a child session that resolves after launch interruption", () => {
     const delayed = delayedPiStart();
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: delayed.start,
     });
 
@@ -877,6 +892,7 @@ describe("Pi child backend", () => {
 
   it.effect("reports a failed native reopen as interrupted", () => {
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: (options) => {
         assert.strictEqual(options.storage._tag, "Resume");
         return Promise.reject(new Error("Saved conversation unavailable"));
@@ -899,6 +915,7 @@ describe("Pi child backend", () => {
 
   it.effect("maps Pi SDK trouble to a session operation failure", () => {
     const sdk = Layer.succeed(PiSdk)({
+      complete: noCompletion,
       start: () => Promise.reject(new Error("provider unavailable")),
     });
     return Effect.scoped(
@@ -978,6 +995,7 @@ describe("Pi child backend", () => {
           ({ session }) => Effect.sync(() => session.dispose()),
         );
         const sdk = Layer.succeed(PiSdk)({
+          complete: noCompletion,
           start: () =>
             Promise.resolve({
               _tag: "Started",

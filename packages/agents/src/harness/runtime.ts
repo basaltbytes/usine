@@ -15,7 +15,14 @@ import { CredentialRoute, Placement } from "./capability.ts";
 import { ChildHost } from "../child-host/child-host.ts";
 import { SessionOperationError } from "../runtime.ts";
 import type { ContinuationPolicy } from "./continuation.ts";
-import type { NativeSession, SessionSpec, Start } from "./contract.ts";
+import type {
+  Completion,
+  CompletionError,
+  CompletionOutput,
+  NativeSession,
+  SessionSpec,
+  Start,
+} from "./contract.ts";
 
 /** Where and how to check a brain without starting a prompt. */
 export class ProbeTarget extends Schema.Class<
@@ -33,8 +40,9 @@ export class ProbeTarget extends Schema.Class<
 }) {}
 
 /**
- * One harness behind a role-neutral seam: a preflight without a prompt, and native sessions opened
- * from a `SessionSpec`. Roles add their policy on top, as `childContinuation` does for children.
+ * One harness behind a role-neutral seam: a preflight without a prompt, native sessions opened
+ * from a `SessionSpec`, and structured completions. Roles add their policy on top, as
+ * `childContinuation` does for children.
  */
 export interface HarnessRuntime {
   readonly id: Harness;
@@ -48,6 +56,16 @@ export interface HarnessRuntime {
     start: Start,
     continuation: ContinuationPolicy,
   ) => Effect.Effect<NativeSession, AgentSessionError, Scope.Scope>;
+  /**
+   * Sends `prompt` once and returns one value that `output` decodes, without saving a
+   * conversation. The harness offers the model no usine tools, and a harness that can't turn its
+   * own tools off runs them without write access.
+   */
+  readonly complete: <A>(
+    spec: SessionSpec,
+    prompt: string,
+    output: CompletionOutput<A>,
+  ) => Effect.Effect<Completion<A>, CompletionError>;
   /** Stops a retained native process of `spec` without reopening its conversation. */
   readonly stop: (spec: SessionSpec) => Effect.Effect<void, AgentSessionError>;
   readonly preflight: (

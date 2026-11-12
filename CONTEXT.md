@@ -212,6 +212,10 @@ _Avoid_: backend, adapter, runner, agent
 What a session does for usine, such as the coordinator, the coding agent, or the supervisor. A role states the placements, credential routes, tools, and persistence it needs; admission refuses a harness that lacks one. A member's access comes from a role binding instead.
 _Avoid_: agent type, mode, persona
 
+**Completion**:
+One schema-checked value that a harness returns for one prompt, with no saved conversation.
+_Avoid_: structured call, one-shot
+
 **Pool**:
 The billing source for an attempt's usage: API keys, the Claude plan, or the ChatGPT plan.
 _Avoid_: budget, account, quota

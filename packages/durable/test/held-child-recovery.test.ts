@@ -66,6 +66,7 @@ for (const supervision of [
             const started = yield* Deferred.make<AgentSessionId>();
             const idle = yield* Deferred.make<void>();
             const sdk = Layer.succeed(PiSdk)({
+              complete: () => Promise.reject(new Error("The test runs no completion")),
               start: async (options) => {
                 assert.strictEqual(options.storage._tag, resumed ? "Resume" : "Create");
                 if (options.storage._tag === "Resume")

@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
-import { it } from "@effect/vitest";
-import { Effect } from "effect";
+import { assert, it } from "@effect/vitest";
+import { Effect, Result } from "effect";
+import { completionScenarios, openCompletionFixture, recordedValues } from "./completion.ts";
 import {
   openFixture,
   openPiFixture,
@@ -26,6 +27,21 @@ export const recordContracts = (provider: Provider): void => {
               Effect.provide(fixture.backend),
               fixture.tape.guard,
             );
+            yield* fixture.save;
+          }),
+        ).pipe(Effect.provide(NodeServices.layer)),
+      240_000,
+    );
+  for (const scenario of completionScenarios)
+    it.live.skipIf(recordingModel(provider) === undefined)(
+      `records ${provider}: ${scenario}`,
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fixture = yield* openCompletionFixture(provider, scenario, "record");
+            const completion = yield* fixture.run;
+            assert(Result.isSuccess(completion), "the recorded completion returns a value");
+            assert.deepStrictEqual(completion.success.value, recordedValues[scenario]);
             yield* fixture.save;
           }),
         ).pipe(Effect.provide(NodeServices.layer)),
