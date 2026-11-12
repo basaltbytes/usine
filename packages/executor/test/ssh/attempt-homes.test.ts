@@ -226,7 +226,7 @@ describe.skipIf(process.platform !== "linux")("Claude container sessions (Linux 
             }),
             readOnly: [],
             writable,
-            harnesses: [harness],
+            logins: [harness],
             environment: {},
             secrets: {},
           });
