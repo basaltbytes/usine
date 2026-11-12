@@ -1,6 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
-import { Effect, Predicate, Ref, Stream } from "effect";
+import { Effect, Predicate, Stream } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { createServer, type Http2Session } from "node:http2";
 import { runLocally as runCommand } from "../../remote/local-command.ts";
@@ -133,45 +133,40 @@ export const fakeBoxdExec = (options: {
   });
 
 /**
- * Returns a `BoxdExec` that runs each command line through `spawner` as
- * `boxd-exec <machine> -- <line>`, which `fakeMachine` answers as it answers an SSH command to the
- * machine, and reports its exit code 255 as a call that boxd ended with `UNAVAILABLE`.
+ * Returns a `BoxdExec` that runs each command line on `machine` through its spawner as
+ * `boxd-exec <machine> -- <line>`, which the fake machine answers as it answers an SSH command. While
+ * the machine isn't reachable, a call ends with `UNAVAILABLE`, as boxd ends it, and counts in
+ * `refusedCalls`.
  */
-export const spawnedBoxdExec = (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
+export const spawnedBoxdExec = (machine: {
+  readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
+  readonly state: { readonly reachable: boolean; refusedCalls: number };
+}) =>
   BoxdExec.of({
-    exec: (machine, command, stdin) =>
+    exec: (id, command, stdin) =>
       Effect.gen(function* () {
-        const handle = yield* spawner
-          .spawn(ChildProcess.make("boxd-exec", [machine, "--", command], { stdin }))
+        if (!machine.state.reachable) {
+          machine.state.refusedCalls += 1;
+          return {
+            stdout: Stream.empty,
+            stderr: Stream.empty,
+            exitCode: Effect.fail(
+              BoxdCallError.make({
+                operation: "exec",
+                url: BOXD_ENDPOINT,
+                code: "UNAVAILABLE",
+                message: `lost the connection to machine ${id}`,
+              }),
+            ),
+          };
+        }
+        const handle = yield* machine.spawner
+          .spawn(ChildProcess.make("boxd-exec", [id, "--", command], { stdin }))
           .pipe(Effect.orDie);
-        const stderr = yield* Ref.make("");
         return {
           stdout: handle.stdout.pipe(Stream.orDie),
-          stderr: handle.stderr.pipe(
-            Stream.orDie,
-            Stream.tap((bytes) =>
-              Ref.update(stderr, (text) => text + new TextDecoder().decode(bytes)),
-            ),
-          ),
-          exitCode: handle.exitCode.pipe(
-            Effect.orDie,
-            Effect.flatMap((code) =>
-              code === 255
-                ? Ref.get(stderr).pipe(
-                    Effect.flatMap((message) =>
-                      Effect.fail(
-                        BoxdCallError.make({
-                          operation: "exec",
-                          url: BOXD_ENDPOINT,
-                          code: "UNAVAILABLE",
-                          message,
-                        }),
-                      ),
-                    ),
-                  )
-                : Effect.succeed(Number(code)),
-            ),
-          ),
+          stderr: handle.stderr.pipe(Stream.orDie),
+          exitCode: handle.exitCode.pipe(Effect.orDie, Effect.map(Number)),
         };
       }),
   });

@@ -6,7 +6,6 @@ import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
 import { jsonKey } from "@usine/core/json-key";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
-import type { ChildProcessSpawner } from "effect/process";
 
 /** The base URL of the fake Hetzner Cloud API. */
 export const HETZNER_TEST_API = "https://hetzner.test/v1";
@@ -535,14 +534,14 @@ export const fakeProviders = () => {
      * the endpoint and credential of each connection in `boxd.connections`.
      */
     boxdExecOn:
-      (machine: { readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"] }) =>
+      (machine: Parameters<typeof spawnedBoxdExec>[0]) =>
       (endpoint: string, credential: Effect.Effect<Redacted.Redacted<string>, BoxdCallError>) =>
         Layer.effect(
           BoxdExec,
           credential.pipe(
             Effect.map((bearer) => {
               boxd.state.connections.push({ endpoint, credential: Redacted.value(bearer) });
-              return spawnedBoxdExec(machine.spawner);
+              return spawnedBoxdExec(machine);
             }),
             Effect.orDie,
           ),
