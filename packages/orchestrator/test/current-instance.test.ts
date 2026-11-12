@@ -3,7 +3,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { InstancePath } from "@usine/config/file";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { DurableHarness } from "@usine/durable/harness";
 import { gatewayModelAccess } from "@usine/durable/gateway";
 import { fauxParent } from "@usine/durable/testing";
@@ -398,6 +398,39 @@ describe("CurrentInstance", () => {
       }).pipe(Effect.scoped),
     ).pipe(Effect.provide(changeBusLayer), Effect.scoped),
   );
+
+  it.live("logs undeclared outcome labels at startup and when it applies a revision", () => {
+    const logged: Array<unknown> = [];
+    const outcomeLabels = Logger.make<unknown, void>(({ message }) => {
+      if (
+        Array.isArray(message) &&
+        message[0] === "Loop outcome label is not a declared GitHub label"
+      )
+        logged.push(message[1]);
+    });
+    const startDev = (label: string) =>
+      [
+        "loops/start-dev.md",
+        loopFile("developer").replace("step:", `outcome_labels: [${label}]\nstep:`),
+      ] as const;
+    return withFolder(
+      (root) =>
+        Effect.gen(function* () {
+          // The test store reads the folder, which logs once before each install logs again.
+          assert.deepStrictEqual(logged, [
+            { loop: "start-dev", label: "shipped" },
+            { loop: "start-dev", label: "shipped" },
+          ]);
+          yield* writeInstanceFiles(root, [startDev("shipped-v2")]);
+          yield* (yield* CurrentInstance).reload;
+          assert.deepStrictEqual(logged.slice(2), [
+            { loop: "start-dev", label: "shipped-v2" },
+            { loop: "start-dev", label: "shipped-v2" },
+          ]);
+        }),
+      [...initialFiles.filter(([file]) => file !== "loops/start-dev.md"), startDev("shipped")],
+    ).pipe(Effect.withLogger(outcomeLabels));
+  });
 
   it.live("keeps the running instance when the configuration store cannot be read", () =>
     withFolder((root) =>

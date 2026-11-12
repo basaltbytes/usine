@@ -60,7 +60,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { LaneName } from "@usine/config/board";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { runDetailKey, runDetailKeys } from "~/lib/runs/queries";
 import {
   mergeEarlierTranscript,

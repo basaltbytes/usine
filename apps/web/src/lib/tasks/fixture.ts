@@ -1,6 +1,6 @@
 import { RunSummaryView, AttemptSummaryView } from "@usine/orchestrator/operator";
 import { LabelLaneSource, LaneName, StateLaneSource } from "@usine/config/board";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";

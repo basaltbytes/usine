@@ -21,7 +21,7 @@ import {
   LaneName,
   StateLaneSource,
 } from "@usine/config/board";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   AgentFailureView,

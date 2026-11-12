@@ -220,9 +220,65 @@ it("does not treat ordinary narration or an embedded harness failure as a reserv
     "The child was [usine:provider-capacity] but recovery completed.",
     "Published. The earlier [usine:blocked] outcome is resolved.",
     "Answered the earlier [usine:question] and completed the review.",
+    "The child ended with **[usine:blocked]** and I resolved it.",
+    "The markers ([usine:blocked] and [usine:question]) are reserved.",
+    "See the [[usine:blocked]](https://example.com) marker docs.",
+    "Published.[usine:blocked] was the earlier outcome, now resolved.",
   ]) {
     assert(Option.isNone(reportedOutcome(Option.none(), answer)));
   }
+});
+
+const quotedReports = [
+  "The child returned [usine:blocked]\nso I continued.",
+  'Reviewed the parser: `reportedOutcome(id, "[usine:blocked]\\nmsg")` stays a mention.',
+  'const answer = "[usine:question]\\nWhich transport?";',
+  "Example report:\n```text\n[usine:blocked]\nPermission denied.\n```\nThe review passed.",
+  "Example:\n~~~~\nNarration.[usine:question]\n~~~\n[usine:blocked]\n~~~~\nDone.",
+  "Unclosed example:\n```\n[usine:blocked]\nPermission denied.",
+  "Example:\n```\nSnippet:\n```bash\n[usine:blocked]\n```\nDone.",
+  "Example answer:\n~~~\n```\n[usine:blocked]\nNo access.\n```\n~~~\nDone.",
+  "Example:\n```\n~~~\n[usine:question]\nWhich?\n```\nDone.",
+  "- Ex:\n\n    ```\n    [usine:blocked]\n    ```\nDone.",
+  "- Ex:\n\n\t```\n\t[usine:question]\n\t```\nDone.",
+  'The child answered "[usine:blocked]\nNo access." and I continued.',
+  "The child answered '[usine:question]\nWhich transport?' and I chose HTTP.",
+  "const answer = `[usine:blocked]\nNo access.`;",
+  'prompt = """[usine:question]\nWhich transport?"""',
+  'The child answered:\n"[usine:blocked]\nNo access."\nI continued with the fix.',
+  'The child answered ("[usine:blocked]\nNo access.") and I continued.',
+  "answer=`[usine:blocked]\nNo access.`;",
+] as const;
+
+it.each(quotedReports)("treats a quoted marker as ordinary text: %j", (answer) => {
+  assert(Option.isNone(reportedOutcome(Option.none(), answer)));
+});
+
+it("recognizes a report header after a closed code fence", () => {
+  const report = reportedOutcome(
+    Option.none(),
+    "Example:\n```\n[usine:question]\n```\nThe review is blocked.[usine:blocked]\r\nPermission denied.",
+  );
+  assert(Option.isSome(report));
+  assert.strictEqual(report.value._tag, "AgentBlockedError");
+  assert.strictEqual(report.value.message, "Permission denied.");
+});
+
+it.each([
+  "- Ex:\n\n    ```\n    [usine:question]\n    ```\n[usine:blocked]\nNo access.",
+  "- Ex:\n\n\t~~~\n\t[usine:question]\n\t~~~\n[usine:blocked]\nNo access.",
+  "I wrapped the output in ```text fences.\n[usine:blocked]\nNo access.",
+  "Ran ```pnpm test```.[usine:blocked]\nNo access.",
+  "Ran ```pnpm test```[usine:blocked]\nNo access.",
+  "Next I need to run `gh pr view`[usine:blocked]\nNo access.",
+  'The command failed with "permission denied"[usine:blocked]\nNo access.',
+  "I could not reach 'api.github.com'[usine:blocked]\nNo access.",
+  'I ran `git commit -m ""`[usine:blocked]\nNo access.',
+])("recognizes a report header after an indented fence or inline backticks: %j", (answer) => {
+  const report = reportedOutcome(Option.none(), answer);
+  assert(Option.isSome(report));
+  assert.strictEqual(report.value._tag, "AgentBlockedError");
+  assert.strictEqual(report.value.message, "No access.");
 });
 
 it("uses the first blocker or question when a final answer includes multiple reports", () => {

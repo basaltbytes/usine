@@ -46016,6 +46016,23 @@
               "pattern": "^\\S(?:.*\\S)?$",
               "maxLength": 50
             }
+          },
+          "outcomeLabels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\S(?:.*\\S)?$",
+              "maxLength": 50
+            },
+            "uniqueItems": true
+          },
+          "undeclaredOutcomeLabels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\S(?:.*\\S)?$",
+              "maxLength": 50
+            }
           }
         },
         "required": [
@@ -46035,7 +46052,9 @@
           "agent",
           "prompt",
           "paused",
-          "undeclaredLabels"
+          "undeclaredLabels",
+          "outcomeLabels",
+          "undeclaredOutcomeLabels"
         ],
         "additionalProperties": false
       },

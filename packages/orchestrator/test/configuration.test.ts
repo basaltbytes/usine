@@ -2,7 +2,7 @@ import { jsonKey } from "@usine/core/json-key";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -130,6 +130,7 @@ agent: reviewer
 permissions: read
 priority: 2
 step: review
+outcome_labels: [ready, review-pased]
 ---
 Review the pull request.
 `,
@@ -336,6 +337,8 @@ describe("Configuration view", () => {
       );
       assert.isTrue(startDev.paused);
       assert.deepStrictEqual(startDev.undeclaredLabels, ["urgent"]);
+      assert.deepStrictEqual(startDev.outcomeLabels, []);
+      assert.deepStrictEqual(startDev.undeclaredOutcomeLabels, []);
 
       const review = byName.get(LoopName.make("review"));
       assert(review !== undefined, "review is loaded");
@@ -343,6 +346,8 @@ describe("Configuration view", () => {
       assert.deepStrictEqual(review.repositories, [usine]);
       assert.strictEqual(review.permissions, "read");
       assert.strictEqual(review.priority, 2);
+      assert.deepStrictEqual(review.outcomeLabels, ["ready", "review-pased"]);
+      assert.deepStrictEqual(review.undeclaredOutcomeLabels, ["review-pased"]);
       assert.isFalse(review.paused);
 
       const nightly = byName.get(LoopName.make("nightly"));

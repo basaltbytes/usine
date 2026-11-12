@@ -145,6 +145,8 @@ Run `pnpm --filter @usine/core check` after building dependencies to check TypeS
 
 `@usine/core/step/output` exports `StepOutput`, `StepOutputRef`, their branded fields, and the output limits. `StepResult.outputs` contains metadata only and defaults to an empty array when reading older results. `StepCompletion` (`/step/result`) contains the result and full output documents for executor transport and durable recovery.
 
-`OutcomeLabels` (`/loop`) defines the labels that can prove a loop completed its task. An empty list disables verification; otherwise, any one listed label satisfies the requirement.
+`OutcomeLabels` (`/loop`) defines the labels that can prove a loop completed its task. An empty list disables verification; otherwise, any one listed label satisfies the requirement. Each entry is a `GitHubLabelName`.
+
+`@usine/core/label` exports `GitHubLabelName`, a trimmed label name of at most 50 characters, and `canonicalLabelName`, the case-insensitive comparison key that GitHub uses.
 
 SSH machine providers include Hetzner Cloud, Boat, and boxd. The worker schemas define boxd snapshot names, region ids, captured sizes, and egress allowlist entries.

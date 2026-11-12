@@ -51,7 +51,7 @@ import { StepName, Step } from "@usine/core/step";
 import { SshDestination, WorkerName } from "@usine/core/worker";
 import { AgentFile, InvalidAgent } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";

@@ -9,7 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { DateTime, Option } from "effect";
 import { assert, it } from "@effect/vitest";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { RepositoryName } from "@usine/core/repository";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { PoolLimitNeed, PreflightFindingNeed } from "../src/operator/need.ts";

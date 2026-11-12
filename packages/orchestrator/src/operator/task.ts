@@ -8,7 +8,7 @@ import { LoopName } from "@usine/core/loop";
 import { boardRepositories } from "@usine/config/project";
 import { LaneName } from "@usine/config/board";
 import type { LoadedInstance } from "@usine/config/instance";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
