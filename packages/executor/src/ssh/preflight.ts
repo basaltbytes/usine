@@ -58,15 +58,18 @@ const containerLogins = Effect.fn("SshExecutor.containerLogins")(function* (
   for (const harness of harnesses) {
     const credentialRoute = machineCredentialRoute(catalog, machine, harness);
     const files = credentialRoute === "host-login" ? loginFiles(harness) : [];
-    yield* Effect.logInfo("Chose the login files that the Worker's containers mount", {
-      worker,
-      host: machine.shell.destination,
-      harness,
-      credentialRoute,
-      mounted: files.flatMap(({ file, mounted }) => (mounted ? [file] : [])).join(","),
-      seeded: files.flatMap(({ file, mounted }) => (mounted ? [] : [file])).join(","),
-      reason: LOGIN_MOUNT_REASONS[credentialRoute],
-    });
+    yield* Effect.logInfo(
+      "Chose the login files that the Worker's containers mount if the machine has them",
+      {
+        worker,
+        host: machine.shell.destination,
+        harness,
+        credentialRoute,
+        mounted: files.flatMap(({ file, mounted }) => (mounted ? [file] : [])).join(","),
+        seeded: files.flatMap(({ file, mounted }) => (mounted ? [] : [file])).join(","),
+        reason: LOGIN_MOUNT_REASONS[credentialRoute],
+      },
+    );
     if (files.length > 0) logins.push(harness);
   }
   return logins;

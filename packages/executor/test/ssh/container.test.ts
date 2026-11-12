@@ -1549,8 +1549,9 @@ describe("SSH Worker with Docker", () => {
       Effect.gen(function* () {
         const line = lines.find(
           (line) =>
-            line.includes("Chose the login files that the Worker's containers mount") &&
-            line.includes(`"harness":"${harness}"`),
+            line.includes(
+              "Chose the login files that the Worker's containers mount if the machine has them",
+            ) && line.includes(`"harness":"${harness}"`),
         );
         assert(line !== undefined, "preflight logs the login files");
         return (yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie))[1];
@@ -1637,8 +1638,9 @@ describe("SSH Worker with Docker", () => {
         ] as const) {
           const line = logs.infos.find(
             (line) =>
-              line.includes("Chose the login files that the Worker's containers mount") &&
-              line.includes(`"harness":"${harness}"`),
+              line.includes(
+                "Chose the login files that the Worker's containers mount if the machine has them",
+              ) && line.includes(`"harness":"${harness}"`),
           );
           assert(line !== undefined, `preflight logs ${harness}`);
           const fields = (yield* Schema.decodeEffect(CapturedLog)(line).pipe(Effect.orDie))[1];
