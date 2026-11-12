@@ -9,7 +9,7 @@ import {
   TokenCount,
 } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect, Fiber, Option, Schema } from "effect";
+import { Array as Arr, Effect, Fiber, Option, Predicate, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { LocalProcess } from "../src/child-host/child-host.ts";
 import { AdmissionContext, AdmittedBrain } from "../src/harness/admission.ts";
@@ -39,6 +39,7 @@ import {
   UnsupportedEffortError,
   WorkingDirectory,
 } from "../src/runtime.ts";
+import { isJsonObject } from "./replay/transcript.ts";
 
 const Verdict = Schema.Struct({ approved: Schema.Boolean });
 
@@ -68,9 +69,9 @@ const Tree = Schema.Struct({
 const referencesIn = (schema: Schema.Json): ReadonlyArray<string> =>
   Array.isArray(schema)
     ? schema.flatMap(referencesIn)
-    : typeof schema === "object" && schema !== null
+    : isJsonObject(schema)
       ? Object.entries(schema).flatMap(([key, value]) =>
-          key === "$ref" && typeof value === "string" ? [value] : referencesIn(value),
+          key === "$ref" && Predicate.isString(value) ? [value] : referencesIn(value),
         )
       : [];
 
@@ -333,7 +334,7 @@ describe("the structured completion seam", () => {
         assert.isNotEmpty(references, "the schema references a definition");
         const definitions = schema.$defs;
         assert(
-          typeof definitions === "object" && definitions !== null && !Array.isArray(definitions),
+          definitions !== undefined && isJsonObject(definitions) && !Array.isArray(definitions),
           "the schema sends its definitions",
         );
         for (const reference of references) {

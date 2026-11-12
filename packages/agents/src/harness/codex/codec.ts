@@ -140,7 +140,7 @@ export const toolName = (item: typeof ToolItem.Type): string => {
 };
 
 /** Converts a rate-limit window, with reset timestamps in UTC and absent values as `None`. */
-export const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
+const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
   CoreRateLimitWindow.make({
     usedPercent: window.usedPercent,
     windowDurationMinutes: Option.fromNullishOr(window.windowDurationMins),
