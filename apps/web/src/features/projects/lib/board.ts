@@ -6,6 +6,7 @@ import {
   type UniqueIdentifier,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { isSettledItemState } from "@usine/config/board";
 import type { BoardLaneView, ProjectView, RunSummaryView } from "@usine/orchestrator/operator";
 import { type BoardMoveProgress } from "~/hooks/projects/moves";
 
@@ -16,6 +17,20 @@ export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<B
   ...lanes.filter(({ _tag, origin }) => _tag !== "WritableBoardLane" && origin !== "fallback"),
   ...lanes.filter(({ origin }) => origin === "fallback"),
 ];
+
+const closedOnly = (lane: BoardLaneView): boolean =>
+  lane.sources.length > 0 &&
+  lane.sources.every((source) => "state" in source && isSettledItemState(source.state));
+
+/** Returns whether the operator can fold a lane to a rail: the fallback lane or a lane of closed Items. */
+export const foldableLane = (lane: BoardLaneView): boolean =>
+  lane.origin === "fallback" || closedOnly(lane);
+
+/** Returns whether a lane starts folded: a lane of closed Items, or the fallback lane with no open
+ * Item. */
+export const foldsByDefault = (lane: BoardLaneView): boolean =>
+  closedOnly(lane) ||
+  (lane.origin === "fallback" && lane.items.every(({ state }) => isSettledItemState(state)));
 
 /** Returns the lane of a drop target, which is either a lane or one of its cards. */
 export const laneUnder = (
