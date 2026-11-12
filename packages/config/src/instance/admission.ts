@@ -1,4 +1,4 @@
-import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
+import { admitBrain, AdmissionContext, catalog, codingAgent } from "@usine/agents/harness";
 import { Option, Result } from "effect";
 import type { AgentFile } from "../agent.ts";
 import type { UsineConfig } from "../factory.ts";
@@ -37,7 +37,7 @@ export const brainAdmissionProblems = (
             ? "api-key"
             : "host-login",
       });
-      const admitted = admitBrain(catalog, "coding-agent", brain, context);
+      const admitted = admitBrain(catalog, codingAgent, brain, context);
       return Result.isSuccess(admitted)
         ? []
         : [

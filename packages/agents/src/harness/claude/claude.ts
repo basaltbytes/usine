@@ -1,13 +1,7 @@
 import type { OperatorMessageId } from "@usine/core/attempt/channel";
 import { childContinuation, checkContinuationHome, environmentHome } from "../continuation.ts";
 import { type SessionSpec, type Start } from "../contract.ts";
-import {
-  gatewayCredential,
-  parentFields,
-  resolvedSession,
-  startPrompt,
-  startReference,
-} from "../adapter.ts";
+import { parentFields, resolvedSession, startPrompt, startReference } from "../adapter.ts";
 import { HarnessCatalog } from "../harness.ts";
 import { claudePreflight } from "./preflight.ts";
 import { claude } from "./descriptor.ts";
@@ -486,23 +480,22 @@ const makeClaudeSessions = Effect.gen(function* () {
         start._tag === "StartResume" ? "resume" : undefined,
       );
 
-      const gateway = gatewayCredential(spec.route.credential);
-      const usesApiKey = Option.isNone(gateway)
-        ? yield* Effect.tryPromise({
-            try: () => current.query.usesApiKey(),
-            catch: (cause) =>
-              operationError("launch", spec, "Claude account discovery failed", cause),
-          })
-        : gateway.value === "api-key";
+      // A route without a gateway credential kind leaves the pool to Claude Code's own account.
+      const pool = Option.isSome(spec.admitted.pool)
+        ? spec.admitted.pool.value
+        : (yield* Effect.tryPromise({
+              try: () => current.query.usesApiKey(),
+              catch: (cause) =>
+                operationError("launch", spec, "Claude account discovery failed", cause),
+            }))
+          ? "apiKeys"
+          : "claudePlan";
       const session = resolvedSession(spec.session, {
         brain: spec.session.brain,
-        pool: Option.some(usesApiKey ? "apiKeys" : "claudePlan"),
+        pool: Option.some(pool),
         endpoint: spec.session.endpoint,
       });
-      yield* Effect.logInfo("Claude billing pool verified", {
-        sessionId: session.id,
-        pool: usesApiKey ? "apiKeys" : "claudePlan",
-      });
+      yield* Effect.logInfo("Claude billing pool verified", { sessionId: session.id, pool });
       const channel = yield* sessionChannel({
         label: "Claude child session",
         sessionId: session.id,

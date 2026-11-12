@@ -8,11 +8,11 @@ import {
   type RunningSession,
   WorkingDirectory,
 } from "../runtime.ts";
-import { AdmissionContext } from "./admission.ts";
+import { AdmittedBrain } from "./admission.ts";
 
 /**
- * What a harness session runs and where. A role builds the spec; an adapter only reads it, so the
- * spec names no role and no harness beyond the brain in `session`.
+ * What a harness session runs and where. A role builds the spec; an adapter only reads it, so an
+ * adapter never branches on the role and the spec names no harness beyond the brain.
  */
 export class SessionSpec extends Schema.Class<
   SessionSpec,
@@ -20,8 +20,8 @@ export class SessionSpec extends Schema.Class<
 >("@usine/agents/SessionSpec")({
   /** The usine identity and brain that the session's events carry. */
   session: AgentSession,
-  /** The placement and credential route that the session runs with. */
-  route: AdmissionContext,
+  /** The role, placement, credential route, and billing pool that admission resolved. */
+  admitted: AdmittedBrain,
   /** Where to start the harness process and run its commands. */
   host: ChildHost,
   /** The worker that `host` runs on. */

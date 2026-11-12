@@ -1,6 +1,7 @@
 import {
   admitBrain,
   AdmissionContext,
+  codingAgent,
   type HarnessCatalog,
   type HarnessCredential,
 } from "@usine/agents/harness";
@@ -41,7 +42,7 @@ export const harnessCredentialGap = (
     const harness = brain.harness;
     const admitted = admitBrain(
       catalog,
-      "coding-agent",
+      codingAgent,
       brain,
       AdmissionContext.make({
         placement: "container",

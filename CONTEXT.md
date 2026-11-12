@@ -205,8 +205,12 @@ A named definition of standing instructions and a brain spec (harness, model, re
 _Avoid_: profile, bot, teammate, persona
 
 **Harness**:
-The coding-agent CLI in an agent's brain spec: Claude Code, Codex CLI, or Pi.
+The CLI or SDK that runs an agent session: Claude Code, Codex, or Pi. An agent's brain spec names it.
 _Avoid_: backend, adapter, runner, agent
+
+**Role**:
+What a session does for usine, such as the coordinator, the coding agent, or the supervisor. A role states the placements, credential routes, tools, and persistence it needs; admission refuses a harness that lacks one. A member's access comes from a role binding instead.
+_Avoid_: agent type, mode, persona
 
 **Pool**:
 The billing source for an attempt's usage: API keys, the Claude plan, or the ChatGPT plan.

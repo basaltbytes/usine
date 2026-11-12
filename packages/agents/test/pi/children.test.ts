@@ -1,7 +1,8 @@
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { claude } from "../../src/harness/claude/descriptor.ts";
 import { pi } from "../../src/harness/pi/descriptor.ts";
-import { AdmissionContext } from "../../src/harness/admission.ts";
+import { AdmissionContext, AdmittedBrain } from "../../src/harness/admission.ts";
+import { RolePlacements, RoleSpec } from "../../src/harness/role.ts";
 import { continuationPolicy } from "../../src/harness/continuation.ts";
 import { SessionSpec, StartPrompt, StartResume } from "../../src/harness/contract.ts";
 import { Harnesses, type HarnessRuntime, ProbeTarget } from "../../src/harness/node.ts";
@@ -155,7 +156,7 @@ describe("harness runtime registration", () => {
       stop: () => Effect.void,
       preflight: checkedPreflight(() => Effect.void),
       open: (spec, start, continuation) => {
-        opened.push(`${id}:${spec.route.placement}:${start._tag}`);
+        opened.push(`${id}:${spec.admitted.context.placement}:${start._tag}`);
         return backend(id).open(spec, start, continuation);
       },
     });
@@ -172,25 +173,42 @@ describe("harness runtime registration", () => {
         }),
       ),
     });
-    const spec = (harness: Harness, route: AdmissionContext) =>
-      SessionSpec.make({
+    // A role declared here, with no change to admission, runs on workers like a coding agent.
+    const probe = RoleSpec.make({
+      name: RoleName.make("contract-probe"),
+      placement: RolePlacements.make({
+        placements: ["local", "ssh", "container", "sandbox"],
+        reason: "The contract probe runs on a worker",
+      }),
+      credential: Option.none(),
+      nativeTools: true,
+      hostTools: false,
+      persistence: "saved",
+      interventions: true,
+      output: "text",
+    });
+    const spec = (harness: Harness, route: AdmissionContext) => {
+      const brain = BrainSpec.make({
+        harness,
+        model: ModelId.make(`${harness}-model`),
+        effort: "high",
+      });
+      return SessionSpec.make({
         session: RoleSession.make({
           id: AgentSessionId.make(`role-${harness}`),
-          role: RoleName.make("contract-probe"),
+          role: probe.name,
           agent: AgentName.make("developer"),
-          brain: BrainSpec.make({
-            harness,
-            model: ModelId.make(`${harness}-model`),
-            effort: "high",
-          }),
+          brain,
         }),
-        route,
+        // The registry admits the spec again, so an unchecked route reaches its refusal.
+        admitted: AdmittedBrain.make({ role: probe, brain, context: route, pool: Option.none() }),
         host: LocalProcess.make(),
         worker: WorkerName.make("worker-1"),
         machine: Option.none(),
         cwd: WorkingDirectory.make("/remote/checkout"),
         environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
       });
+    };
     const prompt = "Probe the contract.";
     return Effect.scoped(
       Effect.gen(function* () {
@@ -216,7 +234,7 @@ describe("harness runtime registration", () => {
           false,
         ).pipe(Effect.flip);
         assert.strictEqual(remote._tag, "AgentResultError");
-        assert.include(remote.message, "pi cannot run as coding-agent at ssh: lacks ssh");
+        assert.include(remote.message, "pi cannot run as contract-probe at ssh: lacks ssh");
         const resumed = yield* open(
           spec(claude.id, AdmissionContext.make({ placement: "local", credential: "host-login" })),
           true,

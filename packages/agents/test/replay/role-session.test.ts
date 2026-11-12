@@ -6,8 +6,10 @@ import {
   RoleName,
   RoleSession,
 } from "@usine/core/agent/session";
-import { Effect, Fiber, Option, Stream } from "effect";
-import { AdmissionContext } from "../../src/harness/admission.ts";
+import { Effect, Fiber, Option, Result, Stream } from "effect";
+import { admitBrain, AdmissionContext } from "../../src/harness/admission.ts";
+import { catalog } from "../../src/harness/catalog.ts";
+import { RolePlacements, RoleSpec } from "../../src/harness/role.ts";
 import { claudeRuntime } from "../../src/harness/claude/claude.ts";
 import { codexRuntime } from "../../src/harness/codex/codex.ts";
 import { continuationPolicy } from "../../src/harness/continuation.ts";
@@ -16,6 +18,19 @@ import { RestartState } from "../../src/runtime.ts";
 import { openFixture, providers } from "./fixture.ts";
 
 const prompt = "Reply with exactly REPLAY_DONE. Do not use tools.";
+const probe = RoleSpec.make({
+  name: RoleName.make("contract-probe"),
+  placement: RolePlacements.make({
+    placements: ["local"],
+    reason: "The contract probe runs on the local worker",
+  }),
+  credential: Option.none(),
+  nativeTools: true,
+  hostTools: false,
+  persistence: "saved",
+  interventions: true,
+  output: "text",
+});
 
 describe("role-neutral harness runtimes", () => {
   for (const provider of providers)
@@ -30,16 +45,20 @@ describe("role-neutral harness runtimes", () => {
             const session = RoleSession.make({
               // The recorded traffic names the session in process and pid file paths.
               id: AgentSessionId.make("replay-parent:child:1"),
-              role: RoleName.make("contract-probe"),
+              role: probe.name,
               agent: fixture.request.session.agent,
               brain: fixture.request.session.brain,
             });
+            const admitted = admitBrain(
+              catalog,
+              probe,
+              session.brain,
+              AdmissionContext.make({ placement: "local", credential: "gateway-subscription" }),
+            );
+            assert(Result.isSuccess(admitted));
             const spec = SessionSpec.make({
               session,
-              route: AdmissionContext.make({
-                placement: "local",
-                credential: "gateway-subscription",
-              }),
+              admitted: admitted.success,
               host,
               worker,
               machine,
