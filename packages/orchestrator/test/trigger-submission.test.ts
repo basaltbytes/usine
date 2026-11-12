@@ -47,3 +47,22 @@ it("removes the current CI handoff instructions from an Event recorded without t
     { prompt, removed: "none" },
   );
 });
+
+it("leaves the task unchanged when the CI handoff instructions aren't its end", () => {
+  const current = withCiInstructions("", Option.some(policy)).ciInstructions;
+  assert(Option.isSome(current));
+  const earlier = "\n\nAn earlier wording of the CI handoff.";
+  // A legacy Event that quotes today's wording earlier, as a CI log excerpt can, and ends with
+  // an older wording.
+  const quoting = AttemptTask.make(`${prompt}${current.value}\n\nLog excerpt.${earlier}`);
+  assert.deepStrictEqual(
+    recordedPrompt({ task: quoting, ciInstructions: Option.none(), ciPolicy: Option.some(policy) }),
+    { prompt: quoting, removed: "none" },
+  );
+  // Recorded instructions that more text follows.
+  const amended = AttemptTask.make(`${prompt}${current.value}\n\nAn amendment.`);
+  assert.deepStrictEqual(
+    recordedPrompt({ task: amended, ciInstructions: current, ciPolicy: Option.some(policy) }),
+    { prompt: amended, removed: "none" },
+  );
+});

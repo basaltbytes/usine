@@ -84,7 +84,7 @@ import { fixedInstance } from "./support/current-instance.ts";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { CiMonitor } from "../src/ci.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
-import { triggerSubmission } from "../src/trigger-submission.ts";
+import { triggerSubmission, withCiInstructions } from "../src/trigger-submission.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { inertLabelReconcilerLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
@@ -1960,6 +1960,60 @@ it.live.each(["added", "removed", "changed"] as const)(
         }).pipe(Effect.provide(setup.runtime));
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a CI fix records the CI handoff instructions that end its task", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const policy = CiPolicy.make({ fixLoop: loop.name, timeoutSeconds: 3600 });
+      const configured = LoadedInstance.make({
+        ...fixtureInstance,
+        loops: [LoopFile.make({ ...loop, ci: Option.some(policy) })],
+      });
+      const setup = yield* scenario(3600, configured);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        // The source Run is in another Loop, so nothing holds the fix back: it is admitted when
+        // it is recorded, with no recheck that could record its settings again.
+        const sourceId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+        );
+        yield* (yield* CiMonitor).reconcile(configured, Option.none());
+        const fixId =
+          (yield* reader.ciFixRuns([sourceId])).get(sourceId)?.runId ??
+          assert.fail("missing CI fix run");
+        const row = yield* Effect.sync(() => {
+          const database = new DatabaseSync(join(setup.directory, ".usine/runtime.sqlite"));
+          try {
+            return database
+              .prepare(
+                "SELECT task, ci_instructions FROM usine_trigger_events WHERE event_id = (SELECT event_id FROM usine_runs WHERE run_id = ?)",
+              )
+              .get(fixId);
+          } finally {
+            database.close();
+          }
+        }).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(
+              Schema.Struct({ task: Schema.String, ci_instructions: Schema.NullOr(Schema.String) }),
+            ),
+          ),
+        );
+        const current = withCiInstructions("", Option.some(policy)).ciInstructions;
+        assert(Option.isSome(current));
+        assert.strictEqual(row.ci_instructions, current.value);
+        assert(row.task.endsWith(current.value));
+        assert.include(row.task, "TypeError: failing CI log");
+        assert.strictEqual((yield* engine.inspect(fixId)).task, row.task);
+        yield* engine.drain;
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live.each(["an earlier wording", "no recorded instructions"] as const)(

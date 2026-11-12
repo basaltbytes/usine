@@ -32,6 +32,7 @@ import {
   type AttemptPlan,
   engineLayer,
   executorLayer,
+  stepResult,
   submission as supportSubmission,
   waitFor,
   withInstance,
@@ -474,6 +475,42 @@ it.live.each(["canceled", "revoked"] as const)(
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),
+);
+
+it.live.each([
+  { state: "Succeeded", plan: Effect.succeed(stepResult("fixed")) },
+  {
+    state: "Failed",
+    plan: BlockedFailure.make({ message: "The fix couldn't make the checks pass." }),
+  },
+] as const)("links a CI fix Run that ended as $state, with that state", ({ state, plan }) =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([plan]);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        const sourceId = RunId.make(`source-with-${state}-fix`);
+        const original = supportSubmission({ number: 1 });
+        const head = CommitSha.make("a".repeat(40));
+        const key = ciFixDedupKey(sourceId, head);
+        const fixed = yield* engine.submit(
+          Submission.make({
+            ...original,
+            event: Event.make({ ...original.event, id: EventId.make(key), dedupKey: key }),
+            ciFailureHead: Option.some(head),
+          }),
+        );
+        assert(fixed._tag === "Claimed");
+        yield* waitFor(engine, fixed.runId, ({ run }) => run.state._tag === state);
+        assert.deepStrictEqual(
+          (yield* reader.ciFixRuns([sourceId])).get(sourceId),
+          CiFixRun.make({ runId: fixed.runId, state }),
+        );
+        yield* engine.drain;
+      }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+    }),
+  ),
 );
 
 describe("Attempts by Worker", () => {
