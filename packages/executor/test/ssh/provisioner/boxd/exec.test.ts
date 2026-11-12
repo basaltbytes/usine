@@ -1,5 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { assert, describe, it } from "@effect/vitest";
+import { vi } from "vitest";
 import { HostUnreachable } from "@usine/agents/child-host";
 import { MachineId } from "@usine/core/worker";
 import {
@@ -21,7 +22,6 @@ import {
   BoxdExec,
   boxdExecLayer,
   boxdTransport,
-  DEFAULT_KEEPALIVE,
   STDIN_CHUNK_BYTES,
 } from "../../../../src/ssh/provisioner/boxd/exec.ts";
 import { BoxdCallError } from "../../../../src/ssh/provisioner/boxd/client.ts";
@@ -432,9 +432,46 @@ describe("BoxdExec", () => {
     }).pipe(Effect.scoped),
   );
 
-  it("fails a dead connection within a minute by default", () => {
-    assert.isAtMost(DEFAULT_KEEPALIVE.pingInterval + DEFAULT_KEEPALIVE.pingTimeout, 60_000);
-  });
+  it.live("fails a silent command within a minute by default when the connection dies", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const server = yield* fake(() =>
+        Stream.fromEffect(Deferred.succeed(started, undefined)).pipe(
+          Stream.flatMap(() => Stream.never),
+        ),
+      );
+      const proxy = yield* blackHoleProxy(new URL(server.url).port);
+      // The connection's PING timers run on the fake clock. Node's sockets and the fibers keep
+      // their real timers.
+      yield* Effect.acquireRelease(
+        Effect.sync(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })),
+        () => Effect.sync(() => vi.useRealTimers()),
+      );
+      const fiber = yield* Effect.gen(function* () {
+        const exec = yield* BoxdExec;
+        const execution = yield* exec.exec(MACHINE, "sleep 2400", Stream.never);
+        return yield* execution.exitCode;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(boxdExecLayer(proxy.url, bearer(KEY))),
+        Effect.flip,
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      proxy.drop();
+      for (let second = 0; second < 60 && fiber.pollUnsafe() === undefined; second++) {
+        vi.advanceTimersByTime(1_000);
+        yield* Effect.callback<void>((resume) => {
+          setImmediate(() => resume(Effect.void));
+        }).pipe(Effect.repeat({ times: 20 }));
+      }
+      const exit = fiber.pollUnsafe();
+
+      assert(exit !== undefined && Exit.isSuccess(exit), "the call outlived a minute");
+      assert.strictEqual(exit.value._tag, "BoxdCallError");
+      assert.strictEqual(exit.value.code, "UNAVAILABLE");
+    }).pipe(Effect.scoped),
+  );
 
   it.live("fails a silent command within the keepalive bound when the connection dies", () =>
     Effect.gen(function* () {

@@ -77,7 +77,7 @@ export interface ExecKeepalive {
 }
 
 /** The keepalive of a `boxdExecLayer` without options: a dead connection fails within 50 seconds. */
-export const DEFAULT_KEEPALIVE: ExecKeepalive = { pingInterval: 30_000, pingTimeout: 20_000 };
+const DEFAULT_KEEPALIVE: ExecKeepalive = { pingInterval: 30_000, pingTimeout: 20_000 };
 
 /**
  * The connection's session manager, which raises the connection's receive window on the session
