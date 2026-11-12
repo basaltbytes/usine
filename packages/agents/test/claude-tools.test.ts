@@ -346,6 +346,7 @@ describe("Claude Code usine tool sets", () => {
       assert(launch !== undefined);
       assert(Option.isNone(launch.server), "a completion serves no usine tools");
       assert.deepStrictEqual(launch.options.tools, []);
+      assert.strictEqual(launch.options.strictMcpConfig, true, "no MCP server from the worker");
     }).pipe(Effect.scoped, Effect.provide([answering, loginLock, NodeServices.layer]));
   });
 });

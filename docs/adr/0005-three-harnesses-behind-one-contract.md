@@ -12,9 +12,9 @@ An agent is standing instructions plus a brain spec: harness, model, and effort.
 
 ## Status
 
-Built: harness runtimes and descriptors, a role-neutral session spec (#1203), roles as declarations (#1204), and usine tool sets on Claude Code and Pi (#1205). Descriptors declare only what contract scenarios prove. The coding agent runs on all three; Pi on local workers only. Configuration selects the coordinator with `coordinator: session | events` (#1158): the Pi parent, which Claude Code and Codex refuse, or the event-driven coordinator (#1157).
+Built: harness runtimes and descriptors, a role-neutral session spec (#1203), roles as declarations (#1204), usine tool sets on Claude Code and Pi (#1205), and a structured `complete` on all three (#1208). Descriptors declare only what contract scenarios prove. The coding agent runs on all three; Pi on local workers only. Configuration selects the coordinator with `coordinator: session | events` (#1158): the Pi parent, which Claude Code and Codex refuse, or the event-driven coordinator (#1157).
 
-Decided, not built: the contract gains tool sets on Codex and a structured `complete` (#1206, #1208); until then, Codex refuses the supervisor (#799).
+Decided, not built: the contract gains tool sets on Codex (#1206); until then, Codex refuses the supervisor (#799).
 
 ## Considered options
 
