@@ -90,7 +90,9 @@ export const tracingLayer = (
   Option.match(tracing, {
     onNone: () =>
       Layer.effectDiscard(
-        Effect.logInfo("Span export is off; set tracing.otlp_url in usine.yaml to turn it on"),
+        Effect.logInfo(
+          "Span export is off; set tracing.otlp_url in the instance settings to turn it on",
+        ),
       ),
     onSome: ({ otlpUrl, serviceName }) =>
       Layer.unwrap(

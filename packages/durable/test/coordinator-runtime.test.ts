@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import { BLOCKED_MARKER, FAILED_MARKER, QUESTION_MARKER } from "@usine/agents/runtime";
 import {
   HarnessSession,
@@ -32,24 +31,27 @@ import {
   Schema,
   Scope,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { AttemptRequest, ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
+import type { BrainSpec } from "@usine/core/agent/brain";
 import {
   type AttemptContext,
   Complete,
   FIRST_ASSIGNMENT,
   REPLACEMENT_ASSIGNMENT,
 } from "../src/attempt/coordinator/rules.ts";
-import { AttemptJournal, Settled } from "../src/coordinator/journal.ts";
+import { AttemptJournal, EventSequence, Settled } from "../src/coordinator/journal.ts";
 import { outboxFor } from "../src/coordinator/outbox.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
-import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { RecordedDecision, WakeUp } from "../src/coordinator/wake-up.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
 import {
   assertAdmitted,
   attemptRequest,
+  handlerSession,
   recordingSink,
   slowToInterrupt,
+  sqliteJournal,
   temporaryDatabase,
   trace,
 } from "./support.ts";
@@ -62,12 +64,6 @@ const coordinated = (attemptId: string, maxChildren = 3) => {
     spec: AttemptChannel.RunSpec.make({ ...request.spec, parent: "none" }),
   });
 };
-
-const sqliteJournal = (database: string) =>
-  sqliteAttemptJournalLayer.pipe(
-    Layer.provide(SqliteClient.layer({ filename: database })),
-    Layer.orDie,
-  );
 
 /** Interrupts, as a process stop does, each transition whose event has tag `tag`. */
 const interruptingTransition = (tag: string) => (journal: Layer.Layer<AttemptJournal>) =>
@@ -128,6 +124,25 @@ const holdingStartDelegation =
           ...inner,
           startDelegation: () =>
             Deferred.succeed(reached, undefined).pipe(Effect.andThen(Effect.never)),
+        });
+      }),
+    ).pipe(Layer.provide(journal));
+
+/** Holds the `decide` call for event `sequence` after completing `reached`, until `release` completes. */
+const holdingDecide =
+  (sequence: EventSequence, reached: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  (journal: Layer.Layer<AttemptJournal>) =>
+    Layer.effect(
+      AttemptJournal,
+      Effect.gen(function* () {
+        const inner = yield* AttemptJournal;
+        return AttemptJournal.of({
+          ...inner,
+          decide: (attemptId, decided, decision) =>
+            (decided === sequence
+              ? Deferred.succeed(reached, undefined).pipe(Effect.andThen(Deferred.await(release)))
+              : Effect.void
+            ).pipe(Effect.andThen(inner.decide(attemptId, decided, decision))),
         });
       }),
     ).pipe(Layer.provide(journal));
@@ -264,8 +279,15 @@ const stored = (database: string, attemptId: AttemptId) =>
     Effect.provide(sqliteJournal(database)),
   );
 
-const decides = (message: string, handler: RecordedDecision["handler"]) =>
-  Effect.succeedSome(RecordedDecision.make({ decision: Complete.make({ message }), handler }));
+/** A model handler's decision to complete the Attempt with `message`. */
+const decides = (message: string, handler: Exclude<RecordedDecision["handler"], "rule">) =>
+  Effect.succeedSome(
+    RecordedDecision.make({
+      decision: Complete.make({ message }),
+      handler,
+      session: Option.some(handlerSession),
+    }),
+  );
 
 const decodeChildReport = Schema.decodeUnknownOption(
   Schema.TaggedStruct("ChildReported", { report: Schema.String }),
@@ -425,6 +447,36 @@ describe("event-driven coordinator runtime", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "stops a canceled Attempt's child without a resume when the cancel escalates to an interrupt",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated("coordinator/cancel-escalates");
+        const recording = recordingSink();
+        const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+        const execution = yield* process.execute(request, recording.sink);
+        const child = yield* process.nextChild;
+        yield* child.stall;
+        // As the executor does: cancel, wait a bounded time, then interrupt `execute`.
+        const canceling = yield* process.attempts
+          .cancel(request.spec.attemptId)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* child.interrupted;
+        const interrupted = yield* Fiber.interrupt(execution).pipe(
+          Effect.timeoutOption("2 seconds"),
+        );
+        const stoppingOnClose = yield* child.closed;
+        yield* Fiber.join(canceling);
+        const live = yield* process.attempts.isLive(request.spec.attemptId);
+        yield* process.stop;
+
+        assert(Option.isSome(interrupted), "the interrupt waited for the child to stop");
+        assert.isFalse(stoppingOnClose);
+        assert.isFalse(live);
+      }).pipe(Effect.scoped),
+  );
+
   it.live("refuses operator input and relays Worker notices from Started until the outcome", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -549,6 +601,68 @@ describe("event-driven coordinator runtime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("hands WakeUp the attempt ID, event sequence, agent brain, and attached request", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/wake-up-attempt");
+      const seen: Array<{
+        readonly event: string;
+        readonly attemptId: AttemptId;
+        readonly sequence: number;
+        readonly brain: BrainSpec;
+        readonly request: AttemptRequest;
+      }> = [];
+      // Reads what a model handler needs to open a session on the attempt's worker, and opens none.
+      const reading = Layer.succeed(
+        WakeUp,
+        WakeUp.of({
+          handle: (event, _context, attempt) =>
+            attempt.request.pipe(
+              Effect.map((attached) => {
+                seen.push({
+                  event: event._tag,
+                  attemptId: attempt.attemptId,
+                  sequence: attempt.sequence,
+                  brain: attempt.spec.agent.brain,
+                  request: attached,
+                });
+              }),
+              Effect.as(Option.none()),
+            ),
+        }),
+      );
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinatorWith(reading)));
+      const execution = yield* process.execute(request, recordingSink().sink);
+      yield* (yield* process.nextChild).reply("Opened #12.");
+      yield* Fiber.join(execution);
+      yield* process.stop;
+
+      assert.deepStrictEqual(
+        seen.map(({ event, attemptId, sequence, brain }) => ({
+          event,
+          attemptId,
+          sequence,
+          brain,
+        })),
+        [
+          {
+            event: "AttemptStarted",
+            attemptId: request.spec.attemptId,
+            sequence: 1,
+            brain: request.spec.agent.brain,
+          },
+          {
+            event: "ChildReported",
+            attemptId: request.spec.attemptId,
+            sequence: 2,
+            brain: request.spec.agent.brain,
+          },
+        ],
+      );
+      for (const { request: attached } of seen) assert.strictEqual(attached, request);
+    }).pipe(Effect.scoped),
+  );
+
   it.live("cancels an Attempt whose execute call already returned, without waiting", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -626,22 +740,12 @@ describe("event-driven coordinator runtime", () => {
       const recording = recordingSink();
       const reached = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      // Holds the decision for the child's report, which the delegation has already recorded.
-      const holding = Layer.succeed(
-        WakeUp,
-        WakeUp.of({
-          handle: (event) =>
-            event._tag === "ChildReported"
-              ? Deferred.succeed(reached, undefined).pipe(
-                  Effect.andThen(Deferred.await(release)),
-                  Effect.as(Option.none()),
-                )
-              : Effect.succeedNone,
-        }),
-      );
+      // Holds the record of the decision for the child's report: the handler has returned, so the
+      // cancel no longer interrupts it.
+      const holding = holdingDecide(EventSequence.make(2), reached, release);
       const logged: Array<string> = [];
       const logger = Logger.layer([Logger.make(({ message }) => logged.push(String(message)))]);
-      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinatorWith(holding)));
+      const process = yield* orchestrator(sqliteJournal(database).pipe(holding, coordinator));
       const execution = yield* Effect.forkChild(
         process.attempts.execute(request, recording.sink).pipe(Effect.provide(logger)),
       );
@@ -680,6 +784,60 @@ describe("event-driven coordinator runtime", () => {
       );
       assert.isFalse(logged.some((entry) => entry.includes("failed while it stopped")));
       assertAdmitted(attemptId, recording.outbound());
+      assert.isFalse(trace(recording.outbound()).includes("Final"));
+      assert.strictEqual(trace(recording.outbound()).at(-1), "Interrupted");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("interrupts a slow handler when the Attempt is canceled, and commits no outcome", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const request = coordinated("coordinator/cancel-slow-handler");
+      const attemptId = request.spec.attemptId;
+      const recording = recordingSink();
+      const reached = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      // Decides the child's report only after a long model call, which the cancel interrupts.
+      const slow = Layer.succeed(
+        WakeUp,
+        WakeUp.of({
+          handle: (event) =>
+            event._tag === "ChildReported"
+              ? Deferred.succeed(reached, undefined).pipe(
+                  Effect.andThen(Effect.sleep("1 hour")),
+                  Effect.andThen(decides("Decided after an hour.", "session")),
+                  Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+                )
+              : Effect.succeedNone,
+        }),
+      );
+      const logged: Array<string> = [];
+      const logger = Logger.layer([Logger.make(({ message }) => logged.push(String(message)))]);
+      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinatorWith(slow)));
+      const execution = yield* Effect.forkChild(
+        process.attempts.execute(request, recording.sink).pipe(Effect.provide(logger)),
+      );
+      yield* (yield* process.nextChild).reply("Opened #12.");
+      yield* Deferred.await(reached);
+      yield* process.attempts.cancel(attemptId);
+      const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+      const handlerInterrupted = yield* Deferred.isDone(interrupted);
+      yield* process.stop;
+      const journal = yield* stored(database, attemptId);
+
+      assert.strictEqual(failure._tag, "AgentFailure");
+      assert.isTrue(handlerInterrupted);
+      assert.isTrue(
+        logged.some((entry) => entry.includes("The cancel interrupted the event's handler")),
+      );
+      assert.deepStrictEqual(
+        Option.map(journal, ({ status, events, pendingDecision }) => ({
+          status: status._tag,
+          events: events.length,
+          pending: Option.isSome(pendingDecision),
+        })),
+        Option.some({ status: "Settled", events: 1, pending: false }),
+      );
       assert.isFalse(trace(recording.outbound()).includes("Final"));
       assert.strictEqual(trace(recording.outbound()).at(-1), "Interrupted");
     }).pipe(Effect.scoped),
@@ -868,28 +1026,36 @@ describe("event-driven coordinator runtime", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live("fails the Attempt when relaying a Worker notice fails", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const request = coordinated("coordinator/notice-relay-fails");
-      const attemptId = request.spec.attemptId;
-      const recording = recordingSink();
-      const sink = failingWhere(recording.sink, (payload) => payload._tag === "WorkerUnresponsive");
-      const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
-      const execution = yield* process.execute(request, sink);
-      yield* process.nextChild;
-      yield* until(() => trace(recording.outbound()).includes("child.SessionStarted"));
-      yield* process.attempts.notify(attemptId, unresponsive("while working"));
-      const exit = yield* Fiber.await(execution).pipe(Effect.timeoutOption("3 seconds"));
-      yield* process.stop;
+  it.live(
+    "fails the Attempt and stops its child without a resume when relaying a notice fails",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated("coordinator/notice-relay-fails");
+        const attemptId = request.spec.attemptId;
+        const recording = recordingSink();
+        const sink = failingWhere(
+          recording.sink,
+          (payload) => payload._tag === "WorkerUnresponsive",
+        );
+        const process = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+        const execution = yield* process.execute(request, sink);
+        const child = yield* process.nextChild;
+        yield* until(() => trace(recording.outbound()).includes("child.SessionStarted"));
+        yield* process.attempts.notify(attemptId, unresponsive("while working"));
+        const exit = yield* Fiber.await(execution).pipe(Effect.timeoutOption("3 seconds"));
+        const stoppingOnClose = yield* child.closed.pipe(Effect.timeoutOption("1 second"));
+        yield* process.stop;
 
-      assert(Option.isSome(exit), "execute is still running after the relay failed");
-      assert(Exit.isFailure(exit.value));
-      const failure = yield* Effect.flip(exit.value);
-      assert.strictEqual(failure._tag, "InfraFailure");
-      assert.strictEqual(failure.message, "transcript unavailable");
-      assert.deepStrictEqual(unresponsiveReasons(recording.outbound()), []);
-    }).pipe(Effect.scoped),
+        assert.deepStrictEqual(stoppingOnClose, Option.some(false));
+
+        assert(Option.isSome(exit), "execute is still running after the relay failed");
+        assert(Exit.isFailure(exit.value));
+        const failure = yield* Effect.flip(exit.value);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.strictEqual(failure.message, "transcript unavailable");
+        assert.deepStrictEqual(unresponsiveReasons(recording.outbound()), []);
+      }).pipe(Effect.scoped),
   );
 
   it.live("drops a Worker notice while an execute call is attached to an ended Attempt", () =>
@@ -1008,6 +1174,8 @@ describe("event-driven coordinator restarts on SQLite", () => {
       );
       yield* until(() => startedChildren() === 2);
       yield* first.stop;
+      // The stop interrupts the live child's turn before its session closes.
+      const interruptedOnStop = yield* working.interrupted.pipe(Effect.timeoutOption("1 second"));
 
       const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
       // The run fiber reattaches only an Attempt that is live after the restart.
@@ -1018,12 +1186,51 @@ describe("event-driven coordinator restarts on SQLite", () => {
       const report = yield* Fiber.join(execution);
       yield* second.stop;
 
+      assert.isTrue(Option.isSome(interruptedOnStop));
       assert.isTrue(liveAfterRestart);
       assert.strictEqual(report.message, "Done after the restart.");
       assert.strictEqual(resumed.request.session.id, working.request.session.id);
       assert.deepStrictEqual(resumed.request.resume, Option.some(harnessSession));
       assertAdmitted(request.spec.attemptId, recording.outbound());
     }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "waits 10 seconds for a child whose turn interrupt hangs, then keeps it to resume",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = coordinated("restart/interrupt-hangs");
+        const recording = recordingSink();
+        const first = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
+        yield* first.execute(request, recording.sink);
+        const working = yield* first.nextChild;
+        yield* working.stall;
+        // The test clock stands still, so wait by yielding instead of sleeping.
+        const yieldUntil = (check: () => boolean): Effect.Effect<void> =>
+          Effect.suspend(() =>
+            check() ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(yieldUntil(check))),
+          );
+        yield* yieldUntil(() => trace(recording.outbound()).includes("child.SessionStarted"));
+        const stopped = yield* Deferred.make<void>();
+        yield* first.stop.pipe(
+          Effect.andThen(Deferred.succeed(stopped, undefined)),
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* working.interrupted;
+        // Advances the clock one second at a time, so a wait that started late still ends.
+        let waited = 0;
+        while (!(yield* Deferred.isDone(stopped)) && waited < 15) {
+          yield* TestClock.adjust("1 second");
+          waited += 1;
+        }
+        const stoppedInTime = yield* Deferred.isDone(stopped);
+        const stoppingOnClose = yield* working.closed;
+
+        assert.isTrue(stoppedInTime, "the stop didn't end after 15 seconds");
+        assert.isAtLeast(waited, 10, "the stop didn't wait for the child");
+        assert.isTrue(stoppingOnClose);
+      }).pipe(Effect.scoped),
   );
 
   it.live(
@@ -1093,7 +1300,7 @@ describe("event-driven coordinator restarts on SQLite", () => {
             handle: (event) =>
               event._tag === "ChildReported"
                 ? Ref.update(calls, (count) => count + 1).pipe(
-                    Effect.andThen(decides("Reviewed: the pull request is open.", "harness")),
+                    Effect.andThen(decides("Reviewed: the pull request is open.", "session")),
                   )
                 : Effect.succeedNone,
           }),
@@ -1136,7 +1343,7 @@ describe("event-driven coordinator restarts on SQLite", () => {
                 : Ref.update(calls, (count) => count + 1).pipe(
                     Effect.andThen(
                       answer === "decide"
-                        ? decides("Decided after the restart.", "endpoint")
+                        ? decides("Decided after the restart.", "completion")
                         : Deferred.succeed(deciding, undefined).pipe(Effect.andThen(Effect.never)),
                     ),
                   ),

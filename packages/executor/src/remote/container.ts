@@ -157,8 +157,11 @@ export interface ContainerSpec {
   readonly readOnly: ReadonlyArray<string>;
   /** Machine directories of the Attempt mounted read-write. */
   readonly writable: ReadonlyArray<WritableMount>;
-  /** The harnesses whose login files the container gets. */
-  readonly harnesses: ReadonlyArray<Harness>;
+  /**
+   * The harnesses that authenticate with the SSH user's login, whose login files the container
+   * gets. A harness whose credential comes from the Gateway or an API key isn't one of them.
+   */
+  readonly logins: ReadonlyArray<Harness>;
   /** Variables set in the container without secrets. */
   readonly environment: Readonly<Record<string, string>>;
   /** Variables set in the container through the container CLI's standard input, never a command line. */
@@ -240,6 +243,19 @@ exec "$1" ps --all --filter "label=$2" --filter "label=$3" --format '{{.Names}} 
  * standard input.
  */
 const PIPED_STDIN_SCRIPT = 'cat | "$@"';
+
+/**
+ * Returns the login files of `harness` under the SSH user's home. The container mounts each
+ * `mounted` file read-write, so the harness can refresh its token, and copies each other file
+ * when it starts.
+ */
+export const loginFiles = (
+  harness: Harness,
+): ReadonlyArray<{ readonly file: string; readonly mounted: boolean }> =>
+  Option.toArray(catalog.get(harness)).flatMap(({ worker }) => [
+    ...worker.login.mounted.map((file) => ({ file, mounted: true })),
+    ...worker.login.seeded.map((file) => ({ file, mounted: false })),
+  ]);
 
 /** Returns a CSV field of a `--mount` option, quoted so a comma in a path is kept. */
 const field = (key: string, value: string): string => `"${key}=${value.replaceAll('"', '""')}"`;
@@ -391,12 +407,7 @@ export const containersFor = (commands: RemoteCommands) => {
   ) {
     const fields = containerFields(shell, spec);
     yield* Effect.annotateCurrentSpan(fields);
-    const logins = spec.harnesses.flatMap((harness) =>
-      Option.toArray(catalog.get(harness)).flatMap(({ worker }) => [
-        ...worker.login.mounted.map((file) => ({ file, mounted: true })),
-        ...worker.login.seeded.map((file) => ({ file, mounted: false })),
-      ]),
-    );
+    const logins = spec.logins.flatMap(loginFiles);
     const [home = "", ...present] = (yield* commands.run(operation, shell, "sh", [
       "-c",
       PREPARE_SCRIPT,

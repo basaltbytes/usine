@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { DateTime, Deferred, Effect, Fiber, Layer, Option } from "effect";
@@ -8,7 +7,6 @@ import type { ParentKind } from "@usine/core/agent";
 import { AttemptJournal } from "../src/coordinator/journal.ts";
 import { PiAttemptRuntime, routerLayer } from "../src/coordinator/router.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
-import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { WakeUp } from "../src/coordinator/wake-up.ts";
 import {
   stubAttemptRuntime,
@@ -20,6 +18,7 @@ import {
   attemptRequest,
   recordingSink,
   slowToInterrupt,
+  sqliteJournal,
   temporaryDatabase,
   trace,
 } from "./support.ts";
@@ -31,12 +30,6 @@ const withParent = (attemptId: string, parent: ParentKind) => {
     spec: AttemptChannel.RunSpec.make({ ...request.spec, parent }),
   });
 };
-
-const sqliteJournal = (database: string) =>
-  sqliteAttemptJournalLayer.pipe(
-    Layer.provide(SqliteClient.layer({ filename: database })),
-    Layer.orDie,
-  );
 
 /**
  * The router over a stub Pi runtime on `storage` and a coordinator with stub children, on

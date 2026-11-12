@@ -374,13 +374,13 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
 
   /**
    * Starts a container from `settings` for a preflight's harness probes, with the login files
-   * of `harnesses` and `environment`, until the caller's scope closes. It removes itself after
+   * of `logins` and `environment`, until the caller's scope closes. It removes itself after
    * 15 minutes if this process can't.
    */
   const preflightShell = Effect.fn("SshExecutor.preflightContainer")(function* (
     machine: SshMachine,
     settings: ContainerSettings,
-    harnesses: ReadonlyArray<Harness>,
+    logins: ReadonlyArray<Harness>,
     environment: Readonly<Record<string, string>>,
   ) {
     const suffix = yield* Random.nextIntBetween(0, 1_000_000_000);
@@ -392,7 +392,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       checkout: Option.none(),
       readOnly: [],
       writable: [],
-      harnesses,
+      logins,
       environment,
       secrets: {},
     });

@@ -1,4 +1,5 @@
 import type { configCommand } from "./configuration/cli.ts";
+import { exeDevWorkerRefusal } from "@usine/config/factory";
 import { Duration, type Effect, Match, Option, Schema } from "effect";
 import type { backup } from "./backup.ts";
 import type { CliUsageError, CliVersionError } from "./cli.ts";
@@ -6,6 +7,7 @@ import { LaunchdService } from "./instance/launchd.ts";
 import { type ServiceUnit, serviceOutput, serviceStartCommand } from "./instance/service.ts";
 import type { upDetached } from "./detach.ts";
 import type { exportRun } from "./export-run.ts";
+import type { mcpCommand } from "./mcp/cli.ts";
 import type { instanceEnvironment } from "./instance/environment.ts";
 import type { restart } from "./restart.ts";
 import type { status } from "./status.ts";
@@ -26,7 +28,8 @@ export type CliFailure =
   | Effect.Error<ReturnType<typeof restart>>
   | Effect.Error<ReturnType<typeof upgrade>>
   | Effect.Error<ReturnType<typeof backup>>
-  | Effect.Error<ReturnType<typeof exportRun>>;
+  | Effect.Error<ReturnType<typeof exportRun>>
+  | Effect.Error<ReturnType<typeof mcpCommand>>;
 
 const messageOf = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }));
 
@@ -204,6 +207,7 @@ export const failureMessage = (failure: CliFailure): string =>
       `usine up did not start: ${variable} is invalid: ${clause(message)}. Set it to comma-separated key=value pairs with percent-encoded keys and values, or unset it.`,
     WebhookConfigurationError: ({ message }) => message,
     AuthError: ({ message }) => message,
+    McpStartError: ({ message }) => message,
     ConfigCommandError: ({ message }) => message,
     ConfigurationInvalid: ({ problems }) =>
       `Configuration is invalid; no revision was written.\n${problems.map(({ file, stage, message }) => `${file} (${stage}): ${message}`).join("\n")}`,
@@ -212,7 +216,9 @@ export const failureMessage = (failure: CliFailure): string =>
     StaleRevision: ({ expected, actual }) =>
       `Configuration changed from revision ${expected} to ${actual}. No revision was written. Export or edit the current configuration and try again.`,
     UnsupportedWorkerError: ({ worker, kind }) =>
-      `usine up did not start: worker "${worker}" has kind ${kind}, which differs from the other workers in usine.yaml. usine up runs all workers with one executor. Give every worker under workers the same kind.`,
+      kind === "exe.dev"
+        ? `usine up did not start: ${exeDevWorkerRefusal(worker)} Then run usine up again.`
+        : `usine up did not start: worker "${worker}" has kind ${kind}, which differs from the other workers in usine.yaml. usine up runs all workers with one executor. Give every worker under workers the same kind.`,
     WorkerCapabilityError: ({ worker, capability, message, cause }) =>
       `usine up did not start: worker "${worker}" failed its ${capability} check: ${clause(message)}${because(cause, message)}. Fix the worker or its entry under workers in usine.yaml, then run usine up again.`,
     ExecutorOperationError: ({ operation, message, cause }) =>

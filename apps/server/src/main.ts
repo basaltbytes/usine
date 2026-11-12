@@ -2,7 +2,7 @@
 import type { ConfigCommand } from "./configuration/command.ts";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Config, ConfigProvider, Console, Effect, Match } from "effect";
+import { Config, ConfigProvider, Console, Effect, Match, References } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { CLI_USAGE, type CliEnvironment, packageVersion, parseCli } from "./cli.ts";
 import { failureMessage } from "./failure-message.ts";
@@ -44,6 +44,11 @@ const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
         Effect.promise(() => import("./providers/cli.ts")),
         ({ providerCommand }) => providerCommand(directory, command),
       ),
+    McpCommand: (command) =>
+      Effect.flatMap(
+        Effect.promise(() => import("./mcp/cli.ts")),
+        ({ mcpCommand }) => mcpCommand(directory, command),
+      ).pipe(Effect.provideService(References.LogToStderr, true)),
     SignInCommand: (command) =>
       Effect.flatMap(
         Effect.promise(() => import("./auth/cli.ts")),

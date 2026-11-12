@@ -17,7 +17,7 @@ import { SetupApi } from "../src/setup/api.ts";
 import { setupRoutes } from "../src/setup/http.ts";
 import { securityMiddleware } from "../src/security.ts";
 import { registerSchema, unregisterSchema, validate } from "@hyperjump/json-schema/openapi-3-1";
-import { DocumentationApi, operatorOpenApi } from "../src/openapi.ts";
+import { DocumentationApi, operationPermission, operatorOpenApi } from "../src/openapi.ts";
 import { ConfigurationStoreError } from "@usine/config/configuration";
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
@@ -554,6 +554,10 @@ it.live(
         Object.entries(methods).map(([method, operation]) => {
           assert.property(operation, "summary", `${method} ${path}`);
           assert.property(operation, "description", `${method} ${path}`);
+          assert.isTrue(
+            "responses" in operation && Option.isSome(operationPermission(operation)),
+            `${method} ${path}`,
+          );
           return `${method.toUpperCase()} ${path}`;
         }),
       );
@@ -565,6 +569,10 @@ it.live(
       assert.deepEqual(generated.paths["/api/version"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/ready"]?.get?.security, []);
       assert.deepEqual(generated.paths["/api/setup/callback"]?.get?.security, []);
+      const approve = generated.paths["/api/runs/{runId}/approve"]?.post;
+      const createToken = generated.paths["/api/tokens"]?.post;
+      assert.deepEqual(approve && operationPermission(approve), Option.some("operate"));
+      assert.deepEqual(createToken && operationPermission(createToken), Option.some("tokens"));
       assert.deepEqual(generated.paths["/api/overview"]?.get?.security, [
         { bearer: [] },
         { session: [] },

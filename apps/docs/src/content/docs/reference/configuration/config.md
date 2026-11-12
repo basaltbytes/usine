@@ -94,7 +94,7 @@ These settings require a restart:
 | `tracing` | startup setting | unchanged | Initializes the process-wide exporter. |
 | `auth` | startup setting | unchanged | Initializes browser origin middleware. |
 | Worker name or `kind` | worker identity | unchanged | Determines stored identities and executor selection. |
-| Executor kind or workers added in setup mode | runtime capability | unchanged | Requires executor initialization. |
+| Executor kind or any `workers` change in setup mode | runtime capability | unchanged | Requires executor initialization. |
 | Credentials, `.env`, listen port, canonical origin, or log level | process input | unchanged | Initializes services outside configuration revisions. |
 
 For example, after changing browser origins with the CLI, run `usine restart` when no attempt is running.

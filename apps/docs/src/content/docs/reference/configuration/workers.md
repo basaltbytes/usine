@@ -5,6 +5,14 @@ description: Worker connections, containers, gateways, provisioners, and Cloudfl
 
 Manage workers in **Configuration > Workers**, or edit an existing worker with `usine config edit worker <name>`. All workers in an instance must use the same executor kind. Without an explicit worker list, an instance has one local worker named `local` with one slot.
 
+This version of usine doesn't run `exe.dev` workers. Saving one in the configuration fails. When `usine up` starts running attempts, it refuses a stored one and stops. Both refusals use the same message:
+
+```text
+Worker "<name>" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.
+```
+
+Without GitHub App credentials, `usine up` still starts in setup mode, which runs no attempts. Setup mode accepts no worker change, so change the worker's kind with `usine config edit worker <name>`, or remove the worker with `usine config import`. Then restart `usine up`.
+
 ## Worker
 
 | Field | Type | Default | Description |
@@ -24,7 +32,7 @@ max_concurrent_attempts: 2
 
 A paused worker keeps its slots and preflight. The scheduler gives its free slots only to a run that reattaches an attempt that already runs there, and sends every other run to the next unpaused worker in `workers` order. Pausing or resuming a worker applies on reload without a restart or a preflight. While a worker is paused, its page, the **Workers** line on **Overview**, and **Needs attention** show it. Exports omit `paused: false`. See [Pause a worker](/guides/pause-a-worker/).
 
-Local children run as the orchestrator's Unix user and can read that user's credentials. Use local workers only for trusted agents. Cached clones, attempt worktrees, and Turbo outputs are under `.usine/workers/<name>/`. Children also share the user's pnpm store. Pi children require a local worker. Each child process and its tool commands receive the attempt base environment plus only that harness's configuration and credential wiring. Registering another harness does not add its variables to existing harnesses. The server rejects `exe.dev` workers at startup.
+Local children run as the orchestrator's Unix user and can read that user's credentials. Use local workers only for trusted agents. Cached clones, attempt worktrees, and Turbo outputs are under `.usine/workers/<name>/`. Children also share the user's pnpm store. Pi children require a local worker. Each child process and its tool commands receive the attempt base environment plus only that harness's configuration and credential wiring. Registering another harness does not add its variables to existing harnesses.
 
 Preflight requires at least 1.5 GiB per concurrent attempt and warns below 3 GiB. Allocate enough memory for the repository's heaviest checks; the minimum is a tool-start requirement. A startup preflight failure stops startup. An explicit preflight failure on a running worker blocks new attempts there until a successful check.
 
@@ -80,7 +88,7 @@ Derived limits round down to a hundredth of a CPU, a MiB, and a process, with mi
 
 `/etc/usine/container-runtime` selects Podman or Docker. Without the file, installed Podman takes precedence. A selected runtime that fails checks blocks preflight. Without a usable runtime, fixed SSH workers can run as the SSH user in degraded mode, where attempts can read each other's credentials.
 
-Containers mount the attempt checkout and credential directory, harness login files, and shared pnpm and Turbo volumes. Other attempts' checkouts and tokens are outside these mounts. Custom images must use the SSH user's UID with home `/home/usine`. Rootless Podman requires cgroup v2, delegated CPU, memory, and PID controllers, subordinate UID/GID ranges, and a lingering user manager. Preflight checks resource enforcement and pulls the image.
+Containers mount the attempt checkout and credential directory, the SSH user's login files of the attempt's harness, and shared pnpm and Turbo volumes. A container mounts no login files for a harness whose provider credential comes from the gateway (`llm_providers`) or a provisioner API key; preflight logs, for each harness, which login files the worker's containers mount if the machine has them, and why. Other attempts' checkouts and tokens are outside these mounts. Custom images must use the SSH user's UID with home `/home/usine`. Rootless Podman requires cgroup v2, delegated CPU, memory, and PID controllers, subordinate UID/GID ranges, and a lingering user manager. Preflight checks resource enforcement and pulls the image.
 
 Claude Code sessions in attempt containers persist in `<root>/workers/<name>/claude/<attempt>`, mounted writable at `/home/usine/.claude/projects`. This directory remains while the attempt checkout exists, so reattached children resume their saved conversations after an orchestrator restart recreates the container. Cleanup removes it after checkout removal; the sweep also removes orphan session directories that no attempt uses. Claude's credential file mount and seeded `.claude.json` remain separate. Shared-user SSH continues to use the SSH user's session directory.
 
