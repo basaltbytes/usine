@@ -1,10 +1,10 @@
 import { ProviderApi } from "./providers/api.ts";
-import { SetupApi } from "./setup/api.ts";
+import { SetupApi, setupPermissions } from "./setup/api.ts";
 import { CrossSiteRequestError } from "./security.ts";
-import { OperatorApi } from "@usine/orchestrator/operator/http";
-import { Schema } from "effect";
+import { OperatorApi, operatorPermissions } from "@usine/orchestrator/operator/http";
+import { Option, Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api";
-import { AuthApi, AuthenticationError, publicAuthPaths } from "./auth/api.ts";
+import { AuthApi, AuthenticationError, authPermissions, publicAuthPaths } from "./auth/api.ts";
 
 export const DocumentationApi = HttpApiGroup.make("documentation").add(
   HttpApiEndpoint.get("openapi", "/api/openapi.json", {
@@ -18,6 +18,49 @@ export const DocumentationApi = HttpApiGroup.make("documentation").add(
       OpenApi.Description,
       "Public OpenAPI 3.1 document generated from the registered API contracts.",
     ),
+);
+
+/** The credential or permission that an operation requires. */
+export const OperationPermission = Schema.Literals([
+  "public",
+  "read",
+  "operate",
+  "maintain",
+  "admin",
+  "session",
+  "tokens",
+  "local",
+  "setup",
+]);
+export type OperationPermission = typeof OperationPermission.Type;
+
+/** The OpenAPI extension that names the permission of an operation. */
+export const PERMISSION_EXTENSION = "x-usine-permission";
+
+/** Reads the permission extension of a published operation. */
+export const operationPermission = (operation: OpenApi.OpenAPISpecOperation) =>
+  Schema.decodeUnknownOption(Schema.Struct({ [PERMISSION_EXTENSION]: OperationPermission }))(
+    operation,
+  ).pipe(Option.map((marked) => marked[PERMISSION_EXTENSION]));
+
+const groupPermissions = {
+  [OperatorApi.groups.operator.identifier]: operatorPermissions,
+  [AuthApi.identifier]: authPermissions,
+  [SetupApi.identifier]: setupPermissions,
+  [ProviderApi.identifier]: Object.fromEntries(
+    Object.keys(ProviderApi.endpoints).map((identifier) => [identifier, "setup" as const]),
+  ),
+  [DocumentationApi.identifier]: { openapi: "public" },
+} satisfies Record<string, Readonly<Record<string, OperationPermission>>>;
+
+/** The permission of every published operation, keyed by OpenAPI operation ID (`operator.approve`). */
+export const operationPermissions: ReadonlyMap<string, OperationPermission> = new Map(
+  Object.entries(groupPermissions).flatMap(([group, permissions]) =>
+    Object.entries(permissions).map(([identifier, permission]) => [
+      `${group}.${identifier}`,
+      permission,
+    ]),
+  ),
 );
 
 export const publicOperatorPaths = new Set<string>([
@@ -71,6 +114,9 @@ export const operatorOpenApi = () => {
   for (const [path, methods] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(methods)) {
       if (!("responses" in operation)) continue;
+      const permission = operationPermissions.get(operation.operationId);
+      if (permission !== undefined)
+        Object.assign(operation, { [PERMISSION_EXTENSION]: permission });
       addForbiddenResponse(
         operation,
         CrossSiteRequestError,

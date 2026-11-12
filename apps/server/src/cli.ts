@@ -62,6 +62,7 @@ export const CLI_USAGE = `Usage:
   usine status
   usine sign-in [<instance-url>]
   usine sign-in-link
+  usine mcp [--origin <url>]
   usine stop [--timeout <seconds>] [--force]
   usine restart [--timeout <seconds>] [--force]
   usine upgrade [<version> | --channel <latest|next>] [--check] [--timeout <seconds>] [--force]
@@ -72,7 +73,8 @@ export const CLI_USAGE = `Usage:
 
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
-  --origin <url>               Also accept the UI's pages at this origin, such as the URL of tailscale serve
+  --origin <url>               up: also accept the UI's pages at this origin, such as the URL of tailscale serve
+                               mcp: serve the tools of the instance at this URL, with USINE_TOKEN
   --log-level <level>          Log at this level and above: trace, debug, info, warn, or error (default: info)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
   --detach                     Start in the background, with the output in .usine/usine.log
@@ -91,6 +93,7 @@ Environment:
   USINE_ORIGIN                   Also accept the UI's pages at this origin if --origin is not set
   USINE_LOG_LEVEL                Log at this level if --log-level is not set
   USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance
+  USINE_TOKEN                    The instance token that usine mcp --origin sends
 
 Every command reads .env in the instance folder for the variables that the environment doesn't set.`;
 
@@ -217,6 +220,15 @@ export class SignInCommand extends Schema.TaggedClass<
   Brand.Brand<"@usine/server/cli/SignInCommand">
 >()("SignInCommand", { action: Schema.Literals(["device", "link"]), origin: UiOrigin }) {}
 
+/** Serves the operator API as MCP tools over standard input and output. */
+export class McpCommand extends Schema.TaggedClass<
+  McpCommand,
+  Brand.Brand<"@usine/server/cli/McpCommand">
+>()("McpCommand", {
+  /** The instance to serve; `None` serves the running instance of the current folder. */
+  origin: Schema.Option(UiOrigin),
+}) {}
+
 export class ProviderCommand extends Schema.TaggedClass<
   ProviderCommand,
   { readonly brand: unique symbol }
@@ -237,6 +249,7 @@ export interface CliEnvironment {
 export const CliCommand = Schema.Union([
   ConfigCommand,
   SignInCommand,
+  McpCommand,
   ProviderCommand,
   HelpCommand,
   VersionCommand,
@@ -475,8 +488,24 @@ const upgradeCommand = (args: ReadonlyArray<string>) =>
     );
   });
 
+const mcpCommandOf = (args: ReadonlyArray<string>) => {
+  const [flag, value, ...rest] = args;
+  if (args.length === 0) return Effect.succeed(McpCommand.make({ origin: Option.none() }));
+  const origin =
+    flag === "--origin" && rest.length === 0
+      ? value
+      : flag?.startsWith("--origin=") === true && args.length === 1
+        ? flag.slice("--origin=".length)
+        : undefined;
+  if (origin === undefined) return Effect.fail(usageError());
+  return Effect.map(decodeUiOrigin("--origin", origin), (decoded) =>
+    McpCommand.make({ origin: Option.some(decoded) }),
+  );
+};
+
 const SUBCOMMANDS: ReadonlySet<string> = new Set([
   "config",
+  "mcp",
   "login",
   "logout",
   "up",
@@ -536,6 +565,8 @@ export const parseCli = Effect.fn("Cli.parse")((
         );
         return SignInCommand.make({ action: command === "sign-in" ? "device" : "link", origin });
       });
+    case "mcp":
+      return mcpCommandOf(rest);
     case "config":
       return parseConfigCommand(rest).pipe(Effect.mapError(({ message }) => usageError(message)));
     case "backup":

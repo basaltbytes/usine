@@ -2,17 +2,26 @@ import { ProviderApi } from "../providers/api.ts";
 import { jsonKey } from "@usine/core/json-key";
 import type { SqliteReader } from "@usine/engine/local-sqlite";
 import { ChangeAccess } from "../changes/access.ts";
-import { SetupApi, setupPermissions } from "../setup/api.ts";
+import { SetupApi } from "../setup/api.ts";
 import { permits, InstanceScope, RequestPermissions } from "@usine/core/access";
 import { ActingMember, localActor } from "@usine/core/operator";
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Authentication, type Access, type IssuedToken } from "./authentication.ts";
 import { GitHubSignIn } from "./github.ts";
-import { AuthError, authFailure, GitHubUserId, Member, TokenId } from "./model.ts";
+import {
+  AuthError,
+  authFailure,
+  ceilingAdmits,
+  GitHubUserId,
+  Member,
+  NO_EXPIRY,
+  OperationCeilingChange,
+  type OperationId,
+  TokenId,
+} from "./model.ts";
 import {
   AuthApi,
-  authPermissions,
   publicAuthPaths,
   ConsumeLink,
   StartDevice,
@@ -21,7 +30,7 @@ import {
   CreateToken,
   TokenScopes,
 } from "./api.ts";
-import { publicOperatorPaths } from "../openapi.ts";
+import { operationPermissions, publicOperatorPaths } from "../openapi.ts";
 import { AuthStore } from "./store.ts";
 
 export interface AuthServices {
@@ -30,6 +39,27 @@ export interface AuthServices {
   readonly github: GitHubSignIn["Service"];
   readonly sqliteReader?: SqliteReader["Service"];
 }
+/** The operations the request's device token may call; `None` when it has no operation ceiling. */
+export const RequestOperations = Context.Reference<Option.Option<ReadonlyArray<OperationId>>>(
+  "@usine/server/RequestOperations",
+  { defaultValue: Option.none },
+);
+/** Refuses an operation ID that the published API doesn't have. */
+const knownOperations = (operations: ReadonlyArray<OperationId>) => {
+  const unknown = operations.filter((operation) => !operationPermissions.has(operation));
+  return unknown.length === 0
+    ? Effect.succeed(operations)
+    : Effect.logWarning("Token operations refused: unknown operation IDs", {
+        unknown: unknown.join(", "),
+      }).pipe(Effect.andThen(authFailure(`Unknown operations: ${unknown.join(", ")}.`, 400)));
+};
+// The groups whose operations this guard checks; the operator route policy checks the operator group.
+const guardedGroups = [AuthApi, SetupApi, ProviderApi];
+// Every credential may read its own session and sign itself out.
+const ceilingExempt: ReadonlySet<string> = new Set([
+  `${AuthApi.identifier}.session`,
+  `${AuthApi.identifier}.signOut`,
+]);
 const RequestAccess = Context.Reference<Option.Option<Access>>("@usine/server/RequestAccess", {
   defaultValue: Option.none,
 });
@@ -99,6 +129,10 @@ export const authenticatedRoutes = (services: AuthServices) => {
           member: Option.getOrNull(access.member),
           csrf: access.csrf,
           permissions: access.permissions,
+          ...Option.match(access.operations, {
+            onNone: () => ({}),
+            onSome: (operations) => ({ operations }),
+          }),
         });
       }),
     ),
@@ -242,14 +276,21 @@ export const authenticatedRoutes = (services: AuthServices) => {
         const actor = yield* member;
         const tokens = yield* store.tokens(actor.id);
         return json(
-          tokens.map(({ id, name, createdAt, lastUsedAt, kind, scopes }) => ({
-            id,
-            name,
-            createdAt,
-            lastUsedAt,
-            kind,
-            scopes,
-          })),
+          tokens.map(
+            ({ id, name, createdAt, lastUsedAt, kind, scopes, operations, expiresAt }) => ({
+              id,
+              name,
+              createdAt,
+              lastUsedAt,
+              kind,
+              scopes,
+              ...Option.match(operations, {
+                onNone: () => ({}),
+                onSome: (allowed) => ({ operations: allowed }),
+              }),
+              expiresAt: kind === "device" && expiresAt === NO_EXPIRY ? null : expiresAt,
+            }),
+          ),
         );
       }),
     ),
@@ -259,7 +300,14 @@ export const authenticatedRoutes = (services: AuthServices) => {
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const input = yield* body(CreateToken);
-        const issued = yield* auth.createToken(secretOf(request), input.name, input.scopes);
+        const issued = yield* auth.createToken(secretOf(request), {
+          name: input.name,
+          scopes: input.scopes,
+          operations: yield* Effect.transposeOption(
+            Option.map(Option.fromUndefinedOr(input.operations), knownOperations),
+          ),
+          expiresAt: Option.fromUndefinedOr(input.expiresAt),
+        });
         return json({ token: Redacted.value(issued.secret) });
       }),
     ),
@@ -272,8 +320,14 @@ export const authenticatedRoutes = (services: AuthServices) => {
         const tokenId = yield* Schema.decodeUnknownEffect(TokenId)(id).pipe(
           Effect.mapError(() => authFailure("Invalid token ID.", 400)),
         );
-        const { scopes } = yield* body(TokenScopes);
-        yield* auth.setScopes(secretOf(request), tokenId, scopes);
+        const { scopes, operations } = yield* body(TokenScopes);
+        const change =
+          operations === undefined
+            ? OperationCeilingChange.Keep()
+            : operations === null
+              ? OperationCeilingChange.Remove()
+              : OperationCeilingChange.Replace({ operations: yield* knownOperations(operations) });
+        yield* auth.setScopes(secretOf(request), tokenId, scopes, change);
         return json({ ok: true });
       }),
     ),
@@ -300,22 +354,24 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }
       const request = yield* HttpServerRequest.HttpServerRequest;
       const access = yield* auth.authenticate(secretOf(request));
-      const authEndpoint = Object.values(AuthApi.endpoints).find(
-        (endpoint) => endpoint.method === route.method && endpoint.path === route.path,
-      );
-      const setupEndpoint = Object.values(SetupApi.endpoints).find(
-        (endpoint) => endpoint.method === route.method && endpoint.path === route.path,
-      );
-      const providerEndpoint = Object.values(ProviderApi.endpoints).some(
-        (endpoint) => endpoint.method === route.method && endpoint.path === route.path,
-      );
-      const requirement = providerEndpoint
-        ? "setup"
-        : authEndpoint === undefined
-          ? setupEndpoint === undefined
-            ? undefined
-            : setupPermissions[setupEndpoint.identifier]
-          : authPermissions[authEndpoint.identifier];
+      const operation = guardedGroups
+        .flatMap((group) =>
+          Object.values(group.endpoints)
+            .filter((endpoint) => endpoint.method === route.method && endpoint.path === route.path)
+            .map((endpoint) => `${group.identifier}.${endpoint.identifier}`),
+        )
+        .at(0);
+      const requirement = operation === undefined ? undefined : operationPermissions.get(operation);
+      if (
+        operation !== undefined &&
+        !ceilingExempt.has(operation) &&
+        !ceilingAdmits(access.operations, operation)
+      ) {
+        yield* Effect.logWarning("Operation refused by the token's operation ceiling", {
+          operation,
+        });
+        return yield* authFailure(`This token cannot call ${operation}.`, 403);
+      }
       if (requirement === "local" && access.credential !== "local")
         return yield* authFailure("Run usine sign-in-link on the instance machine.", 403);
       if (requirement === "admin" && !permits(access.permissions, "admin", InstanceScope.make()))
@@ -348,13 +404,16 @@ export const authenticatedRoutes = (services: AuthServices) => {
         );
       return yield* handler.pipe(
         Effect.provideService(RequestPermissions, access.permissions),
+        Effect.provideService(RequestOperations, access.operations),
         Effect.provideService(
           ChangeAccess,
           auth
             .authenticate(secretOf(request))
             .pipe(
               Effect.flatMap((current) =>
-                jsonKey(current.permissions) === jsonKey(access.permissions)
+                jsonKey(current.permissions) === jsonKey(access.permissions) &&
+                jsonKey(Option.getOrNull(current.operations)) ===
+                  jsonKey(Option.getOrNull(access.operations))
                   ? Effect.void
                   : Effect.fail(authFailure("Permissions changed. Reconnect to continue.", 403)),
               ),
