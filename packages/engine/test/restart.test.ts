@@ -34,6 +34,10 @@ import {
   Scope,
   TxRef,
 } from "effect";
+import { checkoutRecoveryFor } from "../src/engine/checkout-recovery.ts";
+import { localSqliteLayer } from "../src/database/local-sqlite.ts";
+import { EnginePersistenceError } from "../src/engine/error.ts";
+import { RunStore } from "../src/store/store.ts";
 import {
   LeftoversDiscardRejectedError,
   ReconcileInterval,
@@ -1476,6 +1480,104 @@ describe("engine restart", () => {
             jsonKey([
               "Startup checkout reconciliation finished on a Worker",
               { worker: "local", visited: 1, kept: 1, failed: 0, empty: 0, discarded: 0 },
+            ]),
+          ]);
+        }),
+      ),
+  );
+
+  it.live(
+    "counts live, unstopped, untracked, and not untracked Attempts in the startup summary",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [notUntracked, alreadyUntracked, unstopped] = (yield* Effect.forEach(
+            [48, 49, 50],
+            (number) => deliverOneAttempt(directory, number),
+          )).flatMap(({ attempts }) => attempts.map(({ id }) => id));
+          const [live] = (yield* stopDuringAttempts(directory, [
+            submission({ number: 51, item: "live" }),
+          ])).map(({ id }) => id);
+          assert(
+            notUntracked !== undefined &&
+              alreadyUntracked !== undefined &&
+              unstopped !== undefined &&
+              live !== undefined,
+          );
+          const summaries: Array<string> = [];
+          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+            const line = jsonKey(message);
+            if (logLevel === "Info" && line.includes("finished on a Worker")) summaries.push(line);
+          });
+          const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+          const executor = StepExecutor.of({
+            workers: Effect.succeed([WorkerName.make("local")]),
+            isLive: (attemptId) => Effect.succeed(attemptId === live),
+            outcome: () => Effect.succeedNone,
+            recover: (attempt) =>
+              Ref.update(recovered, (ids) => [...ids, attempt.attemptId]).pipe(
+                Effect.as("gone" as const),
+              ),
+            intervene: () => Effect.void,
+            interrupt: (attemptId) =>
+              attemptId === unstopped
+                ? Effect.fail(
+                    InfraFailure.make({
+                      message: "Could not cancel the parent task",
+                      cause: undefined,
+                    }),
+                  )
+                : Effect.void,
+            reserve: () => Effect.never,
+            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            sweep: Effect.void,
+            discard: () => Effect.void,
+            execute: () => Effect.die("no Attempt starts"),
+          });
+
+          const [returned, tracked] = yield* Effect.gen(function* () {
+            const store = yield* RunStore;
+            // One Attempt can't be untracked; another is untracked while its recovery runs.
+            const checkouts = yield* checkoutRecoveryFor(
+              {
+                ...store,
+                discardClosedAttempt: (attemptId) =>
+                  attemptId === notUntracked
+                    ? Effect.fail(
+                        EnginePersistenceError.make({
+                          operation: "discard a closed Attempt",
+                          cause: "disk full",
+                        }),
+                      )
+                    : attemptId === alreadyUntracked
+                      ? store
+                          .discardClosedAttempt(attemptId)
+                          .pipe(Effect.andThen(store.discardClosedAttempt(attemptId)))
+                      : store.discardClosedAttempt(attemptId),
+              },
+              executor,
+            );
+            const returned = yield* checkouts
+              .atStartup()
+              .pipe(Effect.provide(Logger.layer([logger])));
+            const tracked = yield* store.salvageCandidates;
+            return [returned, tracked] as const;
+          }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))));
+
+          const recoveredState = yield* Ref.get(recovered);
+          assert.sameMembers([...recoveredState], [notUntracked, alreadyUntracked]);
+          assert.deepStrictEqual(
+            returned.map(({ attemptId }) => attemptId),
+            [unstopped],
+          );
+          assert.sameMembers(
+            tracked.map(({ attemptId }) => attemptId),
+            [notUntracked, unstopped, live],
+          );
+          assert.deepStrictEqual(summaries, [
+            jsonKey([
+              "Startup checkout reconciliation finished on a Worker",
+              { worker: "local", visited: 4, kept: 2, failed: 0, empty: 1, discarded: 1 },
             ]),
           ]);
         }),

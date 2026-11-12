@@ -29,7 +29,7 @@ type StartupVisit = Data.TaggedEnum<{
    * untracked; the next startup visits it again.
    */
   Empty: {};
-  /** The Attempt is closed and left nothing on its Worker, so later startups skip it. */
+  /** The closed Attempt left nothing on its Worker and is untracked, so later startups skip it. */
   Discarded: {};
   /** The closed Attempt's parent task isn't confirmed stopped; its checkout and a slot stay kept. */
   Unstopped: { readonly attempt: SalvageCandidate };
@@ -104,13 +104,13 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       );
       return StartupVisit.Empty();
     }
-    yield* Effect.logDebug(
+    yield* Effect.logInfo(
       discarded.success
         ? "Stopped tracking a closed Attempt that left nothing on its Worker; later startups skip it"
-        : "The Attempt left nothing on its Worker and was already untracked",
+        : "The Attempt left nothing on its Worker and was already untracked; later startups skip it",
       fields,
     );
-    return discarded.success ? StartupVisit.Discarded() : StartupVisit.Empty();
+    return StartupVisit.Discarded();
   });
 
   /**

@@ -538,7 +538,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       // recovery visits it again. A long-lived machine keeps nothing of the Attempt outside its
       // checkout: listing its leftovers reclaimed whatever else no Attempt holds.
       if (Option.isSome(machine.provisioned)) return "found" satisfies RecoveredLeftovers;
-      yield* Effect.logDebug(
+      yield* Effect.logInfo(
         "The Attempt's checkout is gone from its Worker's machine; nothing is left to reconcile",
         { attemptId: attempt.attemptId, worker: attempt.worker },
       );
