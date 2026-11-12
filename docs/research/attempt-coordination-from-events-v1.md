@@ -1,6 +1,6 @@
 # Coordinating an attempt from lifecycle events, version 1
 
-> Superseded by [version 2](./attempt-coordination-from-events.md), which removes pi-durable from the coordinator. Kept for its answers to the questions in #1150 and its run-history evidence.
+Historical: version 1 of this design, kept for the record. It kept pi-durable and a model parent; [version 2](./attempt-coordination-from-events.md) replaced it on 2026-11-11.
 
 Research for [#1150](https://github.com/basaltbytes/usine/issues/1150) and [#1149](https://github.com/basaltbytes/usine/issues/1149). Read on 2026-11-11 against usine `origin/main` at `658c8c444ded5141ca71c76fe5e360f862d40a20`, with `@earendil-works/pi-durable` 1.4.0, `@anthropic-ai/claude-agent-sdk` 0.3.311 (type declarations read from an installed copy of that exact version), and the Codex app-server schema generated at 0.164.0 (`packages/agents/src/protocol/codex/upstream-schema.json`). The dogfood instance's operator API was read with GET requests only. Claims that this note couldn't check against a pinned source are marked **unverified**.
 
