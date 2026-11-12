@@ -11,6 +11,7 @@ import {
   HarnessCatalog,
   HarnessDescriptor,
   Lacking,
+  type Placement,
   requirements,
   RoleCredentials,
   RolePlacements,
@@ -334,6 +335,22 @@ describe("brain admission", () => {
       outside.failure.message,
       "capable cannot run as reviewer at ssh: lacks local (The reviewer runs beside the coding agent it checks); lacks credential-route (The reviewer bills the coding agent's API key)",
     );
+    // The capable descriptor serves every gateway route at `local`, so only the role refuses these.
+    for (const credential of ["gateway", "gateway-subscription"] as const) {
+      const gateway = admitBrain(
+        extended,
+        reviewer,
+        brain("capable"),
+        AdmissionContext.make({ placement: "local", credential }),
+      );
+      assert(Result.isFailure(gateway), credential);
+      assert.deepStrictEqual(gateway.failure.missing, [
+        Lacking.make({
+          capability: "credential-route",
+          reason: "The reviewer bills the coding agent's API key",
+        }),
+      ]);
+    }
   });
 
   it("requires resume-session only to reopen a saved conversation", () => {
@@ -348,15 +365,15 @@ describe("brain admission", () => {
   });
 
   it("puts the pool that the credential route determines on the admitted brain", () => {
-    const pools = (id: string) =>
+    const pools = (id: string, role = codingAgent, placement: Placement = "local") =>
       (
         ["host-login", "gateway", "gateway-subscription", "gateway-api-key", "api-key"] as const
       ).map((credential) => {
         const admitted = admitBrain(
           catalog,
-          codingAgent,
+          role,
           brain(id),
-          AdmissionContext.make({ placement: "local", credential }),
+          AdmissionContext.make({ placement, credential }),
         );
         return Result.isSuccess(admitted)
           ? Option.getOrElse(admitted.success.pool, () => "launch")
@@ -376,6 +393,14 @@ describe("brain admission", () => {
       "chatgptPlan",
       "apiKeys",
       "launch",
+    ]);
+    // Pi's descriptor names no subscription provider, so Pi reports a subscription's pool itself.
+    assert.deepStrictEqual(pools("pi", coordinator, "orchestrator"), [
+      "launch",
+      "launch",
+      "launch",
+      "apiKeys",
+      "refused",
     ]);
   });
 });

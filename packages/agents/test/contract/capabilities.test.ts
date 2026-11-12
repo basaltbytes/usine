@@ -20,7 +20,7 @@ const isRecordedHarness = Schema.is(Schema.Literals(["claude", "codex", "pi"]));
 
 /** Where `unproven` looks up the proofs, replayed scenarios, and fixtures of a harness. */
 interface ProofSources {
-  readonly proofs: typeof capabilityProofs;
+  readonly proofs: Readonly<Record<Capability, Proof>>;
   readonly replayed: (harness: Provider) => ReadonlyArray<Scenario>;
   readonly fixture: (harness: Provider, scenario: Scenario) => string;
 }
@@ -169,6 +169,26 @@ describe("harness capability declarations", () => {
       const problems = yield* unproven(overclaiming("claude", "model-check"));
       assert.deepStrictEqual(problems, [
         "Claude Code declares model-check, but no suite checks it for Claude Code",
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("fail when a suite named for the declaring harness is missing", () =>
+    Effect.gen(function* () {
+      const pi = catalog.get(Harness.make("pi"));
+      assert(Option.isSome(pi));
+      const problems = yield* unproven(pi.value, {
+        ...contractSuite,
+        proofs: {
+          ...capabilityProofs,
+          "model-check": {
+            ...capabilityProofs["model-check"],
+            files: { pi: ["test/pi/missing.test.ts"] },
+          },
+        },
+      });
+      assert.deepStrictEqual(problems, [
+        "model-check names the missing suite test/pi/missing.test.ts",
       ]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );

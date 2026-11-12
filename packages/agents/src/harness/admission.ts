@@ -42,8 +42,10 @@ const subscriptionPools = {
 } satisfies Record<GatewayLlmProvider, BillingPool>;
 
 /**
- * The billing pool that `credential` determines for `descriptor`. A gateway route that reports
- * its credential kind determines the pool; every other route leaves it to the harness at launch.
+ * The billing pool that `credential` determines for `descriptor`. `gateway-api-key` determines
+ * `apiKeys`, and `gateway-subscription` determines the plan of the provider that the descriptor's
+ * worker credential names. Every other route, and a subscription on a descriptor that names no
+ * provider, returns `None`: the harness reports the pool at launch.
  */
 export const routePool = (
   descriptor: HarnessDescriptor,
