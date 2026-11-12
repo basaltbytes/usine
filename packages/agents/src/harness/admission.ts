@@ -80,6 +80,7 @@ export const admitBrain = (
   } else {
     const adapter = descriptor.value;
     if (!role.placement.placements.includes(placement)) {
+      // The refusal names a placement that the role runs at, which this context lacks.
       missing.push(
         Lacking.make({
           capability: role.placement.placements[0],

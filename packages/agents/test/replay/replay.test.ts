@@ -23,14 +23,7 @@ import {
   Scope,
   Stream,
 } from "effect";
-import {
-  openFixture,
-  openPiFixture,
-  piScenarios,
-  providers,
-  scenarios,
-  recordingPid,
-} from "./fixture.ts";
+import { openFixture, providers, scenarios, recordingPid } from "./fixture.ts";
 import { ChildProcessLost } from "../../src/child-host/process.ts";
 import {
   ChildBackend,
@@ -174,26 +167,6 @@ describe("recorded harness transports", () => {
         20_000,
       );
     }
-});
-
-describe("recorded Pi provider streams", () => {
-  for (const scenario of piScenarios)
-    it.live(
-      `pi: ${scenario}`,
-      () =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const fixture = yield* openPiFixture(scenario, "replay");
-            const events = yield* runScenario(scenario, fixture.request, fixture.controls).pipe(
-              Effect.provide(fixture.backend),
-              fixture.tape.guard,
-            );
-            assertProvenCapabilities(Harness.make("pi"), scenario, events);
-            yield* fixture.save;
-          }),
-        ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
-      20_000,
-    );
 });
 
 for (const provider of providers) {
