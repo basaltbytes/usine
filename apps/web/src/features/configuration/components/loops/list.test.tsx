@@ -290,6 +290,42 @@ describe("Workers page", () => {
     assert.strictEqual(page.split("Destination").length, 2, "only the Gateway has a destination");
   });
 
+  it("shows a boxd Worker's region, snapshot, size, and isolation", async () => {
+    const page = text(
+      await render(() => <WorkerDetail name="boxd-pool" configuration={configurationFixture()} />),
+    );
+    for (const fact of [
+      "Provider boxd",
+      "Region fra",
+      "Snapshot usine-attempt",
+      "Size 2x8",
+      "Isolation Isolated",
+      "API token Read from BOXD_API_KEY",
+    ])
+      assert.include(page, fact);
+
+    const configuration = Schema.decodeUnknownSync(ConfigurationView)({
+      ...configurationJson,
+      workers: configurationJson.workers.map((worker) =>
+        worker.provisioner?._tag === "boxd"
+          ? {
+              ...worker,
+              provisioner: { ...worker.provisioner, region: null, size: null, isolated: false },
+            }
+          : worker,
+      ),
+    });
+    const unset = text(
+      await render(() => <WorkerDetail name="boxd-pool" configuration={configuration} />),
+    );
+    for (const fact of [
+      "Region Where the endpoint runs machines",
+      "Size The snapshot's",
+      "Isolation The snapshot's",
+    ])
+      assert.include(unset, fact);
+  });
+
   it("shows a Boat Worker's size and key variables, and that it has no machines", async () => {
     const page = text(
       await render(() => <WorkerDetail name="boat-pool" configuration={configurationFixture()} />),
