@@ -1,4 +1,4 @@
-import { webhookStatusCopy } from "~/features/configuration/strings";
+import { coordinatorCopy, webhookStatusCopy } from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
 import type { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
@@ -57,8 +57,13 @@ const groups = (
     ],
   ],
   [
-    "Parent",
+    "Coordinator",
     [
+      {
+        key: "settings.coordinator",
+        value: mono(settings.coordinator),
+        effect: coordinatorCopy.effect[settings.coordinator],
+      },
       {
         key: "settings.parent_model",
         value: settings.parentModel === null ? unset("Not set") : mono(settings.parentModel),

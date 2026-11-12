@@ -103,6 +103,17 @@ parent_model: claude-sonnet-4-5
 Review the pull request.
 `,
   ],
+  [
+    "agents/triager.md",
+    `---
+harness: codex
+model: gpt-5.6-sol
+effort: low
+coordinator: events
+---
+Label the issue.
+`,
+  ],
   ["agents/broken.md", "---\nharness: [\n---\nNo brain.\n"],
   [
     "loops/start-dev.md",
@@ -289,26 +300,39 @@ const workers = Layer.succeed(WorkerStatus)({
   }),
 });
 
-const readConfiguration = Effect.gen(function* () {
-  const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-    prefix: "usine-config-",
-  });
-  const root = InstanceDirectory.make(directory);
-  yield* writeInstanceFiles(root, files);
-  return yield* Effect.gen(function* () {
-    const instance = yield* (yield* CurrentInstance).get;
+const readConfigurationOf = Effect.fn("test.readConfigurationOf")(
+  function* (instanceFiles: ReadonlyArray<readonly [string, string]>) {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+      prefix: "usine-config-",
+    });
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, instanceFiles);
+    return yield* Effect.gen(function* () {
+      const instance = yield* (yield* CurrentInstance).get;
 
-    return yield* (yield* OperatorConfiguration).view(instance);
-  }).pipe(
-    Effect.provide(
-      OperatorConfiguration.layer.pipe(
-        Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
-        Layer.provideMerge(reloadableInstanceLayer(root)),
+      return yield* (yield* OperatorConfiguration).view(instance);
+    }).pipe(
+      Effect.provide(
+        OperatorConfiguration.layer.pipe(
+          Layer.provide(Layer.mergeAll(controls, labels, polling, workers)),
+          Layer.provideMerge(reloadableInstanceLayer(root)),
+        ),
       ),
-    ),
-    Effect.flatMap(Schema.encodeEffect(ConfigurationView)),
-  );
-}).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+      Effect.flatMap(Schema.encodeEffect(ConfigurationView)),
+    );
+  },
+  Effect.scoped,
+  Effect.provide(NodeServices.layer),
+);
+
+const readConfiguration = readConfigurationOf(files);
+
+/** The instance files with `settings.coordinator: events` in place of `settings.parent_model`. */
+const eventsFiles = files.map(([path, content]) =>
+  path === "usine.yaml"
+    ? ([path, content.replace("  parent_model: gpt-5.6-sol\n", "  coordinator: events\n")] as const)
+    : ([path, content] as const),
+);
 
 describe("Configuration view", () => {
   it.effect("shows each Loop as parsed, with its pause, its repositories, and its file", () =>
@@ -385,6 +409,15 @@ describe("Configuration view", () => {
       assert.strictEqual(reviewer.resolvedParentModel, "claude-sonnet-4-5");
       assert.strictEqual(reviewer.resolvedParentEffort, "xhigh");
       assert.deepStrictEqual(reviewer.loops, ["review"]);
+
+      const triager = view.agents.find(({ name }) => name === "triager");
+      assert.deepStrictEqual(
+        [developer, triager].map((agent) => [agent?.coordinator, agent?.resolvedCoordinator]),
+        [
+          [null, "session"],
+          ["events", "events"],
+        ],
+      );
 
       assert.deepStrictEqual(
         view.invalidAgents.map(({ name, file }) => [name, file]),
@@ -526,12 +559,27 @@ describe("Configuration view", () => {
         maxAttemptTokens: null,
         parentModel: "gpt-5.6-sol",
         parentEffort: null,
+        coordinator: "session",
         operator: "PhilDL",
         webhooks: "endpoint",
         lastHintAt: "2026-10-29T12:00:00.000Z",
         webhooksPublicUrl: "https://factory.example/webhooks",
         tracing: { otlpUrl: "http://localhost:4318/v1/traces", serviceName: "usine" },
       });
+    }),
+  );
+
+  it.effect("shows the instance's coordinator and resolves Agents that don't set one to it", () =>
+    Effect.gen(function* () {
+      const view = yield* readConfigurationOf(eventsFiles);
+      assert.strictEqual(view.settings.coordinator, "events");
+      assert.isNull(view.settings.parentModel);
+      const developer = view.agents.find(({ name }) => name === "developer");
+      assert(developer !== undefined, "developer loads");
+      assert.deepStrictEqual(
+        [developer.coordinator, developer.resolvedCoordinator],
+        [null, "events"],
+      );
     }),
   );
 

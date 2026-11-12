@@ -1,5 +1,5 @@
 import { type Brand, Effect, Option, Result, Schema } from "effect";
-import { Agent, ParentKind } from "../agent/agent.ts";
+import { Agent, CoordinatorKind } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
 import {
@@ -60,11 +60,11 @@ export class RunSpec extends Schema.Class<
   parentEffort: Effort,
   /**
    * What coordinates the Attempt's children. A reattached Attempt keeps the coordinator it started
-   * with. Decodes as `pi` for older Attempts.
+   * with. Decodes as `session` for older Attempts.
    */
-  parent: ParentKind.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed("pi" as const)),
-    Schema.withConstructorDefault(Effect.succeed("pi" as const)),
+  coordinator: CoordinatorKind.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("session" as const)),
+    Schema.withConstructorDefault(Effect.succeed("session" as const)),
   ),
   /** The labels the Item must carry after a successful Attempt; empty disables the check. */
   outcomeLabels: OutcomeLabels.pipe(

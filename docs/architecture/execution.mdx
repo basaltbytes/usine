@@ -186,7 +186,7 @@ The parent's billing pool follows its provider ([authentication.ts:30](https://g
 
 ### Event-driven coordinator
 
-A router ([router.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/router.ts), [#1157](https://github.com/basaltbytes/usine/issues/1157)) implements `AttemptRuntime` over the Pi runtime above and the event-driven coordinator. `execute` sends an attempt to the coordinator if the [attempt journal](./storage-and-config.mdx#attempt-journal) has it, to the Pi runtime if pi-durable has it, and otherwise by `RunSpec.parent`, which decodes as `pi`. Every other operation looks the attempt up in the journal and falls back to the Pi runtime, so an attempt stays on the runtime that started it.
+A router ([router.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/router.ts), [#1157](https://github.com/basaltbytes/usine/issues/1157)) implements `AttemptRuntime` over the Pi runtime above and the event-driven coordinator. `execute` sends an attempt to the coordinator if the [attempt journal](./storage-and-config.mdx#attempt-journal) has it, to the Pi runtime if pi-durable has it, and otherwise by `RunSpec.coordinator`, which decodes as `session` for attempts stored without it. The scheduler sets it from the agent's `coordinator`, else the instance setting. Every other operation looks the attempt up in the journal and falls back to the Pi runtime, so an attempt stays on the runtime that started it.
 
 The coordinator ([runtime.ts](https://github.com/basaltbytes/usine/blob/main/packages/durable/src/coordinator/runtime.ts)) has no parent session. It handles each lifecycle event in four steps:
 

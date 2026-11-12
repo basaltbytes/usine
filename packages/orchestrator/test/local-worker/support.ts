@@ -73,11 +73,20 @@ export const testAgent = Agent.make({
   persona: AgentPersona.make("Implement the task."),
 });
 
-export const config = Schema.decodeEffect(UsineConfig)({
-  version: 1,
-  repos: [{ name: "acme/demo" }],
-  workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
-});
+/** The `settings` block of a `usine.yaml`, with snake_case keys. */
+export type SettingsInput = (typeof UsineConfig.Encoded)["settings"];
+
+/** Decodes the test instance's configuration with `settings` as its `settings` block. */
+export const configWith = (settings?: SettingsInput) => {
+  const input = {
+    version: 1,
+    repos: [{ name: "acme/demo" }],
+    workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
+  } as const;
+  return Schema.decodeEffect(UsineConfig)(settings === undefined ? input : { ...input, settings });
+};
+
+export const config = configWith();
 
 export const workerCredential = (value: Redacted.Redacted<string>) =>
   WorkerCredential.make({
@@ -206,6 +215,8 @@ export interface LocalRuntimeOptions {
   readonly platform?: Layer.Layer<NodeServices.NodeServices>;
   readonly credentials?: Layer.Layer<CredentialProvider>;
   readonly executor?: Omit<LocalExecutorOptions, "instanceDirectory">;
+  /** The instance's `settings` block. */
+  readonly settings?: SettingsInput;
 }
 
 /**
@@ -218,7 +229,7 @@ export const localRuntime = (
   options: LocalRuntimeOptions = {},
 ) =>
   Layer.unwrap(
-    Effect.map(config, (configuration) =>
+    Effect.map(configWith(options.settings), (configuration) =>
       localEngineLayer(instance).pipe(
         Layer.provide(
           stepExecutorLayer(configuration, []).pipe(

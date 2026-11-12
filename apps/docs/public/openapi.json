@@ -46034,6 +46034,13 @@
               }
             ]
           },
+          "coordinator": {
+            "type": "string",
+            "enum": [
+              "session",
+              "events"
+            ]
+          },
           "operator": {
             "anyOf": [
               {
@@ -46104,6 +46111,7 @@
           "maxAttemptTokens",
           "parentModel",
           "parentEffort",
+          "coordinator",
           "operator",
           "webhooks",
           "webhooksPublicUrl",
@@ -47148,6 +47156,27 @@
               "max"
             ]
           },
+          "coordinator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "session",
+                  "events"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolvedCoordinator": {
+            "type": "string",
+            "enum": [
+              "session",
+              "events"
+            ]
+          },
           "persona": {
             "type": "string",
             "pattern": "\\S"
@@ -47170,6 +47199,8 @@
           "parentEffort",
           "resolvedParentModel",
           "resolvedParentEffort",
+          "coordinator",
+          "resolvedCoordinator",
           "persona",
           "loops"
         ],

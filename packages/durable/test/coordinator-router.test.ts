@@ -3,7 +3,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { DateTime, Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { AttemptRequest, AttemptRuntime, ParentReported } from "../src/attempt-runtime.ts";
-import type { ParentKind } from "@usine/core/agent";
+import type { CoordinatorKind } from "@usine/core/agent";
 import { AttemptJournal } from "../src/coordinator/journal.ts";
 import { PiAttemptRuntime, routerLayer } from "../src/coordinator/router.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
@@ -23,11 +23,11 @@ import {
   trace,
 } from "./support.ts";
 
-const withParent = (attemptId: string, parent: ParentKind) => {
+const withCoordinator = (attemptId: string, coordinator: CoordinatorKind) => {
   const request = attemptRequest(attemptId);
   return AttemptRequest.make({
     ...request,
-    spec: AttemptChannel.RunSpec.make({ ...request.spec, parent }),
+    spec: AttemptChannel.RunSpec.make({ ...request.spec, coordinator }),
   });
 };
 
@@ -77,13 +77,13 @@ const unresponsive = (reason: string) =>
 
 describe("AttemptRuntime router", () => {
   it.live(
-    "keeps each Attempt on the coordinator it started with when its parent changes across a restart",
+    "keeps each Attempt on the coordinator it started with when its coordinator kind changes across a restart",
     () =>
       Effect.gen(function* () {
         const database = yield* temporaryDatabase;
         const storage = new StubStorage();
-        const coordinated = withParent("router/coordinated", "none");
-        const parented = withParent("router/parented", "pi");
+        const coordinated = withCoordinator("router/coordinated", "events");
+        const parented = withCoordinator("router/parented", "session");
         const [first, parentReport] = yield* Effect.gen(function* () {
           const attempts = yield* AttemptRuntime;
           const execution = yield* Effect.forkChild(
@@ -101,11 +101,11 @@ describe("AttemptRuntime router", () => {
           const attempts = yield* AttemptRuntime;
           const journal = yield* AttemptJournal;
           const again = yield* attempts.execute(
-            withParent("router/coordinated", "pi"),
+            withCoordinator("router/coordinated", "session"),
             recordingSink().sink,
           );
           const parentAgain = yield* attempts.execute(
-            withParent("router/parented", "none"),
+            withCoordinator("router/parented", "events"),
             recordingSink().sink,
           );
           const coordinatedLive = yield* attempts.isLive(coordinated.spec.attemptId);
@@ -119,8 +119,8 @@ describe("AttemptRuntime router", () => {
           assert.strictEqual(parentAgain.message, parentReport.message);
           assert.isFalse(coordinatedLive);
           assert.deepStrictEqual(
-            Option.map(parentedRequest, ({ spec }) => spec.parent),
-            Option.some("pi"),
+            Option.map(parentedRequest, ({ spec }) => spec.coordinator),
+            Option.some("session"),
           );
           assert.isTrue(Option.isNone(parentedJournal));
         }).pipe(Effect.provide(routed(storage, sqliteJournal(database))));
@@ -134,7 +134,7 @@ describe("AttemptRuntime router", () => {
       yield* Effect.gen(function* () {
         const attempts = yield* AttemptRuntime;
         const children = yield* StubChildren;
-        const reported = withParent("router/harvested", "none");
+        const reported = withCoordinator("router/harvested", "events");
         const execution = yield* Effect.forkChild(attempts.execute(reported, recordingSink().sink));
         const child = yield* children.next;
         yield* child.reply("Done by the child.");
@@ -143,11 +143,11 @@ describe("AttemptRuntime router", () => {
         const kept = yield* attempts.request(reported.spec.attemptId);
         assert.deepStrictEqual(finished, Option.some(ParentReported.make({ report })));
         assert.deepStrictEqual(
-          Option.map(kept, ({ spec }) => spec.parent),
-          Option.some("none"),
+          Option.map(kept, ({ spec }) => spec.coordinator),
+          Option.some("events"),
         );
 
-        const canceled = withParent("router/canceled", "none");
+        const canceled = withCoordinator("router/canceled", "events");
         const recording = recordingSink();
         const running = yield* Effect.forkChild(
           attempts.execute(canceled, slowToInterrupt(recording.sink)),
@@ -173,7 +173,7 @@ describe("AttemptRuntime router", () => {
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const storage = new StubStorage();
-      const request = withParent("router/early-notice", "none");
+      const request = withCoordinator("router/early-notice", "events");
       const recording = recordingSink();
       const attachedBeforeExecute = yield* Effect.gen(function* () {
         const attempts = yield* AttemptRuntime;
@@ -199,7 +199,7 @@ describe("AttemptRuntime router", () => {
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const storage = new StubStorage();
-      const request = withParent("router/opening-notice", "none");
+      const request = withCoordinator("router/opening-notice", "events");
       const recording = recordingSink();
       const opening = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();

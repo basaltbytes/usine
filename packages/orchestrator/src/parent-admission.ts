@@ -1,13 +1,14 @@
 import type { LoadedInstance } from "@usine/config/instance";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
-import { resolveParentEffort, resolveParentModel } from "@usine/core/agent";
+import { resolveCoordinator, resolveParentEffort, resolveParentModel } from "@usine/core/agent";
 import type { DurableHarness } from "@usine/durable/harness";
 import { resolveParent } from "@usine/durable/parent";
 import { Effect, Option, Result } from "effect";
 
 /**
  * Checks resolved coordinator brains without writing configuration or opening durable storage.
- * Agents that resolve to the same parent model and effort share one check.
+ * Agents that resolve to the same parent model and effort share one check. Agents that resolve to
+ * `coordinator: events` run no parent session and need no check.
  */
 export const parentAdmissionProblems: (
   loaded: LoadedInstance,
@@ -16,10 +17,14 @@ export const parentAdmissionProblems: (
   loaded: LoadedInstance,
   parents: Pick<DurableHarness["Service"], "models" | "defaultModel" | "credentials">,
 ) {
-  const keyed = loaded.agents.map(({ name, agent }) => {
+  const { settings } = loaded.config;
+  const parented = loaded.agents.filter(
+    ({ agent }) => resolveCoordinator(agent, settings.coordinator) === "session",
+  );
+  const keyed = parented.map(({ name, agent }) => {
     const spec = {
-      parentModel: resolveParentModel(agent, loaded.config.settings.parentModel),
-      parentEffort: resolveParentEffort(agent, loaded.config.settings.parentEffort),
+      parentModel: resolveParentModel(agent, settings.parentModel),
+      parentEffort: resolveParentEffort(agent, settings.parentEffort),
     };
     return {
       name,
@@ -60,6 +65,7 @@ export const parentAdmissionProblems: (
   }
   yield* Effect.logInfo("Coordinator brain validation completed", {
     count: loaded.agents.length,
+    skipped: loaded.agents.length - parented.length,
     checked: results.size,
     refused: problems.length,
   });

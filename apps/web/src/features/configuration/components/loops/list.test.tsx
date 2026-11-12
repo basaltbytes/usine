@@ -21,9 +21,11 @@ import { usePauseLoop } from "~/features/configuration/queries";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
 import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 import { SettingsPage } from "~/features/configuration/settings.page";
+import { AgentFields } from "~/features/configuration/components/forms/agent";
+import { SettingsFields } from "~/features/configuration/components/forms/settings";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
-import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
+import { AgentFileView, ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import {
   configurationFixture,
@@ -210,7 +212,52 @@ describe("Agents page", () => {
     assert.include(markup, "<li>Keep changes small.</li>");
     assert.include(page, "openai-codex/gpt-5.6-terra From settings.parent_model");
     assert.include(page, "medium Set on this agent");
+    assert.include(page, "Coordinator session From settings.coordinator");
     assert.include(markup, 'href="/configuration/loops/start-dev"');
+  });
+
+  it("shows an Agent on the event-driven coordinator without parent settings", async () => {
+    const configuration = configurationFixture();
+    const page = text(
+      await render(() => (
+        <AgentDetail
+          name="developer"
+          configuration={ConfigurationView.make({
+            ...configuration,
+            agents: configuration.agents.map((agent) =>
+              AgentFileView.make({
+                ...agent,
+                coordinator: "events",
+                resolvedCoordinator: "events",
+              }),
+            ),
+          })}
+        />
+      )),
+    );
+    assert.include(page, "Coordinator events Set on this agent");
+    assert.notInclude(page, "Parent model");
+  });
+
+  it("shows an Agent that inherits the event-driven coordinator without parent settings", async () => {
+    const configuration = configurationFixture();
+    const page = text(
+      await render(() => (
+        <AgentDetail
+          name="developer"
+          configuration={ConfigurationView.make({
+            ...configuration,
+            settings: SettingsView.make({ ...configuration.settings, coordinator: "events" }),
+            agents: configuration.agents.map((agent) =>
+              AgentFileView.make({ ...agent, coordinator: null, resolvedCoordinator: "events" }),
+            ),
+          })}
+        />
+      )),
+    );
+    assert.include(page, "Coordinator events From settings.coordinator");
+    assert.notInclude(page, "Parent model");
+    assert.notInclude(page, "Parent effort");
   });
 
   it("shows why an Agent file did not load", async () => {
@@ -529,6 +576,29 @@ describe("Repositories page", () => {
 });
 
 describe("Settings page", () => {
+  it("shows the instance's coordinator and what it does", async () => {
+    const configuration = configurationFixture();
+    const page = text(
+      await render(() => (
+        <SettingsPage
+          configuration={ConfigurationView.make({
+            ...configuration,
+            settings: SettingsView.make({
+              ...configuration.settings,
+              coordinator: "events",
+              parentModel: null,
+              parentEffort: null,
+            }),
+          })}
+        />
+      )),
+    );
+    assert.include(
+      page,
+      "settings.coordinator events Rules on lifecycle events coordinate each attempt",
+    );
+  });
+
   it("lists settings, the operator, the webhooks mode, and tracing with what each does", async () => {
     const page = text(await render(() => <SettingsPage configuration={configurationFixture()} />));
     assert.include(page, "settings.poll_interval 60");
@@ -569,4 +639,44 @@ describe("Settings page", () => {
       assert.include(page, `Last hint received ${at}`);
     },
   );
+});
+
+/** Returns the markup of the select labeled `label`, from its label to its closing tag. */
+const selectLabeled = (markup: string, label: string): string => {
+  const start = markup.indexOf(`>${label}</label>`);
+  assert.isAtLeast(start, 0, `the form has a ${label} field`);
+  const end = markup.indexOf("</select>", start);
+  assert.isAtLeast(end, 0, `the ${label} field is a select`);
+  return markup.slice(start, end);
+};
+
+describe("Configuration forms", () => {
+  const noop = () => {};
+
+  it("edits the instance's coordinator in the settings form", async () => {
+    const markup = await render(() => (
+      <SettingsFields
+        value={{ settings: { coordinator: "events" } }}
+        onChange={noop}
+        problems={[]}
+      />
+    ));
+    const select = selectLabeled(markup, "Coordinator");
+    assert.include(select, '<option value="session">session</option>');
+    assert.include(select, '<option value="events" selected="">events</option>');
+  });
+
+  it("edits an Agent's coordinator in the agent form", async () => {
+    const markup = await render(() => (
+      <AgentFields
+        value={{ name: "triager", harness: "codex", coordinator: "events" }}
+        onChange={noop}
+        problems={[]}
+      />
+    ));
+    const select = selectLabeled(markup, "Coordinator");
+    assert.include(select, '<option value="session">session</option>');
+    assert.include(select, '<option value="events" selected="">events</option>');
+    assert.include(text(markup), "Leave blank to use settings.coordinator.");
+  });
 });

@@ -241,8 +241,8 @@ describe("event-driven coordinator runtime", () => {
       assert.deepStrictEqual(reported, Option.some(ParentReported.make({ report })));
       assert.deepStrictEqual(harvested, Option.some(ResultRecorded.make({ result })));
       assert.deepStrictEqual(
-        Option.map(kept, ({ spec }) => spec.parent),
-        Option.some("none"),
+        Option.map(kept, ({ spec }) => spec.coordinator),
+        Option.some("events"),
       );
       assert.deepStrictEqual(
         Option.map(snapshot, ({ delegations }) => delegations.map(({ number }) => number)),

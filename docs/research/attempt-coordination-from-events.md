@@ -8,9 +8,9 @@ The goal is a quickstart that requires no subscription from a specific model pro
 
 ## Status
 
-Built: the delegation core (#1179), the rules and the `Decision` contract (#1169), the relay without a parent session (#1171), the attempt journal with memory and SQLite adapters (#1181), the coordinator runtime and router with rules-only wake-up (#1197), the widened wake-up seam (#1244), and the restart replays (#1245). The router sends an attempt to the coordinator when its `RunSpec.parent` is `none`; no configuration sets that yet.
+Built: the delegation core (#1179), the rules and the `Decision` contract (#1169), the relay without a parent session (#1171), the attempt journal with memory and SQLite adapters (#1181), the coordinator runtime and router with rules-only wake-up (#1197), the widened wake-up seam (#1244), the restart replays (#1245), operator input to the coordinator (#1163), and configuration as `coordinator: session | events`, with an optional agent `decision: { model, effort }` (#1158). The router sends an attempt to the coordinator when its `RunSpec.coordinator` is `events`.
 
-Decided, not built: operator input to the coordinator (#1163, PR #1246); configuration as `coordinator: session | events`, with an optional agent `decision: { model, effort }` (#1158); the quickstart (#1160); the decision session (#1164); the structured completion (#1165); removing the Pi parent (#1166); and the design-review follow-ups (#1237).
+Decided, not built: the quickstart (#1160); the decision session (#1164); the structured completion (#1165); removing the Pi parent (#1166); and the design-review follow-ups (#1237).
 
 ## Recommendation
 
@@ -83,7 +83,7 @@ engine run fiber ─▶ StepExecutor.execute ─▶ AttemptRuntime (router)
                                                                     flush outbox, finish
 ```
 
-`AttemptRuntime` (`packages/durable/src/attempt-runtime.ts`) stays the seam to the executor; `packages/executor/src/durable-session.ts` doesn't change. A router (`coordinator/router.ts`) implements it. `execute` keeps an attempt on the runtime that started it: the coordinator if the attempt journal has it, the Pi runtime if pi-durable has it, and otherwise the kind that `RunSpec` names. Every other operation looks the attempt up in the journal first and falls back to the Pi runtime. The `RunSpec` field is `parent: pi | none` until #1158 renames it to `coordinator: session | events`; this note uses the new names.
+`AttemptRuntime` (`packages/durable/src/attempt-runtime.ts`) stays the seam to the executor; `packages/executor/src/durable-session.ts` doesn't change. A router (`coordinator/router.ts`) implements it. `execute` keeps an attempt on the runtime that started it: the coordinator if the attempt journal has it, the Pi runtime if pi-durable has it, and otherwise the kind that `RunSpec` names. Every other operation looks the attempt up in the journal first and falls back to the Pi runtime. The `RunSpec` field is `coordinator: session | events`.
 
 ### Ports
 
@@ -187,7 +187,7 @@ At `c222289`, `packages/durable/src` has 10,279 lines. With the Pi parent remove
 
 The coordinator runs beside the Pi parent with no shared state. The router sends new `coordinator: events` attempts to the coordinator and everything else to the Pi runtime, which keeps `.usine/durable.sqlite` until #1166. They share code, not storage: the delegation core, the continuation policy, and `ChildBackend`. The Pi runtime's `subagent` tool calls the delegation core through a pi-durable adapter of `DelegationJournal`.
 
-The remaining order is #1163, then #1158, then #1160, then #1166; [harness-contract-and-roles.md](./harness-contract-and-roles.md#where-the-coordinator-slices-and-799-plug-in) shows it with the harness steps that #1164 and #1165 wait for. Each issue carries its scope, acceptance criteria, and files.
+The remaining order is #1160, then #1166; [harness-contract-and-roles.md](./harness-contract-and-roles.md#where-the-coordinator-slices-and-799-plug-in) shows it with the harness steps that #1164 and #1165 wait for. Each issue carries its scope, acceptance criteria, and files.
 
 Pi as a child harness needs nothing from pi-durable. It runs `pi-coding-agent` sessions from `packages/agents`, which has no pi-durable dependency.
 
@@ -299,7 +299,7 @@ Yes. No event observed in the run history needs a model in the first release. Th
 | Structured completion through `complete` | Uses the agent's harness and route with its `decision` model; no `decision` means rules |
 | `coordinator: events` written by new bootstrap files | A new instance never needs a Pi credential |
 
-The goal holds after #1158 for any configuration that sets `coordinator: events`, and for the documented quickstart after #1160.
+The goal holds for any configuration that sets `coordinator: events` (#1158), and for the documented quickstart after #1160.
 
 ## Owner decisions
 
