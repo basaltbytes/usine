@@ -239,7 +239,7 @@ describe("structured completions through the registry", () => {
           assert.strictEqual(refused._tag, "AgentResultError");
           assert.include(
             refused.message,
-            "runs as a completion",
+            "a session always saves its conversation and returns text",
             `${role.persistence} ${role.output}`,
           );
         }

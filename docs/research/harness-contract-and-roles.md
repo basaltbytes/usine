@@ -291,12 +291,12 @@ The route resolution is `childAdmissionContext` (`launch.ts:12-32`) generalized 
 | Placement | The worker's | Follows the attempt agent: same placement and route | Follows the attempt agent, or orchestrator for an instance-level brain | `orchestrator` |
 | Credential | Any route the descriptor offers | The attempt agent's route | The attempt agent's route, or the instance brain's route | `gateway-*` (owner decision 10 of 2026-11-04) |
 | Brain | Agent `harness`, `model`, `effort` | Agent `harness`, `decision.model` and `decision.effort` | Same as (b), or an instance brain | Instance `orchestrator` brain |
-| Primitive | `open` with continuation | `open`, read the first decision tool call, `interrupt` | `complete` | `open` with continuation |
+| Primitive | `open` with continuation | `open`, read the first decision tool call, `interrupt`. Blocked until `open` can run a session without saving its conversation: every adapter's `open` saves one, so admission refuses an `ephemeral` role, and `complete` refuses a text role | `complete` | `open` with continuation |
 | Pi | Local only until step 21 | In process, `customTools`, `tools: []` | One `streamSimple` request through Pi's model runtime with an output tool; see [step 20](#20-structured-completion) | In process on the orchestrator with a gateway route (`pi/descriptor.ts:16-18`) |
 | Claude Code | Built | SDK `query()` with `tools: []`, an SDK MCP server, `permissionMode: "dontAsk"`, `persistSession: false` (PR #1153 section 4) | SDK `query()` with `tools: []` and `outputFormat` (PR #1153 section 4) | SDK with an SDK MCP server |
 | Codex | Built | Client-served dynamic tools or MCP configuration (section 6); turning off shell and edit **unverified** | `thread/start` `ephemeral` and `turn/start` `outputSchema` (both in `packages/agents/src/protocol/codex/upstream-schema.json`, `definitions/v2/ThreadStartParams` and `TurnStartParams`) | Same as decision session, with `saved` |
 
-The coordinator never names a harness: the #1164 handler builds a decision `SessionSpec` from the attempt's admitted child brain, calls `Harnesses.runtime(brain.harness).open`, and reads the first decision tool call. Placement and route follow the child, so the decision session needs no extra credential, as #1164 requires.
+The coordinator never names a harness: the #1164 handler builds a decision `SessionSpec` from the attempt's admitted child brain, calls `Harnesses.runtime(brain.harness).open`, and reads the first decision tool call. Placement and route follow the child, so the decision session needs no extra credential, as #1164 requires. Before it can run, `open` must run a session without saving its conversation: every adapter's `open` saves one today (`persistSession: true` for Claude Code, `ephemeral: false` for Codex, Pi's `Create` storage), so `admitSession` refuses an `ephemeral` role, and `complete` admits only a structured one.
 
 ## 6. Tool delivery
 

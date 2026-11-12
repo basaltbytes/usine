@@ -92,9 +92,10 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
 
 /**
  * Admits the brain of `spec` for its role at its placement and credential route before a session
- * opens. A `StartResume` also requires `resume-session`. An opened session saves its conversation
- * and returns text, so a role that keeps no conversation or returns a structured value is refused:
- * it runs as a completion.
+ * opens. A `StartResume` also requires `resume-session`. An opened session always saves its
+ * conversation and returns text, so a role that keeps no conversation or returns a structured value
+ * is refused. Only a role that does both runs as a completion; any other such role has no primitive
+ * until a session can run without saving its conversation.
  */
 export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
   catalog: HarnessCatalog,
@@ -110,7 +111,7 @@ export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
     harness: spec.session.brain.harness,
   });
   if (role.persistence === "ephemeral" || role.output === "structured") {
-    const message = `${role.name} keeps no conversation or returns a structured value, so it runs as a completion, not a session`;
+    const message = `${role.name} keeps no conversation or returns a structured value, but a session always saves its conversation and returns text; only a role that returns a structured value and keeps no conversation runs as a completion`;
     yield* Effect.logWarning("Harness session refused", {
       sessionId: spec.session.id,
       role: role.name,

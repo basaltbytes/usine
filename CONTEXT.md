@@ -213,7 +213,7 @@ What a session does for usine, such as the coordinator, the coding agent, or the
 _Avoid_: agent type, mode, persona
 
 **Completion**:
-One schema-checked value that a harness returns for one prompt, with no saved conversation. A role that returns a structured value runs as a completion, not a session.
+One schema-checked value that a harness returns for one prompt, with no saved conversation.
 _Avoid_: structured call, one-shot
 
 **Pool**:
