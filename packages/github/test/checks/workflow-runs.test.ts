@@ -23,7 +23,8 @@ const workflowRun = (
   html_url: `https://github.com/${repository}/actions/runs/${id}`,
 });
 
-const runJob = (conclusion: string | null, name = `job-${conclusion ?? "running"}`) => ({
+const runJob = (conclusion: string | null, name = `job-${conclusion ?? "running"}`, id = 1) => ({
+  id,
   name,
   status: conclusion === null ? "in_progress" : "completed",
   conclusion,
@@ -130,10 +131,10 @@ it.effect("reports a latest workflow run that has not concluded after its jobs f
 // The jobs of CI run 43098104121 on 2026-11-11: the gate job failed because the jobs it needs
 // stayed queued after GitHub Actions stalled.
 const stalledJobs = (gate: string | null) => [
-  { ...runJob(null, "static"), status: "queued" },
-  { ...runJob(null, "test (rest)"), status: "queued" },
-  runJob("success", "test (web)"),
-  runJob(gate, "ci"),
+  { ...runJob(null, "static", 11), status: "queued" },
+  { ...runJob(null, "test (rest)", 12), status: "queued" },
+  runJob("success", "test (web)", 13),
+  runJob(gate, "ci", 14),
 ];
 
 it.effect(
@@ -143,16 +144,26 @@ it.effect(
       const { incomplete, running } = yield* (yield* GitHubChecks).workflowRuns(repository, head);
       assert.deepStrictEqual(running, []);
       assert.deepStrictEqual(
-        incomplete.map(({ id, conclusion, loneFailure }) => ({
+        incomplete.map(({ id, conclusion, loneFailure, jobIds }) => ({
           id,
           conclusion,
-          loneFailure: Option.map(loneFailure, ({ job, unfinished }) => ({ job, unfinished })),
+          loneFailure: Option.map(loneFailure, ({ job, jobId, unfinished }) => ({
+            job,
+            jobId,
+            unfinished,
+          })),
+          jobIds,
         })),
         [
           {
             id: 43098104121,
             conclusion: "failure",
-            loneFailure: Option.some({ job: "ci", unfinished: ["static", "test (rest)"] }),
+            loneFailure: Option.some({
+              job: "ci",
+              jobId: 14,
+              unfinished: ["static", "test (rest)"],
+            }),
+            jobIds: [11, 12, 13, 14],
           },
         ],
       );
@@ -193,16 +204,24 @@ it.effect.each([
       const { incomplete, running } = yield* (yield* GitHubChecks).workflowRuns(repository, head);
       assert.deepStrictEqual(incomplete, []);
       assert.deepStrictEqual(
-        running.map(({ status, loneFailure }) => ({
+        running.map(({ status, loneFailure, jobIds }) => ({
           status,
-          loneFailure: Option.map(loneFailure, ({ job, unfinished }) => ({ job, unfinished })),
+          loneFailure: Option.map(loneFailure, ({ job, jobId, unfinished }) => ({
+            job,
+            jobId,
+            unfinished,
+          })),
+          jobIds,
         })),
         [
           {
             status: "in_progress",
-            loneFailure: lone ? Option.some({ job: "ci", unfinished: ["static"] }) : Option.none(),
+            loneFailure: lone
+              ? Option.some({ job: "ci", jobId: 14, unfinished: ["static"] })
+              : Option.none(),
+            jobIds: [11, 13, 14],
           },
-          { status: "queued", loneFailure: Option.none() },
+          { status: "queued", loneFailure: Option.none(), jobIds: [] },
         ],
       );
     }).pipe(
@@ -212,9 +231,9 @@ it.effect.each([
             return json({
               total_count: 3,
               jobs: [
-                { ...runJob(null, "static"), status: sibling },
-                runJob("success", "test (web)"),
-                runJob("failure", "ci"),
+                { ...runJob(null, "static", 11), status: sibling },
+                runJob("success", "test (web)", 13),
+                runJob("failure", "ci", 14),
               ],
             });
           if (url.includes("/jobs")) return json({ total_count: 0, jobs: [] });
@@ -236,4 +255,54 @@ it.effect.each([
         }),
       ),
     ),
+);
+
+it.effect.each([
+  {
+    case: "two failed jobs beside a queued job",
+    jobs: [
+      { ...runJob(null, "static", 11), status: "queued" },
+      runJob("failure", "test (web)", 13),
+      runJob("failure", "ci", 14),
+    ],
+    lone: Option.none(),
+  },
+  {
+    case: "one failed job and every other job completed",
+    jobs: [runJob("success", "static", 11), runJob("failure", "ci", 14)],
+    lone: Option.none(),
+  },
+  {
+    case: "one failed job beside a job left in progress",
+    jobs: [runJob(null, "static", 11), runJob("failure", "ci", 14)],
+    lone: Option.some({ job: "ci", jobId: 14, unfinished: ["static"] }),
+  },
+])("reports a concluded run with $case as incomplete only for a lone failure", ({ jobs, lone }) =>
+  Effect.gen(function* () {
+    const { incomplete } = yield* (yield* GitHubChecks).workflowRuns(repository, head);
+    assert.deepStrictEqual(
+      incomplete.map(({ loneFailure }) =>
+        Option.map(loneFailure, ({ job, jobId, unfinished }) => ({ job, jobId, unfinished })),
+      ),
+      Option.isSome(lone) ? [lone] : [],
+    );
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("/jobs")
+          ? json({ total_count: jobs.length, jobs })
+          : json({
+              total_count: 1,
+              workflow_runs: [
+                workflowRun(43098104121, {
+                  name: "CI",
+                  workflow: 1,
+                  number: 9,
+                  conclusion: "failure",
+                }),
+              ],
+            }),
+      ),
+    ),
+  ),
 );

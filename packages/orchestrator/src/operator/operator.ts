@@ -1458,7 +1458,8 @@ export class Operator extends Context.Service<
     /**
      * Applies the completion labels of a Run whose CI wait ended because CI on its head didn't
      * finish, once CI on that head has passed, and resolves the displayed failed Attempt. Fails with
-     * `CiNotPassedError` while CI on the head hasn't passed in full.
+     * `CiNotPassedError` while CI on the head hasn't passed in full or after its pull request closed
+     * without a merge.
      */
     readonly applyCiLabels: (
       instance: LoadedInstance,

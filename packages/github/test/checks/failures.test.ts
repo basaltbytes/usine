@@ -596,3 +596,55 @@ for (const status of [403, 429, 503]) {
     );
   });
 }
+
+it.effect("reports the Actions run and job behind each failed check run", () =>
+  Effect.gen(function* () {
+    const evidence = yield* (yield* GitHubChecks).failures(repository, head);
+    assert.deepStrictEqual(
+      evidence.checks.map(({ name, actionsJob }) => ({
+        name,
+        actionsJob: Option.map(actionsJob, ({ runId, jobId }) => ({ runId, jobId })),
+      })),
+      [
+        { name: "ci", actionsJob: Option.some({ runId: 1, jobId: 2 }) },
+        { name: "external", actionsJob: Option.none() },
+      ],
+    );
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("/actions/jobs/")
+          ? new Response("forbidden", { status: 403 })
+          : json({
+              total_count: 2,
+              check_runs: [
+                failedCheckRun,
+                { ...failedCheckRun, name: "external", details_url: "https://ci.example/build/7" },
+              ],
+            }),
+      ),
+    ),
+  ),
+);
+
+it.effect("reads failed commit statuses beside failed check runs", () =>
+  Effect.gen(function* () {
+    const evidence = yield* (yield* GitHubChecks).failedStatuses(repository, head);
+    assert.deepStrictEqual(evidence.jobs, ["external-ci"]);
+    assert.isTrue(evidence.checks.every(({ actionsJob }) => Option.isNone(actionsJob)));
+    assert.include(evidence.excerpt, "Build failed");
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("check-runs")
+          ? json(failedCheck)
+          : json({
+              statuses: [
+                { context: "external-ci", state: "failure", description: "Build failed" },
+                { context: "docs", state: "success", description: null },
+              ],
+            }),
+      ),
+    ),
+  ),
+);

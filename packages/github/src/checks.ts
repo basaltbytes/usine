@@ -33,14 +33,40 @@ export class CheckSnapshot extends Schema.Class<
   state: Schema.Literals(["pending", "success", "failure", "conflict"]),
 }) {}
 
-/** Failed check names and a bounded log excerpt for a fix attempt. */
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+
+/** A GitHub Actions job, by the ID of its workflow run and its own job ID. */
+export class ActionsJobRef extends Schema.Class<
+  ActionsJobRef,
+  Brand.Brand<"@usine/github/checks/ActionsJobRef">
+>("ActionsJobRef")({
+  runId: PositiveInt,
+  jobId: PositiveInt,
+}) {}
+
+/** A failed check run or commit status on a head. */
+export class FailedCheck extends Schema.Class<
+  FailedCheck,
+  Brand.Brand<"@usine/github/checks/FailedCheck">
+>("FailedCheck")({
+  name: Schema.NonEmptyString,
+  /** The Actions job behind a check run, or `None` for a commit status or another app's check. */
+  actionsJob: Schema.Option(ActionsJobRef).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
+}) {}
+
+/** Failed checks and a bounded log excerpt for a fix attempt. */
 export class CheckFailureEvidence extends Schema.Class<
   CheckFailureEvidence,
   Brand.Brand<"@usine/github/checks/CheckFailureEvidence">
 >("CheckFailureEvidence")({
-  jobs: Schema.Array(Schema.NonEmptyString),
+  checks: Schema.Array(FailedCheck),
   excerpt: Schema.String.check(Schema.isMaxLength(12000)),
-}) {}
+}) {
+  /** The names of the failed checks. */
+  get jobs(): ReadonlyArray<string> {
+    return this.checks.map(({ name }) => name);
+  }
+}
 
 /** A check run or legacy commit status on a head that has not completed. */
 export class PendingCheck extends Schema.Class<
@@ -66,6 +92,9 @@ export class PendingCheckReport extends Schema.Class<
 }) {}
 
 const JobNames = Schema.Array(Schema.NonEmptyString);
+const JobIds = Schema.Array(PositiveInt).pipe(
+  Schema.withConstructorDefault(Effect.succeed<ReadonlyArray<number>>([])),
+);
 
 /**
  * The only failed job of a workflow run and the jobs of that run that never finished, such as a
@@ -76,6 +105,7 @@ export class LoneJobFailure extends Schema.Class<
   Brand.Brand<"@usine/github/checks/LoneJobFailure">
 >("LoneJobFailure")({
   job: Schema.NonEmptyString,
+  jobId: PositiveInt,
   /** The jobs of the run that are queued or waiting; at least one. */
   unfinished: JobNames.check(Schema.isMinLength(1)),
 }) {}
@@ -96,6 +126,8 @@ export class IncompleteWorkflowRun extends Schema.Class<
   loneFailure: Schema.Option(LoneJobFailure).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /** The IDs of the jobs in the run's latest attempt. */
+  jobIds: JobIds,
 }) {}
 
 /** The latest run of a workflow on a head that has not concluded yet. */
@@ -114,6 +146,8 @@ export class RunningWorkflowRun extends Schema.Class<
   loneFailure: Schema.Option(LoneJobFailure).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+  /** The IDs of the jobs in the run's latest attempt, which can lack jobs of an earlier attempt. */
+  jobIds: JobIds,
 }) {}
 
 /** The latest workflow runs on a head that either ran only in part or have not concluded. */
@@ -193,6 +227,7 @@ const CompletedJobs = Schema.Struct({
   total_count: Schema.Int,
   jobs: Schema.Array(
     Schema.Struct({
+      id: PositiveInt,
       name: Schema.NonEmptyString,
       status: Schema.String,
       conclusion: Schema.NullOr(Schema.String),
@@ -205,6 +240,7 @@ type CompletedJob = (typeof CompletedJobs.Type)["jobs"][number];
 type PendingCheckRun = (typeof PendingCheckRuns.Type)["check_runs"][number];
 
 const PENDING_CHECK_LIMIT = 10;
+const ACTIONS_JOB_URL = /\/actions\/runs\/(\d+)\/job\/(\d+)(?:\?|$)/u;
 const jobDuration = (job: CompletedJob) =>
   job.started_at !== null && job.completed_at !== null
     ? Option.some(
@@ -250,7 +286,7 @@ const loneFailure = (jobs: ReadonlyArray<CompletedJob>, concluded: boolean) => {
     .map(({ name }) => name);
   return unfinished.length === 0
     ? Option.none()
-    : Option.some(LoneJobFailure.make({ job: job.name, unfinished }));
+    : Option.some(LoneJobFailure.make({ job: job.name, jobId: job.id, unfinished }));
 };
 
 /** Reads aggregate CI and failure diagnostics without starting an agent. */
@@ -261,7 +297,16 @@ export class GitHubChecks extends Context.Service<
       repository: RepositoryName,
       item: ItemNumber,
     ) => Effect.Effect<CheckSnapshot, GitHubAppError>;
+    /**
+     * Reads the failed check runs on `head`, or its failed commit statuses when no check run
+     * failed, with a bounded excerpt of their logs.
+     */
     readonly failures: (
+      repository: RepositoryName,
+      head: CommitSha,
+    ) => Effect.Effect<CheckFailureEvidence, GitHubAppError>;
+    /** Reads the failed commit statuses on `head`, whether or not a check run failed. */
+    readonly failedStatuses: (
       repository: RepositoryName,
       head: CommitSha,
     ) => Effect.Effect<CheckFailureEvidence, GitHubAppError>;
@@ -444,6 +489,22 @@ export class GitHubChecks extends Context.Service<
         );
         return statuses;
       });
+      const failedStatuses = (prefix: string, head: CommitSha) =>
+        commitStatuses(prefix, head).pipe(
+          Effect.map((statuses) => {
+            const failures = statuses.filter(
+              ({ state }) => state === "failure" || state === "error",
+            );
+            return CheckFailureEvidence.make({
+              checks: failures.map(({ context }) => FailedCheck.make({ name: context })),
+              excerpt: failures
+                .slice(0, 4)
+                .map(({ context, description }) => `${context}\n${description ?? ""}`.slice(-2900))
+                .join("\n\n")
+                .slice(-12000),
+            });
+          }),
+        );
       const pendingStatuses = (prefix: string, head: CommitSha) =>
         commitStatuses(prefix, head).pipe(
           Effect.map((statuses) =>
@@ -490,6 +551,7 @@ export class GitHubChecks extends Context.Service<
                   status: run.status === null || run.status === "" ? "unknown" : run.status,
                   url: run.html_url,
                   loneFailure: loneFailure(jobs, false),
+                  jobIds: jobs.map(({ id }) => id),
                 }),
               );
               continue;
@@ -505,6 +567,7 @@ export class GitHubChecks extends Context.Service<
                 conclusion: run.conclusion,
                 url: run.html_url,
                 loneFailure: lone,
+                jobIds: jobs.map(({ id }) => id),
               }),
             );
           }
@@ -691,29 +754,38 @@ export class GitHubChecks extends Context.Service<
             );
             excerpts.push(`${check.name}\n${output.slice(-2800)}`);
           }
-          if (failed.length === 0) {
-            const statuses = yield* commitStatuses(prefix, head);
-            const failures = statuses.filter(
-              ({ state }) => state === "failure" || state === "error",
-            );
-            return CheckFailureEvidence.make({
-              jobs: failures.map(({ context }) => context),
-              excerpt: failures
-                .slice(0, 4)
-                .map(({ context, description }) => `${context}\n${description ?? ""}`.slice(-2900))
-                .join("\n\n")
-                .slice(-12000),
-            });
-          }
+          if (failed.length === 0) return yield* failedStatuses(prefix, head);
           yield* Effect.logInfo("Read failed CI checks", {
             repository,
             head,
             jobs: failed.map(({ name }) => name),
           });
           return CheckFailureEvidence.make({
-            jobs: failed.map(({ name }) => name),
+            checks: failed.map(({ name, details_url }) => {
+              const ids = details_url?.match(ACTIONS_JOB_URL);
+              return FailedCheck.make({
+                name,
+                actionsJob:
+                  ids?.[1] === undefined || ids[2] === undefined
+                    ? Option.none()
+                    : Option.some(
+                        ActionsJobRef.make({ runId: Number(ids[1]), jobId: Number(ids[2]) }),
+                      ),
+              });
+            }),
             excerpt: excerpts.join("\n\n").slice(-12000),
           });
+        }),
+        failedStatuses: Effect.fn("GitHubChecks.failedStatuses")(function* (
+          repository: RepositoryName,
+          head: CommitSha,
+        ) {
+          yield* Effect.annotateCurrentSpan({ repository, head });
+          const { owner, name } = splitRepositoryName(repository);
+          return yield* failedStatuses(
+            `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+            head,
+          );
         }),
       };
     }),

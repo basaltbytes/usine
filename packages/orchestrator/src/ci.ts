@@ -35,6 +35,8 @@ import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
+  type CheckFailureEvidence,
+  type FailedCheck,
   GitHubChecks,
   HeadWorkflowRunState,
   type IncompleteWorkflowRun,
@@ -96,13 +98,23 @@ const workflowRunDetails = (runs: ReadonlyArray<IncompleteWorkflowRun | RunningW
     })
     .join("; ");
 
-/** The jobs whose failure only reflects a workflow run that didn't run in full. */
-const loneFailedJobs = ({ incomplete, running }: HeadWorkflowRunState) =>
-  new Set(
-    [...incomplete, ...running].flatMap(({ loneFailure }) =>
-      Option.toArray(Option.map(loneFailure, ({ job }) => job)),
-    ),
-  );
+/**
+ * Returns whether a failed check only reflects a workflow run on the head that didn't run or
+ * finish in full: it is the run's lone failed job, or a job of an earlier attempt of a run that
+ * GitHub Actions reran. Checks without an Actions job never match.
+ */
+const unfinishedRunFailure = ({ incomplete, running }: HeadWorkflowRunState) => {
+  const runs = new Map([...incomplete, ...running].map((run) => [run.id, run]));
+  return ({ actionsJob }: FailedCheck) =>
+    Option.exists(actionsJob, ({ runId, jobId }) => {
+      const run = runs.get(runId);
+      return (
+        run !== undefined &&
+        (!run.jobIds.includes(jobId) ||
+          Option.exists(run.loneFailure, (lone) => lone.jobId === jobId))
+      );
+    });
+};
 
 /**
  * Returns how workflow runs that didn't run or finish in full end a CI wait without another failed
@@ -124,7 +136,10 @@ const checksUrl = (repository: RepositoryName, pullRequest: number) =>
 const afterGreen = (head: CommitSha) =>
   `After CI on head ${head} passes, apply the completion labels from Needs attention.`;
 
-/** CI on the recorded head of a failed CI wait hasn't passed, so its completion labels stay unapplied. */
+/**
+ * CI on the recorded head of a failed CI wait hasn't passed, or its pull request closed without a
+ * merge, so its completion labels stay unapplied.
+ */
 export class CiNotPassedError extends Schema.TaggedError<
   CiNotPassedError,
   Brand.Brand<"@usine/orchestrator/ci/CiNotPassedError">
@@ -159,9 +174,9 @@ export class CiMonitor extends Context.Service<
     /**
      * Applies the completion labels of a Run whose CI wait ended because CI on its head didn't
      * finish, then resolves the failure of `attemptId`. CI on the recorded head must read green
-     * with every workflow run on it concluded in full. Fails with `CiNotPassedError` if it doesn't,
-     * or with `RunOperationRejectedError` if the Run kept no CI handoff or `attemptId` isn't its
-     * unresolved latest failure.
+     * with every workflow run on it concluded in full, and the pull request must not be closed
+     * without a merge. Fails with `CiNotPassedError` otherwise, or with `RunOperationRejectedError`
+     * if the Run kept no CI handoff or `attemptId` isn't its unresolved latest failure.
      */
     readonly applyLabelsAfterGreen: (
       runId: RunId,
@@ -283,50 +298,71 @@ export class CiMonitor extends Context.Service<
         const timedOut =
           DateTime.toEpochMillis(now) >=
           DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000;
+        // History reads stop early, so the job list survives a slow history read.
+        const pendingDiagnostics = checks
+          .pendingDetails(wait.repository, head, DateTime.add(now, PENDING_HISTORY_LIMIT))
+          .pipe(
+            Effect.timeout(PENDING_DIAGNOSTICS_LIMIT),
+            Effect.map(pendingCheckDetails),
+            Effect.catch((error) =>
+              Effect.logWarning("Pending CI diagnostics unavailable", {
+                runId,
+                head,
+                ...(error._tag === "TimeoutError"
+                  ? { errorTag: error._tag, message: error.message }
+                  : repositoryFailureLogFields(error)),
+              }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
+            ),
+          );
         // Settles CI that GitHub Actions didn't run or finish in full, or keeps the wait pending
         // while a run goes on. Returns `false` once every workflow run concluded in full.
-        const settleUnfinished = (runs: HeadWorkflowRunState) =>
-          Effect.gen(function* () {
-            const unfinished = unfinishedCi(runs, timedOut);
-            const ids = unfinished._tag === "Concluded" ? [] : unfinished.runs.map(({ id }) => id);
-            const fields = { runId, head, state: observed.state, runs: ids };
-            switch (unfinished._tag) {
-              case "Concluded":
-                return false;
-              case "Running":
-                yield* Effect.logInfo(
-                  "Workflow runs on the head have not concluded; CI is still pending",
-                  fields,
-                );
-                return true;
-              case "Incomplete":
-                yield* Effect.logWarning(
-                  "CI ran only in part; operator attention is required and no fix starts",
-                  fields,
-                );
-                yield* engine.settleCi(
-                  runId,
-                  head,
-                  CiIncomplete.make({
-                    message: `GitHub Actions didn't run CI on head ${head} in full, so it isn't a failure that a fix can address: ${workflowRunDetails(unfinished.runs)}. usine applied no completion labels and started no fix. Rerun these workflow runs once GitHub allows it, or push a commit to start new ones. ${afterGreen(head)} Check ${checksUrl(wait.repository, pullRequest)}`,
-                  }),
-                );
-                return true;
-              case "Stalled":
-                yield* Effect.logWarning(
-                  "CI wait timed out while workflow runs had not concluded; operator attention is required",
-                  fields,
-                );
-                yield* engine.settleCi(
-                  runId,
-                  head,
-                  CiTimedOut.make({
-                    message: `CI did not settle within ${handoff.timeoutSeconds} seconds because GitHub Actions didn't finish these workflow runs on head ${head}: ${workflowRunDetails(unfinished.runs)}. usine applied no completion labels and started no fix. Push a commit to start new runs, or rerun these workflow runs once GitHub allows it. ${afterGreen(head)} Check ${checksUrl(wait.repository, pullRequest)}`,
-                  }),
-                );
-                return true;
+        const settleUnfinished = Effect.fn("CiMonitor.settleUnfinished")(function* (
+          runs: HeadWorkflowRunState,
+        ) {
+          const unfinished = unfinishedCi(runs, timedOut);
+          const ids = unfinished._tag === "Concluded" ? [] : unfinished.runs.map(({ id }) => id);
+          const fields = { runId, head, state: observed.state, runs: ids };
+          yield* Effect.annotateCurrentSpan({ outcome: unfinished._tag, runs: ids });
+          switch (unfinished._tag) {
+            case "Concluded":
+              return false;
+            case "Running":
+              yield* Effect.logInfo(
+                "Workflow runs on the head have not concluded; CI is still pending",
+                fields,
+              );
+              return true;
+            case "Incomplete":
+              yield* Effect.logWarning(
+                "CI ran only in part; operator attention is required and no fix starts",
+                fields,
+              );
+              yield* engine.settleCi(
+                runId,
+                head,
+                CiIncomplete.make({
+                  message: `GitHub Actions didn't run CI on head ${head} in full, so it isn't a failure that a fix can address: ${workflowRunDetails(unfinished.runs)}. usine applied no completion labels and started no fix. Rerun these workflow runs once GitHub allows it, or push a commit to start new ones. ${afterGreen(head)} Check ${checksUrl(wait.repository, pullRequest)}`,
+                }),
+              );
+              return true;
+            case "Stalled": {
+              // The pending jobs tell a stalled run apart from a slow or hung job.
+              const details = yield* pendingDiagnostics;
+              yield* Effect.logWarning(
+                "CI wait timed out while workflow runs had not concluded; operator attention is required",
+                { ...fields, details },
+              );
+              yield* engine.settleCi(
+                runId,
+                head,
+                CiTimedOut.make({
+                  message: `CI did not settle within ${handoff.timeoutSeconds} seconds because GitHub Actions didn't finish these workflow runs on head ${head}: ${workflowRunDetails(unfinished.runs)}. ${details} usine applied no completion labels and started no fix. Push a commit to start new runs, or rerun these workflow runs once GitHub allows it. ${afterGreen(head)} Check ${checksUrl(wait.repository, pullRequest)}`,
+                }),
+              );
+              return true;
             }
-          });
+          }
+        });
         const readWorkflowRuns = checks.workflowRuns(wait.repository, head).pipe(
           Effect.catchIf(
             (error) => error._tag !== "GitHubRateLimitError",
@@ -351,23 +387,7 @@ export class CiMonitor extends Context.Service<
               }),
             );
             if (yield* settleUnfinished(runs)) return;
-            // History reads stop early, so the job list survives a slow history read.
-            const historyDeadline = DateTime.add(now, PENDING_HISTORY_LIMIT);
-            const details = yield* checks
-              .pendingDetails(wait.repository, head, historyDeadline)
-              .pipe(
-                Effect.timeout(PENDING_DIAGNOSTICS_LIMIT),
-                Effect.map(pendingCheckDetails),
-                Effect.catch((error) =>
-                  Effect.logWarning("Pending CI diagnostics unavailable", {
-                    runId,
-                    head,
-                    ...(error._tag === "TimeoutError"
-                      ? { errorTag: error._tag, message: error.message }
-                      : repositoryFailureLogFields(error)),
-                  }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
-                ),
-              );
+            const details = yield* pendingDiagnostics;
             yield* Effect.logWarning("CI wait timed out; operator attention is required", {
               runId,
               head,
@@ -392,23 +412,40 @@ export class CiMonitor extends Context.Service<
           });
           return;
         }
-        const evidence =
+        const reported =
           observed.state === "failure"
             ? yield* checks.failures(wait.repository, head).pipe(Effect.asSome)
-            : Option.none();
+            : Option.none<CheckFailureEvidence>();
         const runs = observed.state === "conflict" ? noWorkflowRuns : yield* readWorkflowRuns;
         // A gate job that failed because the jobs it needs never ran is no failure to fix.
-        const lone = loneFailedJobs(runs);
+        const isUnfinishedRunFailure = unfinishedRunFailure(runs);
+        const unfinishedFailures = Option.match(reported, {
+          onNone: () => [],
+          onSome: ({ checks }) => checks.filter(isUnfinishedRunFailure),
+        });
+        // `failures` reads commit statuses only when no check run failed.
+        const evidence =
+          unfinishedFailures.length > 0 &&
+          Option.exists(reported, ({ checks }) => checks.length === unfinishedFailures.length)
+            ? yield* checks
+                .failedStatuses(wait.repository, head)
+                .pipe(
+                  Effect.map((statuses) =>
+                    statuses.checks.length > 0 ? Option.some(statuses) : reported,
+                  ),
+                )
+            : reported;
         const failedJobs = Option.match(evidence, {
           onNone: () => [],
-          onSome: ({ jobs }) => jobs.filter((job) => !lone.has(job)),
+          onSome: ({ checks }) =>
+            checks.filter((check) => !isUnfinishedRunFailure(check)).map(({ name }) => name),
         });
         if (failedJobs.length > 0)
           yield* Effect.logInfo("A check failed on the head; CI goes to the fix loop", {
             runId,
             head,
             jobs: failedJobs,
-            loneFailedJobs: [...lone],
+            unfinishedRunFailures: unfinishedFailures.map(({ name }) => name),
           });
         else if (yield* settleUnfinished(runs)) return;
         if (observed.state === "success") {
@@ -604,6 +641,11 @@ export class CiMonitor extends Context.Service<
         if (observed.head !== head)
           return yield* notPassed(
             `Pull request #${pullRequest} moved from head ${head} to ${observed.head}, so CI on the recorded head can't pass anymore.`,
+          );
+        // The CI wait cancels a Run whose pull request closed without a merge, with no labels.
+        if (observed.pullRequestState === "closed")
+          return yield* notPassed(
+            `Pull request #${pullRequest} was closed without a merge, so its completion labels no longer apply. Mark the failure resolved instead.`,
           );
         if (observed.state !== "success")
           return yield* notPassed(

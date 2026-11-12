@@ -26,6 +26,7 @@ const previousJobs = () =>
     total_count: 2,
     jobs: [
       {
+        id: 1,
         name: "test (engine)",
         status: "completed",
         conclusion: "success",
@@ -33,6 +34,7 @@ const previousJobs = () =>
         completed_at: "2026-11-04T19:55:00Z",
       },
       {
+        id: 2,
         name: "test (web)",
         status: "completed",
         conclusion: "success",
