@@ -556,7 +556,9 @@ it.live(
           return configuration.agents[0]?.harness;
         });
       const pollContext = yield* Effect.context<FileSystem.FileSystem | HttpClient.HttpClient>();
-      const pollHarness = () => Effect.runPromiseWith(pollContext)(harness());
+      // Bounds each request so a request that never gets a response can't use up the whole poll.
+      const pollHarness = () =>
+        Effect.runPromiseWith(pollContext)(harness().pipe(Effect.timeout("2 seconds")));
       try {
         yield* Effect.promise(() =>
           expect.poll(() => pollHarness().catch(() => output), { timeout: 20_000 }).toBe("codex"),
