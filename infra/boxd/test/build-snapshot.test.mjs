@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
+import { Boxd } from "@boxd-sh/sdk";
 import {
   build,
   clientOptions,
+  clients,
   parseOptions,
   sendStdin,
   STDIN_CHUNK_BYTES,
@@ -24,10 +26,18 @@ const env = { BOXD_API_KEY: "bxd_test", ATTEMPT_IMAGE: "ghcr.io/example/attempt:
  * An `Exec` stream that relays one line on each output, then `chunks` on stdout, and exits with
  * `exit` after stdin closes, or never exits when `exit` is null. `onEnd` runs when stdin closes.
  * With `chatter`, the stream then prints a line on stdout every `chatter.everyMs` for
- * `chatter.forMs`, and exits only after that. Closing the stream ends it with an error, unless
- * `cancellable` is false, as on a connection that no longer carries bytes.
+ * `chatter.forMs`, and exits only after that. With `silent`, the stream relays nothing. Closing the
+ * stream ends it with an error, unless `cancellable` is false, as on a connection that no longer
+ * carries bytes.
  */
-const fakeStream = ({ exit = 0, onEnd, chunks = [], chatter, cancellable = true } = {}) => {
+const fakeStream = ({
+  exit = 0,
+  onEnd,
+  chunks = [],
+  chatter,
+  cancellable = true,
+  silent = false,
+} = {}) => {
   const stdin = [];
   let finish;
   let fail;
@@ -40,7 +50,7 @@ const fakeStream = ({ exit = 0, onEnd, chunks = [], chatter, cancellable = true 
     () => true,
   );
   const output = async function* (text, more = [], chatty) {
-    yield new TextEncoder().encode(text);
+    if (!silent) yield new TextEncoder().encode(text);
     for (const chunk of more) yield new TextEncoder().encode(chunk);
     if (chatty !== undefined) {
       const start = Date.now();
@@ -84,7 +94,8 @@ const fakeStream = ({ exit = 0, onEnd, chunks = [], chatter, cancellable = true 
  * default, the first read returns the previous version, and the next ones the new version, or
  * `pending` for good when `neverReady` is set. `setup` holds the options of the setup's `Exec`
  * stream. When `reappliesEgress` is set, the reads after the first one that reports the allowlist
- * lifted report the allowlist of the machine's creation again. `create` waits for `creating`.
+ * lifted report the allowlist of the machine's creation again. `create` waits for `creating`, and
+ * each machine read waits `readMs` first.
  */
 const fakeBoxd = ({
   setup,
@@ -97,6 +108,7 @@ const fakeBoxd = ({
   egressLags = [],
   previous,
   reads,
+  readMs = 0,
 } = {}) => {
   const events = [];
   const state = {
@@ -138,6 +150,7 @@ const fakeBoxd = ({
         return entries;
       },
       get: async (id) => {
+        if (readMs > 0) await sleep(readMs);
         if (state.lag > 0) state.lag -= 1;
         else if (reappliesEgress && state.liftedAt !== undefined) state.egress = state.created;
         else state.egress = state.requested;
@@ -254,8 +267,8 @@ const setupScript = async () => {
 
 /**
  * A command that appends its name and arguments to `$LOG`. As `timeout`, it skips the command
- * that it limits, and exits 124 for the first `$HANG_TIMES` runs of a command that contains
- * `$HANG`. As `tee`, it also appends its input. As `id`, it prints a user ID.
+ * that it limits, and exits `$FAIL_CODE` for the first `$FAIL_TIMES` runs of a command that
+ * contains `$FAIL`. As `tee`, it also appends its input. As `id`, it prints a user ID.
  */
 const STUB = `#!/bin/sh
 name=$(basename "$0")
@@ -263,13 +276,13 @@ echo "$name $*" >> "$LOG"
 case "$name" in
   timeout)
     shift 3
-    if [ -n "$HANG" ]; then
+    if [ -n "$FAIL" ]; then
       case "$*" in
-        *"$HANG"*)
-          runs=$(cat "$LOG.hangs" 2>/dev/null || echo 0)
+        *"$FAIL"*)
+          runs=$(cat "$LOG.fails" 2>/dev/null || echo 0)
           runs=$((runs + 1))
-          echo "$runs" > "$LOG.hangs"
-          if [ "$runs" -le "$HANG_TIMES" ]; then exit 124; fi
+          echo "$runs" > "$LOG.fails"
+          if [ "$runs" -le "$FAIL_TIMES" ]; then exit "$FAIL_CODE"; fi
           ;;
       esac
     fi
@@ -279,8 +292,11 @@ case "$name" in
 esac
 `;
 
-/** Runs the setup script with podman against stub commands; see `STUB`. */
-const runSetupScript = async (script, hang = "", hangTimes = 0) => {
+/**
+ * Runs the setup script with podman against stub commands, where the first `times` runs of a
+ * limited command that contains `fail` exit with `code`; see `STUB`.
+ */
+const runSetupScript = async (script, { fail = "", times = 0, code = 124 } = {}) => {
   const dir = await mkdtemp(join(tmpdir(), "usine-setup-"));
   try {
     await writeFile(join(dir, "stub"), STUB);
@@ -301,8 +317,9 @@ const runSetupScript = async (script, hang = "", hangTimes = 0) => {
       env: {
         PATH: `${dir}:${process.env.PATH}`,
         LOG: log,
-        HANG: hang,
-        HANG_TIMES: String(hangTimes),
+        FAIL: fail,
+        FAIL_TIMES: String(times),
+        FAIL_CODE: String(code),
       },
     });
     pending.child.stdin.end(script);
@@ -334,7 +351,7 @@ test("the setup limits apt and the Tailscale installer and runs each once more",
     "timeout -k 10 240 sh /tmp/usine-tailscale.sh",
   ]);
 
-  const apt = await runSetupScript(script, "apt-get", 1);
+  const apt = await runSetupScript(script, { fail: "apt-get", times: 1 });
   assert.equal(apt.code, 0, apt.stderr);
   assert.equal(
     apt.stderr,
@@ -345,7 +362,7 @@ test("the setup limits apt and the Tailscale installer and runs each once more",
     "timeout -k 10 120 apt-get update",
   ]);
 
-  const once = await runSetupScript(script, "usine-tailscale", 1);
+  const once = await runSetupScript(script, { fail: "usine-tailscale", times: 1 });
   assert.equal(once.code, 0, once.stderr);
   assert.equal(
     once.stderr,
@@ -353,13 +370,35 @@ test("the setup limits apt and the Tailscale installer and runs each once more",
   );
   assert.equal(limited(once.log).filter((line) => line.includes("usine-tailscale")).length, 2);
 
-  const twice = await runSetupScript(script, "usine-tailscale", 2);
+  const twice = await runSetupScript(script, { fail: "usine-tailscale", times: 2 });
   assert.equal(twice.code, 124);
   assert.equal(
     twice.stderr,
     "usine: the Tailscale installer didn't finish within 240 seconds\nusine: running the Tailscale installer again\nusine: the Tailscale installer didn't finish within 240 seconds\n",
   );
   assert.equal(twice.log.includes("systemctl enable tailscaled"), false);
+
+  // `timeout` exits 137 when it sends KILL.
+  const killed = await runSetupScript(script, { fail: "usine-tailscale", times: 1, code: 137 });
+  assert.equal(killed.code, 0, killed.stderr);
+  assert.equal(
+    killed.stderr,
+    "usine: the Tailscale installer didn't finish within 240 seconds\nusine: running the Tailscale installer again\n",
+  );
+
+  const failed = await runSetupScript(script, { fail: "apt-get", times: 1, code: 100 });
+  assert.equal(failed.code, 0, failed.stderr);
+  assert.equal(
+    failed.stderr,
+    "usine: apt-get update exited with code 100\nusine: running apt-get update again\n",
+  );
+
+  const failedTwice = await runSetupScript(script, { fail: "usine-tailscale", times: 2, code: 1 });
+  assert.equal(failedTwice.code, 1);
+  assert.equal(
+    failedTwice.stderr,
+    "usine: the Tailscale installer exited with code 1\nusine: running the Tailscale installer again\nusine: the Tailscale installer exited with code 1\n",
+  );
 });
 
 test("passes each size to the spec, including one that only a self-hosted cluster lists", async () => {
@@ -548,6 +587,13 @@ test(
         options.setupTimeoutMs,
         /^Error: The setup printed nothing for 0\.05 seconds\. Its last output lines:\n(?:pulled\nprogress|progress\npulled)$/u,
       ],
+      // Without output, the quiet limit fires long before the overall one.
+      [
+        { exit: null, silent: true },
+        50,
+        5_000,
+        /^Error: The setup printed nothing for 0\.05 seconds\. It printed no output$/u,
+      ],
       // The lines arrive at once, so the tail is complete before the overall limit fires.
       [
         { exit: null, chunks: lines },
@@ -589,6 +635,48 @@ test("output resets the quiet limit", { timeout: 10_000 }, async () => {
   assert.equal(await result, "usine-attempt");
   assert.ok(relayed.length > 10, relayed.join(""));
 });
+
+/** The number of timers that keep the process running. */
+const timers = () => process.getActiveResourcesInfo().filter((name) => name === "Timeout").length;
+
+test("leaves no timer behind when the setup ends", async () => {
+  const before = timers();
+  const { result } = run(fakeBoxd(), parseOptions(["usine-attempt"], env), undefined, {
+    quietMs: 60_000,
+  });
+  assert.equal(await result, "usine-attempt");
+  assert.equal(timers(), before);
+});
+
+test(
+  "logs the egress reads before it deletes the machine or restricts its egress again",
+  { timeout: 10_000 },
+  async () => {
+    const options = parseOptions(["usine-attempt"], env);
+    const timedOut = "usine: the Tailscale installer didn't finish within 240 seconds\n";
+    for (const [setup, settings] of [
+      // The setup exits right after the timeout line, with a failure and with success.
+      [{ exit: 124, chunks: [timedOut] }, {}],
+      [{ exit: 0, chunks: [timedOut] }, {}],
+      [{ exit: null }, { ...options, setupTimeoutMs: 50 }],
+    ]) {
+      const boxd = fakeBoxd({ setup });
+      const cleanup = fakeBoxd({ readMs: 50 });
+      const { result, logged } = run(boxd, { ...options, ...settings }, undefined, { cleanup });
+      await result.catch(() => {});
+      const read = logged.indexOf("boxd reports the temporary machine's egress as unrestricted");
+      const after = logged.findIndex(
+        (line) =>
+          line.startsWith("Deleted temporary machine") || line.startsWith("Saving snapshot"),
+      );
+      assert.ok(read !== -1 && read < after, logged.join("\n"));
+      assert.deepEqual(cleanup.events, [
+        ["machine", []],
+        ["delete", "vm-1"],
+      ]);
+    }
+  },
+);
 
 test("reads the egress through the second client when a command in the setup times out", async () => {
   const boxd = fakeBoxd({
@@ -718,6 +806,9 @@ test("refuses invalid options and a missing API key", () => {
     [["--setup-timeout", "0", "usine-attempt"], env],
     [["--setup-timeout", "1.5", "usine-attempt"], env],
     [["--setup-timeout", "20m", "usine-attempt"], env],
+    // More minutes than `setTimeout` takes.
+    [["--setup-timeout", "10000", "usine-attempt"], env],
+    [["--setup-timeout", "35792", "usine-attempt"], env],
     [["--vcpu", "2", "usine-attempt"], env],
     [["Usine_Attempt"], env],
     [["usine-attempt"], { ...env, BOXD_API_KEY: "" }],
@@ -725,6 +816,19 @@ test("refuses invalid options and a missing API key", () => {
     [["usine-attempt"], { ...env, ATTEMPT_IMAGE: "ghcr.io/x;rm -rf /" }],
   ])
     assert.throws(() => parseOptions(argv, environment), UsageError);
+});
+
+test("the command line deletes through a client of its own", async () => {
+  const { boxd, cleanup } = clients(
+    parseOptions(["--endpoint", "https://127.0.0.1:1", "usine-attempt"], env),
+  );
+  try {
+    assert.ok(boxd instanceof Boxd);
+    assert.ok(cleanup instanceof Boxd);
+    assert.notEqual(boxd, cleanup);
+  } finally {
+    await Promise.all([boxd.close(), cleanup.close()]);
+  }
 });
 
 test("the command line exits 2 with its usage before it calls boxd", async () => {

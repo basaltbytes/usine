@@ -174,6 +174,15 @@ export const clientOptions = ({ apiKey, endpoint, region }) => {
   return options;
 };
 
+/**
+ * Returns the client that runs the build and `cleanup`, a second client for the deletion and the
+ * egress reads, which `build` takes.
+ */
+export const clients = (options) => ({
+  boxd: new Boxd(clientOptions(options)),
+  cleanup: new Boxd(clientOptions(options)),
+});
+
 /** Writes `bytes` to the stdin of `stream` in chunks of at most `STDIN_CHUNK_BYTES`, then closes it. */
 export const sendStdin = (stream, bytes) => {
   for (let start = 0; start < bytes.length; start += STDIN_CHUNK_BYTES)
@@ -245,8 +254,16 @@ const runSetup = async (
     stream.close();
     reject(error);
   };
-  const limit = (reason) =>
-    stop(new SetupLimitError(`${reason}. Its last output lines:\n${tail.lines()}`));
+  const limit = (reason) => {
+    const lines = tail.lines();
+    stop(
+      new SetupLimitError(
+        lines === ""
+          ? `${reason}. It printed no output`
+          : `${reason}. Its last output lines:\n${lines}`,
+      ),
+    );
+  };
   const overall = setTimeout(
     () => limit(`The setup didn't finish within ${setupTimeoutMs / 1000} seconds`),
     setupTimeoutMs,
@@ -445,8 +462,7 @@ if (import.meta.main) {
   const controller = new AbortController();
   process.once("SIGINT", () => controller.abort(130));
   process.once("SIGTERM", () => controller.abort(143));
-  const boxd = new Boxd(clientOptions(options));
-  const cleanup = new Boxd(clientOptions(options));
+  const { boxd, cleanup } = clients(options);
   try {
     const name = await build(boxd, options, {
       cleanup,
