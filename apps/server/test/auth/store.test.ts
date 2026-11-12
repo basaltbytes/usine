@@ -109,6 +109,34 @@ for (const [name, layer] of [
         );
       }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
     );
+    it.live("issues a device token with an operation ceiling and an expiry", () =>
+      Effect.gen(function* () {
+        const store = yield* AuthStore;
+        yield* store.add(alice, true);
+        const operations = [OperationId.make("operator.detail")];
+        const token = InstanceToken.make({
+          id: TokenId.make("ceiling-expiry"),
+          memberId: alice.id,
+          name: TokenName.make("Agent"),
+          hash: secretHash("ceiling-expiry"),
+          kind: "device",
+          createdAt: 0,
+          lastUsedAt: 0,
+          expiresAt: 5000,
+          operations: Option.some(operations),
+        });
+        yield* store.issue(token);
+        const authenticated = yield* store.authenticate(token.hash, 1);
+        const found = Option.getOrNull(authenticated)?.token;
+        assert.deepEqual(found?.operations, Option.some(operations));
+        assert.equal(found?.expiresAt, 5000);
+        const listed = (yield* store.tokens(alice.id))[0];
+        assert.deepEqual(listed?.operations, Option.some(operations));
+        assert.equal(listed?.expiresAt, 5000);
+        const expired = yield* store.authenticate(token.hash, 5000);
+        assert.isTrue(Option.isNone(expired));
+      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(TestClock.layer()))), Effect.scoped),
+    );
     it.live("revokes every credential when a member is removed", () =>
       Effect.gen(function* () {
         const store = yield* AuthStore;
