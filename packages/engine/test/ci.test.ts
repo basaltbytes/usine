@@ -1,4 +1,8 @@
 import { jsonKey } from "@usine/core/json-key";
+import { DatabaseSync } from "node:sqlite";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join } from "node:path";
 import { withRunStore } from "./store/support.ts";
 import { assert, it } from "@effect/vitest";
 import {
@@ -553,6 +557,95 @@ it.live(
         );
       }),
     ),
+);
+
+it.live("a reset replays a blocked CI fix that was ignored as superseded", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const source = Submission.make({
+        ...submission({ number: 1 }),
+        cycleLimit: Option.some(CycleLimit.make(1)),
+      });
+      const labelEvent = Submission.make({
+        ...submission({ number: 2 }),
+        cycleLimit: source.cycleLimit,
+      });
+      const blockedFix = Submission.make({
+        ...submission({ number: 3 }),
+        loop: policy.fixLoop,
+        cycleLimit: source.cycleLimit,
+        ciFailureHead: Option.some(head),
+      });
+      const storage = Layer.merge(RunStore.layer, CycleBudgets.layer).pipe(
+        Layer.provide(localSqliteLayer(directory)),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const budgets = yield* CycleBudgets;
+          yield* store.recordAndClaim(source, RunId.make("source"));
+          const started = yield* store.beginAttempt(
+            RunId.make("source"),
+            WorkerName.make("local"),
+            Option.none(),
+          );
+          assert(started._tag === "AttemptStarted");
+          yield* store.finishAttempt(
+            started.execution.attempt,
+            Result.succeed(stepResult("Completed")),
+          );
+          const exhausted = yield* store.recordAndClaim(labelEvent, RunId.make("exhausted"));
+          assert(exhausted.result._tag === "CycleBlocked");
+          const blocked = yield* store.recordAndClaim(blockedFix, RunId.make("blocked-ci-fix"));
+          assert(blocked.result._tag === "CycleBlocked");
+          // While the ask is open, admission blocks every Run of the Item, so no claim can
+          // supersede the fix; the row is written directly.
+          yield* Effect.sync(() => {
+            const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+            try {
+              database
+                .prepare(
+                  "INSERT INTO usine_ignored_events (event_id, reason) VALUES (?, 'superseded')",
+                )
+                .run(blockedFix.event.id);
+            } finally {
+              database.close();
+            }
+          });
+          const superseded = yield* store.recordAndClaim(blockedFix, RunId.make("blocked-ci-fix"));
+          assert(superseded.result._tag === "Ignored");
+          assert.strictEqual(superseded.result.reason, "superseded");
+
+          const replayed = yield* budgets.reset(blocked.result.ask.id, approvalEvent(1));
+          assert.deepStrictEqual(replayed, [blockedFix.event.id]);
+          const pending = yield* ciFixQueues(store);
+          assert.deepStrictEqual(
+            pending.map(({ submission }) => submission.event.id),
+            [blockedFix.event.id],
+          );
+        }).pipe(Effect.provide(storage)),
+      );
+
+      const rechecked = yield* Ref.make<ReadonlyArray<EventId>>([]);
+      const condition = conditionLayer((queued) =>
+        Ref.update(rechecked, (all) => [...all, queued.event.id]).pipe(
+          Effect.andThen(stillMatches(queued)),
+        ),
+      );
+      const worker = yield* slottedExecutor([Effect.succeed(stepResult("Completed"))]);
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const admitted = yield* (yield* RunReader).runForEvent(blockedFix.event.dedupKey);
+          assert(Option.isSome(admitted));
+          yield* waitFor(engine, admitted.value, ({ attempts }) => attempts.length === 1);
+          const rechecks = yield* Ref.get(rechecked);
+          assert.include(rechecks, blockedFix.event.id);
+          yield* engine.drain;
+        }).pipe(Effect.provide(engineLayer(directory, worker.executor, condition))),
+      );
+    }),
+  ),
 );
 
 it.live.each(["required", "none"] as const)(

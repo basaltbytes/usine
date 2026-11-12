@@ -26,24 +26,24 @@ it("removes the recorded CI handoff instructions, whatever their wording", () =>
     ciInstructions: Option.some(earlier),
     ciPolicy: Option.some(policy),
   };
-  assert.strictEqual(recordedPrompt(recorded), prompt);
-  const replaced = withCiInstructions(recordedPrompt(recorded), Option.some(policy));
+  assert.deepStrictEqual(recordedPrompt(recorded), { prompt, removed: "recorded" });
+  const replaced = withCiInstructions(recordedPrompt(recorded).prompt, Option.some(policy));
   assert.notInclude(replaced.task, earlier);
   assert.strictEqual(replaced.task.split("After pushing, end with").length, 2);
 });
 
 it("removes the current CI handoff instructions from an Event recorded without them", () => {
   const { task } = withCiInstructions(prompt, Option.some(policy));
-  assert.strictEqual(
+  assert.deepStrictEqual(
     recordedPrompt({ task, ciInstructions: Option.none(), ciPolicy: Option.some(policy) }),
-    prompt,
+    { prompt, removed: "current-wording" },
   );
-  assert.strictEqual(
+  assert.deepStrictEqual(
     recordedPrompt({
       task: AttemptTask.make(prompt),
       ciInstructions: Option.none(),
       ciPolicy: Option.some(policy),
     }),
-    prompt,
+    { prompt, removed: "none" },
   );
 });

@@ -134,21 +134,41 @@ export const withCiInstructions = (prompt: string, policy: Option.Option<CiPolic
 };
 
 /**
+ * The CI handoff instructions that `recordedPrompt` removed: the ones recorded with the Event, the
+ * ones its CI policy generates now for an Event recorded without them, or none.
+ */
+type RemovedCiInstructions = "recorded" | "current-wording" | "none";
+
+interface RecordedSuffix {
+  readonly instructions: string;
+  readonly removed: Exclude<RemovedCiInstructions, "none">;
+}
+
+/**
  * Returns the prompt of a recorded Submission: its task without the CI handoff instructions
  * recorded with it. For an Event recorded before the instructions were stored, it removes the
- * instructions that the Event's CI policy generates now, if the task ends with them.
+ * instructions that the Event's CI policy generates now, if the task ends with them. `removed`
+ * states which instructions it removed; with `none`, the task is returned unchanged.
  */
 export const recordedPrompt = (
   submission: Pick<Submission, "task" | "ciInstructions" | "ciPolicy">,
-): string => {
-  const suffix = Option.orElse(submission.ciInstructions, () =>
-    Option.map(submission.ciPolicy, ciInstructions),
-  );
+): { readonly prompt: string; readonly removed: RemovedCiInstructions } => {
+  const suffix = Option.match(submission.ciInstructions, {
+    onSome: (instructions) => Option.some<RecordedSuffix>({ instructions, removed: "recorded" }),
+    onNone: () =>
+      Option.map(submission.ciPolicy, (policy): RecordedSuffix => ({
+        instructions: ciInstructions(policy),
+        removed: "current-wording",
+      })),
+  });
   return Option.match(
-    Option.filter(suffix, (instructions) => submission.task.endsWith(instructions)),
+    Option.filter(suffix, ({ instructions }) => submission.task.endsWith(instructions)),
     {
-      onNone: () => submission.task,
-      onSome: (instructions) => submission.task.slice(0, -instructions.length),
+      onNone: () => ({ prompt: submission.task, removed: "none" }),
+      onSome: ({ instructions, removed }) => ({
+        prompt: submission.task.slice(0, -instructions.length),
+        removed,
+      }),
     },
   );
 };

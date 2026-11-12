@@ -4,6 +4,10 @@ import { assert, it } from "@effect/vitest";
 // The retention assertion must run after Node’s check phase releases native async handles.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { setImmediate } from "node:timers/promises";
+import { DatabaseSync } from "node:sqlite";
+// Synchronous Node path callbacks retain the host platform’s path semantics.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
+import { join } from "node:path";
 import { queryObjects } from "node:v8";
 import { NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
@@ -374,6 +378,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     mutations,
     runtime,
     timeoutSeconds,
+    directory,
   };
 });
 
@@ -1951,6 +1956,106 @@ it.live.each(["added", "removed", "changed"] as const)(
           assert.deepStrictEqual(saved.ciFailureHead, Option.some(head));
           const links = yield* reader.ciFixRuns([sourceId]);
           assert.strictEqual(links.get(sourceId)?.runId, fixId.value);
+          yield* engine.drain;
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each(["an earlier wording", "no recorded instructions"] as const)(
+  "a replayed CI fix recorded with %s ends with one current CI handoff",
+  (recorded) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const policy = CiPolicy.make({ fixLoop: loop.name, timeoutSeconds: 3600 });
+        const configured = LoadedInstance.make({
+          ...fixtureInstance,
+          loops: [
+            LoopFile.make({
+              ...loop,
+              maxCycles: CycleLimit.make(1),
+              approval: "required",
+              ci: Option.some(policy),
+            }),
+          ],
+        });
+        const setup = yield* scenario(3600, configured);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const budgets = yield* CycleBudgets;
+          yield* openWait(setup.timeoutSeconds, true);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+          );
+          yield* (yield* CiMonitor).reconcile(configured, Option.none());
+          const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+          const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+          const earlier = "\n\nAn earlier wording of the CI handoff.";
+          // Stands for an Event recorded by an earlier release: with other instructions, or
+          // before the instructions were stored apart from the task.
+          const withDatabase = <A>(use: (database: DatabaseSync) => A) =>
+            Effect.sync(() => {
+              const database = new DatabaseSync(join(setup.directory, ".usine/runtime.sqlite"));
+              try {
+                return use(database);
+              } finally {
+                database.close();
+              }
+            });
+          const row = yield* withDatabase((database) =>
+            database
+              .prepare("SELECT task, ci_instructions FROM usine_trigger_events WHERE event_id = ?")
+              .get(blocked.eventId),
+          ).pipe(
+            Effect.flatMap(
+              Schema.decodeUnknownEffect(
+                Schema.Struct({ task: Schema.String, ci_instructions: Schema.String }),
+              ),
+            ),
+          );
+          const stored = {
+            prompt: row.task.slice(0, -row.ci_instructions.length),
+            instructions: row.ci_instructions,
+          };
+          yield* withDatabase((database) =>
+            recorded === "an earlier wording"
+              ? database
+                  .prepare(
+                    "UPDATE usine_trigger_events SET task = ?, ci_instructions = ? WHERE event_id = ?",
+                  )
+                  .run(`${stored.prompt}${earlier}`, earlier, blocked.eventId)
+              : database
+                  .prepare(
+                    "UPDATE usine_trigger_events SET ci_instructions = NULL WHERE event_id = ?",
+                  )
+                  .run(blocked.eventId),
+          );
+          yield* budgets.reset(
+            ask.id,
+            Event.make({
+              id: EventId.make("reset-recorded-instructions"),
+              dedupKey: DedupKey.make("reset-recorded-instructions"),
+              receivedAt: yield* DateTime.now,
+              payload: {},
+            }),
+          );
+          yield* engine.reconcile;
+          const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+          assert(Option.isSome(fixId));
+          const fix = yield* engine.inspect(fixId.value).pipe(
+            Effect.repeat({
+              until: ({ run }) => run.state._tag === "Waiting",
+              schedule: Schedule.spaced("10 millis"),
+            }),
+            Effect.timeout("5 seconds"),
+          );
+          assert.include(stored.prompt, "TypeError: failing CI log");
+          assert.strictEqual(fix.task, `${stored.prompt}${stored.instructions}`);
+          assert.notInclude(fix.task, earlier);
+          assert.strictEqual(fix.task.split("After pushing, end with").length, 2);
           yield* engine.drain;
         }).pipe(Effect.provide(setup.runtime));
       }),

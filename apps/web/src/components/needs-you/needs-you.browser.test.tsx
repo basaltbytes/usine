@@ -455,27 +455,40 @@ it.each([1280, 390])(
   },
 );
 
+const replayNeed = CycleBudgetNeed.make({
+  id: "cycle-budget:replayed",
+  itemLabel: "approval/project#367",
+  itemUrl: "https://github.com/approval/project/issues/367",
+  ask: CycleBudgetAsk.make({
+    id: CycleBudgetAskId.make("replayed"),
+    itemKey: waiting.itemKey,
+    repository,
+    loop,
+    limit: CycleLimit.make(3),
+    counts: [
+      LoopCycleCount.make({ loop, admitted: CycleCount.make(3), completed: CycleCount.make(3) }),
+    ],
+  }).recordBlock(loop, EventId.make("blocked-ci-fix")),
+});
+
 it("reports the CI fixes that a cycle budget reset replayed in a toast", async () => {
-  const need = CycleBudgetNeed.make({
-    id: "cycle-budget:replayed",
-    itemLabel: "approval/project#367",
-    itemUrl: "https://github.com/approval/project/issues/367",
-    ask: CycleBudgetAsk.make({
-      id: CycleBudgetAskId.make("replayed"),
-      itemKey: waiting.itemKey,
-      repository,
-      loop,
-      limit: CycleLimit.make(3),
-      counts: [
-        LoopCycleCount.make({ loop, admitted: CycleCount.make(3), completed: CycleCount.make(3) }),
-      ],
-    }).recordBlock(loop, EventId.make("blocked-ci-fix")),
-  });
-  await replaceNeeds([need]);
+  await replaceNeeds([replayNeed]);
   await commands.cycleResetResponse('{"replayedCiFixEventIds":["blocked-ci-fix"]}');
-  const row = needs.getByRole("listitem").filter({ hasText: need.itemLabel });
+  const row = needs.getByRole("listitem").filter({ hasText: replayNeed.itemLabel });
   await row.getByRole("button", { name: "Reset cycle budget" }).click();
   await expect.element(page.getByText("Replayed 1 CI fix", { exact: true })).toBeVisible();
+});
+
+it("shows no toast for a cycle budget reset that replays no CI fix", async () => {
+  await replaceNeeds([replayNeed]);
+  await commands.cycleResetResponse('{"replayedCiFixEventIds":[]}');
+  const row = needs.getByRole("listitem").filter({ hasText: replayNeed.itemLabel });
+  await row.getByRole("button", { name: "Reset cycle budget" }).click();
+  // A reset succeeds after its success handler, which adds any toast, has finished.
+  await expect
+    .poll(() => queryClient.getMutationCache().find({ status: "success" }) !== undefined)
+    .toBe(true);
+  expect(document.querySelector('[data-slot="toast"]')).toBeNull();
 });
 
 it.each([

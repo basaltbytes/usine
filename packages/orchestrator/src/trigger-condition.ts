@@ -79,16 +79,25 @@ export const triggerConditionLayer: Layer.Layer<
         repository,
         submission.event.payload,
       );
+      const recorded = recordedPrompt(submission);
       yield* Effect.logInfo("Queued CI fix takes its Loop's current settings", {
         ...logFields(submission),
         approval: settings.approval,
         agent: settings.agent.name,
         permissions: settings.permissions,
         cycleLimit: Option.getOrNull(settings.cycleLimit),
+        removedCiInstructions: recorded.removed,
+        ciInstructions: Option.isSome(settings.ciPolicy) ? "appended" : "none",
       });
+      if (recorded.removed === "none" && Option.isSome(submission.ciPolicy)) {
+        yield* Effect.logWarning(
+          "Queued CI fix's task doesn't end with known CI handoff instructions; none were removed",
+          { ...logFields(submission), appendsCiInstructions: Option.isSome(settings.ciPolicy) },
+        );
+      }
       return Option.some<AdmissionSettings>({
         ...settings,
-        ...withCiInstructions(recordedPrompt(submission), settings.ciPolicy),
+        ...withCiInstructions(recorded.prompt, settings.ciPolicy),
       });
     });
 

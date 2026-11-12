@@ -277,6 +277,43 @@ describe("Run Events", () => {
   );
 });
 
+/**
+ * Reads `ciFixRuns` for `sources` on a separate connection and returns the links with the number
+ * of parameters bound by each statement.
+ */
+const ciFixRunsParameters = Effect.fn("test.ciFixRunsParameters")(function* (
+  directory: InstanceDirectory,
+  sources: ReadonlyArray<RunId>,
+) {
+  const path = yield* Path.Path;
+  const parameters: Array<number> = [];
+  const logger = Layer.succeed(EffectLogger)({
+    logQuery: (_query, params) => Effect.sync(() => void parameters.push(params.length)),
+  });
+  const database = Layer.effect(
+    RunDatabase,
+    SQLiteDrizzle.make().pipe(
+      Effect.provide(logger.pipe(Layer.provideMerge(SQLiteDrizzle.DefaultServices))),
+    ),
+  ).pipe(
+    Layer.provide(
+      SqliteClient.layer({
+        filename: path.join(directory, ".usine", "runtime.sqlite"),
+        readonly: true,
+        disableWAL: true,
+      }),
+    ),
+  );
+  const reader = RunReader.layer.pipe(
+    Layer.provide(Layer.merge(database, transcriptCodecLayer)),
+    Layer.fresh,
+  );
+  const links = yield* Effect.flatMap(RunReader, (reader) => reader.ciFixRuns(sources)).pipe(
+    Effect.provide(reader),
+  );
+  return { links, parameters };
+});
+
 it.effect("maps a source Run to its newest admitted CI fix across failed heads", () =>
   withInstance((directory) =>
     Effect.gen(function* () {
@@ -339,29 +376,49 @@ it.effect("maps a source Run to its newest admitted CI fix across failed heads",
           sourceId,
         ]);
         assert.deepStrictEqual(manyLinks, links);
+        const counted = yield* ciFixRunsParameters(directory, [sourceId, ...unknownSources]);
+        assert.deepStrictEqual(counted.links.get(sourceId), links.get(sourceId));
+        assert.isBelow(Math.max(...counted.parameters), 100);
+        assert.strictEqual(counted.parameters.length, Math.ceil(1101 / 48));
         const empty = yield* reader.ciFixRuns([]);
         assert.deepStrictEqual(empty, new Map());
 
-        // Fixes opened at the same time are ordered by Run ID.
-        const tiedSourceId = RunId.make("tied-source");
-        yield* TestClock.setTime(4000);
-        const tied = yield* Effect.forEach(["d", "e"], (head, index) =>
-          engine.submit(
-            Submission.make({
-              ...fix(4 + index, tiedSourceId, head),
-              itemKey: ItemKey.make(`tied-fix-${head}`),
-            }),
-          ),
-        );
-        const tiedRunIds = tied.map((result) => {
-          assert(result._tag === "Claimed");
-          return result.runId;
-        });
-        const newestTied = [...tiedRunIds].sort().at(-1);
-        assert.strictEqual(
-          (yield* reader.ciFixRuns([tiedSourceId])).get(tiedSourceId)?.runId,
-          newestTied,
-        );
+        // Fixes opened at the same time are ordered by Run ID, whichever was inserted first.
+        const tiedAt = DateTime.makeUnsafe("2026-08-24T12:00:30Z");
+        const greatestInsertedFirst: Array<boolean> = [];
+        for (const [index, heads] of [
+          ["d", "e"],
+          ["e", "d"],
+        ].entries()) {
+          const tiedSourceId = RunId.make(`tied-source-${index}`);
+          const tied = yield* Effect.forEach(heads, (head, offset) => {
+            const tiedFix = fix(4 + 2 * index + offset, tiedSourceId, head);
+            return engine.submit(
+              Submission.make({
+                ...tiedFix,
+                event: Event.make({ ...tiedFix.event, receivedAt: tiedAt }),
+                itemKey: ItemKey.make(`tied-fix-${index}-${head}`),
+              }),
+            );
+          });
+          const tiedRunIds = tied.map((result) => {
+            assert(result._tag === "Claimed");
+            return result.runId;
+          });
+          const tiedRuns = yield* Effect.forEach(tiedRunIds, (runId) => engine.inspect(runId));
+          assert.deepStrictEqual(
+            tiedRuns.map(({ run }) => DateTime.formatIso(run.openedAt)),
+            [DateTime.formatIso(tiedAt), DateTime.formatIso(tiedAt)],
+          );
+          const greatest = [...tiedRunIds].sort().at(-1);
+          greatestInsertedFirst.push(tiedRunIds[0] === greatest);
+          assert.strictEqual(
+            (yield* reader.ciFixRuns([tiedSourceId])).get(tiedSourceId)?.runId,
+            greatest,
+          );
+        }
+        // Insertion order alone would link the later row in one of the two pairs.
+        assert.include(greatestInsertedFirst, true);
         yield* engine.drain;
       }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
     }),
