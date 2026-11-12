@@ -14,9 +14,10 @@ import {
   Cause,
   Context,
   Deferred,
-  type Duration,
+  Duration,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Match,
   Option,
@@ -55,6 +56,7 @@ import {
 } from "../attempt/coordinator/rules.ts";
 import { delegate, type DelegationOutcome } from "../attempt/delegation/delegation.ts";
 import type { DelegationHub } from "../attempt/delegation/journal.ts";
+import { childSessionId } from "../attempt/sessions.ts";
 import { buildAttemptContext } from "./context.ts";
 import { coordinatorCall, journalDelegation } from "./delegation.ts";
 import {
@@ -106,6 +108,9 @@ const infra = (error: JournalError) => InfraFailure.make({ message: error.messag
 
 const canceledFailure = () =>
   AgentFailure.make({ message: "The attempt was canceled, and its children stopped" });
+
+/** How long a process stop waits for a child's turn to stop before its session closes. */
+const CHILD_STOP_GRACE = Duration.seconds(10);
 
 const nonEmpty = (text: string, fallback: string) => (text.trim() === "" ? fallback : text);
 
@@ -181,6 +186,15 @@ const outcomeOf = (snapshot: CoordinatorSnapshot) =>
     Settled: ({ outcome }) => outcome,
   });
 
+/**
+ * Replaces the completed `attached` of `hub`, so its children see the `execute` call detach. Does
+ * nothing if a stopped delegation already released it.
+ */
+const releaseAttachment = (hub: CoordinatorHub) =>
+  Effect.gen(function* () {
+    if (yield* Deferred.isDone(hub.attached)) hub.attached = yield* Deferred.make<AttemptRequest>();
+  });
+
 const make = Effect.gen(function* () {
   const journal = yield* AttemptJournal;
   const backend = yield* ChildBackend;
@@ -243,6 +257,35 @@ const make = Effect.gen(function* () {
       }),
   });
 
+  /**
+   * Stops delegation `child` when its `execute` call is interrupted, as a process stop does. The
+   * call detaches first, so the child's harness releases its session for a later resume. A live
+   * child's delegation then aborts as on a cancel, as the Pi parent's children do when its harness
+   * closes; any other delegation is interrupted.
+   */
+  const stopDelegation = <A, E>(
+    hub: CoordinatorHub,
+    child: ChildSessionCount,
+    stopping: Deferred.Deferred<void>,
+    running: Fiber.Fiber<A, E>,
+  ) =>
+    Effect.gen(function* () {
+      const annotations = { attemptId: hub.attemptId, child };
+      yield* releaseAttachment(hub);
+      if (!hub.children.has(childSessionId(hub.attemptId, child))) {
+        yield* Effect.logInfo("The execute call stopped before its child ran", annotations);
+        return;
+      }
+      yield* Effect.logInfo("The execute call stopped; stopping its live child", annotations);
+      yield* Deferred.succeed(stopping, undefined);
+      const stopped = yield* Fiber.await(running).pipe(Effect.timeoutOption(CHILD_STOP_GRACE));
+      if (Option.isNone(stopped))
+        yield* Effect.logWarning("The child didn't stop in time; its delegation is interrupted", {
+          ...annotations,
+          grace: Duration.format(CHILD_STOP_GRACE),
+        });
+    });
+
   /** Runs delegation `record` to its outcome and records the event that ends it. */
   const runDelegation = Effect.fn("CoordinatorRuntime.delegation")(function* (
     hub: CoordinatorHub,
@@ -251,14 +294,21 @@ const make = Effect.gen(function* () {
   ) {
     const attemptId = hub.attemptId;
     yield* Effect.annotateCurrentSpan({ attemptId, child: record.number });
-    const outcome = yield* delegate(backend, {
+    const stopping = yield* Deferred.make<void>();
+    const running = yield* delegate(backend, {
       spec: snapshot.request.spec,
       hub: delegationHub(hub),
       journal: journalDelegation(journal, attemptId, record.number),
-      call: coordinatorCall(Deferred.await(hub.canceled)),
+      call: coordinatorCall(
+        Effect.raceFirst(Deferred.await(hub.canceled), Deferred.await(stopping)),
+      ),
       assignment: Option.getOrElse(record.assignment, () => FIRST_ASSIGNMENT),
-    }).pipe(
-      Effect.map((ended) => eventOf(record.number, ended)),
+    }).pipe(Effect.forkChild({ startImmediately: true }));
+    const ended = yield* Fiber.await(running).pipe(
+      Effect.onInterrupt(() => stopDelegation(hub, record.number, stopping, running)),
+    );
+    const outcome = yield* ended.pipe(
+      Effect.map((delegation) => eventOf(record.number, delegation)),
       Effect.catchIf(Schema.is(AgentSessionError), (error) =>
         Effect.succeed<CoordinatorEvent>(
           ChildFailed.make({
@@ -464,7 +514,7 @@ const make = Effect.gen(function* () {
           attachedHere
             ? Effect.gen(function* () {
                 const detached = hub.detached;
-                hub.attached = yield* Deferred.make<AttemptRequest>();
+                yield* releaseAttachment(hub);
                 hub.detached = yield* Deferred.make<void>();
                 hub.canceled = yield* Deferred.make<void>();
                 yield* Deferred.succeed(detached, undefined);

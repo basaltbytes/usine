@@ -1008,6 +1008,8 @@ describe("event-driven coordinator restarts on SQLite", () => {
       );
       yield* until(() => startedChildren() === 2);
       yield* first.stop;
+      // The stop interrupts the live child's turn before its session closes.
+      const interruptedOnStop = yield* working.interrupted.pipe(Effect.timeoutOption("1 second"));
 
       const second = yield* orchestrator(sqliteJournal(database).pipe(coordinator));
       // The run fiber reattaches only an Attempt that is live after the restart.
@@ -1018,6 +1020,7 @@ describe("event-driven coordinator restarts on SQLite", () => {
       const report = yield* Fiber.join(execution);
       yield* second.stop;
 
+      assert.isTrue(Option.isSome(interruptedOnStop));
       assert.isTrue(liveAfterRestart);
       assert.strictEqual(report.message, "Done after the restart.");
       assert.strictEqual(resumed.request.session.id, working.request.session.id);
