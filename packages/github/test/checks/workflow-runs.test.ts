@@ -184,7 +184,14 @@ it.effect("reports the jobs of the latest attempt of a failed run and of a runni
     Effect.provide(
       withClient((url) => {
         if (url.includes("/runs/43098104121/jobs") || url.includes("/runs/43098104122/jobs"))
-          return json({ total_count: 4, jobs: stalledJobs });
+          // Without `filter=latest`, GitHub adds the jobs of earlier attempts, such as a failed
+          // `test (web)` from attempt 1.
+          return url.includes("filter=latest")
+            ? json({ total_count: 4, jobs: stalledJobs })
+            : json({
+                total_count: 5,
+                jobs: [runJob("failure", "test (web)", 3), ...stalledJobs],
+              });
         if (url.includes("/jobs")) return json({ total_count: 0, jobs: [] });
         return json({
           total_count: 3,

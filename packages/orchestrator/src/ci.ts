@@ -237,7 +237,7 @@ export class CiMonitor extends Context.Service<
      * Applies the completion labels of a Run whose CI wait ended because CI on its head didn't
      * finish, then resolves the failure of `attemptId`. CI on the recorded head must read green
      * with every workflow run on it concluded in full, and the pull request must not be closed
-     * without a merge. Fails with `CiNotPassedError` otherwise, or with `RunOperationRejectedError`
+     * without a merge. If GitHub refuses the workflow-run read, the check rollup decides alone. Fails with `CiNotPassedError` otherwise, or with `RunOperationRejectedError`
      * if the Run kept no CI handoff or `attemptId` isn't its unresolved latest failure.
      */
     readonly applyLabelsAfterGreen: (
@@ -258,6 +258,24 @@ export class CiMonitor extends Context.Service<
       const parser = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const control = yield* LoopControl;
+
+      // A refused workflow-run read, such as a private repository without Actions access, leaves the
+      // decision to the check rollup.
+      const workflowRunsOrRollup = (
+        repository: RepositoryName,
+        head: CommitSha,
+        fields: { readonly runId: RunId },
+      ) =>
+        checks.workflowRuns(repository, head).pipe(
+          Effect.catchIf(
+            (error) => error._tag !== "GitHubRateLimitError",
+            (error) =>
+              Effect.logWarning(
+                "Workflow runs on the head are unreadable; the check rollup decides alone",
+                { ...fields, head, errorTag: error._tag },
+              ).pipe(Effect.as(noWorkflowRuns)),
+          ),
+        );
 
       const observationServices = (yield* Effect.context<
         CycleBudgets | GitHubPolling | ItemProjectionWriter
@@ -401,9 +419,10 @@ export class CiMonitor extends Context.Service<
               return true;
             case "Incomplete": {
               const { incomplete, running } = unfinished;
-              // At the deadline, the pending jobs tell a stalled run apart from a slow or hung job.
-              const details =
-                running.length > 0 ? yield* pendingDiagnostics : "No workflow run is still going.";
+              // At the deadline, the pending jobs tell a stalled run apart from a slow or hung job,
+              // including checks outside a workflow run that is still going.
+              const pending = running.length > 0 || observed.state === "pending";
+              const details = pending ? yield* pendingDiagnostics : "No check is still pending.";
               yield* Effect.logWarning(
                 "CI ran only in part; operator attention is required and no fix starts",
                 { ...fields, details },
@@ -418,9 +437,9 @@ export class CiMonitor extends Context.Service<
                 ...(running.length > 0
                   ? [
                       `GitHub Actions didn't finish these workflow runs within ${handoff.timeoutSeconds} seconds: ${workflowRunDetails(running)}.`,
-                      details,
                     ]
                   : []),
+                ...(pending ? [details] : []),
                 `usine applied no completion labels and started no fix. Rerun these workflow runs once GitHub allows it, or push a commit to start new ones. ${afterGreen(head)} Check ${checksUrl(wait.repository, pullRequest)}`,
               ].join(" ");
               yield* engine.settleCi(runId, head, CiIncomplete.make({ message }));
@@ -444,16 +463,7 @@ export class CiMonitor extends Context.Service<
             }
           }
         });
-        const readWorkflowRuns = checks.workflowRuns(wait.repository, head).pipe(
-          Effect.catchIf(
-            (error) => error._tag !== "GitHubRateLimitError",
-            (error) =>
-              Effect.logWarning(
-                "Workflow runs on the head are unreadable; the check rollup decides alone",
-                { runId, head, errorTag: error._tag },
-              ).pipe(Effect.as(noWorkflowRuns)),
-          ),
-        );
+        const readWorkflowRuns = workflowRunsOrRollup(wait.repository, head, { runId });
         if (observed.state === "pending") {
           if (timedOut) {
             // A stalled Actions run can stay queued with no jobs, so no pending check names it.
@@ -493,11 +503,13 @@ export class CiMonitor extends Context.Service<
           });
           return;
         }
+        // Read the runs before the failed checks: a rerun that concludes between the two reads then
+        // delays a fix by one poll, instead of leaving its earlier attempt's failure unexempt.
+        const runs = observed.state === "conflict" ? noWorkflowRuns : yield* readWorkflowRuns;
         const reported =
           observed.state === "failure"
             ? yield* checks.failures(wait.repository, head).pipe(Effect.asSome)
             : Option.none<CheckFailureEvidence>();
-        const runs = observed.state === "conflict" ? noWorkflowRuns : yield* readWorkflowRuns;
         // A gate job that failed because the jobs it needs never ran is no failure to fix.
         const isUnfinishedRunFailure = unfinishedRunFailure(unfinishedRuns(runs));
         const unfinishedFailures = Option.match(reported, {
@@ -734,7 +746,7 @@ export class CiMonitor extends Context.Service<
               ? `Pull request #${pullRequest} conflicts with its base branch, so no checks run on head ${head}.`
               : `CI on head ${head} is ${observed.state === "pending" ? "still pending" : "red"}.`,
           );
-        const runs = yield* checks.workflowRuns(failed.repository, head);
+        const runs = yield* workflowRunsOrRollup(failed.repository, head, { runId });
         const { incomplete, running } = unfinishedRuns(runs);
         if (incomplete.length > 0 || running.length > 0)
           return yield* notPassed(
