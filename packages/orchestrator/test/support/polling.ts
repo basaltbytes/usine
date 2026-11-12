@@ -1,4 +1,5 @@
 import { idleCiMonitor } from "./ci.ts";
+import type { CiMonitor } from "../../src/ci.ts";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import { ConfigParser } from "@usine/config/parser";
 import { CursorStore } from "@usine/engine/cursor";
@@ -149,6 +150,7 @@ export const pollingTestLayer = (
   cursorStore: CursorStore["Service"] = forgetfulCursorStore,
   cycleBudgets: CycleBudgets["Service"] = emptyCycleBudgets,
   itemProjections: ItemProjectionReader["Service"] = noItemProjections,
+  ciMonitor: Layer.Layer<CiMonitor> = idleCiMonitor,
 ) => {
   const cursors = Layer.succeed(CursorStore)(cursorStore);
   const expressions = Layer.succeed(ExpressionEngine)({
@@ -199,5 +201,5 @@ export const pollingTestLayer = (
     loopControlLayer(states),
     Layer.succeed(GitHubPolling, github),
   );
-  return PollingTriggers.layer.pipe(Layer.provide(idleCiMonitor), Layer.provide(dependencies));
+  return PollingTriggers.layer.pipe(Layer.provide(ciMonitor), Layer.provide(dependencies));
 };

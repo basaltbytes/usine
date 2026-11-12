@@ -372,7 +372,7 @@ export class RunDriver extends Context.Service<
           }
           const admitted = Submission.make({
             ...submission,
-            ...(recheck._tag === "Matches" ? recheck.settings : savedSettings(submission)),
+            ...savedSettings(recheck._tag === "Matches" ? recheck.settings : submission),
           });
           const claimed = yield* store
             .claimQueued(admitted, runId)

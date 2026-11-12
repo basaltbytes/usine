@@ -515,7 +515,8 @@ export class PollingTriggers extends Context.Service<
           );
           const ciCycle = yield* ci.reconcile(instance, Option.none());
           const watched = watchedRepositories(instance, resolved);
-          // After the CI reconcile, which rechecks the CI fixes these resets replayed.
+          // After the CI reconcile, which rechecks the CI fixes replayed by the resets pending when
+          // it starts.
           yield* acknowledgeUnwatchedResets(watched.map(({ repository }) => repository.name));
           return yield* pollAll(
             watched,

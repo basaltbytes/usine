@@ -43,6 +43,7 @@ import {
   RepositoryNotModified,
 } from "@usine/github/polling";
 
+import { CiMonitor } from "../src/ci.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { acknowledgeUnwatchedResets } from "../src/polling/reset-refresh.ts";
 import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
@@ -331,6 +332,62 @@ describe("cycle reset polling", () => {
     }).pipe(
       Effect.provide(
         pollingTestLayer(github, [], undefined, undefined, memoryCursorStore().store, budgets),
+      ),
+    );
+  });
+
+  it.effect("runs the CI reconcile before it acknowledges an unwatched repository's reset", () => {
+    let pending: ReadonlyArray<CycleBudgetReset> = [];
+    const seenByCi: Array<ReadonlyArray<CycleBudgetReset>> = [];
+    const budgets: CycleBudgets["Service"] = {
+      ...emptyCycleBudgets,
+      pendingResets: Effect.sync(() => pending),
+      acknowledgeReset: (value) =>
+        Effect.sync(() => {
+          pending = pending.filter((reset) => reset !== value);
+        }),
+    };
+    const recordingCiMonitor = Layer.succeed(CiMonitor)({
+      reconcile: () =>
+        Effect.sync(() => {
+          seenByCi.push(pending);
+          return { outcomes: [], failures: [], nextPollAt: Option.none() };
+        }),
+    });
+    const github: GitHubPolling["Service"] = {
+      itemLabels: () => Effect.die("unused item labels"),
+      baseRefHead: unmovedBaseRefHead,
+      missingIssues: () => Effect.succeed([]),
+      labels: () =>
+        Effect.succeed(RepositoryLabelCatalog.make({ labels: [], entityTag: Option.none() })),
+      snapshot: () => Effect.die("no Item changed"),
+      changes: (_repository, cursor) =>
+        Effect.succeed(RepositoryNotModified.make({ cursor, nextPollAt: Option.none() })),
+    };
+    return Effect.gen(function* () {
+      const reset = yield* cycleBudgetReset("basaltbytes/retired", 7);
+      pending = [reset];
+      const fixtureInstance = yield* instance;
+      const polling = yield* PollingTriggers;
+
+      const cycle = yield* polling.poll(fixtureInstance);
+
+      assert.deepStrictEqual(cycle.failures, []);
+      // The CI reconcile still saw the reset, so it admitted the CI fixes the reset replayed.
+      assert.deepStrictEqual(seenByCi, [[reset]]);
+      assert.deepStrictEqual(pending, []);
+    }).pipe(
+      Effect.provide(
+        pollingTestLayer(
+          github,
+          [],
+          undefined,
+          undefined,
+          memoryCursorStore().store,
+          budgets,
+          undefined,
+          recordingCiMonitor,
+        ),
       ),
     );
   });

@@ -12,6 +12,6 @@ Reconcile reads the admissible queues once per pass and admits each one, whateve
 
 Breaking API changes:
 
-- `TriggerRecheck.Matches` carries `settings`, the Loop settings and task the run opens with, instead of a whole `submission`. The engine keeps the event, item, revision, cycle generation, and CI evidence as recorded. Adapters that keep the saved settings return `TriggerRecheck.Matches({ settings: savedSettings(submission) })`; `savedSettings` and the `AdmissionSettings` type are exported from `@usine/engine/trigger-condition`.
+- `TriggerRecheck.Matches` carries `settings`, the Loop settings and task the run opens with, instead of a whole `submission`. The engine keeps only the setting keys from `settings`, so the event, item, revision, cycle generation, and CI evidence stay as recorded even when an adapter returns a whole submission. Adapters that keep the saved settings return `TriggerRecheck.Matches({ settings: savedSettings(submission) })`; `savedSettings`, which returns only the setting keys of its argument, and the `AdmissionSettings` type are exported from `@usine/engine/trigger-condition`.
 - `TriggerRecheck.Undetermined()` is a new result for a recheck that could not read the item. Adapters that matched on a failed read return it instead.
 - `RunEngine` implementations must provide `admitCiFixes`, which admits the queues whose newest event is a CI fix, as reconcile does, and returns the run IDs it opened. Those can include a trigger match opened after a CI fix mismatch.

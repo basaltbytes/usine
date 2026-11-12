@@ -19,15 +19,18 @@ const ADMISSION_SETTING_KEYS = [
  */
 export type AdmissionSettings = Pick<Submission, (typeof ADMISSION_SETTING_KEYS)[number]>;
 
-/** Returns the Loop settings and task saved with `submission`. */
-export const savedSettings = (submission: Submission): AdmissionSettings =>
-  Struct.pick(submission, ADMISSION_SETTING_KEYS);
+/**
+ * Returns only the Loop settings and task of `source`, such as those saved with a queued
+ * submission. Every other key, such as the Event, Item, or revision, is dropped.
+ */
+export const savedSettings = (source: AdmissionSettings): AdmissionSettings =>
+  Struct.pick(source, ADMISSION_SETTING_KEYS);
 
 /**
  * The result of re-evaluating a queued Event's trigger:
  *
  * - `Matches`: the Item still matches, and the Event's Run opens with `settings`. Admission
- *   persists them with the Event.
+ *   persists them with the Event and ignores any other key that `settings` carries.
  * - `NoLongerMatches`: the Item, Loop, or repository changed. A trigger-match mismatch revokes
  *   all queued trigger matches from the queue read before the recheck, because their condition
  *   applies to the Item. A CI fix mismatch revokes only that fix. In both cases, the next
