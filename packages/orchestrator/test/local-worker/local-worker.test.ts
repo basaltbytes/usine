@@ -13,6 +13,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
+import { GitHubLabelName } from "@usine/core/label";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
@@ -1098,7 +1099,7 @@ describe("local worker", () => {
                   permissions: selected.permissions,
                   resume: Option.none(),
                   requiresCi: true,
-                  outcomeLabels: ["ready-to-merge"],
+                  outcomeLabels: [GitHubLabelName.make("ready-to-merge")],
                 }),
                 {
                   append: () => Effect.void,
@@ -1133,7 +1134,7 @@ describe("local worker", () => {
           assert.isTrue(requested.every(({ requiresCi }) => requiresCi));
           assert.deepStrictEqual(
             requested.map(({ outcomeLabels }) => outcomeLabels),
-            requested.map(() => ["ready-to-merge"]),
+            requested.map(() => [GitHubLabelName.make("ready-to-merge")]),
           );
           assert.strictEqual(failed._tag, failure);
           // The engine reconciles a checkout kept for a reattachment until preparation acquires it

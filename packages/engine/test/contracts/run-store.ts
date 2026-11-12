@@ -7,6 +7,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
+import { GitHubLabelName } from "@usine/core/label";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
@@ -456,8 +457,9 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
         Effect.gen(function* () {
           const store = yield* RunStore;
           const runId = RunId.make("outcome-labels");
+          const outcomeLabels = [GitHubLabelName.make("ready-to-merge")];
           yield* store.recordAndClaim(
-            Submission.make({ ...lifecycleSubmission, outcomeLabels: ["ready-to-merge"] }),
+            Submission.make({ ...lifecycleSubmission, outcomeLabels }),
             runId,
           );
           const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
@@ -470,9 +472,9 @@ export const runStoreContract = (adapter: PersistenceAdapter) => {
           const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(retried._tag === "AttemptStarted");
 
-          assert.deepStrictEqual(first.execution.outcomeLabels, ["ready-to-merge"]);
-          assert.deepStrictEqual(retried.execution.outcomeLabels, ["ready-to-merge"]);
-          assert.deepStrictEqual((yield* store.snapshot(runId)).outcomeLabels, ["ready-to-merge"]);
+          assert.deepStrictEqual(first.execution.outcomeLabels, outcomeLabels);
+          assert.deepStrictEqual(retried.execution.outcomeLabels, outcomeLabels);
+          assert.deepStrictEqual((yield* store.snapshot(runId)).outcomeLabels, outcomeLabels);
         }),
       ),
     );

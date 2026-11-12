@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { GitHubLabelName } from "@usine/core/label";
 import { Effect, Option, Schema } from "effect";
 import { StoredRequest } from "../src/attempt-runtime.ts";
 import {
@@ -65,7 +66,7 @@ const journalWith = (sizes: {
       ...base.spec,
       task: AttemptTask.make(task(sizes.task)),
       payload: { body: "p".repeat(sizes.payload) },
-      outcomeLabels: ["ready-for-review"],
+      outcomeLabels: [GitHubLabelName.make("ready-for-review")],
       requiresCi: true,
     });
     const attemptId = spec.attemptId;
@@ -122,7 +123,7 @@ describe("AttemptContext.build", () => {
       // The start of the task and the end of the output.
       assert.strictEqual(context.task, "a".repeat(4_000));
       assert.strictEqual(context.output, "e".repeat(2_000));
-      assert.deepStrictEqual(context.outcomeLabels, ["ready-for-review"]);
+      assert.deepStrictEqual(context.outcomeLabels, [GitHubLabelName.make("ready-for-review")]);
       assert.isTrue(context.requiresCi);
       assert.deepStrictEqual(context.event, event);
       assert.deepStrictEqual(
