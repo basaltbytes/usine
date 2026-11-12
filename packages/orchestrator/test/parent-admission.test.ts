@@ -15,8 +15,8 @@ const testLayer = ConfigurationFolder.layer.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
-const agentFile = (effort: string) =>
-  `---\nharness: codex\nmodel: gpt-6.1-sol\neffort: ${effort}\n---\nReview the pull request.\n`;
+const agentFile = (effort: string, frontmatter = "") =>
+  `---\nharness: codex\nmodel: gpt-6.1-sol\neffort: ${effort}\n${frontmatter}---\nReview the pull request.\n`;
 
 it.effect("checks each distinct coordinator brain once", () =>
   Effect.gen(function* () {
@@ -35,6 +35,30 @@ it.effect("checks each distinct coordinator brain once", () =>
     const problems = yield* parentAdmissionProblems(loaded, parents);
 
     expect(problems).toEqual([]);
+    expect(lookups).toHaveBeenCalledTimes(2);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("keys the shared check on the instance default parent effort", () =>
+  Effect.gen(function* () {
+    const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+    const root = InstanceDirectory.make(directory);
+    yield* writeInstanceFiles(root, [
+      [
+        "usine.yaml",
+        "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\nsettings:\n  parent_effort: max\n",
+      ],
+      ["agents/alpha.md", agentFile("high", "parent_effort: high\n")],
+      ["agents/beta.md", agentFile("high")],
+    ]);
+    const loaded = yield* (yield* ConfigurationFolder).load(root);
+    const parents = fauxParent([]);
+    const lookups = vi.spyOn(parents.models, "getModel");
+
+    const problems = yield* parentAdmissionProblems(loaded, parents);
+
+    expect(problems.map(({ file }) => file)).toEqual(["agents/beta.md"]);
+    expect(problems[0]?.message).toContain("doesn't support effort");
     expect(lookups).toHaveBeenCalledTimes(2);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

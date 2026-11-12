@@ -11,6 +11,7 @@ import {
   configurationDiff,
   configurationEntities,
 } from "@usine/config/configuration";
+import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { ConfigurationFolder } from "@usine/config/folder-codec";
 import { memoryConfigurationLayer } from "@usine/config/memory";
 import { ConfigParser } from "@usine/config/parser";
@@ -358,6 +359,41 @@ it.effect("refuses a save whose coordinator brain check is slow and stores no re
       { step: "coordinator-brains", durationMillis: 10_000, outcome: "failed" },
     ]);
   }).pipe(Effect.scoped, Effect.withLogger(stepLogger(steps)), Effect.provide(NodeServices.layer));
+});
+
+it.effect("logs a refused coordinator brain as a failed step and stores no revision", () => {
+  const steps: Array<StepLog> = [];
+  const spans: Array<Tracer.Span> = [];
+  return Effect.gen(function* () {
+    const { store, initial, revision, current, edit, save } = yield* revisionFixture;
+    yield* current.registerWorkers(() => Effect.succeed(Effect.void));
+    const refusal = ConfigFileError.make({
+      file: InstancePath.make("agents/reviewer.md"),
+      stage: "schema",
+      expression: Option.none(),
+      message: 'Agent "reviewer" cannot run as coordinator: no model unknown/x',
+    });
+    let refusing = false;
+    yield* current.registerParentAdmission(() => Effect.succeed(refusing ? [refusal] : []));
+    refusing = true;
+    const failure = yield* save(revision.number, edit("Refused.")).pipe(Effect.flip);
+
+    expect(failure._tag).toBe("FactoryConfigError");
+    expect(failure.message).toContain('Agent "reviewer" cannot run as coordinator');
+    expect((yield* store.read).number).toBe(revision.number);
+    const unchanged = yield* current.get;
+    expect(unchanged).toBe(initial);
+    expect(steps).toEqual([
+      ...savedSteps(0).slice(0, 4),
+      { step: "coordinator-brains", durationMillis: 0, outcome: "failed" },
+    ]);
+    expect(unordered(stepSpans(spans))).toEqual(unordered(steps));
+  }).pipe(
+    Effect.scoped,
+    Effect.withLogger(stepLogger(steps)),
+    recordingSpans(spans),
+    Effect.provide(NodeServices.layer),
+  );
 });
 
 it.effect("logs every step of a save that waits behind a running save", () => {

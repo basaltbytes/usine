@@ -150,9 +150,13 @@ export class ValidationTimeoutError extends Schema.TaggedError<
 
 /**
  * Runs `check` as the `coordinator-brains` step. Fails with `ValidationTimeoutError` when it runs
- * longer than `coordinatorBrainTimeout`.
+ * longer than `coordinatorBrainTimeout`, and with `refuse(problems)` when it refuses a brain, so
+ * a refused brain logs the step as `failed`.
  */
-export const checkCoordinatorBrains = <A, E, R>(check: Effect.Effect<A, E, R>) =>
+export const checkCoordinatorBrains = <E, R, F>(
+  check: Effect.Effect<ReadonlyArray<ConfigFileError>, E, R>,
+  refuse: (problems: EffectArray.NonEmptyReadonlyArray<ConfigFileError>) => F,
+): Effect.Effect<void, E | F | ValidationTimeoutError, R> =>
   timedStep(
     "coordinator-brains",
     check.pipe(
@@ -166,6 +170,9 @@ export const checkCoordinatorBrains = <A, E, R>(check: Effect.Effect<A, E, R>) =
             }),
           ),
       }),
+      Effect.flatMap((problems) =>
+        EffectArray.isReadonlyArrayNonEmpty(problems) ? Effect.fail(refuse(problems)) : Effect.void,
+      ),
     ),
   );
 
@@ -308,14 +315,15 @@ export class CurrentInstance extends Context.Service<
                 }),
               );
               const admit = yield* Ref.get(parentAdmission);
-              const problems = yield* restore(checkCoordinatorBrains(admit(loaded)));
-              const problem = problems[0];
-              if (problem !== undefined)
-                return yield* FactoryConfigError.make({
-                  file: problem.file,
-                  stage: problem.stage,
-                  message: `${problem.message}. The running configuration is unchanged.`,
-                });
+              yield* restore(
+                checkCoordinatorBrains(admit(loaded), ([problem]) =>
+                  FactoryConfigError.make({
+                    file: problem.file,
+                    stage: problem.stage,
+                    message: `${problem.message}. The running configuration is unchanged.`,
+                  }),
+                ),
+              );
               const applyWorkers = yield* timedStep(
                 "worker-preflight",
                 restore(
