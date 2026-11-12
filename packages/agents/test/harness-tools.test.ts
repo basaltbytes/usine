@@ -3,7 +3,7 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, RoleName, RoleSession } from "@usine/core/agent/session";
 import { WorkerName } from "@usine/core/worker";
-import { type Brand, Context, DateTime, Effect, Exit, Layer, Option, Schema } from "effect";
+import { type Brand, Context, DateTime, Effect, Exit, Layer, Option, Schema, Tracer } from "effect";
 import { Tool, Toolkit } from "effect/ai";
 import { LocalProcess } from "../src/child-host/child-host.ts";
 import { AdmissionContext, AdmittedBrain } from "../src/harness/admission.ts";
@@ -99,6 +99,61 @@ describe("usine tool sets", () => {
         ]),
         [["Error", "Usine tool handler died"]],
       );
+    }),
+  );
+
+  it.effect("run each call and its handler under the call's own span", () =>
+    Effect.gen(function* () {
+      const native = yield* Effect.tracer;
+      const spans: Array<Tracer.Span> = [];
+      const recording = Tracer.make({
+        span: (options) => {
+          const span = native.span(options);
+          spans.push(span);
+          return span;
+        },
+      });
+      const Where = Tool.make("where", {
+        description: "Returns the ID of the span that its handler runs under.",
+        success: Schema.String,
+      });
+      const kit = Toolkit.make(Where);
+      const handled = yield* Effect.gen(function* () {
+        const bound = yield* hostToolSet(kit).pipe(
+          Effect.provide(
+            kit.toLayer({
+              where: () =>
+                Effect.currentSpan.pipe(
+                  Effect.map(({ spanId }) => spanId),
+                  Effect.orDie,
+                ),
+            }),
+          ),
+        );
+        const [where] = bound.tools;
+        assert(where !== undefined);
+        const first = yield* where.call({}, Option.some("call-1"));
+        const second = yield* where.call({}, Option.some("call-2"));
+        return [first.text, second.text];
+      }).pipe(Effect.withTracer(recording));
+      const calls = spans.filter(({ name }) => name === "HostTools.call");
+      assert.deepStrictEqual(
+        calls.map(({ attributes }) => ({
+          tool: attributes.get("tool"),
+          callId: attributes.get("callId"),
+        })),
+        [
+          { tool: "where", callId: "call-1" },
+          { tool: "where", callId: "call-2" },
+        ],
+      );
+      assert.deepStrictEqual(
+        handled,
+        calls.map(({ spanId }) => spanId),
+      );
+      const make = spans.find(({ name }) => name === "HostTools.make");
+      assert(make !== undefined);
+      assert.isFalse(make.attributes.has("tool"), "a call annotates its own span only");
     }),
   );
 

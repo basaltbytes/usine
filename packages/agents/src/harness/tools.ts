@@ -1,5 +1,6 @@
 import {
   Cause,
+  Context,
   Effect,
   Hash,
   type JsonSchema,
@@ -8,6 +9,7 @@ import {
   Result,
   Schema,
   Stream,
+  Tracer,
 } from "effect";
 import { AiError, Tool, type Toolkit } from "effect/ai";
 
@@ -81,7 +83,11 @@ export const hostToolSet = <Tools extends Record<string, Tool.Any>>(
 ): Effect.Effect<HostToolSet, never, HostToolServices<Tools>> =>
   Effect.gen(function* () {
     const built = yield* toolkit;
-    const context = yield* Effect.context<Tool.HandlerServices<Tools[keyof Tools]>>();
+    // Without the parent span of `HostTools.make`, each call and its handler run under the call's
+    // own `HostTools.call` span.
+    const context = yield* Effect.context<Tool.HandlerServices<Tools[keyof Tools]>>().pipe(
+      Effect.map(Context.omit(Tracer.ParentSpan)),
+    );
     // SAFETY: `handle` decodes the parameters itself, and `call` passes it the encoded form of
     // parameters that the tool's JSON codec decoded.
     const handle = built.handle as (
