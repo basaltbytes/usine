@@ -22,20 +22,14 @@ export const pi = HarnessDescriptor.make({
         "steer",
         "interrupt",
         "token-usage",
+        "usine-tools",
+        "closed-tools",
         "cost-usd",
         "model-check",
         "structured-output",
         "ephemeral",
       ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason: "The Pi adapter passes no usine tool set to a session",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Pi adapter keeps the harness's own tools on in every session",
-        }),
         Lacking.make({
           capability: "plan-windows",
           reason: "Pi does not report subscription rate windows",
@@ -50,20 +44,14 @@ export const pi = HarnessDescriptor.make({
         "steer",
         "interrupt",
         "token-usage",
+        "usine-tools",
+        "closed-tools",
         "cost-usd",
         "model-check",
         "structured-output",
         "ephemeral",
       ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason: "The Pi adapter passes no usine tool set to a session",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Pi adapter keeps the harness's own tools on in every session",
-        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:

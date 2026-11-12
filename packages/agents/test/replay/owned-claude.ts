@@ -149,8 +149,8 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   const context = yield* Effect.context<never>();
   const run = Effect.runPromiseWith(context);
   const replaySdk = Layer.succeed(ClaudeSdk)({
-    open: (input, options) => {
-      const query = sdk.open(input, options);
+    open: (input, options, tools) => {
+      const query = sdk.open(input, options, tools);
       return {
         ...query,
         async *[Symbol.asyncIterator]() {

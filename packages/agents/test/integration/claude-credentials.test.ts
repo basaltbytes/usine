@@ -62,12 +62,16 @@ it.live(
             Effect.sync(() => {
               const input = new AsyncInput();
               input.end();
-              return sdk.open(input, {
-                cwd: home,
-                env: environment,
-                settingSources: ["user"],
-                pathToClaudeCodeExecutable: "claude",
-              });
+              return sdk.open(
+                input,
+                {
+                  cwd: home,
+                  env: environment,
+                  settingSources: ["user"],
+                  pathToClaudeCodeExecutable: "claude",
+                },
+                Option.none(),
+              );
             }),
             (query) =>
               Effect.promise(() => query.usesApiKey()).pipe(

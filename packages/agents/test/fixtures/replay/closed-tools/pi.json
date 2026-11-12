@@ -1,0 +1,782 @@
+{
+  "protocol": "pi-provider-stream",
+  "harnessVersion": "1.4.0",
+  "model": "openai/gpt-5.6-luna",
+  "scenario": "closed-tools",
+  "environment": { "HOME": "$HOME", "PATH": "$PATH" },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "pi:1.1",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read_note: Reads the usine note with the given name.\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read_note",
+                "description": "Reads the usine note with the given name.",
+                "parameters": {
+                  "type": "object",
+                  "properties": { "name": { "type": "string" } },
+                  "required": ["name"],
+                  "additionalProperties": true
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Call the read_note tool with the name \"greeting\" and reply with exactly the note that it returns."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": {},
+              "partialJson": ""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "{\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": {},
+              "partialJson": "{\"name"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "name",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": {},
+              "partialJson": "{\"name"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\":\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": { "name": "g" },
+              "partialJson": "{\"name\":\"g"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "g",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": { "name": "greeting" },
+              "partialJson": "{\"name\":\"greeting"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "reeting",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": { "name": "greeting" },
+              "partialJson": "{\"name\":\"greeting\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\"}",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": { "name": "greeting" },
+              "partialJson": "{\"name\":\"greeting\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_end",
+        "contentIndex": 0,
+        "toolCall": {
+          "type": "toolCall",
+          "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+          "name": "read_note",
+          "arguments": { "name": "greeting" }
+        },
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": { "name": "greeting" }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "done",
+        "reason": "toolUse",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+              "name": "read_note",
+              "arguments": { "name": "greeting" }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 840,
+            "output": 19,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 859,
+            "cost": {
+              "input": 0.00016800000000000002,
+              "output": 0.0000228,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.00019080000000000003
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794472981119,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c",
+          "rawStopReason": "completed",
+          "durationMs": 1804
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "pi:1.2",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read_note: Reads the usine note with the given name.\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read_note",
+                "description": "Reads the usine note with the given name.",
+                "parameters": {
+                  "type": "object",
+                  "properties": { "name": { "type": "string" } },
+                  "required": ["name"],
+                  "additionalProperties": true
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Call the read_note tool with the name \"greeting\" and reply with exactly the note that it returns."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+                "name": "read_note",
+                "arguments": { "name": "greeting" }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 840,
+              "output": 19,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 859,
+              "cost": {
+                "input": 0.00016800000000000002,
+                "output": 0.0000228,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.00019080000000000003
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_0f3d8b40f3b7dc0d016af57c159b6087d285f82377d4a0aa5c",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "call_8db82be349c84efbaeafbc9287535fbd|fc_0f3d8b40f3b7dc0d016af57c16aa4887d2a0bd0b2a46f5fd9f",
+            "toolName": "read_note",
+            "content": [{ "type": "text", "text": "REPLAY_NOTE_7431" }],
+            "isError": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472982931
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "RE",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "PLAY",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "_NOTE",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_NOTE_" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "_",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_NOTE_743" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "743",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_NOTE_7431" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "1",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_NOTE_7431" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_end",
+        "contentIndex": 0,
+        "content": "REPLAY_NOTE_7431",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_NOTE_7431",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0f3d8b40f3b7dc0d016af57c18309887d2b495f81581acdde2\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 876,
+            "output": 10,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 886,
+            "cost": {
+              "input": 0.0001752,
+              "output": 0.000012,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0001872
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f",
+          "rawStopReason": "completed"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "done",
+        "reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_NOTE_7431",
+              "textSignature": "{\"v\":1,\"id\":\"msg_0f3d8b40f3b7dc0d016af57c18309887d2b495f81581acdde2\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 876,
+            "output": 10,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 886,
+            "cost": {
+              "input": 0.0001752,
+              "output": 0.000012,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0001872
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794472982931,
+          "responseId": "resp_0f3d8b40f3b7dc0d016af57c176f6c87d296f90662d73bb10f",
+          "rawStopReason": "completed",
+          "durationMs": 1540
+        }
+      }
+    }
+  ]
+}

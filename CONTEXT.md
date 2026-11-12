@@ -212,6 +212,10 @@ _Avoid_: backend, adapter, runner, agent
 What a session does for usine, such as the coordinator, the coding agent, or the supervisor. A role states the placements, credential routes, tools, and persistence it needs; admission refuses a harness that lacks one. A member's access comes from a role binding instead.
 _Avoid_: agent type, mode, persona
 
+**Usine tool set**:
+The tools that usine gives a session through the harness contract, defined once as a toolkit. The role that opens the session supplies their handlers, so it decides what each call can reach.
+_Avoid_: MCP tools, custom tools, plugin
+
 **Completion**:
 One schema-checked value that a harness returns for one prompt, with no saved conversation.
 _Avoid_: structured call, one-shot

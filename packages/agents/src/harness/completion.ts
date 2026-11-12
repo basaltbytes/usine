@@ -104,6 +104,10 @@ export const admitCompletion = Effect.fn("HarnessAdmission.completion")(function
     return yield* refuse(
       `${role.name} must return a structured value and keep no conversation to run a completion`,
     );
+  if (role.hostTools)
+    return yield* refuse(
+      `The ${role.name} role runs a usine tool set, but a completion serves no usine tools`,
+    );
   const schema = yield* completionJsonSchema(output);
   if (schema.type !== "object")
     return yield* refuse("A completion's output schema must describe a JSON object");

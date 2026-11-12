@@ -65,20 +65,14 @@ export const claude = HarnessDescriptor.make({
         "steer",
         "interrupt",
         "token-usage",
+        "usine-tools",
+        "closed-tools",
         "cost-usd",
         "plan-windows",
         "structured-output",
         "ephemeral",
       ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason: "The Claude Code adapter passes no usine tool set to a session",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Claude Code adapter keeps the harness's own tools on in every session",
-        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:
@@ -98,19 +92,13 @@ export const claude = HarnessDescriptor.make({
         "steer",
         "interrupt",
         "token-usage",
+        "usine-tools",
+        "closed-tools",
         "cost-usd",
         "structured-output",
         "ephemeral",
       ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason: "The Claude Code adapter passes no usine tool set to a session",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Claude Code adapter keeps the harness's own tools on in every session",
-        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:
