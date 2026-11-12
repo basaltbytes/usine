@@ -8,7 +8,10 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Context, Effect, Layer, Match, Option, Ref, Schema } from "effect";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { Context, Effect, type JsonSchema, Layer, Match, Option, Ref, Schema } from "effect";
+import type { HostToolResult } from "../tools.ts";
 
 // The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
@@ -46,9 +49,34 @@ export type ClaudeQueryOptions = Pick<
   | "settingSources"
   | "settings"
   | "spawnClaudeCodeProcess"
+  | "strictMcpConfig"
   | "thinking"
+  | "tools"
   | "hooks"
 >;
+
+/** A tool that a Claude Code session lists under its tool server. */
+export interface ClaudeTool {
+  /** The name that Claude Code lists after the server prefix. */
+  readonly name: string;
+  readonly description: string;
+  /** The JSON Schema of the input, with an object root. */
+  readonly inputSchema: JsonSchema.JsonSchema;
+}
+
+/**
+ * Tools that a Claude Code session calls in process, over its own stdio, as the MCP server `name`.
+ * Claude Code names each tool `mcp__<name>__<tool>`.
+ */
+export interface ClaudeToolServer {
+  readonly name: string;
+  readonly tools: ReadonlyArray<ClaudeTool>;
+  /**
+   * Runs one call of the tool `name`. A failed call resolves with an error result; the promise
+   * rejects only when `signal` aborts or the session stops.
+   */
+  readonly call: (name: string, input: Schema.Json, signal: AbortSignal) => Promise<HostToolResult>;
+}
 
 /** A model name advertised by Claude Code, with its resolved ID when the SDK provides one. */
 export interface ClaudeModelInfo {
@@ -76,11 +104,13 @@ export class ClaudeSdk extends Context.Service<
   {
     /**
      * Opens a query that consumes task and guidance messages from `input`, using `options` for
-     * the model, environment, settings, and process host. The caller must close the query.
+     * the model, environment, settings, and process host, and serving `tools` to the session.
+     * The caller must close the query.
      */
     readonly open: (
       input: AsyncIterable<ClaudeUserMessage>,
       options: ClaudeQueryOptions,
+      tools: Option.Option<ClaudeToolServer>,
     ) => ClaudeQuery;
   }
 >()("@usine/agents/harness/claude/sdk/ClaudeSdk") {}
@@ -92,11 +122,53 @@ const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schem
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
   decodeVendorMessage(serializeVendorValue(message));
 
+const isJson = Schema.is(Schema.Json);
+
+/**
+ * Returns an MCP server that lists `server`'s tools with their own JSON Schemas and runs their
+ * calls. The Agent SDK connects it to the Claude Code process over the query's control messages.
+ */
+const toolServer = (server: ClaudeToolServer): McpServer => {
+  const mcp = new McpServer(
+    { name: server.name, version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  mcp.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: server.tools.map(({ name, description, inputSchema }) => ({
+      name,
+      description,
+      // SAFETY: a usine tool's parameters always encode to a JSON Schema with an object root.
+      inputSchema: inputSchema as { type: "object" },
+      // Lists the tool in the first prompt instead of deferring it behind Claude Code's tool search.
+      _meta: { "anthropic/alwaysLoad": true },
+    })),
+  }));
+  mcp.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    const input = request.params.arguments ?? {};
+    const result = isJson(input)
+      ? await server.call(request.params.name, input, extra.signal)
+      : { isError: true, text: "The tool input is not JSON" };
+    return { content: [{ type: "text", text: result.text }], isError: result.isError };
+  });
+  return mcp;
+};
+
 /** Provides `ClaudeSdk` through the installed Agent SDK, exposing output messages as JSON for decoding by the child backend. */
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
-  open: (input, options) => {
-    // SAFETY: ClaudeUserMessage is the streaming-input subset of SDKUserMessage.
-    const query = openClaudeQuery({ prompt: input as AsyncIterable<SDKUserMessage>, options });
+  open: (input, options, tools) => {
+    const query = openClaudeQuery({
+      // SAFETY: ClaudeUserMessage is the streaming-input subset of SDKUserMessage.
+      prompt: input as AsyncIterable<SDKUserMessage>,
+      options: Option.match(tools, {
+        onNone: () => options,
+        onSome: (server) => ({
+          ...options,
+          mcpServers: {
+            [server.name]: { type: "sdk", name: server.name, instance: toolServer(server) },
+          },
+        }),
+      }),
+    });
     return {
       close: () => query.close(),
       interrupt: async () => {

@@ -145,11 +145,15 @@ export const loginCheck = (message: Schema.Json, spentTokens: boolean): LoginChe
   return Schema.is(ClaudeLoginEvidence)(message) ? "loggedIn" : "waiting";
 };
 
-/** Returns the transcript events in `message`; `tools` names the open tool calls by ID. */
+/**
+ * Returns the transcript events in `message`; `tools` names the open tool calls by ID, and
+ * `toolName` maps the name that Claude Code reports to the name that events carry.
+ */
 export const sessionEventsFrom = (
   message: Schema.Json,
   session: AgentSession,
   tools: Map<string, string>,
+  toolName: (reported: string) => string = (reported) => reported,
 ): ReadonlyArray<AgentSessionEvent> => {
   if (!Schema.is(ClaudeContentMessage)(message)) return [];
   const events: Array<AgentSessionEvent> = [];
@@ -158,12 +162,13 @@ export const sessionEventsFrom = (
     if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
       events.push(TextOutput.make({ session, text: block.text }));
     } else if (Schema.is(ClaudeToolUseBlock)(block)) {
-      tools.set(block.id, block.name);
+      const tool = toolName(block.name);
+      tools.set(block.id, tool);
       events.push(
         ToolStarted.make({
           session,
           callId: block.id,
-          tool: block.name,
+          tool,
           input: block.input,
         }),
       );
