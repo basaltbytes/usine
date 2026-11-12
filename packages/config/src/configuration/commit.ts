@@ -1,6 +1,6 @@
 import { brainAdmissionProblems } from "../instance/admission.ts";
 import { Array as Arr, Effect, Equal, Option, Result, Schema } from "effect";
-import type { UsineConfig } from "../factory.ts";
+import { exeDevWorkerRefusal, type UsineConfig } from "../factory.ts";
 import { AgentFile } from "../agent.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
 import { LoadedInstance } from "../instance/instance.ts";
@@ -195,7 +195,7 @@ export const validateConfiguration = (
 /**
  * Validates and applies changes without storage or clock access (ADR 0031).
  * Rejects a mismatched revision with `StaleRevision`; invalid before values, positions,
- * schemas, expressions, or references fail with `ConfigurationInvalid`.
+ * schemas, expressions, or references, and exe.dev workers, fail with `ConfigurationInvalid`.
  *
  * @param parser - The parser used to validate the candidate configuration.
  * @param current - The snapshot to which changes apply.
@@ -205,6 +205,32 @@ export const validateConfiguration = (
  * @returns The new snapshot and revision with normalized changes, including for an empty diff.
  */
 export const commit = (
+  parser: ConfigParser["Service"],
+  current: Configuration,
+  expected: ConfigurationRevisionNumber,
+  changes: ReadonlyArray<ConfigurationChange>,
+  metadata: Pick<ConfigurationRevision, "actor" | "time" | "message">,
+) =>
+  replay(parser, current, expected, changes, metadata).pipe(
+    Effect.flatMap((result) => {
+      const problems = Option.match(result.configuration.instance, {
+        onNone: () => [],
+        onSome: ({ config }) =>
+          config.workers
+            .filter(({ kind }) => kind === "exe.dev")
+            .map(({ name }) => problem(`worker:${name}`, exeDevWorkerRefusal(name))),
+      });
+      return Arr.isArrayNonEmpty(problems)
+        ? Effect.fail(ConfigurationInvalid.make({ problems }))
+        : Effect.succeed(result);
+    }),
+  );
+
+/**
+ * Applies changes like `commit`, but accepts exe.dev workers, so that revisions stored before
+ * the store refused them still replay.
+ */
+export const replay = (
   parser: ConfigParser["Service"],
   current: Configuration,
   expected: ConfigurationRevisionNumber,

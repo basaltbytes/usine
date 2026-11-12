@@ -45,6 +45,7 @@ import {
   formatRevisionEntity,
   parseConfigurationEntity,
 } from "../src/configuration/folder.ts";
+import { replay } from "../src/configuration/commit.ts";
 import { LoopJson } from "../src/configuration/entities.ts";
 import { memoryConfigurationLayer } from "../src/configuration/memory.ts";
 import { sqliteConfigurationLayer } from "../src/configuration/sqlite/store.ts";
@@ -164,6 +165,25 @@ describe("configuration domain without layers", () => {
           }
         }
       }
+    }),
+  );
+
+  it.effect("replays a stored revision that adds an exe.dev worker", () =>
+    Effect.gen(function* () {
+      const changes = (yield* initialChanges).map((change) =>
+        change.key.kind === "worker"
+          ? ConfigurationChange.make({
+              ...change,
+              after: Option.some({ name: change.key.identifier, kind: "exe.dev" }),
+            })
+          : change,
+      );
+      const replayed = yield* replay(parser, Configuration.empty, zero, changes, metadata);
+      expect(
+        Option.map(replayed.configuration.instance, ({ config }) =>
+          config.workers.map(({ kind }) => kind),
+        ),
+      ).toEqual(Option.some(["exe.dev", "exe.dev"]));
     }),
   );
 
@@ -600,6 +620,40 @@ for (const [name, layer] of adapters)
           expect(storedConfiguration).toEqual(current);
           const entries = yield* store.list(Option.none());
           expect(entries).toHaveLength(1);
+        }
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("refuses all-exe.dev and mixed workers without writing a revision", () =>
+      Effect.gen(function* () {
+        const fixtureInstance = yield* fixture;
+        const store = yield* ConfigurationStore;
+        yield* initialize;
+        const current = yield* store.read;
+
+        const workers = configurationEntities(fixtureInstance).filter(
+          ({ key }) => key.kind === "worker",
+        );
+        const toExeDev = workers.map(({ key, value }) =>
+          ConfigurationChange.make({
+            key,
+            before: Option.some(value),
+            after: Option.some({ name: key.identifier, kind: "exe.dev" }),
+          }),
+        );
+        for (const changes of [toExeDev, toExeDev.slice(1)]) {
+          const failure = yield* store
+            .commit({ expected: current.number, changes, ...metadata })
+            .pipe(Effect.flip);
+          assert(failure._tag === "ConfigurationInvalid", failure._tag);
+          expect(failure.problems.map(({ file, message }) => ({ file, message }))).toEqual(
+            changes.map(({ key }) => ({
+              file: `worker:${key.identifier}`,
+              message: `Worker "${key.identifier}" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.`,
+            })),
+          );
+          const stored = yield* store.read;
+          expect(stored).toEqual(current);
         }
       }).pipe(Effect.provide(layer)),
     );
