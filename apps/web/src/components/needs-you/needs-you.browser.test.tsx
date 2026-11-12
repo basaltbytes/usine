@@ -20,6 +20,7 @@ import {
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { CiFixRun } from "@usine/engine/run-reader";
 import {
   RunSummaryView,
   AttemptSummaryView,
@@ -58,6 +59,7 @@ declare module "vitest/browser" {
     ) => Promise<void>;
     answerApproval: (status: 200 | 409, body: string) => Promise<void>;
     lateOverviewRequests: () => Promise<number>;
+    cycleResetResponse: (body: string) => Promise<void>;
   }
 }
 
@@ -318,14 +320,13 @@ it("shows a silent worker's last answer and opens an affected run", async () => 
 });
 
 it("names the CI fix run that continues a failed run's work and opens it", async () => {
-  const fixRunId = RunId.make("fix-run-1047");
   const need = RunFailureNeed.make({
     id: "run-failure:approval-run:attempt-1",
     repository,
     runId,
     loop,
     failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
-    fixRunId,
+    fixRun: CiFixRun.make({ runId: RunId.make("fix-run-1047"), state: "Running" }),
   });
   await commands.approvalResponses(
     overview([need]),
@@ -453,6 +454,29 @@ it.each([1280, 390])(
     }
   },
 );
+
+it("reports the CI fixes that a cycle budget reset replayed in a toast", async () => {
+  const need = CycleBudgetNeed.make({
+    id: "cycle-budget:replayed",
+    itemLabel: "approval/project#367",
+    itemUrl: "https://github.com/approval/project/issues/367",
+    ask: CycleBudgetAsk.make({
+      id: CycleBudgetAskId.make("replayed"),
+      itemKey: waiting.itemKey,
+      repository,
+      loop,
+      limit: CycleLimit.make(3),
+      counts: [
+        LoopCycleCount.make({ loop, admitted: CycleCount.make(3), completed: CycleCount.make(3) }),
+      ],
+    }).recordBlock(loop, EventId.make("blocked-ci-fix")),
+  });
+  await replaceNeeds([need]);
+  await commands.cycleResetResponse('{"replayedCiFixEventIds":["blocked-ci-fix"]}');
+  const row = needs.getByRole("listitem").filter({ hasText: need.itemLabel });
+  await row.getByRole("button", { name: "Reset cycle budget" }).click();
+  await expect.element(page.getByText("Replayed 1 CI fix", { exact: true })).toBeVisible();
+});
 
 it.each([
   { width: 1280, running: 0 },

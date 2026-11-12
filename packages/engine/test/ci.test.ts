@@ -27,6 +27,7 @@ import {
   Exit,
   Option,
   Ref,
+  Result,
   Schedule,
   Scope,
   Layer,
@@ -40,7 +41,6 @@ import { RunStore } from "../src/store/store.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { RunId } from "@usine/core/run";
-import { Result } from "effect";
 import {
   approvalEvent,
   type AttemptPlan,

@@ -119,27 +119,37 @@ export const loopSettings = Effect.fn("TriggerRouting.loopSettings")(function* (
   };
 });
 
-const ciInstructions = (policy: CiPolicy): string =>
-  `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${policy.fixLoop}"), timeout_seconds (${policy.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`;
+const ciInstructions = (policy: CiPolicy) =>
+  Schema.NonEmptyString.make(
+    `\n\nAfter pushing, end with [usine:awaiting-ci] followed by a JSON object with pull_request, head, fix_loop ("${policy.fixLoop}"), timeout_seconds (${policy.timeoutSeconds}), and on_green (an array of {item, add, remove} label changes to apply after CI passes). Do not apply completion labels or wait for CI in the agent session. Relay this handoff unchanged from a child. usine verifies CI before completing the run.`,
+  );
 
-/** Replaces the generated CI suffix while preserving the recorded prompt and failure evidence. */
-export const taskWithCiPolicy = (
-  task: AttemptTask,
-  policy: Option.Option<CiPolicy>,
-  previousPolicy: Option.Option<CiPolicy> = Option.none(),
-): AttemptTask => {
-  const prompt = Option.match(previousPolicy, {
-    onNone: () => task,
-    onSome: (previous) => {
-      const suffix = ciInstructions(previous);
-      return task.endsWith(suffix) ? task.slice(0, -suffix.length) : task;
+/** Returns `prompt` followed by the CI handoff instructions of `policy`, and those instructions. */
+export const withCiInstructions = (prompt: string, policy: Option.Option<CiPolicy>) => {
+  const instructions = Option.map(policy, ciInstructions);
+  return {
+    task: AttemptTask.make(`${prompt}${Option.getOrElse(instructions, () => "")}`),
+    ciInstructions: instructions,
+  };
+};
+
+/**
+ * Returns the prompt of a recorded Submission: its task without the CI handoff instructions
+ * recorded with it. For an Event recorded before the instructions were stored, it removes the
+ * instructions that the Event's CI policy generates now, if the task ends with them.
+ */
+export const recordedPrompt = (
+  submission: Pick<Submission, "task" | "ciInstructions" | "ciPolicy">,
+): string => {
+  const suffix = Option.orElse(submission.ciInstructions, () =>
+    Option.map(submission.ciPolicy, ciInstructions),
+  );
+  return Option.match(
+    Option.filter(suffix, (instructions) => submission.task.endsWith(instructions)),
+    {
+      onNone: () => submission.task,
+      onSome: (instructions) => submission.task.slice(0, -instructions.length),
     },
-  });
-  return AttemptTask.make(
-    Option.match(policy, {
-      onNone: () => prompt,
-      onSome: (current) => `${prompt}${ciInstructions(current)}`,
-    }),
   );
 };
 
@@ -164,7 +174,7 @@ export const triggerSubmission = Effect.fn("TriggerRouting.submission")(function
     ...settings,
     repository: options.repository.name,
     revision: options.revision,
-    task: taskWithCiPolicy(options.task, options.loop.ci),
+    ...withCiInstructions(options.task, options.loop.ci),
   });
 });
 

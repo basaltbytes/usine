@@ -1485,154 +1485,219 @@ it.live("a cycle reset revokes a blocked CI fix when the PR moves to a failing h
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", "gone"] as const)(
-  "a cycle reset rechecks a blocked CI fix without a trigger label: %s",
+const blockedFixInstance = (approval: "none" | "required") =>
+  Effect.gen(function* () {
+    const fixtureInstance = yield* instance;
+    return LoadedInstance.make({
+      ...fixtureInstance,
+      loops: [
+        LoopFile.make({
+          ...loop,
+          maxCycles: CycleLimit.make(1),
+          trigger: PullRequestTrigger.make({
+            on: "pr",
+            if: Source.make(
+              'item.state == "OPEN" && !item.merged && item.labels.nodes.exists(label, label.name == "agent-review-findings")',
+            ),
+          }),
+          approval,
+        }),
+      ],
+    });
+  });
+
+type CiScenario = Effect.Success<ReturnType<typeof scenario>>;
+
+const withPolling = (setup: CiScenario) =>
+  PollingTriggers.layer.pipe(
+    Layer.provideMerge(Layer.merge(setup.runtime, inertLabelReconcilerLayer)),
+  );
+
+// Blocks a CI fix on the item's one-cycle budget, polls without the trigger label, and resets the
+// budget, which replays the fix.
+const resetBlockedCiFix = (setup: CiScenario, limited: LoadedInstance) =>
+  Effect.gen(function* () {
+    const budgets = yield* CycleBudgets;
+    yield* openWait(setup.timeoutSeconds, true);
+    yield* Ref.set(
+      setup.observed,
+      CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+    );
+    yield* (yield* CiMonitor).reconcile(limited, Option.none());
+    const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+    const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
+    const answer = Event.make({
+      id: EventId.make("reset-ci-fix"),
+      dedupKey: DedupKey.make("reset-ci-fix"),
+      receivedAt: yield* DateTime.now,
+      payload: {},
+    });
+    assert.deepStrictEqual((yield* (yield* PollingTriggers).poll(limited)).failures, []);
+    yield* budgets.reset(ask.id, answer);
+    return { ask, blocked, answer };
+  });
+
+// Answers the reset again, which replays nothing, and checks that `tasks` attempts ran.
+const answerResetAgain = (
+  setup: CiScenario,
+  limited: LoadedInstance,
+  reset: Effect.Success<ReturnType<typeof resetBlockedCiFix>>,
+  tasks: number,
+) =>
+  Effect.gen(function* () {
+    const budgets = yield* CycleBudgets;
+    yield* (yield* RunEngine).drain;
+    yield* budgets.reset(reset.ask.id, reset.answer);
+    yield* (yield* CiMonitor).reconcile(limited, Option.none());
+    assert.strictEqual((yield* Ref.get(setup.tasks)).length, tasks);
+    const remainingAsks = yield* budgets.asks;
+    assert.deepStrictEqual(remainingAsks, []);
+  });
+
+it.live.each(["CLOSED", "MERGED", "gone"] as const)(
+  "a cycle reset revokes a replayed CI fix waiting for approval when its pull request is %s",
   (state) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const fixtureInstance = yield* instance;
-        const terminal = state === "CLOSED" || state === "MERGED" || state === "gone";
-        const limited = LoadedInstance.make({
-          ...fixtureInstance,
-          loops: [
-            LoopFile.make({
-              ...loop,
-              maxCycles: CycleLimit.make(1),
-              trigger: PullRequestTrigger.make({
-                on: "pr",
-                if: Source.make(
-                  'item.state == "OPEN" && !item.merged && item.labels.nodes.exists(label, label.name == "agent-review-findings")',
-                ),
-              }),
-              approval: terminal || state === "failure" ? "required" : "none",
-            }),
-          ],
-        });
+        const limited = yield* blockedFixInstance("required");
         const setup = yield* scenario(3600, limited);
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
-          const budgets = yield* CycleBudgets;
-          const monitor = yield* CiMonitor;
-          yield* openWait(setup.timeoutSeconds, true);
-          yield* Ref.set(
-            setup.observed,
-            CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
-          );
-          yield* monitor.reconcile(limited, Option.none());
-          const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
-          const blocked = ask.blocks[0] ?? assert.fail("missing CI block");
-          const answer = Event.make({
-            id: EventId.make("reset-ci-fix"),
-            dedupKey: DedupKey.make("reset-ci-fix"),
-            receivedAt: yield* DateTime.now,
-            payload: {},
-          });
-          const polling = yield* PollingTriggers;
-          assert.deepStrictEqual((yield* polling.poll(limited)).failures, []);
-          yield* budgets.reset(ask.id, answer);
           const reader = yield* RunReader;
-          if (terminal) {
-            yield* engine.reconcile;
-            const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
-            assert(Option.isSome(fixId));
-            yield* engine.inspect(fixId.value).pipe(
-              Effect.repeat({
-                until: ({ run }) => run.state._tag === "Waiting",
-                schedule: Schedule.spaced("10 millis"),
-              }),
-              Effect.timeout("5 seconds"),
-            );
-            yield* Ref.set(setup.itemState, state);
-          }
-          const controls = yield* LoopControl;
-          if (state === "paused") yield* controls.pause(loop.name);
-          if (state === "superseded" || state === "success") {
-            yield* Ref.set(
-              setup.observed,
-              CheckSnapshot.make({
-                pullRequestState: "open",
-                head: state === "superseded" ? CommitSha.make("c".repeat(40)) : head,
-                state: "success",
-              }),
-            );
-          }
-
-          const cycle = yield* polling.poll(limited);
-          assert.deepStrictEqual(cycle.failures, []);
-          if (state === "failure") {
-            const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
-            assert(Option.isSome(fixId));
-            const waiting = yield* engine.inspect(fixId.value).pipe(
-              Effect.repeat({
-                until: ({ run }) => run.state._tag === "Waiting" || run.state._tag === "Canceled",
-                schedule: Schedule.spaced("10 millis"),
-              }),
-              Effect.timeout("5 seconds"),
-            );
-            assert.strictEqual(waiting.run.state._tag, "Waiting");
-            assert.deepStrictEqual(waiting.attempts, []);
-            yield* engine.approve(
-              fixId.value,
-              Event.make({
-                id: EventId.make("approve-ci-fix"),
-                dedupKey: DedupKey.make("approve-ci-fix"),
-                receivedAt: yield* DateTime.now,
-                payload: {},
-              }),
-              ApprovalSource.make({ channel: "ui", approver: Option.none() }),
-            );
-          }
-          if (state === "paused") {
-            assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
-            const resets = yield* budgets.pendingResets;
-            for (const reset of resets) yield* budgets.acknowledgeReset(reset);
-            yield* controls.unpause(loop.name);
-            yield* engine.admitCiFixes;
-          }
-          if (state === "failure" || state === "paused") {
-            yield* Ref.get(setup.tasks).pipe(
-              Effect.repeat({
-                until: (tasks) => tasks.length === 2,
-                schedule: Schedule.spaced("10 millis"),
-              }),
-              Effect.timeout("5 seconds"),
-            );
-          }
-          yield* engine.drain;
-          yield* budgets.reset(ask.id, answer);
-          yield* monitor.reconcile(limited, Option.none());
-
-          assert.strictEqual(
-            (yield* Ref.get(setup.tasks)).length,
-            state === "failure" || state === "paused" ? 2 : 1,
+          const reset = yield* resetBlockedCiFix(setup, limited);
+          yield* engine.reconcile;
+          const fixId = yield* reader.runForEvent(DedupKey.make(reset.blocked.eventId));
+          assert(Option.isSome(fixId));
+          yield* engine.inspect(fixId.value).pipe(
+            Effect.repeat({
+              until: ({ run }) => run.state._tag === "Waiting",
+              schedule: Schedule.spaced("10 millis"),
+            }),
+            Effect.timeout("5 seconds"),
           );
-          const remainingAsks = yield* budgets.asks;
-          assert.deepStrictEqual(remainingAsks, []);
-          const fixId = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
-          if (state === "failure" || state === "paused") {
-            assert(Option.isSome(fixId));
-            const fix = yield* engine.inspect(fixId.value);
-            assert.strictEqual(fix.event.id, blocked.eventId);
-            const tasks = yield* Ref.get(setup.tasks);
-            assert.include(tasks[1] ?? "", "TypeError: failing CI log");
-          } else if (terminal) {
-            assert(Option.isSome(fixId));
-            const revoked = yield* engine.inspect(fixId.value);
-            assert(revoked.run.state._tag === "Canceled");
-            assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
-            assert.deepStrictEqual(revoked.attempts, []);
-          } else {
-            assert(Option.isNone(fixId));
-          }
-        }).pipe(
-          Effect.provide(
-            PollingTriggers.layer.pipe(
-              Layer.provideMerge(Layer.merge(setup.runtime, inertLabelReconcilerLayer)),
-            ),
-          ),
-        );
+          yield* Ref.set(setup.itemState, state);
+
+          assert.deepStrictEqual((yield* (yield* PollingTriggers).poll(limited)).failures, []);
+          yield* answerResetAgain(setup, limited, reset, 1);
+          const revoked = yield* engine.inspect(fixId.value);
+          assert(revoked.run.state._tag === "Canceled");
+          assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+          assert.deepStrictEqual(revoked.attempts, []);
+        }).pipe(Effect.provide(withPolling(setup)));
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live.each(["superseded", "success"] as const)(
+  "a cycle reset drops a replayed CI fix without opening a run when the recheck finds %s checks",
+  (state) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const limited = yield* blockedFixInstance("none");
+        const setup = yield* scenario(3600, limited);
+        yield* Effect.gen(function* () {
+          const reset = yield* resetBlockedCiFix(setup, limited);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({
+              pullRequestState: "open",
+              head: state === "superseded" ? CommitSha.make("c".repeat(40)) : head,
+              state: "success",
+            }),
+          );
+
+          assert.deepStrictEqual((yield* (yield* PollingTriggers).poll(limited)).failures, []);
+          yield* answerResetAgain(setup, limited, reset, 1);
+          const fixId = yield* (yield* RunReader).runForEvent(DedupKey.make(reset.blocked.eventId));
+          assert(Option.isNone(fixId));
+        }).pipe(Effect.provide(withPolling(setup)));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a cycle reset opens a replayed CI fix without a trigger label once it is approved", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const limited = yield* blockedFixInstance("required");
+      const setup = yield* scenario(3600, limited);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        const reset = yield* resetBlockedCiFix(setup, limited);
+
+        assert.deepStrictEqual((yield* (yield* PollingTriggers).poll(limited)).failures, []);
+        const fixId = yield* reader.runForEvent(DedupKey.make(reset.blocked.eventId));
+        assert(Option.isSome(fixId));
+        const waiting = yield* engine.inspect(fixId.value).pipe(
+          Effect.repeat({
+            until: ({ run }) => run.state._tag === "Waiting" || run.state._tag === "Canceled",
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        );
+        assert.strictEqual(waiting.run.state._tag, "Waiting");
+        assert.deepStrictEqual(waiting.attempts, []);
+        yield* engine.approve(
+          fixId.value,
+          Event.make({
+            id: EventId.make("approve-ci-fix"),
+            dedupKey: DedupKey.make("approve-ci-fix"),
+            receivedAt: yield* DateTime.now,
+            payload: {},
+          }),
+          ApprovalSource.make({ channel: "ui", approver: Option.none() }),
+        );
+        yield* Ref.get(setup.tasks).pipe(
+          Effect.repeat({
+            until: (tasks) => tasks.length === 2,
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        );
+
+        yield* answerResetAgain(setup, limited, reset, 2);
+        const fix = yield* engine.inspect(fixId.value);
+        assert.strictEqual(fix.event.id, reset.blocked.eventId);
+        assert.include((yield* Ref.get(setup.tasks))[1] ?? "", "TypeError: failing CI log");
+      }).pipe(Effect.provide(withPolling(setup)));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a cycle reset keeps a replayed CI fix queued while its loop is paused", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const limited = yield* blockedFixInstance("none");
+      const setup = yield* scenario(3600, limited);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const budgets = yield* CycleBudgets;
+        const controls = yield* LoopControl;
+        const reset = yield* resetBlockedCiFix(setup, limited);
+        yield* controls.pause(loop.name);
+
+        assert.deepStrictEqual((yield* (yield* PollingTriggers).poll(limited)).failures, []);
+        assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        for (const pending of yield* budgets.pendingResets)
+          yield* budgets.acknowledgeReset(pending);
+        yield* controls.unpause(loop.name);
+        yield* engine.admitCiFixes;
+        yield* Ref.get(setup.tasks).pipe(
+          Effect.repeat({
+            until: (tasks) => tasks.length === 2,
+            schedule: Schedule.spaced("10 millis"),
+          }),
+          Effect.timeout("5 seconds"),
+        );
+
+        yield* answerResetAgain(setup, limited, reset, 2);
+        const fixId = yield* (yield* RunReader).runForEvent(DedupKey.make(reset.blocked.eventId));
+        assert(Option.isSome(fixId));
+        assert.strictEqual((yield* engine.inspect(fixId.value)).event.id, reset.blocked.eventId);
+        assert.include((yield* Ref.get(setup.tasks))[1] ?? "", "TypeError: failing CI log");
+      }).pipe(Effect.provide(withPolling(setup)));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.live.each([
@@ -1744,7 +1809,7 @@ it.live.each([
             assert.include(reason, current);
           }
           const linked = yield* reader.ciFixRuns([sourceId]);
-          assert.strictEqual(linked.get(sourceId), fixId.value);
+          assert.strictEqual(linked.get(sourceId)?.runId, fixId.value);
           yield* engine.drain;
         }).pipe(
           Effect.provide(
@@ -1873,7 +1938,11 @@ it.live.each(["added", "removed", "changed"] as const)(
           if (change === "removed") {
             assert.notInclude(fix.task, "[usine:awaiting-ci]");
             assert.notInclude(fix.task, "Do not apply completion labels");
+            assert(Option.isNone(saved.ciInstructions));
           } else {
+            assert(Option.isSome(saved.ciInstructions));
+            assert(fix.task.endsWith(saved.ciInstructions.value));
+            assert.include(saved.ciInstructions.value, 'fix_loop ("new-fix")');
             assert.include(fix.task, 'fix_loop ("new-fix")');
             assert.include(fix.task, "timeout_seconds (7200)");
             assert.include(fix.task, "Do not apply completion labels");
@@ -1881,7 +1950,7 @@ it.live.each(["added", "removed", "changed"] as const)(
           }
           assert.deepStrictEqual(saved.ciFailureHead, Option.some(head));
           const links = yield* reader.ciFixRuns([sourceId]);
-          assert.strictEqual(links.get(sourceId), fixId.value);
+          assert.strictEqual(links.get(sourceId)?.runId, fixId.value);
           yield* engine.drain;
         }).pipe(Effect.provide(setup.runtime));
       }),

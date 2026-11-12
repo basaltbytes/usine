@@ -22,7 +22,12 @@ import { Effect, Layer, Option, Result, Schema } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { needsCiFix } from "./polling/ci-fix-state.ts";
 import { repositoryFailureLogFields } from "./polling/cycle.ts";
-import { loopSettings, resolveTriggerLoop, taskWithCiPolicy } from "./trigger-submission.ts";
+import {
+  loopSettings,
+  recordedPrompt,
+  resolveTriggerLoop,
+  withCiInstructions,
+} from "./trigger-submission.ts";
 import { GitHubItemKey } from "@usine/core/item";
 
 const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
@@ -83,7 +88,7 @@ export const triggerConditionLayer: Layer.Layer<
       });
       return Option.some<AdmissionSettings>({
         ...settings,
-        task: taskWithCiPolicy(submission.task, settings.ciPolicy, submission.ciPolicy),
+        ...withCiInstructions(recordedPrompt(submission), settings.ciPolicy),
       });
     });
 

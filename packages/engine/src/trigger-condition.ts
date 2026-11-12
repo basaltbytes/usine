@@ -6,6 +6,7 @@ const ADMISSION_SETTING_KEYS = [
   "approvalReason",
   "permissions",
   "ciPolicy",
+  "ciInstructions",
   "outcomeLabels",
   "cycleLimit",
   "agent",

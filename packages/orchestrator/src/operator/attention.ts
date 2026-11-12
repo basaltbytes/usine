@@ -8,7 +8,7 @@ import {
   type AttentionAcknowledgements,
 } from "@usine/engine/attention";
 import type { RunReader } from "@usine/engine/run-reader";
-import { DateTime, Effect, Match, Option, Schema } from "effect";
+import { DateTime, Effect, Match, Option, Schema, Struct } from "effect";
 import {
   boardTaskRuns,
   BoardTaskView,
@@ -16,28 +16,34 @@ import {
   ReadOnlyBoardLaneView,
   WritableBoardLaneView,
 } from "./board.ts";
-import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT } from "./need.ts";
+import { NeedView, PoolLimitNeed, POOL_LIMIT_WARNING_PERCENT, RunFailureNeed } from "./need.ts";
 import type { RunSummaryView } from "./run.ts";
 import { ProjectView, ReadyOverview } from "./overview.ts";
 
 // The need is already validated; attention keys are derived synchronously.
 // @effect-diagnostics-next-line schemaSync:off
 const encodeNeed = Schema.encodeSync(NeedView);
+// @effect-diagnostics-next-line schemaSync:off
+const encodeRunFailure = Schema.encodeSync(RunFailureNeed);
 
-/** Identifies the condition to dismiss; pool usage is grouped into threshold bands. */
+/**
+ * Identifies the condition to dismiss. Pool usage is grouped into threshold bands, and a failed
+ * Run's revision leaves out its CI fix Run, which changes while the failure stays the same.
+ */
 export const attentionKey = (need: NeedView): AttentionKey => {
-  const content =
-    need._tag === "PoolLimitNeed"
-      ? {
-          pool: need.pool,
-          window: need.window,
-          resetsAt: DateTime.formatIso(need.resetsAt),
-          band: [90, 95, 100].reduce(
-            (band, threshold) => (need.usedPercent >= threshold ? threshold : band),
-            POOL_LIMIT_WARNING_PERCENT,
-          ),
-        }
-      : encodeNeed(need);
+  const content = Match.value(need).pipe(
+    Match.tag("PoolLimitNeed", (pool) => ({
+      pool: pool.pool,
+      window: pool.window,
+      resetsAt: DateTime.formatIso(pool.resetsAt),
+      band: [90, 95, 100].reduce(
+        (band, threshold) => (pool.usedPercent >= threshold ? threshold : band),
+        POOL_LIMIT_WARNING_PERCENT,
+      ),
+    })),
+    Match.tag("RunFailureNeed", (failure) => Struct.omit(encodeRunFailure(failure), ["fixRun"])),
+    Match.orElse(encodeNeed),
+  );
   return AttentionKey.make({
     id: need.id,
     revision: AttentionRevision.make(jsonKey(content)),

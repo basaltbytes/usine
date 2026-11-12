@@ -133,6 +133,7 @@ const eventRouteSelection = {
   approvalReason: triggerEvents.approvalReason,
   permissions: triggerEvents.permissions,
   ciPolicy: triggerEvents.ciPolicyJson,
+  ciInstructions: triggerEvents.ciInstructions,
   ciFailureHead: triggerEvents.ciFailureHead,
   ciOnGreen: triggerEvents.ciOnGreenJson,
   outcomeLabels: triggerEvents.outcomeLabelsJson,
@@ -156,6 +157,7 @@ const loopSettingColumns = Effect.fnUntraced(function* (submission: Submission) 
     approvalReason: Option.getOrNull(submission.approvalReason),
     permissions: submission.permissions,
     ciPolicyJson,
+    ciInstructions: Option.getOrNull(submission.ciInstructions),
     outcomeLabelsJson: [...submission.outcomeLabels],
     cycleLimit: Option.getOrNull(submission.cycleLimit),
     agentJson: yield* encodeAgent(submission.agent),
@@ -1297,7 +1299,8 @@ export const queriesFor = (
 
   /**
    * Replaces the Loop settings saved with a queued Event by `submission`'s: approval, permissions,
-   * CI policy and task suffix, outcome labels, cycle limit, Agent, and parent model.
+   * CI policy and its generated instructions, outcome labels, cycle limit, Agent, parent model, and
+   * task.
    */
   const recordSettings = Effect.fn("RunStoreQueries.recordSettings")(function* (
     submission: Submission,
