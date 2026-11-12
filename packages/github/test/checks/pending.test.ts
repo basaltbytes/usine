@@ -27,12 +27,14 @@ const previousJobs = () =>
     jobs: [
       {
         name: "test (engine)",
+        status: "completed",
         conclusion: "success",
         started_at: "2026-11-04T19:54:00Z",
         completed_at: "2026-11-04T19:55:00Z",
       },
       {
         name: "test (web)",
+        status: "completed",
         conclusion: "success",
         started_at: "2026-11-04T19:54:00Z",
         completed_at: "2026-11-04T20:00:00Z",

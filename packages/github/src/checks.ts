@@ -65,7 +65,25 @@ export class PendingCheckReport extends Schema.Class<
   omitted: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
-/** The latest run of a workflow on a head that failed or was canceled although none of its jobs failed. */
+const JobNames = Schema.Array(Schema.NonEmptyString);
+
+/**
+ * The only failed job of a workflow run and the jobs of that run that never finished, such as a
+ * gate job that failed because the jobs it needs stayed queued.
+ */
+export class LoneJobFailure extends Schema.Class<
+  LoneJobFailure,
+  Brand.Brand<"@usine/github/checks/LoneJobFailure">
+>("LoneJobFailure")({
+  job: Schema.NonEmptyString,
+  /** The jobs of the run that are queued or waiting; at least one. */
+  unfinished: JobNames.check(Schema.isMinLength(1)),
+}) {}
+
+/**
+ * The latest run of a workflow on a head that failed or was canceled although it didn't run in
+ * full: none of its jobs failed, or its only failed job failed while other jobs never finished.
+ */
 export class IncompleteWorkflowRun extends Schema.Class<
   IncompleteWorkflowRun,
   Brand.Brand<"@usine/github/checks/IncompleteWorkflowRun">
@@ -74,6 +92,10 @@ export class IncompleteWorkflowRun extends Schema.Class<
   workflow: Schema.NonEmptyString,
   conclusion: Schema.Literals(["failure", "cancelled"]),
   url: Schema.NonEmptyString,
+  /** The run's only failed job, or `None` if none of its jobs failed. */
+  loneFailure: Schema.Option(LoneJobFailure).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
 }) {}
 
 /** The latest run of a workflow on a head that has not concluded yet. */
@@ -85,6 +107,13 @@ export class RunningWorkflowRun extends Schema.Class<
   workflow: Schema.NonEmptyString,
   status: Schema.NonEmptyString,
   url: Schema.NonEmptyString,
+  /**
+   * The run's only failed job while other jobs of the run are still queued, or `None` if no job
+   * failed, several failed, or no other job is queued.
+   */
+  loneFailure: Schema.Option(LoneJobFailure).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
 }) {}
 
 /** The latest workflow runs on a head that either ran only in part or have not concluded. */
@@ -165,6 +194,7 @@ const CompletedJobs = Schema.Struct({
   jobs: Schema.Array(
     Schema.Struct({
       name: Schema.NonEmptyString,
+      status: Schema.String,
       conclusion: Schema.NullOr(Schema.String),
       started_at: Schema.NullOr(Schema.DateTimeUtcFromString),
       completed_at: Schema.NullOr(Schema.DateTimeUtcFromString),
@@ -202,6 +232,27 @@ const HeadWorkflowRuns = Schema.Struct({
 });
 type HeadWorkflowRun = (typeof HeadWorkflowRuns.Type)["workflow_runs"][number];
 
+const isFailedJob = ({ conclusion }: CompletedJob) =>
+  conclusion !== null && FAILED_CONCLUSIONS.has(conclusion);
+
+/**
+ * Returns the only failed job of a run with the jobs that never finished, or `None`. In a run that
+ * has not concluded, a job in progress may still finish, so only queued or waiting jobs count.
+ */
+const loneFailure = (jobs: ReadonlyArray<CompletedJob>, concluded: boolean) => {
+  const failed = jobs.filter(isFailedJob);
+  const [job] = failed;
+  if (failed.length !== 1 || job === undefined) return Option.none();
+  const unfinished = jobs
+    .filter(({ status }) =>
+      concluded ? status !== "completed" : status !== "completed" && status !== "in_progress",
+    )
+    .map(({ name }) => name);
+  return unfinished.length === 0
+    ? Option.none()
+    : Option.some(LoneJobFailure.make({ job: job.name, unfinished }));
+};
+
 /** Reads aggregate CI and failure diagnostics without starting an agent. */
 export class GitHubChecks extends Context.Service<
   GitHubChecks,
@@ -228,9 +279,11 @@ export class GitHubChecks extends Context.Service<
     ) => Effect.Effect<PendingCheckReport, GitHubAppError>;
     /**
      * Reads the latest run of each workflow and event on `head`. `incomplete` holds runs that
-     * concluded `failure` or `cancelled` although none of their jobs failed, such as a run whose
-     * jobs GitHub Actions never created. `running` holds runs that have not concluded yet, which
-     * can outlast their last created job while the check rollup already reads green.
+     * concluded `failure` or `cancelled` although they didn't run in full: none of their jobs
+     * failed, such as a run whose jobs GitHub Actions never created, or their only failed job
+     * failed while other jobs never finished, such as a gate job whose needed jobs stayed queued.
+     * `running` holds runs that have not concluded yet, which can outlast their last created job
+     * while the check rollup already reads green, or stay queued when Actions stalls.
      */
     readonly workflowRuns: (
       repository: RepositoryName,
@@ -429,30 +482,29 @@ export class GitHubChecks extends Context.Service<
           const running: Array<RunningWorkflowRun> = [];
           for (const run of latest.values()) {
             if (run.status !== "completed") {
+              const jobs = yield* runJobs(prefix, run.id);
               running.push(
                 RunningWorkflowRun.make({
                   id: run.id,
                   workflow: workflow(run),
                   status: run.status === null || run.status === "" ? "unknown" : run.status,
                   url: run.html_url,
+                  loneFailure: loneFailure(jobs, false),
                 }),
               );
               continue;
             }
             if (run.conclusion !== "failure" && run.conclusion !== "cancelled") continue;
             const jobs = yield* runJobs(prefix, run.id);
-            if (
-              jobs.some(
-                ({ conclusion }) => conclusion !== null && FAILED_CONCLUSIONS.has(conclusion),
-              )
-            )
-              continue;
+            const lone = loneFailure(jobs, true);
+            if (Option.isNone(lone) && jobs.some(isFailedJob)) continue;
             incomplete.push(
               IncompleteWorkflowRun.make({
                 id: run.id,
                 workflow: workflow(run),
                 conclusion: run.conclusion,
                 url: run.html_url,
+                loneFailure: lone,
               }),
             );
           }
