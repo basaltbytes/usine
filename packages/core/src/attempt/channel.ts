@@ -1,5 +1,5 @@
 import { type Brand, Effect, Option, Result, Schema } from "effect";
-import { Agent } from "../agent/agent.ts";
+import { Agent, ParentKind } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
 import {
@@ -8,6 +8,7 @@ import {
   type AttemptWindows,
   type ContainerOutOfMemoryKills,
 } from "./attempt.ts";
+import { OutcomeLabels } from "../loop.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { type Comment, StepResult } from "../step/result.ts";
 import { BotLogin, WorkerName } from "../worker.ts";
@@ -57,6 +58,19 @@ export class RunSpec extends Schema.Class<
   maxChildren: ChildSessionBudget,
   /** The resolved reasoning effort for the Pi parent session. */
   parentEffort: Effort,
+  /**
+   * What coordinates the Attempt's children. A reattached Attempt keeps the coordinator it started
+   * with. Decodes as `pi` for older Attempts.
+   */
+  parent: ParentKind.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("pi" as const)),
+    Schema.withConstructorDefault(Effect.succeed("pi" as const)),
+  ),
+  /** The labels the Item must carry after a successful Attempt; empty disables the check. */
+  outcomeLabels: OutcomeLabels.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
   /** The previous Attempt's pushed salvage, applied on top of `baseCommit` and rebased if the base moved. */
   resume: Schema.OptionFromNullOr(SalvagePushed),
   /** The previous Attempt's pushed salvage that conflicts with `baseCommit` and isn't applied. */
@@ -91,8 +105,11 @@ export class Started extends Schema.TaggedClass<
   Started,
   Brand.Brand<"@usine/core/attempt/channel/Started">
 >("AttemptChannel/Started")("Started", {
-  /** The Pi parent model actually selected when the attempt launched. */
-  parentModel: ModelId,
+  /** The Pi parent model selected when the attempt launched, or `None` if the attempt has no parent session. */
+  parentModel: Schema.OptionFromNullOr(ModelId).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(Option.none<ModelId>())),
+  ),
   /** The previous salvage that could not be rebased onto the prepared revision, or `None`. */
   conflictingSalvage: Schema.OptionFromNullOr(SalvagePushed).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),

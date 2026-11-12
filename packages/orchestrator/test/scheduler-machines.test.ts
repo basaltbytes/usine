@@ -176,6 +176,7 @@ const scheduler = (
 const executionOf = (runId: RunId, attemptId: AttemptId, reattach = false) => {
   const selected = submission(1);
   return StepExecution.make({
+    requiresCi: false,
     attempt: Attempt.make({
       task: selected.task,
       agent: selected.agent.name,
@@ -239,7 +240,11 @@ describe("Worker scheduler on a provisioned Worker", () => {
           pids: ContainerPids.make(60976),
         });
         fake.checks.push(
-          MachineCheck.make({ brains: [testAgent.brain], containerLimits: Option.some(limits) }),
+          MachineCheck.make({
+            brains: [testAgent.brain],
+            containerLimits: Option.some(limits),
+            findings: ["The SSH user can't read the kernel journal"],
+          }),
         );
         const context = yield* scheduler(fake.machines);
         const steps = Context.get(context, StepExecutor);
@@ -258,6 +263,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
 
         const checked = (yield* status.preflights).find(({ worker }) => worker === POOL);
         assert.deepStrictEqual(checked?.containerLimits, Option.some(limits));
+        assert.deepStrictEqual(checked?.findings, ["The SSH user can't read the kernel journal"]);
 
         yield* lease.release;
         assert.deepStrictEqual(fake.calls.at(-1), "release hold-1");

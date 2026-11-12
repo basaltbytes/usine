@@ -216,15 +216,16 @@ const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine
     received.exitCode === 0
       ? received.stdout.split("\n").filter((name) => name !== "")
       : Object.keys(sent);
-  if (dropped.length > 0)
+  if (dropped.length > 0) {
+    const stderr = received.stderr.trim();
     return yield* gatewayGap(
       worker,
       `SSH worker "${worker}" doesn't receive ${dropped.join(", ")} over standard input. Its SSH commands must run in a POSIX sh with base64.`,
       new Error(
-        received.stderr.trim() ||
-          `variables not received: ${dropped.join(" ")} (exit code ${String(received.exitCode)})`,
+        `variables not received: ${dropped.join(" ")} (exit code ${String(received.exitCode)})${stderr === "" ? "" : `: ${stderr}`}`,
       ),
     );
+  }
 
   const probed = yield* commands.inspect("preflight", machine.shell, "curl", [
     "-sS",
@@ -293,7 +294,7 @@ const PROXY_REFUSED = "403";
 /**
  * Probes a brain on a Worker behind a Gateway (ADR 0027). If the Gateway has the credential of
  * the harness's provider, checks only the harness binary. Otherwise, Claude Code and Codex use
- * the operator's login (ADR 0026), or an API key in the Attempt's environment if `apiKeyed`
+ * the operator's login on the machine, or an API key in the Attempt's environment if `apiKeyed`
  * returns `true` for the harness: `probe` checks the login or the binary, then the machine must
  * connect to the login's hosts, or the provider's API host, through the forward proxy. Pi goes
  * to `probe`, which rejects it on any remote machine. The checks run through `shell`, on the

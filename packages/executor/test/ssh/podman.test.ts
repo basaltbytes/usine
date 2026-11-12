@@ -384,6 +384,7 @@ describe("rootless Podman", () => {
         ]),
         environment: "",
         running: true,
+        initKilledForMemory: true,
         oomKills: 0,
       });
     }

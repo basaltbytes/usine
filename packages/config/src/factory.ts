@@ -10,6 +10,7 @@ import {
   ProvisionerReuse,
   BoatSize,
   BoxdSize,
+  BoxdEndpoint,
   BoxdRegion,
   BoxdSnapshotName,
   BoxdEgressAllowlist,
@@ -41,9 +42,9 @@ import {
   WorkerRoot,
 } from "@usine/core/worker";
 import { type Brand, Effect, Option, Schema, SchemaGetter } from "effect";
-import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
+import { nonBlankString, uniqueLabelNames, uniqueRepositoryNames } from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
-import { canonicalLabelName, DeclaredLabel } from "./label.ts";
+import { DeclaredLabel } from "./label.ts";
 
 /** A repository tag that loop selectors match. */
 export const RegistryTag = nonBlankString("Expected a non-blank registry tag").pipe(
@@ -59,14 +60,11 @@ const uniqueNames = Schema.makeFilter<ReadonlyArray<{ readonly name: string }>>(
   { message: "Expected unique names" },
 );
 
-const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
-  (values) => new Set(values.map(({ name }) => canonicalLabelName(name))).size === values.length,
-  { message: "Expected unique GitHub label names" },
+const DeclaredLabels = Schema.Array(DeclaredLabel).check(
+  uniqueLabelNames<DeclaredLabel>(({ name }) => name),
 );
 
-const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
-
-/** A registry entry with selector tags and legacy repository lanes (ADR 0031). */
+/** A registry entry with selector tags and legacy repository lanes. */
 export class ManagedRepo extends Schema.Class<
   ManagedRepo,
   Brand.Brand<"@usine/config/factory/ManagedRepo">
@@ -78,8 +76,7 @@ export class ManagedRepo extends Schema.Class<
     .check(Schema.isUnique())
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   /**
-   * Repository lanes for version 1 and board views; version 2 persistence requires an empty list
-   * (ADR 0031).
+   * Repository lanes for version 1 and board views; version 2 persistence requires an empty list.
    */
   lanes: Lanes.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
@@ -129,6 +126,13 @@ export class ExeDevWorker extends Schema.Class<
   /** Whether the worker takes no new attempts while its running ones finish. */
   paused: WorkerPaused,
 }) {}
+
+/**
+ * Returns the refusal for exe.dev worker `worker`. The configuration store and `usine up` refuse
+ * exe.dev workers, which this version of usine doesn't run.
+ */
+export const exeDevWorkerRefusal = (worker: WorkerName): string =>
+  `Worker "${worker}" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.`;
 
 const EnvironmentVariableName = Schema.String.check(
   Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/u, {
@@ -334,15 +338,32 @@ export class BoatProvisioner extends Schema.Class<
 /** @deprecated Use ProvisionerTailnet. */
 export { ProvisionerTailnet as BoatTailnet };
 
-/** Restores each boxd machine from a snapshot with a matching captured size. */
+/**
+ * Restores each boxd machine from a snapshot, which fixes the machine's size. Each attempt gets a
+ * new machine, so a boxd worker ignores `reuse`.
+ */
 export class BoxdProvisioner extends Schema.Class<
   BoxdProvisioner,
   Brand.Brand<"@usine/config/factory/BoxdProvisioner">
 >("@usine/config/BoxdProvisioner")({
   provider: Schema.Literal("boxd"),
   tokenEnv: EnvironmentVariableName,
-  region: BoxdRegion.pipe(Schema.withDecodingDefaultKey(Effect.succeed("fra"))),
-  size: BoxdSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("2x8"))),
+  /**
+   * The account endpoint of the boxd cluster, or `None` for the hosted service at
+   * `https://boxd.sh:9443`.
+   */
+  endpoint: Schema.OptionFromOptionalKey(BoxdEndpoint),
+  /**
+   * The region of the machines, which boxd lists at `endpoint`, or `None` to create them where
+   * `endpoint` runs them: Frankfurt on the hosted service, or the only location of a cluster that
+   * runs in one place.
+   */
+  region: Schema.OptionFromOptionalKey(BoxdRegion),
+  /**
+   * The size that preflight expects the snapshot to have, or `None` to accept the snapshot's
+   * size.
+   */
+  size: Schema.OptionFromOptionalKey(BoxdSize),
   snapshot: BoxdSnapshotName,
   isolated: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
   /**
@@ -353,6 +374,10 @@ export class BoxdProvisioner extends Schema.Class<
   tailnet: ProvisionerTailnetFromYaml,
   apiKeys: ProviderApiKeysFromYaml,
   timings: ProvisionerTimingsFromYaml,
+  /**
+   * Ignored: every attempt gets a new machine. It is decoded so that a stored worker that sets it
+   * still loads, and preflight warns that it has no effect.
+   */
   reuse: ProvisionerReuseFromYaml,
 }) {}
 

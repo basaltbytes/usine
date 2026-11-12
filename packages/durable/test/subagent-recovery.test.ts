@@ -4,10 +4,12 @@ import { assert, it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { childContinuation } from "@usine/agents/continuation";
+import { catalog, HarnessCatalog, HarnessDescriptor } from "@usine/agents/harness";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Harness } from "@usine/core/agent/brain";
 import {
   ChildBackend,
+  type ChildRequest,
   ChildSessionJournal,
   SessionInterruptedError,
   SessionOperationError,
@@ -30,7 +32,7 @@ import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Result } f
 import { AttemptRequest, AttemptRuntime } from "../src/attempt-runtime.ts";
 import { SubagentDoc } from "../src/attempt/child.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc } from "../src/attempt/documents.ts";
-import { layer as runtimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as runtimeLayer } from "../src/testing.ts";
 import { DurableHarness, durableError, layer as harnessLayer } from "../src/harness.ts";
 import {
   answer,
@@ -268,15 +270,24 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
             Effect.gen(function* () {
               const services = yield* Effect.context<ChildBackend | StubChildren>();
               const backend = Context.get(services, ChildBackend);
-              const shared = childContinuation({
-                stop: backend.stop,
-                open: (request) =>
-                  Effect.gen(function* () {
-                    const running = yield* backend.launch(request);
-                    if (Option.isSome(request.resume)) yield* running.result;
-                    return { running, active: false, recover: () => Effect.void };
-                  }),
+              // Admits every recorded harness on any route, as the stub backend does.
+              const claude = catalog.descriptors.find(({ id }) => id === "claude");
+              assert(claude !== undefined);
+              const admitting = HarnessCatalog.make({
+                descriptors: catalog.descriptors.map((descriptor) =>
+                  HarnessDescriptor.make({ ...descriptor, capabilities: claude.capabilities }),
+                ),
               });
+              const shared = (request: ChildRequest) =>
+                childContinuation(admitting, {
+                  stop: () => backend.stop(request),
+                  open: (_spec, start) =>
+                    Effect.gen(function* () {
+                      const running = yield* backend.launch(request);
+                      if (start._tag === "StartResume") yield* running.result;
+                      return { running, active: false, recover: () => Effect.void };
+                    }),
+                });
               return Context.add(services, ChildBackend, {
                 ...backend,
                 launch: (request) =>
@@ -293,13 +304,15 @@ for (const [recovery, blocker, harness] of recoveries.flatMap(([recovery, blocke
                         Effect.andThen(backend.launch(request)),
                       )
                     : recovery === "resume-crashes-then-replacement"
-                      ? shared.launch(request).pipe(
-                          Effect.tapError((error) =>
-                            Effect.sync(() => {
-                              assert.strictEqual(error._tag, "SessionInterruptedError");
-                            }),
-                          ),
-                        )
+                      ? shared(request)
+                          .launch(request)
+                          .pipe(
+                            Effect.tapError((error) =>
+                              Effect.sync(() => {
+                                assert.strictEqual(error._tag, "SessionInterruptedError");
+                              }),
+                            ),
+                          )
                       : backend.launch(request),
                 stop: (request) =>
                   backend.stop(request).pipe(
@@ -614,3 +627,76 @@ for (const acknowledged of [false, true])
       assert.deepStrictEqual(restored, [acknowledged]);
     }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
   );
+
+// A harness saves the conversation again on every launch, a resume included, and a resumed child
+// that already has its prompt does not acknowledge it again.
+it.live("keeps a prompted child's receipt when its resumed launch saves it again", () =>
+  Effect.gen(function* () {
+    const database = yield* temporaryDatabase;
+    const request = attemptRequest("recovery/prompted-twice");
+    const restored: Array<boolean> = [];
+    const backend = Layer.effectContext(
+      Effect.gen(function* () {
+        const services = yield* Effect.context<ChildBackend | StubChildren>();
+        const stub = Context.get(services, ChildBackend);
+        return Context.add(services, ChildBackend, {
+          ...stub,
+          launch: (child) =>
+            Effect.gen(function* () {
+              const journal = yield* ChildSessionJournal.current;
+              if (Option.isSome(child.resume)) {
+                restored.push(child.prompted);
+                if (restored.length > 1)
+                  return yield* SessionInterruptedError.make({
+                    sessionId: child.session.id,
+                    message: "Native reopen failed",
+                  });
+                yield* journal.started(child.resume.value);
+                return yield* stub.launch(child);
+              }
+              yield* journal.started(HarnessSession.make({ cwd: child.cwd }));
+              yield* journal.prompted;
+              return yield* stub.launch(child);
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(stubChildBackendLayer));
+    const open = (parent: Parameters<typeof fauxParent>[0]) =>
+      runtimeLayer.pipe(
+        Layer.provideMerge(
+          harnessLayer({
+            ...fauxParent(parent),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open recovery storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+    const restart = (parent: Parameters<typeof fauxParent>[0]) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const services = yield* Layer.build(open(parent));
+          const execution = yield* Effect.forkChild(
+            Context.get(services, AttemptRuntime).execute(request, recordingSink().sink),
+          );
+          yield* Context.get(services, StubChildren).next;
+          yield* Fiber.interrupt(execution);
+        }),
+      );
+    yield* restart([delegate("Fix the findings.")]);
+    yield* restart([answer("Recovered.")]);
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(open([answer("Recovered.")]));
+        const result = yield* Context.get(services, AttemptRuntime).execute(
+          request,
+          recordingSink().sink,
+        );
+        assert.strictEqual(result.message, "Recovered.");
+      }),
+    );
+    assert.deepStrictEqual(restored, [true, true]);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds")),
+);

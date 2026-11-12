@@ -5,6 +5,7 @@ import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { ConfigParser } from "../../parser.ts";
 import { commit, validateConfiguration } from "../commit.ts";
 import { configurationEntities } from "../entities.ts";
+import { storedLoopUpgrades } from "../upgrade.ts";
 import {
   Configuration,
   ConfigurationEntity,
@@ -26,7 +27,7 @@ const revisionTable = getTableName(configurationRevisionsTable);
 /**
  * Provides a configuration store using the application's `SqlClient` and `ConfigParser`. Applies
  * embedded migrations with a separate ledger and commits revisions and entity values in one
- * transaction (ADR 0020).
+ * transaction.
  */
 export const sqliteConfigurationLayer = Layer.effect(
   ConfigurationStore,
@@ -60,22 +61,86 @@ export const sqliteConfigurationLayer = Layer.effect(
       Effect.mapError(failure("read revisions")),
     );
 
-    const read = Effect.gen(function* () {
+    const latestRevision = Effect.gen(function* () {
       const rows =
         yield* sql`SELECT number FROM ${sql(revisionTable)} ORDER BY number DESC LIMIT 1`;
       const row = rows[0];
-      if (row === undefined) return Configuration.empty;
+      if (row === undefined) return Option.none<ConfigurationRevisionNumber>();
       const { number } = yield* Schema.decodeUnknownEffect(
         Schema.Struct({ number: ConfigurationRevisionNumber }),
       )(row);
+      return Option.some(number);
+    });
+
+    const storedEntities = Effect.gen(function* () {
       const stored = yield* sql`SELECT value FROM ${sql(entityTable)} ORDER BY position`;
-      const entities = yield* Effect.forEach(stored, (entry) =>
+      return yield* Effect.forEach(stored, (entry) =>
         Schema.decodeUnknownEffect(Row)(entry).pipe(
           Effect.flatMap(({ value }) => Schema.decodeEffect(EntityJson)(value)),
         ),
       );
+    });
+
+    // Rewrites stored loops that the current loop rules reject, in one recorded revision.
+    yield* Effect.gen(function* () {
+      const latest = yield* latestRevision;
+      if (Option.isNone(latest)) return;
+      const entities = yield* storedEntities;
+      const upgrades = storedLoopUpgrades(entities);
+      if (upgrades.length === 0) return;
+      const upgraded = new Map(upgrades.map(({ change }) => [change.key.key, change.after]));
+      const valid = yield* validateConfiguration(
+        parser,
+        entities.map((entity) =>
+          Option.match(upgraded.get(entity.key.key) ?? Option.none(), {
+            onNone: () => entity,
+            onSome: (value) => ConfigurationEntity.make({ key: entity.key, value }),
+          }),
+        ),
+      ).pipe(
+        Effect.as(true),
+        Effect.catchTag("ConfigurationInvalid", ({ problems }) =>
+          Effect.logWarning("Kept stored outcome labels; the upgraded configuration is invalid", {
+            loops: upgrades.map(({ change }) => change.key.identifier),
+            problems: problems.map(({ file, message }) => `${file}: ${message}`),
+          }).pipe(Effect.as(false)),
+        ),
+      );
+      if (!valid) return;
+      const revision = ConfigurationRevision.make({
+        number: ConfigurationRevisionNumber.make(latest.value + 1),
+        actor: Option.none(),
+        time: yield* DateTime.now,
+        message: Option.some("Removed outcome labels that the loop rules no longer accept"),
+        changes: upgrades.map(({ change }) => change),
+      });
+      const value = yield* Schema.encodeEffect(RevisionJson)(revision);
+      yield* sql`INSERT INTO ${sql(revisionTable)} ${sql.insert({ number: revision.number, value })}`;
+      for (const { change, removed } of upgrades) {
+        if (Option.isNone(change.after)) continue;
+        const encoded = yield* Schema.encodeEffect(EntityJson)(
+          ConfigurationEntity.make({ key: change.key, value: change.after.value }),
+        );
+        yield* sql`UPDATE ${sql(entityTable)} SET value = ${encoded} WHERE key = ${change.key.key}`;
+        yield* Effect.logInfo("Removed stored outcome labels that the loop rules reject", {
+          revision: revision.number,
+          loop: change.key.identifier,
+          removed,
+        });
+      }
+    }).pipe(
+      sql.withTransaction,
+      Effect.provideService(SqlClient.BeginTransaction, "BEGIN IMMEDIATE"),
+      Effect.mapError(failure("upgrade stored loops")),
+      Effect.withSpan("ConfigurationStore.upgradeStoredLoops"),
+    );
+
+    const read = Effect.gen(function* () {
+      const latest = yield* latestRevision;
+      if (Option.isNone(latest)) return Configuration.empty;
+      const entities = yield* storedEntities;
       const instance = yield* validateConfiguration(parser, entities);
-      return Configuration.make({ number, instance: Option.some(instance) });
+      return Configuration.make({ number: latest.value, instance: Option.some(instance) });
     });
 
     return ConfigurationStore.of({

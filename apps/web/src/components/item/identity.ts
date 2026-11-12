@@ -13,7 +13,7 @@ export interface TitledItem extends ItemRef {
   readonly title: string;
 }
 
-/** The item that names a Task, and the Task's other pull requests (ADR 0024). */
+/** The item that names a Task, and the Task's other pull requests (ADR 0008). */
 export interface TaskIdentity {
   /** The earliest issue, else the earliest pull request; its title is the Task's title. */
   readonly origin: TitledItem;

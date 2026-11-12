@@ -24,9 +24,12 @@ import {
   boxdTransport,
   STDIN_CHUNK_BYTES,
 } from "../../../src/ssh/provisioner/boxd/exec.ts";
+import { BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { type ExecHandler, fakeBoxdExec, runLocally } from "./fake-boxd-exec.ts";
 
 const KEY = "bxd_exec_test_key";
+/** Returns the `Exec` credential that always answers `credential`. */
+const bearer = (credential: string) => Effect.succeed(Redacted.make(credential));
 const isGone = Schema.is(BoxdMachineGone);
 const MACHINE = MachineId.make("vm-exec-1");
 const encoder = new TextEncoder();
@@ -55,10 +58,7 @@ const collect = (
       stderr: join(stderr),
       exitCode: yield* Effect.result(execution.exitCode),
     };
-  }).pipe(
-    Effect.scoped,
-    Effect.provide(boxdExecLayer(url, Redacted.make(options.credential ?? KEY))),
-  );
+  }).pipe(Effect.scoped, Effect.provide(boxdExecLayer(url, bearer(options.credential ?? KEY))));
 
 /** Runs `command` like `collect` and fails with the error that ended the call. */
 const run = (...args: Parameters<typeof collect>) =>
@@ -259,7 +259,7 @@ describe("BoxdExec", () => {
             return yield* process.exitCode;
           }).pipe(
             Effect.scoped,
-            Effect.provide(boxdExecLayer(url, Redacted.make(credential))),
+            Effect.provide(boxdExecLayer(url, bearer(credential))),
             Effect.flip,
           );
           assert(Schema.is(HostUnreachable)(failure), says);
@@ -280,6 +280,44 @@ describe("BoxdExec", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("reads the bearer at the start of each call and ends a call whose bearer fails", () =>
+    Effect.gen(function* () {
+      const server = yield* fake();
+      const refusal = BoxdCallError.make({
+        operation: "authenticate",
+        url: "https://app.boxd.test/api/v1/auth/token",
+        code: "UNAUTHENTICATED",
+        message: "Token exchange returned HTTP 401",
+      });
+      const bearers = [bearer("stale"), bearer(KEY), Effect.fail(refusal)];
+      let reads = 0;
+      const credential = Effect.suspend(() => bearers[reads++] ?? Effect.die("no more bearers"));
+      const exitCodes = yield* Effect.gen(function* () {
+        const exec = yield* BoxdExec;
+        return yield* Effect.forEach([1, 2, 3], () =>
+          Effect.gen(function* () {
+            const execution = yield* exec.exec(MACHINE, "true", Stream.empty);
+            yield* Stream.runDrain(Stream.merge(execution.stdout, execution.stderr));
+            return yield* Effect.result(execution.exitCode);
+          }).pipe(Effect.scoped),
+        );
+      }).pipe(Effect.provide(boxdExecLayer(server.url, credential)));
+
+      assert.strictEqual(reads, 3);
+      const [stale, accepted, failed] = exitCodes;
+      assert(stale !== undefined && Result.isFailure(stale));
+      assert(stale.failure._tag === "BoxdCallError");
+      assert.strictEqual(stale.failure.code, "UNAUTHENTICATED");
+      assert.deepStrictEqual(accepted, Result.succeed(0));
+      assert(failed !== undefined && Result.isFailure(failed));
+      assert.strictEqual(failed.failure, refusal);
+      assert.deepStrictEqual(
+        server.calls.map(({ authorization }) => authorization),
+        [`Bearer ${KEY}`],
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("cancels the call when its scope closes", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<AbortSignal>();
@@ -288,7 +326,7 @@ describe("BoxdExec", () => {
           Stream.flatMap(() => Stream.never),
         ),
       );
-      const services = yield* Layer.build(boxdExecLayer(server.url, Redacted.make(KEY)));
+      const services = yield* Layer.build(boxdExecLayer(server.url, bearer(KEY)));
       const exec = Context.get(services, BoxdExec);
       const fiber = yield* Effect.gen(function* () {
         const execution = yield* exec.exec(MACHINE, "sleep 600", Stream.empty);
@@ -309,7 +347,7 @@ describe("BoxdExec", () => {
     () =>
       Effect.gen(function* () {
         const server = yield* fake();
-        const services = yield* Layer.build(boxdExecLayer(server.url, Redacted.make(KEY)));
+        const services = yield* Layer.build(boxdExecLayer(server.url, bearer(KEY)));
         const exec = Context.get(services, BoxdExec);
         const exitCodeOf = (command: string) =>
           Effect.gen(function* () {
@@ -348,7 +386,7 @@ describe("BoxdExec", () => {
           Stream.flatMap(() => Stream.never),
         ),
       );
-      const services = yield* Layer.build(boxdExecLayer(server.url, Redacted.make(KEY)));
+      const services = yield* Layer.build(boxdExecLayer(server.url, bearer(KEY)));
       const exec = Context.get(services, BoxdExec);
       const scope = yield* Scope.make();
       const execution = yield* exec
@@ -384,7 +422,7 @@ describe("BoxdExec", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          boxdExecLayer(proxy.url, Redacted.make(KEY), { pingInterval: 100, pingTimeout: 200 }),
+          boxdExecLayer(proxy.url, bearer(KEY), { pingInterval: 100, pingTimeout: 200 }),
         ),
         Effect.flip,
         Effect.forkChild,

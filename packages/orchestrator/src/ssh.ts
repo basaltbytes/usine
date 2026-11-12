@@ -140,17 +140,23 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
             ...(settings.provider === "boxd"
               ? {
                   provider: settings.provider,
+                  endpoint: settings.endpoint,
                   region: settings.region,
                   isolated: settings.isolated,
                   egress: settings.egress,
                   size: settings.size,
                   snapshot: settings.snapshot,
+                  ignoredReuse: settings.reuse,
                 }
-              : { provider: settings.provider, size: settings.size, snapshot: settings.snapshot }),
+              : {
+                  provider: settings.provider,
+                  size: settings.size,
+                  snapshot: settings.snapshot,
+                  reuse: settings.reuse,
+                }),
             token,
             apiKeys,
             timings: settings.timings,
-            reuse: settings.reuse,
             tailnet: yield* Effect.transposeOption(
               Option.map(settings.tailnet, (tailnet) =>
                 Effect.gen(function* () {

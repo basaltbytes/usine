@@ -1,6 +1,6 @@
 import type { HarnessCatalog } from "@usine/agents/harness";
 import type { RemoteHost } from "@usine/agents/child-host";
-import type { BrainSpec } from "@usine/core/agent/brain";
+import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Match, Option } from "effect";
 import {
@@ -13,6 +13,10 @@ import {
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import { verifyLinuxMemory } from "../memory-preflight.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
+import { loginFiles } from "../remote/container.ts";
+import type { MachineCredentialRoute } from "../remote/machine.ts";
+import { verifyKernelLog } from "../remote/memory.ts";
+import { machineCredentialRoute } from "./api-keys.ts";
 import type { SshContainers } from "./container.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
@@ -31,6 +35,46 @@ const capabilityError = (
   cause: unknown,
 ): WorkerCapabilityError => WorkerCapabilityError.make({ worker, capability, message, cause });
 
+/** Why an Attempt's container mounts a harness's login files for each credential route, or doesn't. */
+const LOGIN_MOUNT_REASONS = {
+  "host-login": "The harness uses the SSH user's login on the machine",
+  gateway: "The Gateway holds the credential of the harness's provider",
+  "api-key": "Each Attempt gets the provisioner's API key for the harness's provider",
+} as const satisfies Record<MachineCredentialRoute, string>;
+
+/**
+ * Returns the harnesses whose login files the containers on the machine mount: those that use
+ * the SSH user's login. Logs, for each harness, the files that a container mounts if the machine
+ * has them, and why.
+ */
+const containerLogins = Effect.fn("SshExecutor.containerLogins")(function* (
+  catalog: HarnessCatalog,
+  machine: SshMachine,
+  harnesses: ReadonlyArray<Harness>,
+) {
+  const worker = machine.address.name;
+  yield* Effect.annotateCurrentSpan({ worker, harnesses: harnesses.join(",") });
+  const logins: Array<Harness> = [];
+  for (const harness of harnesses) {
+    const credentialRoute = machineCredentialRoute(catalog, machine, harness);
+    const files = credentialRoute === "host-login" ? loginFiles(harness) : [];
+    yield* Effect.logInfo(
+      "Chose the login files that the Worker's containers mount if the machine has them",
+      {
+        worker,
+        host: machine.shell.destination,
+        harness,
+        credentialRoute,
+        mounted: files.flatMap(({ file, mounted }) => (mounted ? [file] : [])).join(","),
+        seeded: files.flatMap(({ file, mounted }) => (mounted ? [] : [file])).join(","),
+        reason: LOGIN_MOUNT_REASONS[credentialRoute],
+      },
+    );
+    if (files.length > 0) logins.push(harness);
+  }
+  return logins;
+});
+
 /**
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,
  * memory is enough for the concurrent Attempts, the Gateway (if any) responds and is reachable,
@@ -39,7 +83,8 @@ const capabilityError = (
  * sudo. With a container runtime, it derives the container limits that `usine.yaml` leaves unset
  * for `maxConcurrentAttempts` containers, which the report gives, and
  * brains are probed in a container from the image; without, as the SSH user, which the report
- * gives as degraded. Each runtime synchronizes its login checks.
+ * gives as degraded. With a container runtime, the report gives as a finding a kernel log that
+ * the SSH user can't read. Each runtime synchronizes its login checks.
  */
 export const sshMachinePreflightFor = (
   catalog: HarnessCatalog,
@@ -122,6 +167,11 @@ export const sshMachinePreflightFor = (
       yield* verifyGateway(catalog, commands, worker, machine, machine.gateway.value);
     }
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
+    // Only containers record out-of-memory kills, so only they need the kernel log.
+    const findings =
+      containerCheck._tag === "Container"
+        ? yield* verifyKernelLog(commands, machine.shell).pipe(Effect.map(Option.toArray))
+        : [];
     if (containerCheck._tag === "Container") {
       const memoryMib = containerCheck.limits.limits.memoryMib;
       const hostMemoryMib = Math.floor(memory.totalBytes / 1024 ** 2);
@@ -154,21 +204,24 @@ export const sshMachinePreflightFor = (
       verifyHarnessReadiness(worker, machine.provisioned, brains, harnessProbe(machine, shell));
     yield* containerCheck._tag === "Container"
       ? Effect.scoped(
-          containers
-            .preflightShell(
-              machine,
-              containerCheck.settings,
-              harnesses,
-              Option.match(machine.gateway, {
-                onNone: () => ({}),
-                onSome: ({ settings }) =>
-                  gatewayExportedEnvironment(
-                    { ...settings, catalog },
-                    `${machine.workerDirectory}/gh`,
-                  ),
-              }),
-            )
-            .pipe(Effect.flatMap(probe)),
+          containerLogins(catalog, machine, harnesses).pipe(
+            Effect.flatMap((logins) =>
+              containers.preflightShell(
+                machine,
+                containerCheck.settings,
+                logins,
+                Option.match(machine.gateway, {
+                  onNone: () => ({}),
+                  onSome: ({ settings }) =>
+                    gatewayExportedEnvironment(
+                      { ...settings, catalog },
+                      `${machine.workerDirectory}/gh`,
+                    ),
+                }),
+              ),
+            ),
+            Effect.flatMap(probe),
+          ),
         )
       : probe(machine.shell);
     const fields = {
@@ -178,6 +231,7 @@ export const sshMachinePreflightFor = (
       gitVersion,
       isolation: containerCheck._tag,
       harnesses: harnesses.join(","),
+      findings: findings.length,
     };
     return yield* Match.valueTags(containerCheck, {
       Container: ({ limits }) =>
@@ -187,6 +241,7 @@ export const sshMachinePreflightFor = (
             degraded: Option.none(),
             deferred: Option.none(),
             containerLimits: Option.some(limits.limits),
+            findings,
           } satisfies PreflightReport,
         ),
       SharedUser: ({ degraded }) =>
@@ -194,6 +249,7 @@ export const sshMachinePreflightFor = (
           degraded: Option.some(degraded),
           deferred: Option.none(),
           containerLimits: Option.none(),
+          findings,
         } satisfies PreflightReport),
     });
   });

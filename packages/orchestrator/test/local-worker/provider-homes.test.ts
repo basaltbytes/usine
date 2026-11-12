@@ -91,6 +91,7 @@ fi
         );
         const selected = submission(1);
         const request = CheckoutRequest.make({
+          requiresCi: false,
           attemptId: AttemptId.make("provider-homes/execute/1"),
           worker: WorkerName.make("local"),
           repository: selected.repository,

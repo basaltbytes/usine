@@ -12,6 +12,9 @@ import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Agent } from "@usine/core/agent";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { PullRequestNotFound } from "@usine/core/ci";
+import { ItemNumber } from "@usine/core/item";
+import { CommitSha } from "@usine/core/repository";
 import { CloudflareImageName, WorkerName } from "@usine/core/worker";
 import { AttemptRuntime, type AttemptRequest } from "@usine/durable/attempt-runtime";
 import {
@@ -57,6 +60,7 @@ import {
 import {
   ACCESS_CLIENT_ID,
   ACCESS_CLIENT_SECRET,
+  COMMIT,
   type FakeSandbox,
   fakeWorker,
 } from "./fake-worker.ts";
@@ -267,6 +271,41 @@ describe("cloudflare Worker", () => {
         assert.notInclude(json2, "sk-ant-test-key");
         const json3 = jsonKey([...worker.state.sandboxes.values()]);
         assert.notInclude(json3, "sk-ant");
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "harvests with the parent's CI handoff and keeps why its pull request isn't verified",
+    () =>
+      Effect.gen(function* () {
+        const worker = yield* fakeWorker;
+        const head = CommitSha.make(COMMIT);
+        const handsOff: StubParent = () =>
+          Effect.succeed(
+            `[usine:awaiting-ci]\n${jsonKey({ pull_request: 71, head, fix_loop: "fix", timeout_seconds: 1800, on_green: [] })}`,
+          );
+        yield* Effect.gen(function* () {
+          const cloudflare = yield* Executor;
+          yield* cloudflare.preflight(WORKER, [request.agent.brain], 2);
+          const prepared = yield* cloudflare.prepare(request);
+          const sandbox = worker.state.sandboxes.get(SANDBOX);
+          assert(sandbox !== undefined);
+          const { result } = yield* prepared.launch(sink);
+          // Origin has no `refs/pull/71/head`, so the handoff's pull request isn't found.
+          assert.deepStrictEqual(
+            result.unverifiedHandoff,
+            Option.some(
+              PullRequestNotFound.make({
+                pullRequest: Option.some(ItemNumber.make(71)),
+                branch: Option.none(),
+                head,
+              }),
+            ),
+          );
+          assert.isTrue(
+            sandbox.commands.some((line) => line.includes("'api' 'repos/acme/demo/pulls/71'")),
+          );
+        }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider(), handsOff)));
       }).pipe(Effect.scoped),
   );
 
@@ -644,6 +683,33 @@ describe("cloudflare Worker", () => {
         [`PUT /v1/sandboxes/${SANDBOX}`],
       );
       assert.isFalse(worker.state.sandboxes.has(SANDBOX));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("reports a harness that fails in the sandbox as a sandbox image gap", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const codex = CheckoutRequest.make({ ...request, agent: brain(Harness.make("codex")) });
+      worker.state.respond = (_sandbox, words) =>
+        words[0] === "codex" ? Option.some({ stdout: "", exitCode: 127 }) : Option.none();
+      const [preflight, prepare] = yield* Effect.gen(function* () {
+        const cloudflare = yield* Executor;
+        return [
+          yield* cloudflare.preflight(WORKER, [codex.agent.brain], 1).pipe(Effect.flip),
+          yield* cloudflare.prepare(codex).pipe(Effect.flip),
+        ] as const;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(executor(worker, mintingProvider(), completes, new StubStorage(), [OPENAI])),
+      );
+
+      for (const refused of [preflight, prepare]) {
+        const isCapabilityGap = Schema.is(WorkerCapabilityError)(refused);
+        assert(isCapabilityGap);
+        assert.strictEqual(refused.capability, "toolchain");
+        assert.include(refused.message, "in the sandbox image");
+        assert.notInclude(refused.message, "on the worker");
+      }
     }).pipe(Effect.scoped),
   );
 

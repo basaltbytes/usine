@@ -1,4 +1,4 @@
-import { canonicalLabelName } from "@usine/config/label";
+import { canonicalLabelName } from "@usine/core/label";
 import type { Attempt } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import { GitHubItemKey, type ItemNumber } from "@usine/core/item";

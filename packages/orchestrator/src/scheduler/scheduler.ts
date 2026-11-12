@@ -902,11 +902,11 @@ export const stepExecutorLayer = (
           }
           yield* provisioning.clear(worker);
           if (Option.isSome(created.success.checked)) {
-            const { brains, containerLimits } = created.success.checked.value;
+            const { brains, containerLimits, findings } = created.success.checked.value;
             yield* preflight.record(
               worker,
               brains,
-              Exit.succeed({ ...fullPreflight, containerLimits }),
+              Exit.succeed({ ...fullPreflight, containerLimits, findings }),
             );
           }
           yield* Effect.logInfo("Machine ready for the persisted Attempt", {
@@ -976,6 +976,7 @@ export const stepExecutorLayer = (
                 reattach: execution.reattach,
                 botLogin: Option.some(botLogin),
                 requiresCi: execution.requiresCi,
+                outcomeLabels: execution.outcomeLabels,
                 commitAuthor,
               }),
             )

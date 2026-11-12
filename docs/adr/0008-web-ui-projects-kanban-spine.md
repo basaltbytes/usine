@@ -1,34 +1,20 @@
-# The v1 web UI: projects as home, a kanban board per project
+# The web UI centers projects, boards, and tasks
 
-The UI centers work, not machinery. Home lists the projects (managed repos as the operator sees them) under a global needs-you strip. A project opens as a board, a kanban of the repo's items in lanes. Each lane maps GitHub labels or states (`label: ready`, `state: pr open`), configured per repo from proposed defaults and synced both ways (usine never deletes a label). Cards show the item and its live run: agent, run state, and any error or approval awaiting the operator. Dragging a card writes the label swap to GitHub, which fires label-protocol loops, so the board is a trigger surface. A card opens the run drawer: the event (dedup key, payload summary), attempts with typed errors, and the transcript, with child sessions collapsible one level under parent messages. Loops, agents, workers, and lane maps are in Configuration.
+The UI centers work, not machinery: the overview leads with statistics, then Needs attention, running attempts, stalled items, and recent runs; the sidebar lists projects. A project opens as a board whose lanes map GitHub labels or item states, proposed from repository labels until the project configures them. Dragging a card between authored label lanes writes the label swap to GitHub, so the board is also a trigger surface. Proposed and state lanes are read-only, because labels such as `bug` aren't workflow state, and a move keeps labels outside the lane map.
+
+Every lane stays in one row, and no task is hidden by default. Unmapped and closed-only lanes come last. Unmapped starts open while it holds an open item; closed-only lanes, and Unmapped with no open item, start folded to rails with their counts. Each browser remembers the operator's fold choice per lane.
+
+A card is a task: the issues and pull requests that GitHub's closing references or saved run results link within one repository, with all their runs. A task is a read projection with no stored identity; runs, approvals, and cycle budgets keep their own records. Its earliest issue, or else its earliest pull request, names it.
+
+Statistics count tasks: a task is done when its pull request merges, and its time, tokens, and price cover all its runs.
+
+An item or a repository has one shared component that every surface uses, so a restyle changes it everywhere.
 
 ## Considered options
 
-- **Runs console as home** (CI-dashboard run queue): the densest view, but the operator thinks in projects and items, not run rows; the drawer reuses its design.
-- **Loops as home** (a page of loop cards): puts configuration where the work should be; its loop-file view moves to Configuration.
-- **Intervention inbox as home**: right instinct, too narrow for a whole surface; it remains as the needs-you strip and card badges.
-- **Projects with kanban** (chosen): the only option showing _what agents are working on_ in the operator's terms, with label lanes making the board a trigger surface for free.
-
-## Consequences
-
-- v1 interventions: **Approve**, **Retry**, **Steer** (message the Pi parent), **Interrupt** (pause at the next tool boundary for a steer), **Cancel**, **Pause a loop** (no new runs; runtime state per [ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md)), **Child takeover** (davis-style attach to a harness child), and **Edit-and-retry** (amend context before the next attempt). Takeover and edit-and-retry get their own ticket: the attempt channel ([ADR 0006](./0006-executor-contract-run-host-attempt-channel.md)) addresses only the parent.
-- Diffs: the drawer links the run's PR. v1 has no diff view, and the stored transcript allows one later.
-- Needs-you (approvals, agent failures, steerable runs) is global: a strip on home and badges on project and board cards, so you don't need to know which project to check.
-- Lane maps are per-repo configuration in the instance repo, proposed from a fresh repo's labels. Board sync projects polled trigger state ([ADR 0007](./0007-polling-triggers-content-hashed-events.md)); no new data source.
-- Proposed lanes are read-only: only an authored lane map says which labels the board may swap, since labels like `bug` aren't safely workflow state. Cards offer moves only to another authored label lane, and the server rejects moves to proposed lanes. Authored moves keep labels outside the map. To enable moves, configure `repos[].lanes` in `usine.yaml` and restart. This settles the write question in [#76](https://github.com/basaltbytes/usine/issues/76).
-- **Project** joins the glossary as the operator-facing term (a managed repo with its board and activity); _managed repo_ stays the registry mechanism.
-- The prototype on `prototype/v1-web-ui` validated structure only; its visual language was rejected, and the look is a separate ticket.
-
-## 2026-10-20: the board hides what no loop acts on
-
-The 2026-10-20 audit found the board showing everything on GitHub: five of nine lanes empty, 232 cards in Done and Unmapped, dependabot PRs filling Pull requests, and nothing saying why seven Ready items had no run. The board now shows the lanes and tasks loops act on, the rest behind header toggles:
-
-- An empty lane collapses to a narrow column with its name, count, and labels, and widens to accept a drag.
-- The fallback lane and closed-only lanes move to header toggles, off by default, with counts. Toggled on, they're last in the row, so Unmapped cards can still move to authored lanes.
-- A task no loop can match is hidden until **Show all Items**: no trigger matches its items, its current item has no authored-lane label, it has no open run, and nothing about it waits in Needs you. The orchestrator uses the poll's `LoopMatches` evaluation, so board and poll agree.
-- The arrow between two authored lanes lists the loops whose trigger matches a left-lane task, open run or not ([#345](https://github.com/basaltbytes/usine/issues/345)); listing only working loops left it blank when idle.
-- A card on the overview's Not moving list shows its reason and action, read from the desk view rather than recomputed.
-
-## 2026-10-20, later: every lane in one row again
-
-After trying it live the same day, the operator rejected collapsed empty lanes, toggled Done and Unmapped, and hidden unmatched tasks. The board went back to every lane in one row, empty lanes at full width, Done and Unmapped last as rails, and every task the overview returns. Loop arrows and stall reasons stayed.
+- **A runs console as home**: dense, but the operator thinks in projects and items.
+- **Loops as home**: configuration where the work should be.
+- **An intervention inbox as home**: too narrow; it became Needs attention.
+- **Hiding empty lanes, Done, Unmapped, and tasks no loop matches**: hid work the operator needed, such as open pull requests.
+- **Folding Unmapped by default**: hid open pull requests without a lane label until the operator opened the rail.
+- **Linking items by title, branch, or a bare number**: guesses, and a bare number can name another repository's item.

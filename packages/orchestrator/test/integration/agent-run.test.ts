@@ -19,6 +19,7 @@ import { ConfigParser } from "@usine/config/parser";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunEngine } from "@usine/engine/engine";
+import { localSqliteLayer } from "@usine/engine/local-sqlite";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Source } from "@usine/expression/expression-engine";
@@ -213,6 +214,7 @@ const runtimeLayer = (
     Layer.provide(MarcbachmannCelLayer),
     Layer.provide(current),
   );
+  const database = localSqliteLayer(runtimeDirectory);
   const engine = localWorkerLayer(
     runtimeDirectory,
     instance.config,
@@ -220,6 +222,7 @@ const runtimeLayer = (
     {
       interruptGrace: "10 seconds",
     },
+    database,
   ).pipe(
     Layer.provide(MarcbachmannCelLayer),
     Layer.provide(credentials),
@@ -228,6 +231,7 @@ const runtimeLayer = (
     Layer.provide(CompletionCheck.unverified),
     Layer.provide(
       durableAttemptRuntimeLayer(runtimeDirectory).pipe(
+        Layer.provide(database),
         Layer.provideMerge(harnessesLive),
         Layer.provideMerge(hostLoginLockLayer),
         Layer.provide(NodeServices.layer),

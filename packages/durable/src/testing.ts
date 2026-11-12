@@ -11,12 +11,14 @@ import type { ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
   AgentBlockedError,
+  AgentCapacityError,
   AgentQuestionError,
   type AgentReport,
   harnessFailure,
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
+  ChildSessionLifecycle,
   type OnDelivery,
   reportText,
   type RunningSession,
@@ -60,8 +62,12 @@ import {
   ResultRecorded,
   StoredRequest,
 } from "./attempt-runtime.ts";
-import { keepNotice } from "./attempt/hubs.ts";
+import { keepNotice } from "./attempt/notices.ts";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
+import { memoryAttemptJournalLayer } from "./coordinator/memory.ts";
+import { routerLayer } from "./coordinator/router.ts";
+import { CoordinatorRuntime } from "./coordinator/runtime.ts";
+import { WakeUp } from "./coordinator/wake-up.ts";
 import { SUBAGENT_TOOL } from "./attempt/subagent.ts";
 import { durableError, layer as durableHarnessLayer } from "./harness.ts";
 
@@ -121,12 +127,24 @@ export interface StubChild {
    */
   readonly fail: (message: string) => Effect.Effect<void>;
   /**
+   * Finishes with a provider usage limit that resets at `resetsAt`, which fails the Attempt with
+   * `ProviderCapacityFailure` even if the parent reports a blocker.
+   */
+  readonly limit: (message: string, resetsAt: DateTime.Utc) => Effect.Effect<void>;
+  /**
    * Ends without a result, as a Claude child whose output stream fails: the parent's `subagent`
    * call fails with a `stream` `SessionOperationError` whose message is `message`.
    */
   readonly crash: (message: string) => Effect.Effect<void>;
   /** Completes when the parent's tool call interrupts the child (abort, cancel, or shutdown). */
   readonly interrupted: Effect.Effect<void>;
+  /** Makes later turn interrupts never return, as a harness that doesn't answer them. */
+  readonly stall: Effect.Effect<void>;
+  /**
+   * Completes when the child's session closes, with whether its lifecycle reported stopping then.
+   * A host keeps a stopping child for a resume and stops any other child.
+   */
+  readonly closed: Effect.Effect<boolean>;
   readonly interventions: Effect.Effect<ReadonlyArray<AttemptChannel.OperatorAction>>;
 }
 
@@ -145,6 +163,12 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const interrupted = yield* Deferred.make<void>();
+  const closed = yield* Deferred.make<boolean>();
+  const lifecycle = yield* ChildSessionLifecycle.current;
+  yield* Effect.addFinalizer(() =>
+    lifecycle.isStopping.pipe(Effect.flatMap((stopping) => Deferred.succeed(closed, stopping))),
+  );
+  let stalled = false;
   const interventions: Array<AttemptChannel.OperatorAction> = [];
   let held = request.held;
   let paused = false;
@@ -196,6 +220,14 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const ask = (question: string) =>
     report(AgentQuestionError.make({ sessionId: Option.some(session.id), message: question }));
   const fail = (message: string) => report(harnessFailure(Option.some(session.id), message));
+  const limit = (message: string, resetsAt: DateTime.Utc) =>
+    report(
+      AgentCapacityError.make({
+        sessionId: Option.some(session.id),
+        message,
+        resetsAt: Option.some(resetsAt),
+      }),
+    );
   const crash = (message: string) =>
     Effect.gen(function* () {
       const error = SessionOperationError.make({
@@ -237,7 +269,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     result: Deferred.await(result),
     steer: () => Effect.void,
     interrupt: Deferred.succeed(interrupted, undefined).pipe(
-      Effect.andThen(Queue.end(events)),
+      Effect.andThen(Effect.suspend(() => (stalled ? Effect.never : Queue.end(events)))),
       Effect.asVoid,
     ),
     intervene,
@@ -250,8 +282,13 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     block,
     ask,
     fail,
+    limit,
     crash,
     interrupted: Deferred.await(interrupted),
+    stall: Effect.sync(() => {
+      stalled = true;
+    }),
+    closed: Deferred.await(closed),
     interventions: Effect.sync(() => [...interventions]),
   };
   return { running, child };
@@ -288,9 +325,22 @@ export interface DurableTestingOptions {
   readonly parent: ReadonlyArray<ParentStep>;
 }
 
-/** Returns a durable Attempt runtime with a scripted parent model and stub children. */
+/**
+ * Provides `AttemptRuntime` as production routes it: the Pi parent's runtime on the durable
+ * harness, and the event-driven coordinator on an in-memory attempt journal.
+ */
+export const routedRuntimeLayer = routerLayer.pipe(
+  Layer.provide(Layer.mergeAll(attemptRuntimeLayer, CoordinatorRuntime.layer)),
+  Layer.provide(WakeUp.rules),
+  Layer.provide(memoryAttemptJournalLayer),
+);
+
+/**
+ * Returns the routed Attempt runtime with stub children: a scripted Pi parent model on durable
+ * storage, and the event-driven coordinator on an in-memory attempt journal.
+ */
 export const layer = (options: DurableTestingOptions) =>
-  attemptRuntimeLayer.pipe(
+  routedRuntimeLayer.pipe(
     Layer.provideMerge(
       Layer.unwrap(
         Effect.sync(() =>
@@ -428,7 +478,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           if (stored === undefined) {
             yield* emit(
               AttemptChannel.Started.make({
-                parentModel: Option.getOrElse(request.spec.parentModel, () =>
+                parentModel: Option.orElseSome(request.spec.parentModel, () =>
                   ModelId.make("stub/parent"),
                 ),
               }),

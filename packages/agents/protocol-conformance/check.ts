@@ -52,8 +52,19 @@ export type ThreadStartParamsConform = Assert<
 export type ThreadResumeParamsConform = Assert<
   Extends<Mutable<Ours.ThreadResumeParams>, ThreadResumeParams>
 >;
+/** `R` without the items of its saved turns. */
+type WithoutTurnItems<R extends { readonly thread: { readonly turns: ReadonlyArray<object> } }> =
+  Omit<R, "thread"> & {
+    readonly thread: Omit<R["thread"], "turns"> & {
+      readonly turns: ReadonlyArray<Omit<R["thread"]["turns"][number], "items">>;
+    };
+  };
+// Saved turn items decode as any JSON value, like `ItemNotification.item` below.
 export type ThreadResumeResponseConform = Assert<
-  Decodes<typeof Ours.ThreadResumeResponse, ThreadResumeResponse>
+  Extends<
+    WithoutTurnItems<ThreadResumeResponse>,
+    WithoutTurnItems<typeof Ours.ThreadResumeResponse.Encoded>
+  >
 >;
 export type TurnStartParamsConform = Assert<
   Extends<Mutable<Ours.TurnStartParams>, TurnStartParams>

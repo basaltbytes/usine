@@ -69,14 +69,15 @@ jobs:
       matrix:
         include:
           - leg: web
-            container:
-              image: mcr.microsoft.com/playwright:v1.64.1-noble
+            # Both browser legs use this container. Its tag matches the Playwright
+            # version in apps/web and apps/server, and Renovate updates the tag
+            # and digest together.
+            container: &playwright-container
+              image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
               options: --init
             filters: --filter=@usine/web
           - leg: server
-            container:
-              image: mcr.microsoft.com/playwright:v1.64.1-noble
-              options: --init
+            container: *playwright-container
             filters: --filter=@usine/server
             args: -- --project=server
           - leg: engine
@@ -103,13 +104,21 @@ jobs:
       # first main run on a new image tag misses and downloads from the mirror
       # with the bounded retries below. Running this workflow on main with
       # workflow_dispatch seeds the main cache.
+      # The packages depend on the Ubuntu release that the tag names, so the key
+      # leaves out the digest and a digest update reuses the cached packages.
+      - name: Name the server test tools cache
+        if: matrix.leg == 'server'
+        id: server-tools-key
+        env:
+          IMAGE: ${{ matrix.container.image }}
+        run: echo "key=server-test-tools-${IMAGE%@*}-jq-lsof" >> "$GITHUB_OUTPUT"
       - name: Restore server test tools
         if: matrix.leg == 'server'
         id: server-tools
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /var/cache/server-test-tools
-          key: server-test-tools-${{ matrix.container.image }}-jq-lsof
+          key: ${{ steps.server-tools-key.outputs.key }}
       - name: Install server test tools
         if: matrix.leg == 'server'
         timeout-minutes: 6

@@ -237,6 +237,14 @@ it.each([404, 503])(
       if (status === 404) {
         await expect.element(page.getByText("Project not found", { exact: true })).toBeVisible();
         await expect
+          .element(
+            page.getByText(
+              `No project has the ID ${projectId(project)}. Admins manage projects in Configuration > Projects.`,
+              { exact: true },
+            ),
+          )
+          .toBeVisible();
+        await expect
           .element(page.getByLabelText(`${repository} project board`))
           .not.toBeInTheDocument();
       } else {

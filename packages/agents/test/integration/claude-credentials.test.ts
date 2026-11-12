@@ -42,6 +42,7 @@ it.live(
         const target = ProbeTarget.make({
           host: LocalProcess.make(),
           environment,
+          placement: "local",
           credential: "host-login",
           worker: WorkerName.make("test-worker"),
           machine: Option.none(),

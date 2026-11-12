@@ -4,12 +4,16 @@ import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
   ContainerOutOfMemoryKills,
+  MAX_KILLED_PROCESSES,
+  MemoryKilledProcess,
   OutOfMemoryKills,
   ProviderRetry,
   FailureResolution,
   AttemptNumber,
   AttemptWindow,
+  pendingProviderRetry,
   shouldAutoRetry,
+  totalOutOfMemoryKills,
   windowsOverlap,
 } from "../src/attempt/attempt.ts";
 import {
@@ -22,7 +26,10 @@ import {
   isAutoRetryableFailure,
   RunawayFailure,
 } from "../src/attempt/failure.ts";
+import { AttemptFailed } from "../src/attempt/outcome.ts";
 import { SalvageRetained } from "../src/attempt/salvage.ts";
+import { Running } from "../src/run/state.ts";
+import { ContainerId, ContainerMemoryMib } from "../src/worker.ts";
 import { RepositoryName } from "../src/repository.ts";
 import { Event, DedupKey, EventId } from "../src/event.ts";
 
@@ -69,6 +76,44 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
       false,
     );
   });
+});
+
+describe("provider retry deadline", () => {
+  const endedAt = DateTime.makeUnsafe("2026-11-11T03:00:00Z");
+  const retryAt = (number: number, resetsAt: Option.Option<DateTime.Utc>) =>
+    pendingProviderRetry(Running.make(), [
+      {
+        number: n(number),
+        outcome: Option.some(
+          AttemptFailed.make({
+            failure: ProviderCapacityFailure.make({ message: "Usage limit reached", resetsAt }),
+          }),
+        ),
+        endedAt: Option.some(endedAt),
+      },
+    ]).pipe(Option.map(({ retryAt }) => DateTime.formatIso(retryAt)));
+
+  it.each([
+    [1, Option.none(), "2026-11-11T03:02:00.000Z"],
+    [2, Option.none(), "2026-11-11T03:05:00.000Z"],
+    [1, Option.some(DateTime.makeUnsafe("2026-11-11T05:00:00Z")), "2026-11-11T05:00:00.000Z"],
+    [2, Option.some(DateTime.makeUnsafe("2026-11-11T03:01:00Z")), "2026-11-11T03:05:00.000Z"],
+  ] as const)(
+    "retries attempt %i no earlier than the backoff or the reported reset time",
+    (number, resetsAt, expected) => {
+      expect(retryAt(number, resetsAt)).toStrictEqual(Option.some(expected));
+    },
+  );
+
+  it.effect("decodes a stored capacity failure without a reset time", () =>
+    Effect.gen(function* () {
+      const failure = yield* Schema.decodeEffect(ProviderCapacityFailure)({
+        _tag: "ProviderCapacityFailure",
+        message: "At capacity",
+      });
+      expect(Option.isNone(failure.resetsAt)).toBe(true);
+    }),
+  );
 });
 
 describe("construction is the only door", () => {
@@ -201,4 +246,49 @@ describe("older OOM records", () => {
       expect(container.processes).toEqual([]);
     }),
   );
+});
+
+describe("killed process lists", () => {
+  const processes = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      MemoryKilledProcess.make({ command: "node", pid: index + 1 }),
+    );
+  const container = "a".repeat(64);
+
+  it("rejects a record with more processes than the cap", () => {
+    expect(() =>
+      ContainerOutOfMemoryKills.make({
+        container: ContainerId.make(container),
+        kills: MAX_KILLED_PROCESSES + 1,
+        memoryMib: ContainerMemoryMib.make(6656),
+        processes: processes(MAX_KILLED_PROCESSES + 1),
+      }),
+    ).toThrow();
+  });
+
+  it.effect("keeps the first processes of a record written before the cap", () =>
+    Effect.gen(function* () {
+      const decoded = yield* Schema.decodeEffect(ContainerOutOfMemoryKills)({
+        container,
+        kills: MAX_KILLED_PROCESSES + 5,
+        memoryMib: 6656,
+        processes: processes(MAX_KILLED_PROCESSES + 5),
+      });
+      expect(decoded.kills).toBe(MAX_KILLED_PROCESSES + 5);
+      expect(decoded.processes).toEqual(processes(MAX_KILLED_PROCESSES));
+    }),
+  );
+
+  it("caps the processes of the containers together and counts every kill", () => {
+    const record = (count: number) =>
+      ContainerOutOfMemoryKills.make({
+        container: ContainerId.make(container),
+        kills: count,
+        memoryMib: ContainerMemoryMib.make(6656),
+        processes: processes(count),
+      });
+    const total = totalOutOfMemoryKills([record(MAX_KILLED_PROCESSES), record(3)]);
+    expect(total.kills).toBe(MAX_KILLED_PROCESSES + 3);
+    expect(total.processes).toHaveLength(MAX_KILLED_PROCESSES);
+  });
 });

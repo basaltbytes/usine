@@ -1,7 +1,7 @@
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { isSettledItemState, LaneItemState, LaneName, LaneSource } from "@usine/config/board";
 import { type Brand, Effect, Schema } from "effect";
 import { RunStateTag, RunSummaryView } from "./run.ts";

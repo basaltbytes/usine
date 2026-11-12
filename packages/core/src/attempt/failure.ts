@@ -1,4 +1,4 @@
-import { type Brand, Schema } from "effect";
+import { type Brand, Effect, Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../agent/session.ts";
 import { RepositoryName } from "../repository.ts";
 
@@ -17,7 +17,9 @@ export class GitHubPushFailure extends Schema.TaggedError<
 
 /**
  * An infrastructure failure outside the agent, such as an unreachable Worker or failed checkout.
- * The engine retries it automatically, up to the attempt cap.
+ * The engine retries a failed attempt with it automatically, up to the attempt cap. A CI wait that
+ * times out or ends with partly run CI also records it, and needs the operator: CI settlement sets
+ * the attempt and run outcome directly, without the automatic retry.
  */
 export class InfraFailure extends Schema.TaggedError<
   InfraFailure,
@@ -40,13 +42,17 @@ export class DefectFailure extends Schema.TaggedError<
   cause: Schema.Defect(),
 }) {}
 
-/** A temporary refusal because the model provider has no capacity. */
+/** A temporary refusal because the model provider has no capacity or the usage limit is reached. */
 export class ProviderCapacityFailure extends Schema.TaggedError<
   ProviderCapacityFailure,
   Brand.Brand<"@usine/core/attempt/failure/ProviderCapacityFailure">
 >("AttemptFailure/ProviderCapacityFailure")("ProviderCapacityFailure", {
   /** The provider's temporary capacity refusal used in the retry notice. */
   message: Schema.NonEmptyString,
+  /** The time the provider's usage limit resets, or `None` if the provider didn't report one. */
+  resetsAt: Schema.OptionFromOptionalKey(Schema.DateTimeUtcFromString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
 }) {}
 
 /** A task failure reported by the agent; not retried automatically. */

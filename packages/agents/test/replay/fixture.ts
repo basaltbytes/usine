@@ -13,7 +13,7 @@ import { claudeChildLayer } from "../../src/harness/claude/claude.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { ClaudeSdk, claudeSdkLive } from "../../src/harness/claude/sdk.ts";
 import { codexChildLayer } from "../../src/harness/codex/codex.ts";
-import { codexAppServerLive } from "../../src/harness/codex/app-server.ts";
+import { CodexAppServer, codexAppServerLive } from "../../src/harness/codex/app-server.ts";
 import { ChildBackend, ChildRequest, HostLoginLock, WorkingDirectory } from "../../src/runtime.ts";
 import { ownedClaudeReplay } from "./owned-claude.ts";
 import { claudeTransport } from "./claude.ts";
@@ -54,7 +54,17 @@ const environmentKeys = [
   "USINE_GATEWAY_TOKEN",
 ] as const;
 
-export const openFixture = (provider: Provider, scenario: Scenario, mode: "record" | "replay") =>
+export interface FixtureOptions {
+  /** Rewrites the decoded transcript before the replay tape reads it. Ignored when recording. */
+  readonly transform?: (transcript: Transcript) => Transcript;
+}
+
+export const openFixture = (
+  provider: Provider,
+  scenario: Scenario,
+  mode: "record" | "replay",
+  options: FixtureOptions = {},
+) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -69,6 +79,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
                 onExcessProperty: "error",
               }),
             ),
+            Effect.map((transcript) => options.transform?.(transcript) ?? transcript),
           );
     const tape = new Tape(source);
     tape.bind(cwd, "$WORKTREE");
@@ -135,22 +146,25 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
     const boundary = yield* Deferred.make<void>();
     const started = yield* Deferred.make<void>();
     const released = yield* Deferred.make<void>();
-    const transport: Layer.Layer<ChildBackend, never, ChildProcessSpawner.ChildProcessSpawner> =
+    /** The recorded transport and the services a harness runtime needs on top of it. */
+    const harness = Layer.mergeAll(
       provider === "claude"
-        ? claudeChildLayer.pipe(
-            Layer.provide(
-              claudeTransport(
-                tape,
-                sdk,
-                scenario === "early-exit" ? "early-exit" : "none",
-                scenario === "interrupt-guidance" ? { boundary, started, released } : undefined,
-              ),
-            ),
-            Layer.provide(Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect })),
-            Layer.provide(processes),
+        ? claudeTransport(
+            tape,
+            sdk,
+            scenario === "early-exit" ? "early-exit" : "none",
+            scenario === "interrupt-guidance" ? { boundary, started, released } : undefined,
           )
-        : codexChildLayer.pipe(Layer.provide(codexAppServerLive.pipe(Layer.provide(processes))));
-    const backend = transport.pipe(Layer.provideMerge(NodeServices.layer));
+        : Layer.succeed(ClaudeSdk)({ open: () => assert.fail("A Codex replay opens no Claude") }),
+      Layer.succeed(HostLoginLock)({ withLock: () => (effect) => effect }),
+      codexAppServerLive,
+    ).pipe(Layer.provideMerge(processes));
+    const childLayer: Layer.Layer<
+      ChildBackend,
+      never,
+      ClaudeSdk | CodexAppServer | HostLoginLock | ChildProcessSpawner.ChildProcessSpawner
+    > = provider === "claude" ? claudeChildLayer : codexChildLayer;
+    const backend = childLayer.pipe(Layer.provide(harness), Layer.provideMerge(NodeServices.layer));
     const request = ChildRequest.make({
       worker: WorkerName.make("replay-worker"),
       machine: Option.none(),
@@ -336,6 +350,7 @@ export const openFixture = (provider: Provider, scenario: Scenario, mode: "recor
       tape,
       cwd,
       backend,
+      harness,
       request,
       controls: {
         nativeReceipts: true,

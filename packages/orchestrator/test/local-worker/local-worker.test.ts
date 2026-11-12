@@ -13,6 +13,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
+import { GitHubLabelName } from "@usine/core/label";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
@@ -122,9 +123,12 @@ const attemptFailures = (attempts: ReadonlyArray<Attempt>) =>
     }),
   );
 
-/** A parent that commits and pushes (unless it only updates its PR) and records the PR the fake `gh` reports. */
+/**
+ * A parent that commits and pushes (unless it only updates its PR), records the PR the fake `gh`
+ * reports, and reports completion or, given `handoff`, the CI handoff it returns for the head.
+ */
 const pullRequestParent =
-  (operation: "create" | "update"): StubParent =>
+  (operation: "create" | "update", handoff?: (head: string) => string): StubParent =>
   ({ request }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -154,10 +158,17 @@ const pullRequestParent =
       const json1 = jsonKey({
         number: 71,
         html_url: "https://github.com/acme/demo/pull/71",
-        head: { sha: head },
+        state: "open",
+        merged_at: null,
+        head: {
+          sha: head,
+          ref: "usine/implement-the-issue",
+          repo: { id: 1, full_name: "acme/demo" },
+        },
+        base: { repo: { id: 1 } },
       });
       yield* fileSystem.writeFileString(`${request.cwd}/.test-pull-request.json`, json1);
-      return `Completed: ${request.spec.task}`;
+      return handoff === undefined ? `Completed: ${request.spec.task}` : handoff(head);
     }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
 
 /** A parent whose last turn answered the operator, after it posted the review on pull request 71 that the fake `gh` reports. */
@@ -362,6 +373,34 @@ describe("local worker", () => {
     LIVE_TEST_TIMEOUT,
   );
 
+  it.live(
+    "harvests with the parent's CI handoff and fails with why its pull request isn't verified",
+    () =>
+      withGitHubEngine(
+        pullRequestParent(
+          "create",
+          (head) =>
+            `[usine:awaiting-ci]\n${jsonKey({ pull_request: 71, head, fix_loop: "fix", timeout_seconds: 1800, on_green: [] })}`,
+        ),
+        "answers",
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            // Origin has no `refs/pull/71/head`, so the handoff's pull request isn't found, while
+            // GitHub's index lists pull request 71 at the head.
+            assert.deepStrictEqual(attemptFailures(snapshot.attempts), [
+              [
+                "AgentFailure",
+                "CI can't wait on the pushed pull request: origin has no pull request #71",
+              ],
+            ]);
+          }),
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
   it.live.each(["create", "update"] as const)(
     "persists a PR fact and operator link after an agent %s",
     (operation) =>
@@ -462,6 +501,7 @@ describe("local worker", () => {
           const selected = submission(7);
           const runId = RunId.make("cleanup-budget-run");
           const execution = StepExecution.make({
+            requiresCi: false,
             attempt: Attempt.make({
               task: selected.task,
               agent: selected.agent.name,
@@ -586,6 +626,7 @@ describe("local worker", () => {
             const executor = yield* Executor;
             const preparing = executor.prepare(
               CheckoutRequest.make({
+                requiresCi: false,
                 attemptId: AttemptId.make(`prepare-${phase}/run/1`),
                 worker: WorkerName.make("local"),
                 repository: RepositoryName.make("acme/demo"),
@@ -673,6 +714,7 @@ describe("local worker", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const request = CheckoutRequest.make({
+            requiresCi: false,
             attemptId: AttemptId.make("unlaunched/run/1"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
@@ -963,7 +1005,7 @@ describe("local worker", () => {
   );
 
   it.effect(
-    "commits as the App's bot on every Worker kind, passes the Run's CI requirement, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
+    "commits as the App's bot on every Worker kind, passes the Run's CI requirement and outcome labels, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
     () =>
       Effect.gen(function* () {
         const missing = InstallationDiscoveryError.make({
@@ -1057,6 +1099,7 @@ describe("local worker", () => {
                   permissions: selected.permissions,
                   resume: Option.none(),
                   requiresCi: true,
+                  outcomeLabels: [GitHubLabelName.make("ready-to-merge")],
                 }),
                 {
                   append: () => Effect.void,
@@ -1089,6 +1132,10 @@ describe("local worker", () => {
           );
           assert.deepStrictEqual(writers, expected);
           assert.isTrue(requested.every(({ requiresCi }) => requiresCi));
+          assert.deepStrictEqual(
+            requested.map(({ outcomeLabels }) => outcomeLabels),
+            requested.map(() => [GitHubLabelName.make("ready-to-merge")]),
+          );
           assert.strictEqual(failed._tag, failure);
           // The engine reconciles a checkout kept for a reattachment until preparation acquires it
           // (#180).

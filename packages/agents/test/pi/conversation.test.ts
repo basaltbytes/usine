@@ -294,6 +294,27 @@ describe("session supervision", () => {
     }),
   );
 
+  it.effect("finishes a child whose answer quotes a marker in a code block", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("quoted"));
+      const answer =
+        "The review passed. The parser reports:\n```text\n[usine:blocked]\nPermission denied.\n```";
+      yield* session.finish(answer);
+      assert.strictEqual((yield* Fiber.join(session.result)).message, answer);
+    }),
+  );
+
+  it.effect("fails a child whose blocker header follows narration", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("narrated"));
+      yield* session.finish("The delegation was interrupted.[usine:blocked]\nNo review posted.");
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      const matchesError = Schema.is(AgentBlockedError)(error);
+      assert(matchesError);
+      assert.strictEqual(error.message, "No review posted.");
+    }),
+  );
+
   it.effect("fails a blocker whose details share the marker's line", () =>
     Effect.gen(function* () {
       const session = yield* conversation(child("same-line"));

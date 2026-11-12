@@ -8,6 +8,7 @@ import type {
   ProvisionerReuse,
   BoatSize,
   BoxdSize,
+  BoxdEndpoint,
   BoxdRegion,
   BoxdSnapshotName,
   BoxdEgressAllowlist,
@@ -130,12 +131,25 @@ export interface BoatProvisioner {
 /** @deprecated Use ProvisionerTailnet. */
 export type BoatTailnet = ProvisionerTailnet;
 
-/** Restores each attempt's boxd machine from a prepared snapshot. */
+/**
+ * Restores each attempt's boxd machine from a prepared snapshot. A restore takes under a second,
+ * so every attempt gets a new machine and the provisioner has no reuse policy.
+ */
 export interface BoxdProvisioner {
   readonly provider: "boxd";
   readonly token: Redacted.Redacted<string>;
-  readonly region: BoxdRegion;
-  readonly size: BoxdSize;
+  /**
+   * The account endpoint of the boxd cluster, or `None` for `providerEndpoints.boxd`, which
+   * defaults to the hosted service.
+   */
+  readonly endpoint: Option.Option<BoxdEndpoint>;
+  /** The region of the machines, or `None` to create them where the account endpoint runs them. */
+  readonly region: Option.Option<BoxdRegion>;
+  /**
+   * The size that preflight expects the snapshot to have, or `None` to accept the snapshot's size.
+   * A restore keeps its snapshot's size.
+   */
+  readonly size: Option.Option<BoxdSize>;
   readonly snapshot: BoxdSnapshotName;
   readonly isolated: boolean;
   /** The allowlist each machine gets before usine connects to it, or `None` for unrestricted egress. */
@@ -143,10 +157,18 @@ export interface BoxdProvisioner {
   readonly tailnet: Option.Option<ProvisionerTailnet>;
   readonly apiKeys: ProviderApiKeys;
   readonly timings: ProvisionerTimings;
-  readonly reuse: Option.Option<ProvisionerReuse>;
+  /**
+   * The `reuse` that the worker's configuration sets, which usine ignores and preflight warns
+   * about, or `None`.
+   */
+  readonly ignoredReuse: Option.Option<ProvisionerReuse>;
 }
 
 export type SshProvisioner = HetznerProvisioner | BoatProvisioner | BoxdProvisioner;
+
+/** Returns the machine reuse policy of `provisioner`, which is `None` for single-use machines. */
+export const machineReuseOf = (provisioner: SshProvisioner): Option.Option<ProvisionerReuse> =>
+  provisioner.provider === "boxd" ? Option.none() : provisioner.reuse;
 
 /** How the executor finds a Worker's machines: one long-lived machine, or one per Attempt. */
 export type SshWorkerMachine =
@@ -173,7 +195,7 @@ export interface SshWorkerAddress {
   readonly port: Option.Option<SshPort>;
   /** The machine directory that contains `workers/<name>`. */
   readonly root: WorkerRoot;
-  /** The Gateway in front of the machine. If `None`, each Attempt's token is written on the machine (ADR 0026). */
+  /** The Gateway in front of the machine. If `None`, each Attempt's token is written on the machine (ADR 0011). */
   readonly gateway: Option.Option<SshWorkerGateway>;
   /** Each Attempt's container. Used only if the machine has Docker. */
   readonly container: SshWorkerContainer;
@@ -213,14 +235,17 @@ export interface SshExecutorOptions {
   /** Builds the boxd transport. Defaults to the gRPC adapter. */
   readonly boxdClient?: BoxdApiLayer;
   /**
-   * Builds the `BoxdExec` of a boxd Worker from its region's API endpoint and credential. Defaults
-   * to the gRPC adapter, with one HTTP/2 connection per Worker.
+   * Builds the `BoxdExec` of a boxd Worker from its region's API endpoint and the effect that
+   * returns the bearer of each call. Defaults to the gRPC adapter, with one HTTP/2 connection per
+   * Worker.
    */
   readonly boxdExec?: (
-    endpoint: string,
-    credential: Redacted.Redacted<string>,
+    ...args: Parameters<typeof boxdExecLayer>
   ) => ReturnType<typeof boxdExecLayer>;
-  /** The provider API endpoints, which tests replace. Defaults to the providers' own. */
+  /**
+   * The provider API endpoints, which tests replace. Defaults to the providers' own. A boxd
+   * Worker's `endpoint` takes precedence over `boxd`.
+   */
   readonly providerEndpoints?: Partial<Record<MachineProvider, string>>;
   /** The longest wait for a created machine to answer over SSH. Defaults to 10 minutes. */
   readonly machineReadyTimeout?: Duration.Input;

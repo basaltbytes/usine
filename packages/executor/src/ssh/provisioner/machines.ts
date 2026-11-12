@@ -34,7 +34,13 @@ import {
   WorkerMachines,
 } from "../../executor.ts";
 import type { RemoteCommands } from "../../remote/commands.ts";
-import type { MachineGateway, SshExecutorOptions, SshMachine, SshProvisioner } from "../model.ts";
+import {
+  machineReuseOf,
+  type MachineGateway,
+  type SshExecutorOptions,
+  type SshMachine,
+  type SshProvisioner,
+} from "../model.ts";
 import {
   hostKeyAlias,
   knownHostsLine,
@@ -888,7 +894,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     );
     protectedAttempts.delete(attemptId);
     const machine = Option.flatMap(located, ({ machine }) => machine);
-    yield* Effect.logInfo("Resolved retained SSH machine for attempt recovery", {
+    yield* Effect.logDebug("Resolved retained SSH machine for attempt recovery", {
       worker,
       attemptId,
       found: Option.isSome(machine),
@@ -959,11 +965,12 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     return {
       degraded: Option.none(),
       deferred: Option.some(
-        Option.isSome(provisioner.value.reuse)
+        Option.isSome(machineReuseOf(provisioner.value))
           ? "Checked before every attempt while machine reuse is enabled."
           : `Checked on the first machine, then every ${provisioner.value.timings.machineCheckInterval} seconds when a machine is created.`,
       ),
       containerLimits: Option.none(),
+      findings: [],
     } satisfies PreflightReport;
   });
 

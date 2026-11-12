@@ -174,7 +174,7 @@ const RunDetails = ({ statistics }: RunDetailsProps) => {
         <StatisticsBlock title="Worker utilization">
           <p className="text-xs text-muted-foreground">{workerUtilizationDetails}</p>
           {statistics.utilization.length === 0 ? (
-            <Empty>No workers in usine.yaml</Empty>
+            <Empty>No workers in Configuration &gt; Workers</Empty>
           ) : (
             <UtilizationMeters workers={statistics.utilization} />
           )}

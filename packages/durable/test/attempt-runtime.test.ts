@@ -21,6 +21,7 @@ import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   AgentFailure,
+  AttemptFailure,
   ProviderCapacityFailure,
   BlockedFailure,
   InfraFailure,
@@ -33,7 +34,12 @@ import { ItemNumber } from "@usine/core/item";
 import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import { Commit, StepCompletion, StepResult, type StepResultFact } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { ChildBackend, ChildSessionLifecycle, SessionOperationError } from "@usine/agents/runtime";
+import {
+  ChildBackend,
+  ChildRequest,
+  ChildSessionLifecycle,
+  SessionOperationError,
+} from "@usine/agents/runtime";
 import {
   Context,
   DateTime,
@@ -60,7 +66,7 @@ import {
   ResultRecorded,
 } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
-import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
+import { routedRuntimeLayer as attemptRuntimeLayer } from "../src/testing.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
 import {
   DurableHarness,
@@ -73,6 +79,7 @@ import {
   delegate,
   fauxParent,
   layer,
+  PARENT_MODEL,
   type ParentStep,
   stubChildBackendLayer,
   StubChildren,
@@ -173,9 +180,24 @@ describe("durable AttemptRuntime", () => {
               Harnesses.layerFrom(activeCatalog, [
                 {
                   id,
-                  launch: stub.launch,
-                  resume: () => Effect.succeedNone,
-                  stop: stub.stop,
+                  // Rebuilds the admitted child's request for the stub backend.
+                  open: (spec, start, { restored }) =>
+                    Effect.gen(function* () {
+                      assert(spec.session._tag === "ChildSession" && start._tag === "StartPrompt");
+                      const request = ChildRequest.make({
+                        ...restored,
+                        session: spec.session,
+                        prompt: start.text,
+                        cwd: spec.cwd,
+                        environment: spec.environment,
+                        host: spec.host,
+                        worker: spec.worker,
+                        machine: spec.machine,
+                      });
+                      const running = yield* stub.launch(request);
+                      return { running, active: false, recover: () => Effect.void };
+                    }),
+                  stop: () => Effect.void,
                   preflight: () => Effect.succeed(HarnessReady.make({ harness: id })),
                 },
               ]),
@@ -243,7 +265,7 @@ describe("durable AttemptRuntime", () => {
         });
         const live = yield* runtime.isLive(request.spec.attemptId);
         assert.isFalse(live);
-        // Sent before `execute` starts, so the notice is buffered until the parent starts.
+        // Sent before `execute` starts, so the notice is buffered until the Attempt starts.
         yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* children.next;
@@ -307,6 +329,9 @@ describe("durable AttemptRuntime", () => {
           "parent.SessionStarted",
           "WorkerUnresponsive",
         ]);
+        const started = outbound[0]?.payload;
+        assert(started?._tag === "Started");
+        assert.deepStrictEqual(started.parentModel, Option.some(PARENT_MODEL));
         assert.deepStrictEqual(
           trace(outbound).filter((tag) => !tag.startsWith("Worker")),
           [
@@ -471,7 +496,7 @@ describe("durable AttemptRuntime", () => {
         assertAdmitted(request.spec.attemptId, outbound);
         assert.deepStrictEqual(trace(outbound), ["Failed"]);
         assert.lengthOf(
-          logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
+          logs.matching(/Dropped the Worker notices kept for an Attempt that never started/u),
           1,
         );
       }).pipe(Effect.provide(layer({ database, parent: [] }).pipe(Layer.provideMerge(logs.layer))));
@@ -525,6 +550,10 @@ describe("durable AttemptRuntime", () => {
                   const record = await tx.doc(AttemptRecordDoc, request.spec.attemptId, null);
                   assert.deepStrictEqual(record.pendingOutbound, []);
                   delete record.pendingOutbound;
+                  // A record written before the `started` marker started once it has a model.
+                  assert.isTrue(record.started);
+                  assert.isNotNull(record.parentModel);
+                  delete record.started;
                 }, context),
             );
             return { child, found };
@@ -2395,6 +2424,64 @@ describe("durable AttemptRuntime", () => {
     );
   }
 
+  it.live("keeps the first child report when a later child reports too", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/1157-first-report");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
+        yield* (yield* (yield* StubChildren).next).block("The repository is archived.");
+        yield* (yield* (yield* StubChildren).next).ask("Which branch should I use?");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          BlockedFailure.make({ message: "The repository is archived." }),
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("Publish the package"),
+              delegate("Try another way"),
+              answer("The children could not publish."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps the first child infrastructure failure when a later child crashes too", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/1157-first-crash");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+
+        yield* (yield* (yield* StubChildren).next).crash("first transport lost");
+        yield* (yield* (yield* StubChildren).next).crash("second transport lost");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.strictEqual(failure.message, "first transport lost");
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              delegate("Complete the task"),
+              delegate("Try again"),
+              answer("Both children lost their transport."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("ends the Attempt with the parent's own blocker", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -2506,6 +2593,53 @@ describe("durable AttemptRuntime", () => {
         );
       }
     }).pipe(Effect.scoped),
+  );
+
+  // In #1147 the Claude children hit the subscription's usage limit and the parent, which kept
+  // answering, reported the refusal as its own blocker.
+  it.live(
+    "fails with the child's usage limit and reset time when the parent reports a blocker",
+    () =>
+      Effect.gen(function* () {
+        const message = "You've hit your limit · resets 5am (UTC)";
+        const resetsAt = DateTime.makeUnsafe("2026-11-11T05:00:00Z");
+        const relay: ParentStep = (context) => {
+          const result = [...context.messages].reverse().find(({ role }) => role === "toolResult");
+          const parts = result?.role === "toolResult" ? result.content : [];
+          return answer(
+            parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+          );
+        };
+        for (const [attempt, parentAnswer] of [
+          ["limit/step/1", relay],
+          [
+            "limit/step/2",
+            answer(
+              "[usine:blocked]\nSubagent delegation is unavailable: the attempt was rejected with HTTP 429.",
+            ),
+          ],
+        ] as const) {
+          const database = yield* temporaryDatabase;
+          yield* Effect.gen(function* () {
+            const runtime = yield* AttemptRuntime;
+            const execution = yield* Effect.forkChild(
+              runtime.execute(attemptRequest(attempt), recordingSink().sink),
+            );
+
+            yield* (yield* (yield* StubChildren).next).limit(message, resetsAt);
+            const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+            // Chai compares errors by name and message only, so compare the encoded failure.
+            const encoded = yield* Schema.encodeEffect(AttemptFailure)(failure);
+            assert.deepStrictEqual(encoded, {
+              _tag: "ProviderCapacityFailure",
+              message,
+              resetsAt: DateTime.formatIso(resetsAt),
+            });
+          }).pipe(
+            Effect.provide(layer({ database, parent: [delegate("Review the PR"), parentAnswer] })),
+          );
+        }
+      }).pipe(Effect.scoped),
   );
 
   // The Claude children of #602 ended with "Claude output stream failed" until the parent used

@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CiFailed,
   CiHandedOff,
+  CiIncomplete,
   CiLabelMutation,
   CiPassed,
   CiPolicy,
@@ -69,6 +70,16 @@ const pushed = StepResult.make({
 });
 const required = () =>
   Submission.make({ ...submission({ number: 1 }), ciPolicy: Option.some(policy) });
+
+/** Returns the pending queues whose newest Event is a CI fix. */
+const ciFixQueues = (store: RunStore["Service"]) =>
+  store.pendingQueues.pipe(
+    Effect.map((queues) =>
+      queues
+        .map(({ queued }) => queued)
+        .filter(({ submission }) => Option.isSome(submission.ciFailureHead)),
+    ),
+  );
 
 it.live.each(["verified", "unverified"] as const)(
   "a %s CI handoff either waits or records a retryable infrastructure failure",
@@ -183,6 +194,7 @@ it.live.each([
   CiSuperseded.make({ head: CommitSha.make("b".repeat(40)) }),
   CiFailed.make({ message: "CI failed without an available fix loop" }),
   CiTimedOut.make({ message: "CI is still running after its deadline" }),
+  CiIncomplete.make({ message: "CI ran only in part" }),
 ])("CI settlement preserves the result's producing attempt after $_tag", (resolution) =>
   withInstance((directory) =>
     Effect.gen(function* () {
@@ -208,11 +220,16 @@ it.live.each([
           resolution._tag === "CiSuperseded" ? "Canceled" : "Failed",
         );
         assert.deepStrictEqual(settled.step.result, waiting.step.result);
-        if (resolution._tag === "CiTimedOut") {
+        if (resolution._tag === "CiTimedOut" || resolution._tag === "CiIncomplete") {
           const outcome = Option.getOrNull(settled.attempts[0]?.outcome ?? Option.none());
           assert(outcome?._tag === "Failed");
-          assert.strictEqual(outcome.failure._tag, "InfraFailure");
+          assert(outcome.failure._tag === "InfraFailure");
           assert.strictEqual(outcome.failure.message, resolution.message);
+          assert.deepStrictEqual(outcome.failure.cause, {
+            resolution: resolution._tag,
+            pullRequest: 815,
+            head,
+          });
         }
         if (resolution._tag === "CiFailed") {
           yield* engine.retry(accepted.runId);
@@ -296,6 +313,41 @@ it.live("a required CI loop fails a success report without a pushed PR", () =>
           ({ run }) => run.state._tag === "Failed",
         );
         assert.strictEqual(failed.attempts.length, 1);
+      }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
+    }),
+  ),
+);
+
+// A result harvested before reasons were recorded fails as an InfraFailure without one, which
+// the engine retries only up to the Attempt cap.
+it.live("a CI handoff without a harvested pull request or reason stops after three attempts", () =>
+  withInstance((directory) =>
+    Effect.gen(function* () {
+      const unverified = Effect.succeed(
+        StepResult.make({
+          message: `[usine:awaiting-ci]\n${jsonKey({ pull_request: 815, head, fix_loop: "fix", timeout_seconds: 3600, on_green: [] })}`,
+          facts: [],
+        }),
+      );
+      const worker = yield* slottedExecutor([unverified, unverified, unverified]);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const accepted = yield* engine.submit(required());
+        assert(accepted._tag === "Claimed");
+        const failed = yield* waitFor(
+          engine,
+          accepted.runId,
+          ({ run }) => run.state._tag === "Failed",
+        );
+        assert.deepStrictEqual(
+          failed.attempts.map(({ outcome }) =>
+            Option.match(outcome, {
+              onNone: () => "open",
+              onSome: (ended) => (ended._tag === "Failed" ? ended.failure._tag : ended._tag),
+            }),
+          ),
+          ["InfraFailure", "InfraFailure", "InfraFailure"],
+        );
       }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
     }),
   ),
@@ -461,7 +513,7 @@ it.live(
             yield* store.recordAndClaim(older, RunId.make("older-ci-fix"));
             const blocked = yield* store.recordAndClaim(current, RunId.make("current-ci-fix"));
             assert(blocked.result._tag === "CycleBlocked");
-            const waitingForReset = yield* store.pendingCiFixes;
+            const waitingForReset = yield* ciFixQueues(store);
             assert.deepStrictEqual(waitingForReset, []);
             yield* store.revoke(current.loop, current.itemKey);
             const answer = approvalEvent(1);
@@ -469,7 +521,7 @@ it.live(
             assert.deepStrictEqual(replayed, [current.event.id]);
             const repeated = yield* budgets.reset(blocked.result.ask.id, answer);
             assert.deepStrictEqual(repeated, []);
-            const pending = yield* store.pendingCiFixes;
+            const pending = yield* ciFixQueues(store);
             assert.strictEqual(pending.length, 1);
             assert.strictEqual(pending[0]?.submission.event.id, current.event.id);
             assert.strictEqual(pending[0]?.submission.cycleGeneration, 1);
@@ -532,7 +584,7 @@ it.live.each(["required", "none"] as const)(
           assert(revoked.run.state._tag === "Canceled");
           assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
           assert.deepStrictEqual(revoked.attempts, []);
-          const pending = yield* store.pendingCiFixes;
+          const pending = yield* ciFixQueues(store);
           assert.deepStrictEqual(pending, []);
         }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
       ),
@@ -597,10 +649,10 @@ it.live("a suppressed CI fix stays queued until the operator resolves the blocke
         });
         const blocked = yield* store.recordAndClaim(queued, RunId.make("queued-ci-fix"));
         assert.strictEqual(blocked.result._tag, "Suppressed");
-        const suppressed = yield* store.pendingCiFixes;
+        const suppressed = yield* ciFixQueues(store);
         assert.deepStrictEqual(suppressed, []);
         yield* store.resolveFailure(runId, started.execution.attempt.id, Option.none());
-        assert.strictEqual((yield* store.pendingCiFixes)[0]?.submission.event.id, queued.event.id);
+        assert.strictEqual((yield* ciFixQueues(store))[0]?.submission.event.id, queued.event.id);
       }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory))))),
     ),
   ),
@@ -701,15 +753,17 @@ it.live.each([
                   ),
                 ),
             );
-            const whileRunning = yield* store.pendingCiFixes;
+            const whileRunning = yield* ciFixQueues(store);
             assert.deepStrictEqual(whileRunning, []);
             yield* store.finishAttempt(
               started.execution.attempt,
               Result.succeed(stepResult("first")),
             );
 
-            const fixes = yield* store.pendingCiFixes;
-            const continuations = yield* store.pendingContinuations;
+            const queues = yield* store.pendingQueues;
+            const fixes = queues
+              .map(({ queued }) => queued)
+              .filter(({ submission }) => Option.isSome(submission.ciFailureHead));
             const next = yield* store.nextQueued(sourceId);
             assert(Option.isSome(next));
             assert.strictEqual(next.value.submission.event.id, newer.event.id);
@@ -720,11 +774,13 @@ it.live.each([
                 fixes.map(({ submission, eventIds }) => [submission.event.id, eventIds]),
                 [[newer.event.id, [newer.event.id, older.event.id]]],
               );
-              assert.deepStrictEqual(continuations, []);
             } else {
               assert.deepStrictEqual(fixes, []);
-              assert.deepStrictEqual(continuations, [sourceId]);
             }
+            assert.deepStrictEqual(
+              queues.map(({ closedRunId }) => closedRunId),
+              [Option.some(sourceId)],
+            );
           }).pipe(Effect.provide(storage)),
         );
 

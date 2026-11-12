@@ -1,5 +1,13 @@
 import { BoxdRegion, MachineId } from "@usine/core/worker";
-import { type Brand, Context, Effect, type Layer, type Redacted, Schema } from "effect";
+import {
+  type Brand,
+  Context,
+  Effect,
+  type Layer,
+  type Option,
+  type Redacted,
+  Schema,
+} from "effect";
 import type { HttpClient } from "effect/http";
 
 export class BoxdCallError extends Schema.TaggedError<
@@ -7,13 +15,15 @@ export class BoxdCallError extends Schema.TaggedError<
   Brand.Brand<"@usine/executor/boxd/BoxdCallError">
 >()("BoxdCallError", {
   operation: Schema.String,
+  /** The URL that the call went to: a gRPC endpoint, or the token exchange URL. */
+  url: Schema.String,
   code: Schema.String,
   message: Schema.String,
 }) {}
 
 /**
  * The error when boxd lists no region with the configured id, or lists it without an API endpoint;
- * `available` lists the ids of the regions that have one.
+ * `available` lists the ids of the regions that boxd can serve, empty when boxd runs in one place.
  */
 export class BoxdUnknownRegion extends Schema.TaggedError<
   BoxdUnknownRegion,
@@ -21,6 +31,17 @@ export class BoxdUnknownRegion extends Schema.TaggedError<
 >()("BoxdUnknownRegion", {
   region: BoxdRegion,
   available: Schema.Array(Schema.String),
+}) {}
+
+/**
+ * The error when the API endpoint of the machines' region uses neither TLS nor a loopback address,
+ * so that its `Exec` calls would carry the credential in clear text.
+ */
+export class BoxdPlainTextEndpoint extends Schema.TaggedError<
+  BoxdPlainTextEndpoint,
+  Brand.Brand<"@usine/executor/boxd/BoxdPlainTextEndpoint">
+>()("BoxdPlainTextEndpoint", {
+  endpoint: Schema.String,
 }) {}
 
 export const BoxdMachine = Schema.Struct({
@@ -58,25 +79,41 @@ export const BoxdCreated = Schema.Struct({
   machine: Schema.OptionFromOptionalKey(BoxdMachine),
 });
 
+/**
+ * A restore of `snapshot` as machine `name`. The client sends `isolated`, `labels`, and `egress` in
+ * the machine spec of the request, so the machine is born with them.
+ */
 export interface BoxdCreate {
   readonly snapshot: string;
   readonly name: string;
   readonly isolated: boolean;
   readonly labels: Record<string, string>;
+  /** The egress allowlist of the new machine; empty sets none. */
+  readonly egress: ReadonlyArray<string>;
 }
 
 /** Transport boundary: responses contain only decoded values used by the driver. */
 export class BoxdApi extends Context.Service<
   BoxdApi,
   {
-    /** The API endpoint URL of the configured region, which serves its machines' `Exec` calls. */
+    /**
+     * The API endpoint URL of the machines' region, which serves their machine and `Exec` calls.
+     * Without a configured region, or for the region that the account endpoint serves, it is the
+     * account endpoint.
+     */
     readonly endpoint: string;
+    /**
+     * The bearer of an `Exec` call to `endpoint`: the API key, or a session once boxd refused the
+     * key as a bearer. When no call has shown yet which one boxd takes, it calls `whoami` first,
+     * as the boxd SDK does before a stream. Fails when the token exchange fails.
+     */
+    readonly execBearer: Effect.Effect<Redacted.Redacted<string>, BoxdCallError>;
     readonly whoami: Effect.Effect<typeof BoxdIdentity.Type, BoxdCallError>;
     readonly orgMachineLimit: Effect.Effect<typeof BoxdLimit.Type, BoxdCallError>;
     readonly snapshot: (name: string) => Effect.Effect<BoxdSnapshot, BoxdCallError>;
     /**
-     * The region that `endpoint` serves. When the client resolved `endpoint` from the region
-     * listing, it is the configured region, without a call; otherwise boxd reports it.
+     * The region that `endpoint` serves, `""` when boxd runs in one place. With a configured
+     * region, it is that region, without a call; otherwise boxd reports it.
      */
     readonly servedRegion: Effect.Effect<string, BoxdCallError>;
     readonly createFromSnapshot: (
@@ -86,10 +123,6 @@ export class BoxdApi extends Context.Service<
     readonly listVms: (
       selector: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<BoxdMachine>, BoxdCallError>;
-    readonly updateLabels: (
-      id: MachineId,
-      set: Record<string, string>,
-    ) => Effect.Effect<void, BoxdCallError>;
     readonly destroy: (id: MachineId) => Effect.Effect<void, BoxdCallError>;
     /**
      * Replaces the machine's egress allowlist; an empty list makes egress unrestricted. Returns
@@ -110,13 +143,19 @@ export class BoxdApi extends Context.Service<
   }
 >()("@usine/executor/ssh/provisioner/boxd/client/BoxdApi") {}
 
+/** Where the calls of a boxd Worker go. */
+export interface BoxdCluster {
+  /** The account endpoint URL, which serves account calls and `ListRegions`. */
+  readonly endpoint: string;
+  /** The region of the machines, or `None` to send every call to `endpoint`. */
+  readonly region: Option.Option<BoxdRegion>;
+}
+
 /**
- * Builds the `BoxdApi` for the region `region` with the API key `token`. When `endpoint` is set, it
- * serves both account and regional calls. Building fails when boxd refuses the key, doesn't
- * answer, or lists no such region.
+ * Builds the `BoxdApi` of `cluster` with the API key `token`. Building fails when boxd refuses the
+ * key, doesn't answer, or lists no such region.
  */
 export type BoxdApiLayer = (
   token: Redacted.Redacted<string>,
-  region: BoxdRegion,
-  endpoint?: string,
+  cluster: BoxdCluster,
 ) => Layer.Layer<BoxdApi, BoxdCallError | BoxdUnknownRegion, HttpClient.HttpClient>;

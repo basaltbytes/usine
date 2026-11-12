@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { ManagedRepo } from "@usine/config/factory";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { EventId } from "@usine/core/event";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";

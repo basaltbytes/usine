@@ -9,6 +9,7 @@ import type {
   StatisticsWindow,
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
+import type { ConfigurationEntityKind } from "@usine/config/configuration";
 import { windowPhrase } from "~/lib/strings";
 
 export const plural = (count: number, noun: string): string =>
@@ -20,6 +21,9 @@ export const workerKindLabel = {
   ssh: "SSH",
   cloudflare: "Cloudflare",
 } satisfies Record<WorkerKind, string>;
+
+/** The heading of what a Worker's last machine preflight found missing that Attempts run without. */
+export const preflightFindingsLabel = "Preflight findings";
 
 export const provisionedHarnessCheckDescription =
   "Harness checks run on the first machine, then on the next machine created after the configured interval since the last successful check.";
@@ -104,7 +108,9 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
         provisioner._tag === "hetzner"
           ? `hetzner ${provisioner.serverType} in ${provisioner.location}`
           : provisioner._tag === "boxd"
-            ? `boxd ${provisioner.size} ${provisioner.region}`
+            ? ["boxd", provisioner.size, provisioner.region]
+                .filter((part) => part !== null)
+                .join(" ")
             : `boat ${provisioner.size}`;
       return `${machine}, one machine per attempt`;
     }
@@ -182,9 +188,59 @@ export const upgradeChannelLabel = "Channel";
 export const upgradeModeLabel = "Mode";
 export const upgradeAvailable = (version: string) => `Version ${version} is available.`;
 
+const entityNoun = {
+  loop: "loop",
+  agent: "agent",
+  worker: "worker",
+  project: "project",
+  repository: "repository",
+  label: "label",
+  binding: "role binding",
+  settings: "settings",
+} satisfies Record<ConfigurationEntityKind, string>;
+
+/** The empty state of each list page: a title and what one entry does. */
+export const emptyListCopy = {
+  loop: {
+    title: "No loops",
+    description:
+      "A loop starts an agent run for each item in a project that matches a trigger. New loops start paused.",
+  },
+  agent: {
+    title: "No agents",
+    description: "An agent sets the instructions, harness, model, and effort for runs.",
+  },
+  worker: {
+    title: "No workers",
+    description: "A worker is a machine that runs attempts, such as this machine or an SSH host.",
+  },
+  project: {
+    title: "No projects",
+    description: "A project groups repositories under one board, with the loops that run on them.",
+  },
+  repository: {
+    title: "No repositories",
+    description:
+      "usine polls each registered repository for the issues and pull requests on boards.",
+  },
+  label: {
+    title: "No labels",
+    description: "usine creates each declared label in every managed repository.",
+  },
+  binding: {
+    title: "No role bindings",
+    description:
+      "A role binding grants a member admin access to the instance, or a viewer, operator, or maintainer role on one project.",
+  },
+} satisfies Record<
+  Exclude<ConfigurationEntityKind, "settings">,
+  { title: string; description: string }
+>;
+
+export const noProjectForLoop = "Creating a loop requires a project.";
+export const openProjects = "Open Projects";
+
 export const editorCopy = {
-  noLabels: "No labels",
-  addLabel: "Choose New to declare a label.",
   localOperator: "Local operator",
   edit: "Edit",
   save: "Save",
@@ -192,7 +248,7 @@ export const editorCopy = {
   cancel: "Cancel",
   delete: "Delete",
   confirmDelete: "Confirm delete",
-  new: "New",
+  continue: "Continue",
   history: "History",
   revert: "Revert",
   confirmRevert: "Confirm revert",
@@ -221,12 +277,11 @@ export const editorCopy = {
   revertWarning:
     "Revert restores every entity in this revision. Later changes can prevent a revert.",
   alreadyExists: "This name already exists. Open the entity to edit it.",
-  create: (kind: string) => `New ${kind}`,
+  create: (kind: ConfigurationEntityKind) => `New ${entityNoun[kind]}`,
   revision: (number: number) => `Revision ${number}`,
 };
 
 export const agentCopy = {
-  add: "Choose New to add an agent.",
   parentOverride: "Set on this agent",
   parentModelUnset: "Not set on this agent or in settings",
   models: "Models",
@@ -237,10 +292,6 @@ export const agentCopy = {
 /** Returns text such as `No merged task with an attempt by this agent in the last 30 days`. */
 export const noModelTasksLine = (window: StatisticsWindow): string =>
   `No merged task with an attempt by this agent ${windowPhrase(window)}`;
-
-export const addLoop = "Choose New to add a loop. New loops start paused.";
-
-export const addRepository = "Choose New to register a repository.";
 
 export const preflightTiming =
   "At startup, on demand, and when a revision changes worker slots or adds a worker or agent brain";
@@ -389,9 +440,14 @@ export const workerFormCopy = {
   sshKey: "SSH key name",
   sshUser: "SSH user",
   size: "Machine size",
+  boxdSizeHint:
+    "The snapshot's size as <vcpu>x<GiB>, such as 2x8 or 1x32. Preflight fails when the snapshot has another size. Leave empty to accept the snapshot's size.",
+  endpoint: "Endpoint",
+  endpointHint:
+    "The account endpoint of a self-hosted or bring-your-own-cloud boxd cluster, such as https://boxd.example.com:9443. Leave empty for the hosted service.",
   region: "Region",
   regionHint:
-    "A region enabled for your boxd org, as listed by boxd manage regions. fra and nyc are the hosted regions.",
+    "A region enabled for your boxd org, as listed by boxd manage regions. fra and nyc are the hosted regions. Leave empty to create machines where the endpoint runs them.",
   isolated: "Isolated",
   egress: "Egress allowlist (comma-separated, empty for unrestricted)",
   domain: "Gateway domain",
@@ -469,7 +525,6 @@ export const projectCopy = {
   name: "Display name",
   repositories: "Repositories",
   choose: "Add a repository",
-  empty: "No projects",
   unassigned: "No unassigned repositories",
   lanesHint: "Lane labels apply to every repository in the project.",
   up: "Move repository up",
@@ -503,12 +558,17 @@ export const preflightCommand = (worker: string) => `Run preflight on ${worker}`
 
 export const bindingCopy = {
   title: "Role bindings",
-  description: "Grant a member instance admin access or a role on one project.",
   member: "Member",
   instance: "Instance",
   role: "Role",
   scope: "Scope",
   unenrolledMember: "Member not enrolled",
+  roles: {
+    admin: "Admin",
+    viewer: "Viewer",
+    operator: "Operator",
+    maintainer: "Maintainer",
+  },
   noMembers: "Add a member before creating a binding.",
   members: "Open Members",
   loadingMembers: "Loading members…",
@@ -528,10 +588,10 @@ export const historyCopy = {
   forEntity: (key: string) => `View history for ${key}`,
   changedBy: (actor: string) => `Changed by ${actor}`,
   unavailable: "· Last change unavailable",
-  type: "Entity type",
-  name: "Entity name",
-  filter: "Filter history",
-  all: "All entities",
+  today: "Today",
+  yesterday: "Yesterday",
+  revision: "Revision",
+  noMessage: "No message",
   kinds: {
     loop: "Loop",
     agent: "Agent",

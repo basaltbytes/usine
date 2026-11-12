@@ -77,7 +77,7 @@ import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { attemptWindowQueries } from "./attempt-windows.ts";
 import { leftoverQueries } from "./leftovers.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
-import { queriesFor, type QueuedEvents } from "./queries.ts";
+import { type PendingQueue, queriesFor, type QueuedEvents } from "./queries.ts";
 import {
   beginAttempt as decideBeginAttempt,
   cameBack,
@@ -407,7 +407,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("park run for approval"));
 
   // Runs in the caller's transaction, so Attempt, Run, Step, and outbox writes commit or roll
-  // back together (ADR 0010, ADR 0020).
+  // back together.
   const applyFinish = Effect.fn("RunStore.applyFinish")(function* (
     tx: ReturnType<typeof queriesFor>,
     runId: RunId,
@@ -513,6 +513,7 @@ const makeRunStore = Effect.gen(function* () {
       resume,
       reattach,
       requiresCi: Option.isSome(current.ciPolicy),
+      outcomeLabels: current.outcomeLabels,
     });
 
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
@@ -714,6 +715,27 @@ const makeRunStore = Effect.gen(function* () {
         ),
     );
   }, persistence("discard attempt leftovers"));
+
+  const discardClosedAttempt = Effect.fn("RunStore.discardClosedAttempt")(function* (
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const discardedAt = yield* DateTime.now;
+    const worker = yield* transact((transaction, record) =>
+      leftoverQueries(transaction)
+        .discardClosedAttempt(attemptId, discardedAt)
+        .pipe(
+          Effect.tap(
+            Option.match({
+              onNone: () => Effect.void,
+              onSome: (worker) =>
+                record({ audience: InstanceScope.make(), target: { kind: "worker", id: worker } }),
+            }),
+          ),
+        ),
+    );
+    return Option.isSome(worker);
+  }, persistence("discard a closed attempt's leftovers"));
 
   const openAttempts = Effect.fn("RunStore.openAttempts")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
@@ -1153,13 +1175,12 @@ const makeRunStore = Effect.gen(function* () {
     claimQueued,
     finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
-    queuedOn: (loop: LoopName, itemKey: ItemKey) =>
-      queries.queuedOn(loop, itemKey).pipe(persistence("find queued events on a loop item")),
+    admissibleQueue: (loop: LoopName, itemKey: ItemKey) =>
+      queries
+        .admissibleQueue(loop, itemKey)
+        .pipe(persistence("find admissible queued events on a loop item")),
     parkForApproval,
-    pendingCiFixes: queries.pendingCiFixes().pipe(persistence("list pending CI fixes")),
-    pendingContinuations: queries
-      .pendingContinuations()
-      .pipe(persistence("list pending continuations")),
+    pendingQueues: queries.pendingQueues().pipe(persistence("list pending queues")),
     runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the runs to drive")),
     recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
@@ -1170,6 +1191,7 @@ const makeRunStore = Effect.gen(function* () {
     recordOutOfMemory,
     attemptWindows,
     discardLeftovers,
+    discardClosedAttempt,
     openAttempts,
     submission: (runId: RunId) =>
       queries.eventRouteByRun(runId).pipe(
@@ -1243,29 +1265,26 @@ export class RunStore extends Context.Service<
       attempt: Attempt,
       result: AttemptResult,
     ) => Effect.Effect<FinishDecision, RunStoreError>;
-    /** Returns the newest queued Event of the Run's Loop and Item, or `None` during a suppression. */
+    /** Returns the queued Events of the Run's Loop and Item, newest first, or `None` during a suppression. */
     readonly nextQueued: (
       runId: RunId,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
-    /** Returns the current unclaimed Events of the Loop's Item, newest first. */
-    readonly queuedOn: (
+    /**
+     * Returns the queued Events of the Loop's Item, newest first, or `None` while the Item has an
+     * open Run or a suppression.
+     */
+    readonly admissibleQueue: (
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
     /** Moves a pending Run to `Waiting` and returns the Run's state. */
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
     /**
-     * The closed Runs whose Item still has a queued Event that no continuation opened or revoked,
-     * and whose newest queued Event is a trigger match. Excludes Items with an open Run, an open
-     * budget ask, or a suppression.
+     * The queues of the current cycle generation that no admission opened or revoked, each with
+     * the newest closed Run of its Loop's Item. Excludes Items with an open Run, an open budget
+     * ask, or a suppression.
      */
-    readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
-    /**
-     * The queues of the current cycle generation whose newest Event is an unclaimed CI fix, with
-     * every queued Event of the Loop's Item. Excludes Items with an open Run, an open budget ask,
-     * or a suppression.
-     */
-    readonly pendingCiFixes: Effect.Effect<ReadonlyArray<QueuedEvents>, RunStoreError>;
+    readonly pendingQueues: Effect.Effect<ReadonlyArray<PendingQueue>, RunStoreError>;
     /** The open Runs that a fiber drives: pending, queued, or running, but not waiting for approval. */
     readonly runIdsToDrive: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /**
@@ -1298,7 +1317,7 @@ export class RunStore extends Context.Service<
     ) => Effect.Effect<void, RunStoreError>;
     /**
      * Returns the Attempt's window and the overlapping windows of the same Agent's other Attempts
-     * on the Item, oldest first (ADR 0006, #429).
+     * on the Item, oldest first (#429).
      */
     readonly attemptWindows: (attemptId: AttemptId) => Effect.Effect<AttemptWindows, RunStoreError>;
     /** The persisted Attempts that startup reconciliation visits, excluding discarded leftovers. */
@@ -1311,6 +1330,12 @@ export class RunStore extends Context.Service<
     readonly discardLeftovers: (
       worker: WorkerName,
     ) => Effect.Effect<ReadonlyArray<AttemptId>, RunStoreError>;
+    /**
+     * Marks `attemptId`, a closed Attempt whose recovery found nothing left on its Worker, so
+     * reconciliation skips it. Returns whether it marked the Attempt; an open or already discarded
+     * Attempt stays as it is.
+     */
+    readonly discardClosedAttempt: (attemptId: AttemptId) => Effect.Effect<boolean, RunStoreError>;
     /** Returns the number of Attempts on `worker` without an outcome, excluding discarded leftovers. */
     readonly openAttempts: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**

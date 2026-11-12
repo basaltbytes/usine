@@ -79,8 +79,37 @@ export class ChildSession extends Schema.TaggedClass<
   ),
 }) {}
 
-/** The identity, agent, and selected brain of a parent or first-level child session. */
-export const AgentSession = Schema.Union([ParentSession, ChildSession]);
+/** The kebab-case name of the role a session plays, such as `decision`. */
+export const RoleName = Schema.NonEmptyString.check(
+  Schema.isPattern(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u, { message: "Expected a kebab-case name" }),
+).pipe(Schema.brand("RoleName"));
+export type RoleName = typeof RoleName.Type;
+
+/**
+ * A session that a role opens through the harness seam, outside the parent and child tree. Older
+ * transcripts record only `ParentSession` and `ChildSession`.
+ */
+export class RoleSession extends Schema.TaggedClass<
+  RoleSession,
+  Brand.Brand<"@usine/core/agent/session/RoleSession">
+>("Agent/RoleSession")("RoleSession", {
+  /** The usine session ID used to correlate the session's events. */
+  id: AgentSessionId,
+  /** The role that opened the session. */
+  role: RoleName,
+  /** The session this one acts for, such as the child a decision session follows. */
+  parentId: Schema.OptionFromOptionalKey(AgentSessionId).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<AgentSessionId>())),
+  ),
+  /** The agent definition whose brain the session runs. */
+  agent: AgentName,
+  /** The harness, model, and effort selected for this session. */
+  brain: BrainSpec,
+  ...sessionBilling,
+}) {}
+
+/** The identity, agent, and selected brain of a parent, child, or role session. */
+export const AgentSession = Schema.Union([ParentSession, ChildSession, RoleSession]);
 export type AgentSession = typeof AgentSession.Type;
 
 /** The harness's ID for its saved conversation, distinct from `AgentSessionId`. */

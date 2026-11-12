@@ -4,7 +4,12 @@ import { CHILD_KILL_SCRIPT, type RemoteHost } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
+import type {
+  AttemptRecovery,
+  AttemptSalvage,
+  RecoveredLeftovers,
+  RecoverySink,
+} from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type CommitSha, RepositoryName, safeSegment } from "@usine/core/repository";
 import type { BotAccount, WorkerName } from "@usine/core/worker";
@@ -111,7 +116,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const { commands, label } = worker;
     const span = (name: string) => `${worker.spanPrefix}.${name}`;
     const fetches = yield* keyedLockFor<RepositoryName>();
-    const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
+    const abandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const workerLeftovers = yield* workerLeftoversFor(commands, worker.machineFor, worker.reclaim);
     const session = yield* durableSessionFor({ interruptGrace: worker.interruptGrace });
     const runtime = yield* AttemptRuntime;
@@ -204,7 +209,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       });
     });
 
-    /** Returns the container of an Attempt, which mounts its checkout and the paths of `access`. */
+    /**
+     * Returns the container of an Attempt, which mounts its checkout, the paths of `access`, and
+     * the login files of `logins`.
+     */
     const containerSpec = (
       machine: M,
       settings: ContainerSettings,
@@ -215,7 +223,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       },
       worktree: string,
       access: RemoteAccess,
-      harnesses: ReadonlyArray<Harness>,
+      logins: ReadonlyArray<Harness>,
     ) => ({
       name: attemptContainerName(attempt.attemptId),
       settings,
@@ -224,7 +232,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       checkout: Option.some({ path: worktree, parent: `${machine.workerDirectory}/attempts` }),
       readOnly: [cachePath(machine, attempt.repository), ...access.readOnlyPaths],
       writable: access.writableMounts,
-      harnesses,
+      logins,
       environment: access.environment,
       secrets: access.secrets,
     });
@@ -241,7 +249,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       worktree: string,
       access: RemoteAccess,
       isolation: AttemptIsolation,
-      harnesses: ReadonlyArray<Harness>,
+      logins: ReadonlyArray<Harness>,
     ) {
       if (isolation._tag === "SharedUser") {
         const shell = Effect.succeed(access.shell);
@@ -254,7 +262,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         return shared;
       }
       const started = yield* SynchronizedRef.make(Option.none<RemoteHost>());
-      const spec = containerSpec(machine, isolation.settings, attempt, worktree, access, harnesses);
+      const spec = containerSpec(machine, isolation.settings, attempt, worktree, access, logins);
       const marker = containerCheckoutMarker(machine.workerDirectory, attempt.attemptId);
       const memory = yield* containers.trackMemory(machine.shell, spec);
       const shell = SynchronizedRef.modifyEffect(started, (current) =>
@@ -499,12 +507,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.stopForRecovery(attempt);
       const located = yield* leftoversOf(attempt);
       if (Option.isNone(located)) {
-        yield* Effect.logInfo("The Attempt's machine is gone; nothing is left to reconcile", {
+        yield* Effect.logDebug("The Attempt's machine is gone; nothing is left to reconcile", {
           attemptId: attempt.attemptId,
           worker: attempt.worker,
         });
         yield* session.recoverPostedComments(attempt, Option.none(), record);
-        return;
+        return "gone" satisfies RecoveredLeftovers;
       }
       const { machine, checkouts } = located.value;
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
@@ -522,8 +530,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           : Option.none(),
         record,
       );
-      if (!present) return;
-      yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
+      // The machine stays until the finalizers release it, so a later recovery visits it again.
+      if (present)
+        yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
+      return "found" satisfies RecoveredLeftovers;
     }, Effect.scoped);
 
     /** Reconciles a kept checkout after its parent stops; skips a missing checkout. */
@@ -814,7 +824,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           worktree,
         },
       );
-      yield* sweepAbandonedWorktrees(
+      yield* abandonedWorktrees.sweep(
         request.attemptId,
         request.worker,
         machine.shell,
@@ -828,6 +838,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         onNone: () => request.agent.brain.harness,
         onSome: (spec) => spec.agent.brain.harness,
       });
+      const credentialRoute = worker.credentialRoute(machine, harness);
 
       // A checkout kept after a failed remote stop never closes its scope, so its salvage result
       // is completed here instead of by the checkout finalizer.
@@ -893,7 +904,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           worktree,
           access,
           isolation,
-          [harness],
+          credentialRoute === "host-login" ? [harness] : [],
         );
         const ops = workspaceOps(
           request,
@@ -966,6 +977,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         resume: Option.map(prepared.spec.resume, ({ ref }) => ref),
         reattach: request.reattach,
         isolation: isolation._tag,
+        harness,
+        credentialRoute,
         worktree,
       });
       return {
@@ -1057,7 +1070,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       recover,
       cancel: session.cancel,
       intervene: session.intervene,
-      isLive: session.isLive,
+      isLive: (attemptId) =>
+        session
+          .isLive(attemptId)
+          .pipe(
+            Effect.tap((live) => (live ? abandonedWorktrees.reattaching(attemptId) : Effect.void)),
+          ),
       outcome: session.outcome,
       preflight: worker.preflight,
       prepare,

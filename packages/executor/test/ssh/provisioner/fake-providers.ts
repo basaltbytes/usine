@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest";
-import type { BoxdApiLayer } from "../../../src/ssh/provisioner/boxd/client.ts";
+import type { BoxdApiLayer, BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
 import { fakeBoxd } from "./fake-boxd.ts";
 import { spawnedBoxdExec } from "./fake-boxd-exec.ts";
 import { BoxdExec } from "../../../src/ssh/provisioner/boxd/exec.ts";
@@ -525,9 +525,9 @@ export const fakeProviders = () => {
     hetzner,
     boat,
     boxd: boxd.state,
-    boxdClient: ((token, region) => {
+    boxdClient: ((token, cluster) => {
       assert.strictEqual(Redacted.value(token), boxd.state.token);
-      assert.strictEqual(region, boxd.state.region);
+      assert.deepStrictEqual(cluster.region, Option.some(boxd.state.region));
       return boxd.layer;
     }) satisfies BoxdApiLayer,
     /**
@@ -536,10 +536,17 @@ export const fakeProviders = () => {
      */
     boxdExecOn:
       (machine: { readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"] }) =>
-      (endpoint: string, credential: Redacted.Redacted<string>) => {
-        boxd.state.connections.push({ endpoint, credential: Redacted.value(credential) });
-        return Layer.succeed(BoxdExec, spawnedBoxdExec(machine.spawner));
-      },
+      (endpoint: string, credential: Effect.Effect<Redacted.Redacted<string>, BoxdCallError>) =>
+        Layer.effect(
+          BoxdExec,
+          credential.pipe(
+            Effect.map((bearer) => {
+              boxd.state.connections.push({ endpoint, credential: Redacted.value(bearer) });
+              return spawnedBoxdExec(machine.spawner);
+            }),
+            Effect.orDie,
+          ),
+        ),
     layer: Layer.merge(Layer.succeed(HttpClient.HttpClient, clientWith(unexpected)), boxd.layer),
     /** Returns the providers' client that sends other origins to `underlying`'s client. */
     over: <E, R>(underlying: Layer.Layer<HttpClient.HttpClient, E, R>) =>

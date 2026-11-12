@@ -1,5 +1,6 @@
 import { StepCompletion } from "@usine/core/step/result";
 import { jsonKey } from "@usine/core/json-key";
+import { GitHubLabelName } from "@usine/core/label";
 import { EnginePersistenceError } from "../src/engine/error.ts";
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { NodeServices } from "@effect/platform-node";
@@ -100,7 +101,7 @@ describe("durable run engine", () => {
             workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeedNone,
-            recover: () => Effect.void,
+            recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
@@ -189,7 +190,7 @@ describe("durable run engine", () => {
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeedNone,
-          recover: () => Effect.void,
+          recover: () => Effect.succeed("found" as const),
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           sweep: Effect.void,
           discard: () => Effect.void,
@@ -909,7 +910,7 @@ describe("durable run engine", () => {
             workers: Effect.succeed([local]),
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeedNone,
-            recover: () => Effect.void,
+            recover: () => Effect.succeed("found" as const),
             intervene: () => Effect.void,
             // Like the durable session, a stop ends the execution within the interrupt grace even
             // if the parent task's cancel fails.
@@ -1233,7 +1234,7 @@ describe("durable run engine", () => {
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeedNone,
-          recover: () => Effect.void,
+          recover: () => Effect.succeed("found" as const),
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
@@ -1416,7 +1417,7 @@ describe("store failures in a Run's fiber", () => {
           const accepted = yield* engine.submit(
             Submission.make({
               ...submission({ number: 1, item: "verified" }),
-              outcomeLabels: ["passed"],
+              outcomeLabels: [GitHubLabelName.make("passed")],
             }),
           );
           assert(accepted._tag === "Claimed");

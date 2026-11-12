@@ -4,6 +4,7 @@ import { sqliteTempDirectory } from "../../../tooling/test/sqlite.mts";
 import { migrateProjects } from "../src/project/operations.ts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
+import { SqlClient } from "effect/sql";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { OperatorLogin } from "@usine/core/operator";
@@ -16,6 +17,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   Option,
   Result,
   Schema,
@@ -33,15 +35,20 @@ import {
   ConfigurationEntity,
   ConfigurationEntityId,
   ConfigurationEntityKey,
+  ConfigurationRevision,
   ConfigurationRevisionNumber,
   ConfigurationStore,
+  revertConfiguration,
   validateConfiguration,
 } from "../src/configuration/store.ts";
 import {
   ConfigurationFolder,
   formatConfigurationEntity,
+  formatRevisionEntity,
   parseConfigurationEntity,
 } from "../src/configuration/folder.ts";
+import { replay } from "../src/configuration/commit.ts";
+import { LoopJson } from "../src/configuration/entities.ts";
 import { memoryConfigurationLayer } from "../src/configuration/memory.ts";
 import { sqliteConfigurationLayer } from "../src/configuration/sqlite/store.ts";
 
@@ -163,6 +170,25 @@ describe("configuration domain without layers", () => {
     }),
   );
 
+  it.effect("replays a stored revision that adds an exe.dev worker", () =>
+    Effect.gen(function* () {
+      const changes = (yield* initialChanges).map((change) =>
+        change.key.kind === "worker"
+          ? ConfigurationChange.make({
+              ...change,
+              after: Option.some({ name: change.key.identifier, kind: "exe.dev" }),
+            })
+          : change,
+      );
+      const replayed = yield* replay(parser, Configuration.empty, zero, changes, metadata);
+      expect(
+        Option.map(replayed.configuration.instance, ({ config }) =>
+          config.workers.map(({ kind }) => kind),
+        ),
+      ).toEqual(Option.some(["exe.dev", "exe.dev"]));
+    }),
+  );
+
   it.effect("loads a stored boxd worker that still sets identity_file", () =>
     Effect.gen(function* () {
       // A worker entity as releases before boxd's Exec transport stored it.
@@ -191,6 +217,41 @@ describe("configuration domain without layers", () => {
       assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
       expect(worker.provisioner.value.provider).toBe("boxd");
       expect(worker.identityFile).toStrictEqual(Option.some("~/.ssh/usine_worker"));
+    }),
+  );
+
+  it.effect("loads a stored boxd worker that still sets reuse", () =>
+    Effect.gen(function* () {
+      // A worker entity as releases before boxd's single-use machines stored it.
+      const stored = {
+        name: "boxd-pool",
+        kind: "ssh",
+        root: "/home/boxd/.usine",
+        provisioner: {
+          provider: "boxd",
+          token_env: "BOXD_API_KEY",
+          snapshot: "usine-attempt",
+          reuse: { attempts: 5, max_age: "2h" },
+        },
+      };
+      const instance = yield* fixture;
+      const entities = configurationEntities(instance).map((entity) =>
+        entity.key.kind === "worker" && entity.key.identifier === "fallback"
+          ? ConfigurationEntity.make({
+              ...entity,
+              key: ConfigurationEntityKey.make({
+                kind: "worker",
+                identifier: ConfigurationEntityId.make("boxd-pool"),
+              }),
+              value: stored,
+            })
+          : entity,
+      );
+      const loaded = yield* validateConfiguration(parser, entities);
+      const worker = loaded.config.workers.find(({ name }) => name === "boxd-pool");
+      assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
+      assert(worker.provisioner.value.provider === "boxd");
+      expect(Option.isSome(worker.provisioner.value.reuse)).toBe(true);
     }),
   );
 
@@ -565,6 +626,40 @@ for (const [name, layer] of adapters)
       }).pipe(Effect.provide(layer)),
     );
 
+    it.effect("refuses all-exe.dev and mixed workers without writing a revision", () =>
+      Effect.gen(function* () {
+        const fixtureInstance = yield* fixture;
+        const store = yield* ConfigurationStore;
+        yield* initialize;
+        const current = yield* store.read;
+
+        const workers = configurationEntities(fixtureInstance).filter(
+          ({ key }) => key.kind === "worker",
+        );
+        const toExeDev = workers.map(({ key, value }) =>
+          ConfigurationChange.make({
+            key,
+            before: Option.some(value),
+            after: Option.some({ name: key.identifier, kind: "exe.dev" }),
+          }),
+        );
+        for (const changes of [toExeDev, toExeDev.slice(1)]) {
+          const failure = yield* store
+            .commit({ expected: current.number, changes, ...metadata })
+            .pipe(Effect.flip);
+          assert(failure._tag === "ConfigurationInvalid", failure._tag);
+          expect(failure.problems.map(({ file, message }) => ({ file, message }))).toEqual(
+            changes.map(({ key }) => ({
+              file: `worker:${key.identifier}`,
+              message: `Worker "${key.identifier}" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.`,
+            })),
+          );
+          const stored = yield* store.read;
+          expect(stored).toEqual(current);
+        }
+      }).pipe(Effect.provide(layer)),
+    );
+
     it.effect(
       "commits atomically, records before and after, filters history, and replays revisions",
       () =>
@@ -740,5 +835,306 @@ it.live("observes another SQLite connection and preserves history after reopenin
     expect((yield* reopened.read).number).toBe(2);
 
     expect((yield* reopened.list(Option.none())).map(({ number }) => number)).toEqual([1, 2]);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
+);
+
+/**
+ * Opens a SQLite store in a scoped temporary directory and commits the fixture with a schedule loop
+ * `nightly`. It then rewrites the stored outcome labels as releases before the schedule and
+ * letter-case rules saved them: `implement` with `[ready, Ready, review]` and `nightly` with
+ * `[passed]`.
+ */
+const legacyOutcomeLabelStore = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
+  const sqlite = SqliteClient.layer({ filename: `${directory}/configuration.sqlite` });
+  const open = Effect.map(
+    Layer.build(sqliteConfigurationLayer.pipe(Layer.provide(parserLayer), Layer.provide(sqlite))),
+    (services) => Context.get(services, ConfigurationStore),
+  );
+  const first = yield* open;
+  const nightly = yield* parser.parseLoopFile(
+    InstancePath.make("loops/nightly.md"),
+    "---\ntrigger: { on: schedule, cron: '0 3 * * *', if: 'true' }\nagent: developer\n---\nCheck the build.\n",
+  );
+  const nightlyValue = yield* Schema.encodeEffect(LoopJson)(nightly);
+  const imported = yield* initialChanges;
+  yield* first.commit({
+    expected: zero,
+    changes: [
+      ...imported,
+      ConfigurationChange.make({
+        key: ConfigurationEntityKey.make({
+          kind: "loop",
+          identifier: ConfigurationEntityId.make("nightly"),
+        }),
+        before: Option.none(),
+        after: Option.some(nightlyValue),
+      }),
+    ],
+    ...metadata,
+  });
+
+  const sqlServices = yield* Layer.build(sqlite);
+  const sql = Context.get(sqlServices, SqlClient.SqlClient);
+  const StoredRow = Schema.fromJsonString(
+    Schema.Struct({ key: Schema.Json, value: Schema.JsonObject }),
+  );
+  const legacy = { "loop:implement": ["ready", "Ready", "review"], "loop:nightly": ["passed"] };
+  for (const [key, outcomeLabels] of Object.entries(legacy)) {
+    const [row] = yield* sql<{
+      readonly value: string;
+    }>`SELECT value FROM usine_configuration_entities WHERE key = ${key}`;
+    if (row === undefined) return yield* Effect.die(`missing ${key}`);
+    const entity = yield* Schema.decodeEffect(StoredRow)(row.value);
+    const value = yield* Schema.encodeEffect(StoredRow)({
+      ...entity,
+      value: { ...entity.value, outcomeLabels },
+    });
+    yield* sql`UPDATE usine_configuration_entities SET value = ${value} WHERE key = ${key}`;
+  }
+  const revisions = Effect.map(
+    sql<{
+      readonly number: number;
+    }>`SELECT number FROM usine_configuration_revisions ORDER BY number`,
+    (rows) => rows.map(({ number }) => number),
+  );
+  return { first, open, sql, revisions };
+});
+
+it.live("rewrites stored outcome labels that the loop rules reject when it opens", () =>
+  Effect.gen(function* () {
+    const { first, open, sql, revisions } = yield* legacyOutcomeLabelStore;
+    const refused = yield* first.read.pipe(Effect.flip);
+    expect(String(refused.cause)).toContain("ConfigurationInvalid");
+
+    // A failed upgrade leaves no revision behind.
+    yield* sql`CREATE TRIGGER refuse_entity_update BEFORE UPDATE ON usine_configuration_entities
+      BEGIN SELECT RAISE(ABORT, 'entity update refused'); END`;
+    const failed = yield* open.pipe(Effect.flip);
+    expect(failed).toMatchObject({ operation: "upgrade stored loops" });
+    const stored = yield* revisions;
+    expect(stored).toEqual([1]);
+    yield* sql`DROP TRIGGER refuse_entity_update`;
+
+    const reopened = yield* open;
+    const upgraded = yield* reopened.read;
+    expect(upgraded.number).toBe(2);
+    assert(Option.isSome(upgraded.instance));
+    expect(
+      Object.fromEntries(
+        upgraded.instance.value.loops.map(({ name, outcomeLabels }) => [name, outcomeLabels]),
+      ),
+    ).toEqual({ implement: ["ready", "review"], nightly: [] });
+    const revision = yield* reopened.revision(ConfigurationRevisionNumber.make(2));
+    assert(Option.isSome(revision));
+    expect(revision.value.actor).toEqual(Option.none());
+    expect(revision.value.changes.map(({ key }) => key.key).sort()).toEqual([
+      "loop:implement",
+      "loop:nightly",
+    ]);
+    // History shows the values the current loop rules reject as their stored JSON.
+    const implement = revision.value.changes.find(({ key }) => key.key === "loop:implement");
+    assert(implement !== undefined && Option.isSome(implement.before));
+    const before = ConfigurationEntity.make({ key: implement.key, value: implement.before.value });
+    yield* formatConfigurationEntity(before).pipe(Effect.flip);
+    const beforeText = yield* formatRevisionEntity(before);
+    expect(beforeText).toContain("- Ready\n");
+    for (const change of revision.value.changes) {
+      assert(Option.isSome(change.after));
+      const after = ConfigurationEntity.make({ key: change.key, value: change.after.value });
+      const afterText = yield* formatRevisionEntity(after);
+      const formatted = yield* formatConfigurationEntity(after);
+      expect(afterText).toBe(formatted);
+    }
+    const edited = yield* reopened.commit({
+      expected: upgraded.number,
+      changes: [],
+      ...metadata,
+    });
+    expect(edited.number).toBe(3);
+    expect((yield* (yield* open).list(Option.none())).map(({ number }) => number)).toEqual([
+      1, 2, 3,
+    ]);
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
+);
+
+it.live("keeps stored outcome labels when the upgraded configuration is still invalid", () => {
+  const warnings: Array<unknown> = [];
+  const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+    if (logLevel === "Warn") warnings.push(message);
+  });
+  return Effect.gen(function* () {
+    const { open, sql, revisions } = yield* legacyOutcomeLabelStore;
+    yield* sql`DELETE FROM usine_configuration_entities WHERE key = 'agent:developer'`;
+
+    const reopened = yield* open;
+    const stored = yield* revisions;
+    expect(stored).toEqual([1]);
+    const refused = yield* reopened.read.pipe(Effect.flip);
+    expect(String(refused.cause)).toContain("ConfigurationInvalid");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toEqual([
+      "Kept stored outcome labels; the upgraded configuration is invalid",
+      expect.objectContaining({ loops: ["implement", "nightly"] }),
+    ]);
+  }).pipe(
+    Effect.scoped,
+    Effect.timeout("10 seconds"),
+    Effect.provide(NodeServices.layer),
+    Effect.withLogger(logger),
+  );
+});
+
+const extraLabel = ConfigurationChange.make({
+  key: ConfigurationEntityKey.make({
+    kind: "label",
+    identifier: ConfigurationEntityId.make("extra"),
+  }),
+  before: Option.none(),
+  after: Option.some({ name: "extra" }),
+});
+/**
+ * Changes worker `fallback` in `configuration` from its stored value to kind `kind`, or removes it
+ * when `kind` is none.
+ */
+const fallbackChange = (configuration: Configuration, kind: Option.Option<string>) =>
+  Effect.gen(function* () {
+    assert(Option.isSome(configuration.instance));
+    const stored = configurationEntities(configuration.instance.value).find(
+      ({ key }) => key.key === "worker:fallback",
+    );
+    if (stored === undefined) return yield* Effect.die("missing worker:fallback");
+    return ConfigurationChange.make({
+      key: stored.key,
+      before: Option.some(stored.value),
+      after: Option.map(kind, (value) => ({ name: "fallback", kind: value })),
+    });
+  });
+const exeDevRefusal = {
+  file: "worker:fallback",
+  message: `Worker "fallback" has kind exe.dev, which this version of usine doesn't run. Remove the worker or give it another kind.`,
+};
+
+/**
+ * Opens a SQLite store in a scoped temporary directory and commits the fixture. It then writes
+ * revision 2, which sets worker `fallback` to kind exe.dev, as releases before the store refused
+ * exe.dev workers saved it.
+ */
+const exeDevWorkerStore = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const directory = yield* fs.makeTempDirectoryScoped({ directory: sqliteTempDirectory() });
+  const sqlite = SqliteClient.layer({ filename: `${directory}/configuration.sqlite` });
+  const services = yield* Layer.build(
+    sqliteConfigurationLayer.pipe(Layer.provide(parserLayer), Layer.provideMerge(sqlite)),
+  );
+  const store = Context.get(services, ConfigurationStore);
+  const sql = Context.get(services, SqlClient.SqlClient);
+  yield* store.commit({ expected: zero, changes: yield* initialChanges, ...metadata });
+  const current = yield* store.read;
+  const toExeDev = yield* fallbackChange(current, Option.some("exe.dev"));
+  const { configuration, revision } = yield* replay(
+    parser,
+    current,
+    current.number,
+    [toExeDev],
+    metadata,
+  );
+  assert(Option.isSome(configuration.instance));
+  const exeDev = configurationEntities(configuration.instance.value).find(
+    ({ key }) => key.key === "worker:fallback",
+  );
+  if (exeDev === undefined) return yield* Effect.die("missing worker:fallback");
+  const value = yield* Schema.encodeEffect(
+    Schema.fromJsonString(Schema.toCodecJson(ConfigurationRevision)),
+  )(revision);
+  yield* sql`INSERT INTO usine_configuration_revisions (number, value) VALUES (${revision.number}, ${value})`;
+  const entity = yield* Schema.encodeEffect(
+    Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity)),
+  )(exeDev);
+  yield* sql`UPDATE usine_configuration_entities SET value = ${entity} WHERE key = 'worker:fallback'`;
+  const revisions = Effect.map(
+    sql<{
+      readonly number: number;
+    }>`SELECT number FROM usine_configuration_revisions ORDER BY number`,
+    (rows) => rows.map(({ number }) => number),
+  );
+  return { store, revisions };
+});
+
+it.live("reads a stored exe.dev worker and refuses other saves until it is removed", () =>
+  Effect.gen(function* () {
+    const { store, revisions } = yield* exeDevWorkerStore;
+    const stored = yield* store.read;
+    expect(stored.number).toBe(2);
+    assert(Option.isSome(stored.instance));
+    expect(stored.instance.value.config.workers.map(({ name, kind }) => `${name}:${kind}`)).toEqual(
+      ["local:local", "fallback:exe.dev"],
+    );
+
+    const refused = yield* store
+      .commit({ expected: stored.number, changes: [extraLabel], ...metadata })
+      .pipe(Effect.flip);
+    assert(refused._tag === "ConfigurationInvalid", refused._tag);
+    expect(refused.problems.map(({ file, message }) => ({ file, message }))).toEqual([
+      exeDevRefusal,
+    ]);
+    const kept = yield* revisions;
+    expect(kept).toEqual([1, 2]);
+
+    for (const kind of [Option.none(), Option.some("local")]) {
+      const fresh = yield* exeDevWorkerStore;
+      const change = yield* fallbackChange(stored, kind);
+      const committed = yield* fresh.store.commit({
+        expected: stored.number,
+        changes: [change],
+        ...metadata,
+      });
+      expect(committed.number).toBe(3);
+      const saved = yield* fresh.store.read;
+      assert(Option.isSome(saved.instance));
+      expect(
+        saved.instance.value.config.workers.map(({ name, kind }) => `${name}:${kind}`),
+      ).toEqual(Option.isSome(kind) ? ["local:local", "fallback:local"] : ["local:local"]);
+    }
+  }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
+);
+
+it.live("reverts a revision over a history that holds an exe.dev worker", () =>
+  Effect.gen(function* () {
+    const { store, revisions } = yield* exeDevWorkerStore;
+    const revertOf = (number: number) =>
+      Effect.gen(function* () {
+        const current = yield* store.read;
+        const target = yield* store.revision(ConfigurationRevisionNumber.make(number));
+        assert(Option.isSome(target));
+        const history = yield* store.list(Option.none());
+        const changes = yield* revertConfiguration(parser, target.value, history, current);
+        return yield* store.commit({ expected: current.number, changes, ...metadata });
+      });
+    const seeded = yield* store.read;
+    const toLocal = yield* fallbackChange(seeded, Option.some("local"));
+    yield* store.commit({ expected: seeded.number, changes: [toLocal], ...metadata });
+    yield* store.commit({
+      expected: ConfigurationRevisionNumber.make(3),
+      changes: [extraLabel],
+      ...metadata,
+    });
+
+    // Reverting revision 4 replays revision 2, which holds the exe.dev worker.
+    const reverted = yield* revertOf(4);
+    expect(reverted.number).toBe(5);
+    const current = yield* store.read;
+    assert(Option.isSome(current.instance));
+    expect(current.instance.value.config.labels.map(({ name }) => name)).not.toContain("extra");
+
+    // Reverting revision 3 would bring the exe.dev worker back.
+    const refused = yield* revertOf(3).pipe(Effect.flip);
+    assert(refused._tag === "ConfigurationInvalid", refused._tag);
+    expect(refused.problems.map(({ file, message }) => ({ file, message }))).toEqual([
+      exeDevRefusal,
+    ]);
+    const written = yield* revisions;
+    expect(written).toEqual([1, 2, 3, 4, 5]);
   }).pipe(Effect.scoped, Effect.timeout("10 seconds"), Effect.provide(NodeServices.layer)),
 );

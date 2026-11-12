@@ -8,7 +8,7 @@ import { LoopName } from "@usine/core/loop";
 import { boardRepositories } from "@usine/config/project";
 import { LaneName } from "@usine/config/board";
 import type { LoadedInstance } from "@usine/config/instance";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -108,7 +108,7 @@ export class TaskCommentView extends Schema.Class<
 }) {}
 
 /**
- * One Task as its page shows it (ADR 0024). Tasks have no stored identity; `number` is the
+ * One Task as its page shows it (ADR 0008). Tasks have no stored identity; `number` is the
  * originating Item: the earliest issue, or else the earliest pull request.
  */
 export class TaskView extends Schema.Class<
@@ -149,7 +149,10 @@ export class TaskView extends Schema.Class<
   ),
   /** The harvested comments and reviews of those Runs, newest Run first, and newest first within a Run. */
   comments: Schema.Array(TaskCommentView),
-  /** Recorded attempt commit ranges, including runs outside the first history page. */
+  /**
+   * Recorded attempt commit ranges, including runs outside the first history page and attempts
+   * that pushed no new commits.
+   */
   attemptChanges: Schema.Array(TaskAttemptChangesView).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
     Schema.withConstructorDefault(Effect.succeed([])),

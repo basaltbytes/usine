@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DeclaredLabel, GitHubLabelColor, GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
+import { DeclaredLabel, GitHubLabelColor } from "@usine/config/label";
 import { RepositoryName } from "@usine/core/repository";
 import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection";
 import { GitHubLabelWriter } from "@usine/github/label-writer";

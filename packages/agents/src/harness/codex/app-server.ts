@@ -1,6 +1,19 @@
 import { Harness } from "@usine/core/agent/brain";
-import { Cause, Deferred, Effect, Fiber, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Schema,
+  Stream,
+} from "effect";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
+import type { HostInput } from "../../child-host/child-host.ts";
 import { startChildProcess, childProcessCommand } from "../../child-host/node.ts";
 import { processError, stopChildProcess } from "../../child-host/process.ts";
 import { ChildSessionLifecycle, SessionOperationError } from "../../runtime.ts";
@@ -43,6 +56,7 @@ const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json)
 const encoder = new TextEncoder();
 
 const RPC_TIMEOUT = "60 seconds";
+const EXIT_REPORT_GRACE = "1 second";
 const preview = (line: string): string => (line.length > 200 ? `${line.slice(0, 200)}…` : line);
 
 interface PendingRequest {
@@ -76,10 +90,12 @@ const appServerArgs = (cwd: string) => [
 /**
  * Returns the app-server command for `client` on its host. The process starts in `/`,
  * not the worktree, so startup cannot read repository config before thread trust is set.
+ * Throws if `client`'s host is an `ExecShell`, which has no local command, or a remote host with
+ * a non-empty environment.
  */
 export const codexAppServerCommand = (
   client: CodexClient,
-  stdin?: ChildProcess.CommandOptions["stdin"],
+  stdin?: HostInput,
 ): ChildProcess.Command =>
   childProcessCommand(
     client,
@@ -126,7 +142,7 @@ const makeCodexAppServer = Effect.gen(function* () {
           ],
         },
         Stream.fromQueue(input),
-        request.transport,
+        { transport: request.transport },
       ).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.mapError((cause) =>
@@ -348,27 +364,51 @@ const makeCodexAppServer = Effect.gen(function* () {
           Effect.uninterruptible,
         ),
       );
+      // The exit code once the app-server's exit is reported, waiting at most `grace`; none while
+      // it runs or when its exit monitor failed.
+      const exitedWithin = (grace: Duration.Input) =>
+        handle.exit.pipe(
+          Effect.timeoutOption(grace),
+          Effect.map(Option.map(({ exitCode }) => exitCode)),
+          Effect.orElseSucceed(() => Option.none<number>()),
+        );
+      const forceStop = Effect.fn("CodexAppServer.forceStop")(function* (cause: unknown) {
+        const sessionId = Option.getOrUndefined(request.sessionId);
+        yield* Effect.annotateCurrentSpan({ sessionId });
+        const exited = yield* exitedWithin(Duration.zero);
+        if (Option.isSome(exited))
+          yield* Effect.logDebug(
+            "Stopping Codex app-server after it exited during a failed graceful shutdown",
+            { cause, exitCode: exited.value, sessionId },
+          );
+        else
+          yield* Effect.logWarning(
+            "Forcing Codex app-server to stop after graceful shutdown failed",
+            { cause, sessionId },
+          );
+        yield* handle.kill().pipe(
+          Effect.catch((cause) =>
+            // A kill fails when the process is already gone; its exit report may trail the kill.
+            Effect.flatMap(exitedWithin(EXIT_REPORT_GRACE), (exited) =>
+              Option.isSome(exited)
+                ? Effect.logDebug("Codex app-server had already exited before the forced stop", {
+                    cause,
+                    exitCode: exited.value,
+                    sessionId,
+                  })
+                : Effect.logWarning("Could not force Codex app-server to stop", {
+                    cause,
+                    sessionId,
+                  }),
+            ),
+          ),
+        );
+      });
       yield* Effect.addFinalizer(() =>
         close.pipe(
           Effect.catch((cause) =>
             Effect.flatMap(lifecycle.isStopping, (stopping) =>
-              stopping
-                ? Effect.void
-                : Effect.logWarning(
-                    "Forcing Codex app-server to stop after graceful shutdown failed",
-                    {
-                      cause,
-                      sessionId: Option.getOrUndefined(request.sessionId),
-                    },
-                  ).pipe(
-                    Effect.andThen(handle.kill()),
-                    Effect.catch((cause) =>
-                      Effect.logWarning("Could not force Codex app-server to stop", {
-                        cause,
-                        sessionId: Option.getOrUndefined(request.sessionId),
-                      }),
-                    ),
-                  ),
+              stopping ? Effect.void : forceStop(cause),
             ),
           ),
         ),

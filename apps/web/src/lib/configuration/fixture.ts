@@ -57,6 +57,7 @@ const deferredHarness = (harness: string, checkedAt: string) => ({
 /** A worker without a provisioner, as every kind but a provisioned SSH Worker has. */
 const unprovisioned = {
   preflightRunning: false,
+  findings: [],
   provisioner: null,
   machines: [],
   provisioning: null,
@@ -89,6 +90,8 @@ export const configurationJson = {
       prompt: startDevPrompt,
       paused: false,
       undeclaredLabels: ["urgent"],
+      outcomeLabels: [],
+      undeclaredOutcomeLabels: [],
     },
     {
       name: "review-pr",
@@ -108,6 +111,8 @@ export const configurationJson = {
       prompt: "Review the pull request.",
       paused: true,
       undeclaredLabels: [],
+      outcomeLabels: ["ready-to-merge", "agent-review-findings", "review-pased"],
+      undeclaredOutcomeLabels: ["review-pased"],
     },
   ],
   quarantinedLoops: [
@@ -256,6 +261,7 @@ export const configurationJson = {
     {
       name: "hz-pool",
       preflightRunning: false,
+      findings: [],
       kind: "ssh",
       maxConcurrentAttempts: 3,
       destination: null,
@@ -339,6 +345,7 @@ export const configurationJson = {
     {
       name: "boat-pool",
       preflightRunning: false,
+      findings: [],
       kind: "ssh",
       maxConcurrentAttempts: 2,
       destination: null,
@@ -364,6 +371,7 @@ export const configurationJson = {
     {
       name: "boxd-pool",
       preflightRunning: false,
+      findings: [],
       kind: "ssh",
       maxConcurrentAttempts: 2,
       destination: null,
@@ -376,6 +384,7 @@ export const configurationJson = {
       provisioner: {
         _tag: "boxd",
         tokenEnv: "BOXD_API_KEY",
+        endpoint: null,
         region: "fra",
         size: "2x8",
         snapshot: "usine-attempt",

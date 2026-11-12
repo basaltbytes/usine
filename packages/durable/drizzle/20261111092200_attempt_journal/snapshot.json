@@ -1,0 +1,246 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "34993bbc-5b50-4217-a76c-ab5de0100335",
+  "prevIds": ["00000000-0000-0000-0000-000000000000"],
+  "ddl": [
+    {
+      "name": "usine_attempt_coordination",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_attempt_delegations",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_attempt_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_attempt_outbox",
+      "entityType": "tables"
+    },
+    {
+      "table": "usine_attempt_coordination",
+      "name": "attempt_id",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_coordination",
+      "name": "request",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_coordination",
+      "name": "revision",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_coordination",
+      "name": "state",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_coordination",
+      "name": "status",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_coordination",
+      "name": "next_outbound",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_delegations",
+      "name": "attempt_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_delegations",
+      "name": "number",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_delegations",
+      "name": "delegation",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_events",
+      "name": "attempt_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_events",
+      "name": "sequence",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_events",
+      "name": "event",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_events",
+      "name": "decision",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_outbox",
+      "name": "attempt_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_outbox",
+      "name": "sequence",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_outbox",
+      "name": "envelope",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_attempt_delegations",
+      "name": "fk_usine_attempt_delegations_attempt_id_usine_attempt_coordination_attempt_id_fk",
+      "columns": ["attempt_id"],
+      "tableTo": "usine_attempt_coordination",
+      "columnsTo": ["attempt_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "entityType": "fks"
+    },
+    {
+      "table": "usine_attempt_events",
+      "name": "fk_usine_attempt_events_attempt_id_usine_attempt_coordination_attempt_id_fk",
+      "columns": ["attempt_id"],
+      "tableTo": "usine_attempt_coordination",
+      "columnsTo": ["attempt_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "entityType": "fks"
+    },
+    {
+      "table": "usine_attempt_outbox",
+      "name": "fk_usine_attempt_outbox_attempt_id_usine_attempt_coordination_attempt_id_fk",
+      "columns": ["attempt_id"],
+      "tableTo": "usine_attempt_coordination",
+      "columnsTo": ["attempt_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "entityType": "fks"
+    },
+    {
+      "table": "usine_attempt_delegations",
+      "name": "usine_attempt_delegations_pk",
+      "columns": ["attempt_id", "number"],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "usine_attempt_events",
+      "name": "usine_attempt_events_pk",
+      "columns": ["attempt_id", "sequence"],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "usine_attempt_outbox",
+      "name": "usine_attempt_outbox_pk",
+      "columns": ["attempt_id", "sequence"],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "usine_attempt_coordination",
+      "name": "usine_attempt_coordination_pk",
+      "columns": ["attempt_id"],
+      "nameExplicit": false,
+      "entityType": "pks"
+    }
+  ],
+  "renames": []
+}

@@ -29,6 +29,30 @@ const noEnvironment = {
 };
 
 describe("usine CLI", () => {
+  it.effect("parses usine mcp for the local instance and for a remote origin", () =>
+    Effect.gen(function* () {
+      const local = yield* parseCli(["mcp"], noEnvironment);
+      assert(local._tag === "McpCommand");
+      assert.isTrue(Option.isNone(local.origin));
+      const remote = yield* parseCli(["mcp", "--origin", "https://usine.example/"], noEnvironment);
+      assert(remote._tag === "McpCommand");
+      assert.deepEqual(remote.origin, Option.some("https://usine.example"));
+      const inline = yield* parseCli(["mcp", "--origin=https://usine.example"], noEnvironment);
+      assert(inline._tag === "McpCommand");
+      assert.deepEqual(inline.origin, Option.some("https://usine.example"));
+      for (const args of [
+        ["mcp", "--origin"],
+        ["mcp", "extra"],
+        ["mcp", "--origin", "ftp://x"],
+      ])
+        assert.equal(
+          (yield* parseCli(args, noEnvironment).pipe(Effect.flip))._tag,
+          "CliUsageError",
+          args.join(" "),
+        );
+      assert.include(CLI_USAGE, "usine mcp [--origin <url>]");
+    }),
+  );
   it.live("parses provider login and logout independently of server settings", () =>
     Effect.gen(function* () {
       const login = yield* parseCli(

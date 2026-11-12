@@ -1,11 +1,15 @@
-import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
+import type {
+  AttemptRecovery,
+  RecoveredLeftovers,
+  RecoverySink,
+} from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, type StopReason } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
-import { LoopName, LoopPermissions } from "@usine/core/loop";
+import { LoopName, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId, type Run } from "@usine/core/run";
@@ -182,6 +186,11 @@ export interface PreflightReport {
    * the machine. `None` if the Worker runs no containers or the preflight checked no machine.
    */
   readonly containerLimits: Option.Option<ContainerLimits>;
+  /**
+   * What the preflight found missing that Attempts run without, for operators, such as a kernel
+   * log that the SSH user can't read, which leaves out-of-memory kills without process names.
+   */
+  readonly findings: ReadonlyArray<string>;
 }
 
 /** The report of a Worker that runs Attempts as designed, without containers. */
@@ -189,6 +198,7 @@ export const fullPreflight: PreflightReport = {
   degraded: Option.none(),
   deferred: Option.none(),
   containerLimits: Option.none(),
+  findings: [],
 };
 
 /** Logs each preflight failure at error level. */
@@ -271,7 +281,12 @@ export class CheckoutRequest extends Schema.Class<
    * Whether the Run's Loop has a CI policy, copied into the RunSpec. If true, harvesting a
    * success without a CI handoff verifies the pull request of the checkout's branch on origin.
    */
-  requiresCi: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  requiresCi: Schema.Boolean,
+  /**
+   * The labels the Item must carry after a successful Attempt, copied into the RunSpec; empty
+   * disables the check.
+   */
+  outcomeLabels: OutcomeLabels.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
   /**
    * The author and committer of every commit that the Attempt's parent and children make. Their
    * environment sets it, so no git config on the Worker's machine applies.
@@ -361,13 +376,13 @@ export class Executor extends Context.Service<
      * failed before the orchestrator stopped, first records the comments it posted on the Run's
      * Item. `commitAuthor` returns the author and committer of the salvage commit, like
      * `CheckoutRequest.commitAuthor`. It runs only before a salvage, and its failure leaves the
-     * checkout.
+     * checkout. Returns `gone` if neither the Attempt's machine nor its checkout is left.
      */
     readonly recover: <E, A>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
       commitAuthor: Effect.Effect<BotAccount, A>,
-    ) => Effect.Effect<void, E | A | ExecutorError>;
+    ) => Effect.Effect<RecoveredLeftovers, E | A | ExecutorError>;
     /** The orchestrator doesn't start if a configured Worker has a different kind. */
     readonly kind: WorkerKind;
     /**
@@ -447,6 +462,8 @@ export class MachineCheck extends Schema.Class<
    * or `None` if the machine has no Docker.
    */
   containerLimits: Schema.Option(ContainerLimits),
+  /** The machine's preflight findings, as in `PreflightReport`. */
+  findings: Schema.Array(Schema.String),
 }) {}
 
 /** A machine that a provisioned Worker created for an Attempt and holds until `release`. */

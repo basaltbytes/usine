@@ -10,6 +10,7 @@ import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
 import { loopReferenceFailure, referenceIndex } from "../src/instance/references.ts";
 import { ManagedRepo, UsineConfig } from "../src/factory.ts";
+import { LoopFile } from "../src/loop.ts";
 import { formatLoop, ConfigParser } from "../src/parser.ts";
 import { issueEnvironment, pullRequestEnvironment } from "../src/payload-slices.ts";
 import { matchesSelector } from "../src/selector.ts";
@@ -496,24 +497,68 @@ workers:
       assert(worker?.kind === "ssh" && Option.isSome(worker.provisioner));
       const settings = worker.provisioner.value;
       assert(settings.provider === "boxd");
-      assert.strictEqual(settings.region, "fra");
-      assert.strictEqual(settings.size, "2x8");
+      assert.deepStrictEqual(settings.region, Option.none());
+      assert.deepStrictEqual(settings.endpoint, Option.none());
+      assert.deepStrictEqual(settings.size, Option.none());
       assert.isTrue(settings.isolated);
       const custom = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
-        yaml + "      region: eu-own-1\n",
+        yaml +
+          "      region: eu-own-1\n      endpoint: https://boxd.example.com:9443\n      size: 1x32\n",
       );
       const customWorker = custom.workers[0];
       assert(customWorker?.kind === "ssh" && Option.isSome(customWorker.provisioner));
       assert(customWorker.provisioner.value.provider === "boxd");
-      assert.strictEqual(customWorker.provisioner.value.region, "eu-own-1");
-      const encoded = yield* Schema.encodeEffect(UsineConfig)(parsed);
-      const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
-      assert.deepStrictEqual(decoded, parsed);
+      assert.deepStrictEqual(customWorker.provisioner.value.region, Option.some("eu-own-1"));
+      assert.deepStrictEqual(
+        customWorker.provisioner.value.endpoint,
+        Option.some("https://boxd.example.com:9443"),
+      );
+      assert.deepStrictEqual(customWorker.provisioner.value.size, Option.some("1x32"));
+      for (const config of [parsed, custom]) {
+        const encoded = yield* Schema.encodeEffect(UsineConfig)(config);
+        const decoded = yield* Schema.decodeEffect(UsineConfig)(encoded);
+        assert.deepStrictEqual(decoded, config);
+      }
+      for (const endpoint of [
+        "http://127.0.0.1:9443",
+        "http://localhost:9443",
+        "http://[::1]:9443",
+        "https://[::1]:9443",
+        "https://boxd.sh",
+        "https://boxd.example.com:65535",
+      ]) {
+        const accepted = yield* parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          yaml + `      endpoint: ${endpoint}\n`,
+        );
+        const acceptedWorker = accepted.workers[0];
+        assert(acceptedWorker?.kind === "ssh" && Option.isSome(acceptedWorker.provisioner));
+        assert(acceptedWorker.provisioner.value.provider === "boxd");
+        assert.deepStrictEqual(acceptedWorker.provisioner.value.endpoint, Option.some(endpoint));
+      }
       for (const invalid of [
         yaml + "      size: small\n",
+        yaml + "      size: 0x4\n",
+        yaml + "      size: 2x0\n",
+        yaml + "      size: 02x8\n",
+        yaml + "      size: 2X8\n",
+        yaml + "      size: 2x8.5\n",
         yaml + "      region: FRA\n",
         yaml + '      region: ""\n',
+        yaml + "      endpoint: boxd.example.com:9443\n",
+        yaml + "      endpoint: https://boxd.example.com:9443/api\n",
+        yaml + "      endpoint: https://boxd.example.com:9443/\n",
+        yaml + "      endpoint: ftp://boxd.example.com\n",
+        yaml + "      endpoint: HTTPS://boxd.example.com:9443\n",
+        yaml + "      endpoint: https://Boxd.example.com:9443\n",
+        yaml + "      endpoint: https://user@boxd.example.com\n",
+        // Plain HTTP would carry the API key in clear text off the host.
+        yaml + "      endpoint: http://boxd.example.com:9443\n",
+        yaml + "      endpoint: http://10.0.0.5:9443\n",
+        yaml + "      endpoint: https://boxd.example.com:99999\n",
+        yaml + "      endpoint: https://boxd.example.com:0\n",
+        yaml + "      endpoint: https://[:::]:9443\n",
         yaml.replace("snapshot: usine-attempt", "snapshot: Bad_Name"),
         yaml.replace("      snapshot: usine-attempt\n", ""),
         yaml +
@@ -526,6 +571,15 @@ workers:
           .pipe(Effect.result);
         assert.isTrue(Result.isFailure(result));
       }
+      // Releases before boxd's single-use machines accepted reuse; a boxd worker ignores it.
+      const reused = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        yaml + "      reuse: { attempts: 5, max_age: 2h }\n",
+      );
+      const reusedWorker = reused.workers[0];
+      assert(reusedWorker?.kind === "ssh" && Option.isSome(reusedWorker.provisioner));
+      assert(reusedWorker.provisioner.value.provider === "boxd");
+      assert.isTrue(Option.isSome(reusedWorker.provisioner.value.reuse));
       // Releases before boxd's Exec transport required identity_file; a boxd worker ignores it.
       const withKey = yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
@@ -966,89 +1020,111 @@ workers:
     }).pipe(Effect.provide(parserLayer)),
   );
 
-  it.effect("warns when a Lane or label-related trigger literal is undeclared", () =>
-    Effect.gen(function* () {
-      const parser = yield* ConfigParser;
-      const config = yield* parser.parseUsineYaml(
-        InstancePath.make("usine.yaml"),
-        [
-          "version: 1",
-          "labels: [{ name: declared }]",
-          "repos:",
-          "  - name: basaltbytes/usine",
-          "    lanes:",
-          "      - name: Ready",
-          "        sources: [{ label: missing-lane }]",
-        ].join("\n"),
-      );
-      const loop = yield* parser.parseLoopFile(
-        InstancePath.make("loops/watch-label.md"),
-        [
-          "---",
-          "trigger:",
-          "  on: issue",
-          "  if: item.labels.nodes.exists(label, label.name == 'missing-trigger' && item.state == 'OPEN')",
-          "agent: developer",
-          "---",
-          "Handle it.",
-        ].join("\n"),
-      );
-      const chainedMacroLoop = yield* parser.parseLoopFile(
-        InstancePath.make("loops/watch-chained-label.md"),
-        [
-          "---",
-          "trigger:",
-          "  on: issue",
-          "  if: item.labels.nodes.map(label, label.name).exists(name, name == 'missing-chained-trigger')",
-          "agent: developer",
-          "---",
-          "Handle it.",
-        ].join("\n"),
-      );
+  it.effect(
+    "warns when a Lane, label-related trigger literal, or outcome label is undeclared",
+    () =>
+      Effect.gen(function* () {
+        const parser = yield* ConfigParser;
+        const config = yield* parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          [
+            "version: 1",
+            "labels: [{ name: declared }]",
+            "repos:",
+            "  - name: basaltbytes/usine",
+            "    lanes:",
+            "      - name: Ready",
+            "        sources: [{ label: missing-lane }]",
+          ].join("\n"),
+        );
+        const loop = yield* parser.parseLoopFile(
+          InstancePath.make("loops/watch-label.md"),
+          [
+            "---",
+            "trigger:",
+            "  on: issue",
+            "  if: item.labels.nodes.exists(label, label.name == 'missing-trigger' && item.state == 'OPEN')",
+            "agent: developer",
+            "---",
+            "Handle it.",
+          ].join("\n"),
+        );
+        const chainedMacroLoop = yield* parser.parseLoopFile(
+          InstancePath.make("loops/watch-chained-label.md"),
+          [
+            "---",
+            "trigger:",
+            "  on: issue",
+            "  if: item.labels.nodes.map(label, label.name).exists(name, name == 'missing-chained-trigger')",
+            "agent: developer",
+            "---",
+            "Handle it.",
+          ].join("\n"),
+        );
 
-      const conditionalLoop = yield* parser.parseLoopFile(
-        InstancePath.make("loops/watch-conditional-label.md"),
-        [
-          "---",
-          "trigger:",
-          "  on: issue",
-          "  if: \"item.labels.nodes.exists(label, label.name == (item.state == 'OPEN' ? 'declared' : 'missing-conditional-trigger'))\"",
-          "agent: developer",
-          "---",
-          "Handle it.",
-        ].join("\n"),
-      );
+        const conditionalLoop = yield* parser.parseLoopFile(
+          InstancePath.make("loops/watch-conditional-label.md"),
+          [
+            "---",
+            "trigger:",
+            "  on: issue",
+            "  if: \"item.labels.nodes.exists(label, label.name == (item.state == 'OPEN' ? 'declared' : 'missing-conditional-trigger'))\"",
+            "agent: developer",
+            "---",
+            "Handle it.",
+          ].join("\n"),
+        );
 
-      const warnings = yield* parser.configWarnings(config, [
-        loop,
-        chainedMacroLoop,
-        conditionalLoop,
-      ]);
-      expect(warnings).toEqual([
-        expect.objectContaining({
-          _tag: "UndeclaredLaneLabelWarning",
-          repository: "basaltbytes/usine",
-          lane: "Ready",
-          label: "missing-lane",
-        }),
-        expect.objectContaining({
-          _tag: "UndeclaredTriggerLabelWarning",
-          loop: "watch-label",
-          label: "missing-trigger",
-        }),
-        expect.objectContaining({
-          _tag: "UndeclaredTriggerLabelWarning",
-          loop: "watch-chained-label",
-          label: "missing-chained-trigger",
-        }),
-        expect.objectContaining({
-          _tag: "UndeclaredTriggerLabelWarning",
-          loop: "watch-conditional-label",
-          label: "missing-conditional-trigger",
-        }),
-      ]);
-      expect(warnings.some((warning) => warning.label === "OPEN")).toBe(false);
-    }).pipe(Effect.provide(parserLayer)),
+        const outcomeLoop = yield* parser.parseLoopFile(
+          InstancePath.make("loops/review.md"),
+          [
+            "---",
+            "trigger:",
+            "  on: pr",
+            "  if: 'true'",
+            "agent: developer",
+            "outcome_labels: [Declared, review-pased]",
+            "---",
+            "Review it.",
+          ].join("\n"),
+        );
+
+        const warnings = yield* parser.configWarnings(config, [
+          loop,
+          chainedMacroLoop,
+          conditionalLoop,
+          outcomeLoop,
+        ]);
+        expect(warnings).toEqual([
+          expect.objectContaining({
+            _tag: "UndeclaredLaneLabelWarning",
+            repository: "basaltbytes/usine",
+            lane: "Ready",
+            label: "missing-lane",
+          }),
+          expect.objectContaining({
+            _tag: "UndeclaredTriggerLabelWarning",
+            loop: "watch-label",
+            label: "missing-trigger",
+          }),
+          expect.objectContaining({
+            _tag: "UndeclaredTriggerLabelWarning",
+            loop: "watch-chained-label",
+            label: "missing-chained-trigger",
+          }),
+          expect.objectContaining({
+            _tag: "UndeclaredTriggerLabelWarning",
+            loop: "watch-conditional-label",
+            label: "missing-conditional-trigger",
+          }),
+          expect.objectContaining({
+            _tag: "UndeclaredOutcomeLabelWarning",
+            loop: "review",
+            label: "review-pased",
+          }),
+        ]);
+        expect(warnings.some((warning) => warning.label === "OPEN")).toBe(false);
+      }).pipe(Effect.provide(parserLayer)),
   );
 
   it.effect("parses parent_effort in settings and agent frontmatter as the Effort scale", () =>
@@ -1219,6 +1295,45 @@ workers:
       ]) {
         expect((yield* parse(field).pipe(Effect.flip)).stage).toBe("schema");
       }
+      for (const [field, message] of [
+        ["outcome_labels: [' passed ']\n", "GitHub label name without surrounding whitespace"],
+        [`outcome_labels: [${"x".repeat(51)}]\n`, "GitHub label name of at most 50 characters"],
+        ["outcome_labels: [passed, Passed]\n", "unique GitHub label names, ignoring case"],
+      ] as const) {
+        expect((yield* parse(field).pipe(Effect.flip)).message).toContain(message);
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("rejects outcome labels on a schedule loop in YAML and JSON", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const file = InstancePath.make("loops/nightly.md");
+      const source = (field: string) =>
+        `---\ntrigger:\n  on: schedule\n  cron: "0 3 * * *"\n  if: 'true'\nagent: developer\n${field}---\nCheck the build.`;
+      expect(
+        (yield* parser.parseLoopFile(file, source("outcome_labels: []\n"))).outcomeLabels,
+      ).toEqual([]);
+      const authored = yield* parser
+        .parseLoopFile(file, source("outcome_labels: [passed]\n"))
+        .pipe(Effect.flip);
+      expect(authored.stage).toBe("schema");
+      expect(authored.message).toContain("no outcome labels on a schedule loop");
+      expect(authored.details?.map(({ path }) => path)).toContainEqual(["outcome_labels"]);
+
+      const valid = yield* parser.parseLoopFile(file, source(""));
+      const json = yield* Schema.encodeEffect(Schema.toCodecJson(LoopFile))(valid).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
+      );
+      const checked = yield* parser.checkLoopDraft(
+        file,
+        { value: { ...json, outcomeLabels: ["passed"] } },
+        Option.none(),
+      );
+      expect(Option.isNone(checked.loop)).toBe(true);
+      expect(checked.problems.map(({ message }) => message).join("\n")).toContain(
+        "no outcome labels on a schedule loop",
+      );
     }).pipe(Effect.provide(parserLayer)),
   );
 

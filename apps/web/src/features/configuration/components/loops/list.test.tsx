@@ -19,6 +19,7 @@ import { LoopDetail } from "~/features/configuration/components/loops/detail";
 import { interpolations } from "~/features/configuration/components/prompt";
 import { usePauseLoop } from "~/features/configuration/queries";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
+import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 import { SettingsPage } from "~/features/configuration/settings.page";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
@@ -55,6 +56,7 @@ const text = (markup: string): string =>
     .replace(/<[^>]+>/gu, " ")
     .replace(/&quot;/gu, '"')
     .replace(/&#x27;/gu, "'")
+    .replace(/&gt;/gu, ">")
     .replace(/&amp;/gu, "&")
     .replace(/\s+/gu, " ");
 
@@ -98,7 +100,7 @@ describe("Loops page", () => {
       [...markup.matchAll(/<button[^>]*>(.*?)<\/button>/gu)].map(([, label]) =>
         text(label ?? "").trim(),
       ),
-      ["New"],
+      ["New loop"],
     );
   });
 
@@ -107,7 +109,7 @@ describe("Loops page", () => {
       await render(() => <LoopsList configuration={emptyConfiguration()} pause={null} />),
     );
     assert.include(page, "No loops");
-    assert.include(page, "Choose New to add a loop");
+    assert.include(page, "A loop starts an agent run for each item in a project");
   });
 
   it("shows a Loop's trigger and selector verbatim, its facts, and its prompt with marked expressions", async () => {
@@ -125,7 +127,10 @@ describe("Loops page", () => {
       'if: item.labels.nodes.exists(label, label.name == "ready") && item.assignees.totalCount == 0',
     );
     assert.include(page, "No selector: every registered repository");
-    assert.include(page, "Condition uses an undeclared label: urgent");
+    assert.include(
+      page,
+      "Condition uses an undeclared label: urgent. usine creates only the labels in Configuration > Labels.",
+    );
     assert.include(markup, 'href="/configuration/agents/developer"');
     assert.include(page, "codex · gpt-5.6-sol · high");
     assert.include(markup, 'href="/configuration/repositories/basaltbytes/site"');
@@ -142,15 +147,19 @@ describe("Loops page", () => {
   });
 
   it("shows a selector as the file states it", async () => {
-    const page = text(
-      await render(() => (
-        <LoopDetail name="review-pr" configuration={configurationFixture()} pause={null} />
-      )),
-    );
+    const markup = await render(() => (
+      <LoopDetail name="review-pr" configuration={configurationFixture()} pause={null} />
+    ));
+    const page = text(markup);
     assert.include(page, "tags: engine");
     assert.include(page, "Read: review and comment, no push");
     assert.include(page, "2 higher values go first; ties use lane order");
     assert.include(page, "Same text for every run");
+    for (const label of ["ready-to-merge", "agent-review-findings", "review-pased"]) {
+      assert.include(markup, `<code class="font-mono text-xs">${label}</code>`);
+    }
+    assert.include(page, "Not declared in Configuration > Labels: review-pased");
+    assert.notInclude(page, "None; the agent's completion is enough");
   });
 
   it("shows why a quarantined Loop did not load and how to recover", async () => {
@@ -239,6 +248,20 @@ describe("Workers page", () => {
     assert.match(page, /boat-pool .* Deferred 20 Oct/u);
   });
 
+  it("places a boxd Worker without a size by its region alone", async () => {
+    const configuration = Schema.decodeUnknownSync(ConfigurationView)({
+      ...configurationJson,
+      workers: configurationJson.workers.map((worker) =>
+        worker.provisioner?._tag === "boxd"
+          ? { ...worker, provisioner: { ...worker.provisioner, size: null } }
+          : worker,
+      ),
+    });
+    const markup = await render(() => <WorkersList configuration={configuration} />);
+    assert.include(markup, ">boxd fra, one machine per attempt<");
+    assert.notInclude(text(markup), "boxd 2x8");
+  });
+
   it("shows a Hetzner Worker's provisioner by variable names only, and where its harnesses are checked", async () => {
     const page = text(
       await render(() => <WorkerDetail name="hz-pool" configuration={configurationFixture()} />),
@@ -290,8 +313,8 @@ describe("Workers page", () => {
       await render(() => <WorkerDetail name="local" configuration={configuration} />),
     );
     assert.include(detail, "Paused");
-    assert.include(detail, "takes no new attempts while usine.yaml pauses it");
-    assert.include(detail, "Clear Paused in the worker's configuration to resume it.");
+    assert.include(detail, "takes no new attempts while paused");
+    assert.include(detail, "Clear Paused in Configuration > Workers to resume it.");
     const list = text(await render(() => <WorkersList configuration={configuration} />));
     assert.strictEqual(list.split("Paused: takes no new attempts").length, 2, "only local");
     const unpaused = text(
@@ -350,6 +373,30 @@ describe("Workers page", () => {
     );
   });
 
+  it("lists the findings of a Worker's last machine preflight, and nothing without any", async () => {
+    const finding =
+      "The SSH user can't read the kernel journal or ring buffer on usine@eu-1, so out-of-memory kills record no process names.";
+    const checked = Schema.decodeUnknownSync(ConfigurationView)({
+      ...configurationJson,
+      workers: configurationJson.workers.map((worker) =>
+        worker.name === "eu-1"
+          ? {
+              ...worker,
+              prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
+              findings: [finding],
+            }
+          : worker,
+      ),
+    });
+    const page = await render(() => <WorkerDetail name="eu-1" configuration={checked} />);
+    assert.include(text(page), `Preflight findings ${finding}`);
+    assert.match(page, /<p id="([^"]+)"[^>]*>Preflight findings<\/p><ul aria-labelledby="\1"/u);
+    const without = text(
+      await render(() => <WorkerDetail name="eu-1" configuration={configurationFixture()} />),
+    );
+    assert.notInclude(without, "Preflight findings");
+  });
+
   it("shows an SSH Worker without Docker as degraded, with the reason, and its container settings", async () => {
     const page = text(
       await render(() => <WorkerDetail name="eu-2" configuration={configurationFixture()} />),
@@ -359,6 +406,14 @@ describe("Workers page", () => {
     assert.include(page, "can read each other's credentials");
     assert.include(page, "registry.example/usine-worker:custom");
     assert.include(page, "1.5 CPUs, 6144 MiB, 2048 processes");
+  });
+
+  it("says when no Worker has the name", async () => {
+    const page = text(
+      await render(() => <WorkerDetail name="nope" configuration={configurationFixture()} />),
+    );
+    assert.include(page, "Worker not found");
+    assert.include(page, "Configuration > Workers has no worker nope.");
   });
 
   it("says that no Worker runs Attempts in setup mode", async () => {
@@ -392,11 +447,48 @@ describe("Repositories page", () => {
     assert.include(page, "Ready ready Review review");
   });
 
+  it("shows the labels usine creates in a repository, from Configuration > Labels", async () => {
+    const page = text(
+      await render(() => (
+        <RepositoryDetail owner="basaltbytes" name="usine" configuration={configurationFixture()} />
+      )),
+    );
+    assert.include(page, "Labels usine creates");
+    assert.include(page, "From Configuration > Labels");
+  });
+
+  it("says when a repository has no declared labels", async () => {
+    const configuration = configurationFixture();
+    const unlabeled = {
+      ...configuration,
+      repositories: configuration.repositories.map((repository) => ({
+        ...repository,
+        declaredLabels: [],
+      })),
+    };
+    const page = text(
+      await render(() => (
+        <RepositoryDetail owner="basaltbytes" name="usine" configuration={unlabeled} />
+      )),
+    );
+    assert.include(page, "No labels in Configuration > Labels");
+  });
+
+  it("says when no repository has the name", async () => {
+    const page = text(
+      await render(() => (
+        <RepositoryDetail owner="basaltbytes" name="nope" configuration={configurationFixture()} />
+      )),
+    );
+    assert.include(page, "Repository not registered");
+    assert.include(page, "Configuration > Repositories has no repository basaltbytes/nope.");
+  });
+
   it("says how to register a repository when there is none", async () => {
     const page = text(
       await render(() => <RepositoriesList configuration={emptyConfiguration()} />),
     );
-    assert.include(page, "No repositories registered");
+    assert.include(page, "No repositories");
   });
 });
 

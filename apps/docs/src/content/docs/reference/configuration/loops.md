@@ -21,7 +21,7 @@ The names below identify fields in the text editor. The form provides controls f
 | `max_cycles` | integer ≥ 1 | `3` | Runs this loop can open on one item between operator resets. |
 | `permissions` | `write` or `read` | `write` | Repository content access of each attempt's GitHub token. |
 | `priority` | integer or integer CEL expression | `0` | Queue priority, with higher values first. |
-| `outcome_labels` | list of label names | `[]` | At least one must be added to the item during the run before the agent completes. |
+| `outcome_labels` | list of label names | `[]` | At least one must be added to the item during the run before the agent completes. Not allowed on schedule loops. |
 | `ci` | CI policy | omitted | Required checks and fix loop after an agent pushes. |
 
 For example, choose the issue stream, agent `developer`, approval `required`, and this condition:
@@ -50,7 +50,7 @@ Run the repository checks and push before finishing. Do not merge.
 
 For example, a weekly schedule uses cron `0 6 * * 1`, time zone `Europe/Paris`, and condition `true`. After downtime, only the latest missed tick fires, once per selected repository.
 
-Polling evaluates changed issues and pull requests, and refreshes open pull requests for mergeability changes. A matching item state opens one run; timestamps alone do not create another state. A changed state can supersede a run before its first attempt. A false condition revokes runs with no started attempt; running attempts continue. A queued event is rechecked before opening its run; a recheck error or timeout permits the run and logs a warning.
+Polling evaluates changed issues and pull requests, and refreshes open pull requests for mergeability changes. A matching item state opens one run; timestamps alone do not create another state. A changed state can supersede a run before its first attempt. A false condition revokes runs with no started attempt; running attempts continue. A queued event is rechecked before its run opens. If the recheck fails or times out, usine logs a warning: a trigger match opens with its saved settings, and a CI fix stays queued until a later reconciliation can read its pull request.
 
 Issue and schedule attempts start detached at the latest default-branch commit. Pull request attempts start detached at the recorded head commit. A task that pushes to a pull request must tell the agent to check out its source branch first.
 
@@ -93,7 +93,11 @@ If usine can't read the label events, it checks the item's current labels instea
 
 The label-event read, including bot-account lookup and all accounts used by the run, has a 15-second timeout. The current-label read has its own 15-second timeout. usine retries a read twice, after one and two seconds, after timeouts, transport failures, server errors, and other failures that GitHub does not classify as definite refusals. A missing item or a definite refusal, such as a 401, 403, or 404 response, ends the read. If the current labels can't be read either, the attempt and run fail with `AgentFailure` in **Needs attention**. Verification retries only the reads; it doesn't rerun the agent.
 
-The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the handoff's `on_green` actions instead. Schedule events cannot satisfy an item label requirement.
+The empty default disables verification. The requirement is saved with the event, so retry and restart retain it; **Run again** uses the current loop setting. Outcome labels apply when the agent ends. For labels applied after CI passes, use the handoff's `on_green` actions instead. Don't list an `on_green` label in `outcome_labels`: usine checks the outcome labels when the agent ends, before the CI wait starts, so the label isn't there yet and the run fails.
+
+A schedule loop can't set `outcome_labels` because its runs have no item to label; the loop fails to load with a schema error. Labels that differ only in letter case are rejected. A label that `usine.yaml` doesn't declare under `labels` still loads, but usine logs `Loop outcome label is not a declared GitHub label` at startup and each time it applies a configuration revision, and the loop's page in **Configuration > Loops** shows a warning next to its outcome labels.
+
+Earlier versions accepted outcome labels on a schedule loop and labels that differ only in letter case. When usine opens a stored configuration that contains them, it removes the schedule loop's outcome labels and each repeated label, keeping the first spelling. It records the change as one configuration revision without an actor and logs `Removed stored outcome labels that the loop rules reject` for each loop. If the configuration is still invalid after this change, usine leaves the stored loops unchanged and logs `Kept stored outcome labels; the upgraded configuration is invalid` with the problems. In **Configuration > History**, a stored loop value that the current rules reject appears as YAML of its stored fields.
 
 ## Priority
 

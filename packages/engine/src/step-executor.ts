@@ -1,10 +1,14 @@
-import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
+import type {
+  AttemptRecovery,
+  RecoveredLeftovers,
+  RecoverySink,
+} from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId, type StopReason } from "@usine/core/attempt";
 import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
-import { LoopPermissions } from "@usine/core/loop";
+import { LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, type RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
@@ -45,7 +49,9 @@ export class StepExecution extends Schema.Class<
   /** Whether to reattach to the Attempt's live parent task instead of starting it. */
   reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** Whether the Run has a CI policy, so the Attempt's pull request must be verified on origin. */
-  requiresCi: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  requiresCi: Schema.Boolean,
+  /** The labels the Item must carry after a successful Attempt; empty disables the check. */
+  outcomeLabels: OutcomeLabels.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** A reservation of one Worker slot for an Attempt, freed by `release`. */
@@ -98,12 +104,13 @@ export class StepExecutor extends Context.Service<
      * Reconciles the checkout of an Attempt that no Run reattaches, recording its salvage before
      * releasing it. Stops a live parent task first, and fails, leaving the checkout, if it can't
      * confirm the stop. For an open Attempt whose parent task failed before a launch recorded it,
-     * also records the comments the Attempt posted on the Run's Item.
+     * also records the comments the Attempt posted on the Run's Item. Returns `gone` if neither
+     * the Attempt's machine nor its checkout is left.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
-    ) => Effect.Effect<void, E | AttemptFailure>;
+    ) => Effect.Effect<RecoveredLeftovers, E | AttemptFailure>;
     /**
      * Stops the Attempt's work for `reason`, including a parent task that survived a restart. Fails
      * if the parent task can't be confirmed stopped. The engine also calls it after `execute`

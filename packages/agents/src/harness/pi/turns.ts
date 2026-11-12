@@ -1,7 +1,7 @@
 import type { ContinuationPolicy } from "../continuation.ts";
 import type { OperatorMessageId } from "@usine/core/attempt/channel";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { ChildSession } from "@usine/core/agent/session";
+import type { AgentSession } from "@usine/core/agent/session";
 import { Effect, Fiber, Option, Schema } from "effect";
 import {
   AgentCapacityError,
@@ -40,7 +40,7 @@ export const piPauseGate = Effect.gen(function* () {
 
 /** Runs successive Pi turns in one SDK session; the conversation decides when the session completes. */
 export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
-  readonly session: ChildSession;
+  readonly session: AgentSession;
   readonly held: boolean;
   readonly paused: boolean;
   readonly idle: Option.Option<string>;

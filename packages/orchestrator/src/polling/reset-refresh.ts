@@ -96,3 +96,37 @@ export const acknowledgeResets = Effect.fn("PollingTriggers.acknowledgeResets")(
     { discard: true },
   );
 });
+
+/**
+ * Acknowledges the pending cycle-budget resets of repositories outside `watched`. No poll cycle
+ * refreshes their Items, and the CI fixes they replayed no longer match. A store failure is
+ * logged, and the next poll retries.
+ */
+export const acknowledgeUnwatchedResets = Effect.fn("PollingTriggers.acknowledgeUnwatchedResets")(
+  function* (watched: ReadonlyArray<RepositoryName>) {
+    const budgets = yield* CycleBudgets;
+    const keys = new Set(watched.map(canonicalRepositoryName));
+    yield* Effect.gen(function* () {
+      const unwatched = (yield* budgets.pendingResets).filter(
+        (reset) => !keys.has(canonicalRepositoryName(reset.repository)),
+      );
+      if (unwatched.length === 0) return;
+      yield* Effect.logInfo(
+        "Cycle budget reset names a repository that is no longer watched; acknowledged without a refresh",
+        {
+          repositories: [...new Set(unwatched.map(({ repository }) => repository))].join(", "),
+          itemKeys: unwatched.map(({ itemKey }) => itemKey).join(", "),
+        },
+      );
+      yield* Effect.forEach(unwatched, budgets.acknowledgeReset, { discard: true });
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not acknowledge the cycle budget resets of unwatched repositories; the next poll retries",
+          { errorTag: error._tag },
+        ),
+      ),
+      Effect.ignore,
+    );
+  },
+);

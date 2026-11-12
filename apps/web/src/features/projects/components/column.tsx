@@ -8,10 +8,9 @@ import { loadingTasks, retryTasks, laneFoldCommand } from "~/lib/projects/string
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react";
-import { isSettledItemState } from "@usine/config/board";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { LabelBadge } from "~/components/label-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -21,12 +20,8 @@ import { BoardCard } from "~/features/projects/components/card/card";
 import { type LabelCatalog } from "~/lib/projects/card";
 import { FlowArrow, type LaneFlow } from "~/features/projects/components/flow";
 import type { BoardMoveProgress } from "~/hooks/projects/moves";
-
-/** Returns whether a lane starts folded: true for the fallback lane and for lanes with only closed Items. */
-export const foldsByDefault = (lane: BoardLaneView): boolean =>
-  lane.origin === "fallback" ||
-  (lane.sources.length > 0 &&
-    lane.sources.every((source) => "state" in source && isSettledItemState(source.state)));
+import { useLaneFold } from "~/features/projects/hooks/fold";
+import { foldableLane } from "~/features/projects/lib/board";
 
 type LaneSourcesProps = {
   readonly sources: BoardLaneView["sources"];
@@ -107,8 +102,8 @@ export const BoardColumn = ({
   openRun,
   onMove,
 }: BoardColumnProps) => {
-  const foldable = foldsByDefault(lane);
-  const [folded, setFolded] = useState(foldable);
+  const foldable = foldableLane(lane);
+  const [folded, setFolded] = useLaneFold(project, lane);
   const writable = lane._tag === "WritableBoardLane";
   const { setNodeRef } = useDroppable({ id: lane.id, disabled: !writable || pending });
   const targets = lanes.filter(
@@ -145,7 +140,7 @@ export const BoardColumn = ({
   usePageCommands(
     foldable ? [{ label: laneFoldCommand(lane.name, folded), run: () => setFolded(!folded) }] : [],
   );
-  if (foldable && folded) return <LaneRail lane={lane} open={() => setFolded(false)} />;
+  if (folded) return <LaneRail lane={lane} open={() => setFolded(false)} />;
   return (
     <section
       ref={setNodeRef}

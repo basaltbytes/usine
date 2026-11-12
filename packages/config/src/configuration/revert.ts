@@ -1,6 +1,6 @@
 import { Array as Arr, Effect, Option } from "effect";
 import type { ConfigParser } from "../parser.ts";
-import { commit } from "./commit.ts";
+import { replay } from "./commit.ts";
 import { configurationEntities } from "./entities.ts";
 import {
   Configuration,
@@ -39,7 +39,7 @@ export const revertConfiguration = (
     for (const entry of history
       .filter(({ number }) => number < target.number)
       .sort((a, b) => a.number - b.number)) {
-      previous = (yield* commit(parser, previous, previous.number, entry.changes, entry))
+      previous = (yield* replay(parser, previous, previous.number, entry.changes, entry))
         .configuration;
     }
     const workerKeys = (snapshot: Configuration) =>

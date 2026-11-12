@@ -62,6 +62,8 @@ const usageFrame = (id, parent, output = 10) => ({
 let waiting = false;
 let hookPending = false;
 let toolFinished = false;
+// A turn submitted while a hook is pending, written after the hook response with z first.
+let queuedTurn;
 const timer = setInterval(() => {
   if (fs.existsSync('request-usage-prefix') && !fs.existsSync('usage-prefix-sent')) {
     sendBatch([
@@ -103,7 +105,8 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {
       commands: [], agents: [], models: [{ value: ${model}, displayName: 'Replay', description: 'Recorded model' }], account: { apiKeySource: 'none' }, output_style: 'default', available_output_styles: ['default'],
     } } });
-    if (message.request.subtype === 'interrupt') {
+    // An interrupt without a waiting turn reports no turn result.
+    if (message.request.subtype === 'interrupt' && waiting) {
       waiting = false;
       const result = messages.find(message => message.type === 'result');
       sendBatch([{ ...result, result: 'Interrupted' }, sessionState('idle')]);
@@ -113,6 +116,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     if (message.response.request_id === 'pending-hook' && message.response.subtype === 'success') {
       hookPending = false;
       fs.appendFileSync('hook-responses', JSON.stringify(message) + '\\n');
+      if (queuedTurn) { sendBatch([usageFrame('z', 'task-z'), ...queuedTurn]); queuedTurn = undefined; }
     }
   }
   else if (message.type === 'user') {
@@ -125,10 +129,12 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       setTimeout(() => process.exit(1), 50);
       return;
     }
+    waiting = true;
+    const turn = [sessionState('running'), mirror, ...messages.slice(0, 2)];
+    if (hookPending && fs.existsSync('usage-after-hook')) { queuedTurn = turn; return; }
     // One write makes the checkpoint exercise multiple protocol messages in one owner frame.
     sendNoise();
-    sendBatch([sessionState('running'), mirror, ...messages.slice(0, 2)]);
-    waiting = true;
+    sendBatch(turn);
   }
 }).on('close', () => { clearInterval(timer); });
 `;

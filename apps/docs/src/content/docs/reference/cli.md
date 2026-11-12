@@ -20,7 +20,7 @@ usine up
 usine up --detach --origin https://usine.example.com
 ```
 
-Startup takes the instance lock, checks the listener, applies runtime database migrations, loads stored configuration, reads App and worker credentials, checks workers, and recovers attempts. Empty configuration tables accept a bootstrap import or initialize empty setup configuration. [Import and export format](/reference/configuration/import-export/) describes bootstrap input. Later starts read the database.
+Startup takes the instance lock, checks the listener, applies runtime database migrations, loads stored configuration, reads App and worker credentials, checks workers, and recovers attempts. Recovery visits every attempt that still has tracked leftovers on a configured worker and logs one summary per worker with the attempts visited, kept, and discarded. A finished attempt whose machine and checkout are both gone is discarded, so later starts skip it. Open attempts and attempts whose recovery failed stay tracked. On SSH workers, the first preparation after a start logs one warning with the number of unrecognized paths under `attempts/`, excluding the checkouts of attempts being reattached; the paths are logged at debug level. Empty configuration tables accept a bootstrap import or initialize empty setup configuration. [Import and export format](/reference/configuration/import-export/) describes bootstrap input. Later starts read the database.
 
 Missing or invalid App credentials start setup mode. Polling and schedules stay idle until setup completes. Worker preflight failure stops runtime startup. The App secrets file, `.usine/github-app.json`, must be a regular file with mode `0600`; environment values override corresponding file fields.
 
@@ -190,6 +190,18 @@ usine sign-in-link
 
 The URL works once within ten minutes. Local lifecycle and link commands require a regular `.usine/admin-token` owned by the current user with mode `0600`. Startup replaces that file. See [Access](/reference/access/).
 
+## usine mcp
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--origin <url>` | instance origin | running instance of the current folder | Instance whose operator tools to serve. With `--origin`, the command sends `USINE_TOKEN`; without it, it uses `.usine/admin-token`. |
+
+```sh
+USINE_TOKEN=<token> usine mcp --origin https://usine.example.com
+```
+
+The command serves the operator API as MCP tools over standard input and output, for a client that starts it as a local command. At start, it reads the instance's `/api/openapi.json` and the token's session, and lists only the tools that the token permits. It refuses a start response over 8 MiB, one that takes over 30 seconds, or one that nests arrays and objects over 256 levels deep or holds over 200,000 of them, before decoding it. It inlines schema references until the input schemas of the whole document hold 500,000 characters of JSON, at most 32 references deep, and at most 64 levels of arrays and objects deep; past any of these limits, the schema accepts any value at that point and a warning is logged. It sends the token only to the origin: a tool call whose URL resolves to another host returns an error result. It writes its logs to standard error. See [Connect an MCP client](/guides/connect-an-mcp-client/).
+
 ## Configuration commands
 
 [`usine config`](/reference/configuration/config/) documents `export`, `import`, `edit`, and `log`. These commands access the local database directly and save configuration revisions.
@@ -203,6 +215,7 @@ The URL works once within ten minutes. Local lifecycle and link commands require
 | `USINE_ORIGIN` | origin | loopback listener | Canonical origin used when `--origin` is absent. |
 | `USINE_LOG_LEVEL` | log level | `info` | Minimum log level used when the flag is absent. |
 | `USINE_ALLOW_VOLATILE_INSTANCE` | `1` | off | Equivalent to `--allow-volatile-instance`. |
+| `USINE_TOKEN` | secret string | none | Instance token that `usine mcp --origin` sends. |
 | `TMPDIR` | path | OS default | Additional path considered temporary by the volatile-instance check. |
 | `USINE_GITHUB_APP_ID` | positive integer | App secrets file | GitHub App ID. |
 | `USINE_GITHUB_PRIVATE_KEY` | PEM string | App secrets file | App RSA private key in RSA-specific or generic PEM encoding. |

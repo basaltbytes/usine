@@ -2,7 +2,12 @@ import { harnessesLive } from "@usine/agents/harness/node";
 import { jsonKey } from "@usine/core/json-key";
 import { NodeCrypto } from "@effect/platform-node";
 import { type ChildProcess, ChildProcessSpawner } from "effect/process";
-import { CHILD_KILL_SCRIPT, type ChildHost, RemoteShell } from "@usine/agents/child-host";
+import {
+  CHILD_KILL_SCRIPT,
+  type ChildHost,
+  RemoteShell,
+  STDIN_ENVIRONMENT_PREFIX,
+} from "@usine/agents/child-host";
 import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -131,8 +136,10 @@ interface FakeContainer {
   readonly labels: ReadonlyMap<string, string>;
   /** The `--env-file` content read from standard input. */
   readonly environment: string;
-  /** Whether its init runs. A stopped container reads as one that the kernel killed for memory. */
+  /** Whether its init runs. */
   running: boolean;
+  /** Whether the kernel killed its init for memory, if it stopped. */
+  initKilledForMemory: boolean;
   /** The processes that the kernel killed for memory since it started, which `memory.events` counts. */
   oomKills: number;
 }
@@ -171,6 +178,8 @@ interface FakeMachineState {
   /** Whether the SSH connection drops while the machine's resources are read, so `ssh` exits 255. */
   resourcesDisconnect: boolean;
   cacheExists: boolean;
+  /** Paths that `find` lists under the Worker's `attempts` directory besides the existing checkout. */
+  readonly attemptPaths: Array<string>;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
   /** The checkout the salvage finds: clean, dirty, or one whose `git status` never answers. */
@@ -215,7 +224,13 @@ interface FakeMachineState {
   limitsEnforced: boolean;
   runtimeExitCode: number;
   memoryEvents: "counted" | "unreadable" | "empty";
-  kernelMemory: "readable" | "unreadable";
+  /**
+   * With `no-kills`, the kernel logs are readable and name no process killed for memory; with
+   * `disconnects`, SSH loses the commands that read them.
+   */
+  kernelMemory: "readable" | "no-kills" | "unreadable" | "disconnects";
+  /** How many processes a readable kernel log names as killed in a container. */
+  kernelVictims: number;
   hostGroupId: string;
   imageGroupId: string;
   docker: "absent" | "running" | "unusable" | "socket-only";
@@ -361,6 +376,7 @@ export const fakeMachine = () => {
     threadsMax: 62_000,
     pidMax: 4_194_304,
     cacheExists: false,
+    attemptPaths: [],
     cloneEchoesToken: false,
     salvage: "clean",
     salvageCommitted: false,
@@ -383,6 +399,7 @@ export const fakeMachine = () => {
     runtimeExitCode: 0,
     memoryEvents: "counted",
     kernelMemory: "unreadable",
+    kernelVictims: 1,
     hostGroupId: "1000",
     imageGroupId: "1000",
     docker: "absent",
@@ -487,6 +504,7 @@ export const fakeMachine = () => {
         labels,
         environment: input,
         running: true,
+        initKilledForMemory: true,
         oomKills: 0,
       });
       return oneShotHandle(`${id}\n`, 0);
@@ -500,7 +518,14 @@ export const fakeMachine = () => {
       const name = words.at(-1) ?? "";
       const container = state.containers.get(name);
       if (container === undefined) return oneShotHandle("", 1, `Error: No such container: ${name}`);
-      return oneShotHandle(container.running ? "running 0 false\n" : "exited 137 true\n", 0);
+      return oneShotHandle(
+        container.running
+          ? "running 0 false\n"
+          : container.initKilledForMemory
+            ? "exited 137 true\n"
+            : "exited 143 false\n",
+        0,
+      );
     }
     if (line.startsWith("exec 'docker' 'start' ")) {
       const name = words.at(-1) ?? "";
@@ -523,20 +548,30 @@ export const fakeMachine = () => {
         `container ${container.id}\n` +
           (container.running
             ? `low 0\nhigh 0\nmax 9\noom ${container.oomKills}\noom_kill ${container.oomKills}\noom_group_kill 0\n`
-            : "oom_kill 1\n"),
+            : `oom_kill ${container.initKilledForMemory ? 1 : 0}\n`),
         0,
       );
     }
-    if (line.includes("journalctl -k")) {
+    if (line.includes("journalctl -k") && state.kernelMemory === "disconnects")
+      return oneShotHandle("", 255, "Connection to 203.0.113.7 closed by remote host.\n");
+    // The collection script also checks the journal's readability, so it goes first.
+    if (line.includes("journalctl -k --since")) {
       if (state.kernelMemory === "unreadable")
         return oneShotHandle("", 1, "dmesg: read kernel buffer failed: Operation not permitted");
       const container = state.containers.get(words.at(-1) ?? "");
       return oneShotHandle(
-        container === undefined
-          ? ""
-          : `oom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=1234,uid=1000\n`,
+        container === undefined || state.kernelMemory === "no-kills"
+          ? "source dmesg\n"
+          : `source journal\n${Array.from(
+              { length: state.kernelVictims },
+              (_, index) =>
+                `oom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/docker/${container.id},task_memcg=/docker/${container.id},task=vitest worker,pid=${1234 + index},uid=1000\n`,
+            ).join("")}`,
         0,
       );
+    }
+    if (line.includes("journalctl -k -b")) {
+      return oneShotHandle("", state.kernelMemory === "unreadable" ? 1 : 0);
     }
     if (line.includes("container inspect")) {
       const container = state.containers.get(words[5] ?? "");
@@ -725,7 +760,10 @@ export const fakeMachine = () => {
       return oneShotHandle("", 0);
     }
     if (line.startsWith("exec 'find' ") && line.includes("/attempts'")) {
-      const listed = state.cacheExists ? [`${WORKER_ROOT}/attempts/remote-run_execute_1`] : [];
+      const listed = [
+        ...(state.cacheExists ? [`${WORKER_ROOT}/attempts/remote-run_execute_1`] : []),
+        ...state.attemptPaths,
+      ];
       return oneShotHandle(listed.map((entry) => `${entry}${NUL}`).join(""), 0);
     }
     if (line.startsWith("exec 'find' ") && line.includes("/repos'"))
@@ -812,12 +850,12 @@ export const fakeMachine = () => {
       let line = remoteLine(command);
       let input = yield* standardInput(command);
       let stdinEnvironment: Readonly<Record<string, string>> = {};
-      if (line.startsWith("set +x; IFS= read -r usine_environment")) {
+      if (line.startsWith(STDIN_ENVIRONMENT_PREFIX)) {
         const boundary = input.indexOf("\n");
         if (state.stdinVariables === "received")
           stdinEnvironment = stdinExports(input.slice(0, boundary));
         input = input.slice(boundary + 1);
-        line = line.slice(line.indexOf(" && ", line.indexOf('eval "unset usine_environment;')) + 4);
+        line = line.slice(STDIN_ENVIRONMENT_PREFIX.length);
         if (state.stdinVariables === "no-base64") {
           state.calls.push({ command, line, input, stdinEnvironment });
           return oneShotHandle("", 127, "sh: 1: base64: not found\n");
@@ -945,6 +983,7 @@ export const request = CheckoutRequest.make({
   parentEffort: "high",
   salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
   resume: Option.none(),
+  requiresCi: false,
   commitAuthor: COMMIT_AUTHOR,
 });
 

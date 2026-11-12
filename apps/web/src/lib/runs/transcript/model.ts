@@ -9,7 +9,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { DateTime, Match, Option, type Schema } from "effect";
 import { brainLine, clockLabel, durationLabel } from "~/lib/strings";
-import { conflictingSalvageMessage, failureMessage } from "~/lib/runs/strings";
+import { conflictingSalvageMessage, failureMessage, NO_PARENT_SESSION } from "~/lib/runs/strings";
 import {
   indexSessions,
   type SessionEvents,
@@ -88,7 +88,7 @@ export interface TranscriptTool extends TranscriptPosition {
   readonly state: ToolState;
 }
 
-/** An entry in a conversation; a child section cannot contain another child section (ADR 0008). */
+/** An entry in a conversation; a child section cannot contain another child section. */
 export type TranscriptEntry = TranscriptNotice | TranscriptTool;
 
 /** The status of a session, independent of its Attempt's success or failure. */
@@ -325,16 +325,19 @@ export const projectTranscript = (
       notice(
         record,
         Match.valueTags(payload, {
-          Started: ({ parentModel, conflictingSalvage }): NoticeContent => ({
-            kind: "status",
-            label: "Attempt started",
-            detail: Option.match(conflictingSalvage, {
-              onNone: () => parentModel,
-              onSome: (salvage) => `${parentModel}. ${conflictingSalvageMessage(salvage)}`,
-            }),
-            format: "plain",
-            tone: "plain",
-          }),
+          Started: ({ parentModel, conflictingSalvage }): NoticeContent => {
+            const parent = Option.getOrElse(parentModel, () => NO_PARENT_SESSION);
+            return {
+              kind: "status",
+              label: "Attempt started",
+              detail: Option.match(conflictingSalvage, {
+                onNone: () => parent,
+                onSome: (salvage) => `${parent}. ${conflictingSalvageMessage(salvage)}`,
+              }),
+              format: "plain",
+              tone: "plain",
+            };
+          },
           Final: ({ result }): NoticeContent => ({
             kind: "status",
             label: "Attempt finished",

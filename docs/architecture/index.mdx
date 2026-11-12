@@ -75,7 +75,7 @@ flowchart TB
 
 [Workers and the gateway](./workers-and-gateway.mdx) describes each path, including three that the diagram omits: the admin API forward ([#249](https://github.com/basaltbytes/usine/issues/249)), the `llm.<domain>` host ([proxy.ts:206](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/proxy/proxy.ts#L206)), and the forward proxy on port 3128. The gateway's listeners are in [environment.ts:121](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/environment.ts#L121).
 
-ADR 0006's run host is gone: [#176](https://github.com/basaltbytes/usine/issues/176) deleted `@usine/run-host` and its byte protocol ([ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-contract-run-host-attempt-channel.md), amendment of 2026-10-11), so no usine package is installed on a worker. Attempt channel envelopes remain the transcript format.
+The run host is gone: [#176](https://github.com/basaltbytes/usine/issues/176) deleted `@usine/run-host` and its byte protocol ([ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-prepares-checkouts-runs-children-on-workers.md)), so no usine package is installed on a worker. Attempt channel envelopes remain the transcript format.
 
 ## Packages and apps
 
@@ -89,7 +89,7 @@ Dependencies are workspace packages only. `effect` is a peer dependency of every
 | `@usine/github` 0.1.2, `packages/github`             | GitHub App authentication and token minting, change detection, GraphQL payload slices, label writes.                                              | core                                                            |
 | `@usine/engine` 0.3.0, `packages/engine`             | Event ledger, run claims, supersede and revoke, one fiber per open run, cycle budgets, attempt admission and drain, the SQLite store.             | core                                                            |
 | `@usine/agents` 0.3.0, `packages/agents`             | Claude Code, Codex, and Pi child backends, where children run (`ChildHost`), prompt assembly, harness preflight.                                  | core                                                            |
-| `@usine/durable` 0.0.0, `packages/durable`           | Runs each attempt's Pi parent as a pi-durable task, forwards its activity as envelopes, resumes it after a restart.                               | agents, core                                                    |
+| `@usine/durable` 0.0.0, `packages/durable`           | Runs each attempt's Pi parent as a pi-durable task, or with the event-driven coordinator on the attempt journal, forwards its activity as envelopes, resumes it after a restart. | agents, core                                                    |
 | `@usine/executor` 0.2.1, `packages/executor`         | Worker contract for local, SSH, and exe.dev workers: preflight, checkout, credentials, launch, cancel, interventions, salvage, harvest, recovery. | agents, core, durable, gateway                                  |
 | `@usine/gateway` 0.0.0, `packages/gateway`           | Gateway service: reverse proxy for GitHub and LLM providers, allowlisted forward proxy, admin API for attachments. Binary `usine-gateway`.        | core                                                            |
 | `@usine/orchestrator` 0.2.1, `packages/orchestrator` | Polling and schedule triggers, worker scheduling, the operator service and HTTP contract, the board projection, the runtime layer.                | config, core, durable, engine, executor, expression, github     |
@@ -106,7 +106,7 @@ The public subpaths are the `exports` of each `package.json`:
 | `@usine/github`       | `/github-app`, `/item-writer`, `/label-writer`, `/local-secrets`, `/polling`                                                                                                                                                                                                                                    |
 | `@usine/engine`       | `/cursor`, `/cycle-budget`, `/database`, `/engine`, `/item-projection`, `/local-sqlite`, `/loop-control`, `/repository-label-projection`, `/run-reader`, `/step-executor`, `/transcript`, `/trigger-condition`                                                                                                  |
 | `@usine/agents`       | `/child-host`, `/children`, `/claude`, `/codex`, `/pi`, `/pi/authentication`, `/preflight`, `/prompt`, `/runtime`                                                                                                                                                                                               |
-| `@usine/durable`      | `/attempt-runtime`, `/backup`, `/harness`, `/live`, `/testing`                                                                                                                                                                                                                                                  |
+| `@usine/durable`      | `/attempt-runtime`, `/backup`, `/coordinator/journal`, `/coordinator/memory`, `/coordinator/sqlite`, `/harness`, `/live`, `/testing`                                                                                                                                                                                                                                                  |
 | `@usine/executor`     | `.`, `/local`, `/ssh`, `/exe-dev`                                                                                                                                                                                                                                                                               |
 | `@usine/gateway`      | `.`, `/admin`, `/node`                                                                                                                                                                                                                                                                                          |
 | `@usine/orchestrator` | `/board/projection`, `/credentials`, `/current-instance`, `/exe-dev`, `/idle-triggers`, `/label-reconciler`, `/local`, `/operator`, `/operator/http`, `/orchestrator`, `/polling-triggers`, `/runtime`, `/schedule-triggers`, `/scheduler`, `/ssh`                                                              |
@@ -205,10 +205,4 @@ sequenceDiagram
     href="./operator-surfaces.mdx"
     description="HTTP endpoints, web UI, CLI, and logs."
   />
-  <LinkCard
-    title="Dogfood instance loops"
-    href="./loops-shipped.md"
-    description="The dogfood instance's loops and agents."
-  />
-  <LinkCard title="Gaps" href="./gaps.md" description="What the code doesn't do yet." />
 </CardGrid>

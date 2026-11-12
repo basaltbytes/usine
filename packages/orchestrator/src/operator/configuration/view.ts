@@ -14,7 +14,7 @@ import {
 } from "@usine/core/agent";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { CycleLimit } from "@usine/core/cycle-budget";
-import { LoopName, LoopPermissions } from "@usine/core/loop";
+import { LoopName, LoopPermissions, OutcomeLabels } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
@@ -39,7 +39,8 @@ import { LaneItemState, LaneName } from "@usine/config/board";
 import { RegistryTag, type ManagedRepo, type Worker } from "@usine/config/factory";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
-import { DeclaredLabel, canonicalLabelName, GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
+import { DeclaredLabel } from "@usine/config/label";
 import { LoopApproval, LoopPriority, PromptTemplate, loopPath } from "@usine/config/loop";
 import { boardRepositories, Project, matchesLoop } from "@usine/config/project";
 import { Cron, TimeZone, Stream } from "@usine/config/trigger";
@@ -111,6 +112,10 @@ export class LoopFileView extends Schema.Class<
   paused: Schema.Boolean,
   /** Labels the trigger compares against that `usine.yaml` doesn't declare in `labels`. */
   undeclaredLabels: Schema.Array(GitHubLabelName),
+  /** Labels that prove a completed run; empty when the agent's completion is enough. */
+  outcomeLabels: OutcomeLabels,
+  /** Outcome labels that `usine.yaml` doesn't declare in `labels`. */
+  undeclaredOutcomeLabels: Schema.Array(GitHubLabelName),
 }) {}
 
 /** A Loop file that failed to load and opens no Runs, with the failed stage and reason. */
@@ -352,6 +357,11 @@ export class WorkerConfigurationView extends Schema.Class<
   preflightRunning: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** In harness name order; empty before any harness check. */
   harnesses: Schema.Array(HarnessPreflightView),
+  /**
+   * What the last passed preflight of the Worker's machine found missing that Attempts run
+   * without, such as a kernel log that the SSH user can't read; empty before one.
+   */
+  findings: Schema.Array(Schema.String).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** A Worker removed by a reload that still runs Attempts. It's removed when the last one ends. */
@@ -652,11 +662,12 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       (repository) => repositoryView(instance, repository, findings),
       { concurrency: 4 },
     );
-    const undeclared = (loop: LoopName) =>
+    const undeclared = (
+      loop: LoopName,
+      tag: "UndeclaredTriggerLabelWarning" | "UndeclaredOutcomeLabelWarning",
+    ) =>
       instance.warnings.flatMap((warning) =>
-        warning._tag === "UndeclaredTriggerLabelWarning" && warning.loop === loop
-          ? [warning.label]
-          : [],
+        warning._tag === tag && warning.loop === loop ? [warning.label] : [],
       );
     const loops = instance.loops.map((loop) =>
       LoopFileView.make({
@@ -685,7 +696,9 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         agent: loop.agent,
         prompt: loop.body,
         paused: paused.has(loop.name),
-        undeclaredLabels: undeclared(loop.name),
+        undeclaredLabels: undeclared(loop.name, "UndeclaredTriggerLabelWarning"),
+        outcomeLabels: loop.outcomeLabels,
+        undeclaredOutcomeLabels: undeclared(loop.name, "UndeclaredOutcomeLabelWarning"),
       }),
     );
     const agents = instance.agents.map((file) =>
@@ -731,6 +744,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         ),
         containerLimits:
           preflight === undefined ? null : Option.getOrNull(preflight.containerLimits),
+        findings: preflight?.findings ?? [],
         machines: inFlight.filter((machine) => machine.worker === worker.name).map(machineView),
         provisioning: Option.getOrNull(
           Option.map(

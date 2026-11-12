@@ -5,7 +5,8 @@ import { Array as Arr, Option, Result, Schema } from "effect";
 import { ManagedRepo, UsineConfig } from "../factory.ts";
 import { LoadedInstance } from "../instance/instance.ts";
 import { LoopFile } from "../loop.ts";
-import { DeclaredLabel, canonicalLabelName } from "../label.ts";
+import { canonicalLabelName } from "@usine/core/label";
+import { DeclaredLabel } from "../label.ts";
 import { ConfigurationInvalid } from "../configuration/model.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
 import { Selector, matchesSelector } from "../selector.ts";
@@ -60,7 +61,7 @@ export const boardRepositories = (config: UsineConfig): ReadonlyArray<ManagedRep
 
 /**
  * Converts a version 1 `instance` to one project per repository, copying each loop to its selected
- * projects (ADR 0031). Returns version 2 unchanged; a loop matching no registered repo fails with
+ * projects. Returns version 2 unchanged; a loop matching no registered repo fails with
  * `ConfigurationInvalid`.
  */
 export const migrateProjects = (

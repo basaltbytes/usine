@@ -8,6 +8,7 @@ import { Link } from "@tanstack/react-router";
 import type { ConfigurationView, WorkerSlotsView } from "@usine/orchestrator/operator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { CheckRow } from "~/features/configuration/components/workers/check-row";
+import { PreflightFindings } from "~/features/configuration/components/workers/findings";
 import { Machines } from "~/features/configuration/components/workers/machines";
 import {
   ConfigurationPage,
@@ -38,7 +39,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
     return (
       <ConfigurationPage entity={entityKey("worker", name)} title={name}>
         <Missing title="Worker not found">
-          <code>usine.yaml</code> has no worker {name}.{" "}
+          Configuration &gt; Workers has no worker {name}.{" "}
           <Link to="/configuration/workers" className="text-primary hover:underline">
             See all workers
           </Link>
@@ -119,6 +120,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
               </Table>
             </div>
           )}
+          <PreflightFindings findings={worker.findings} />
         </DetailSection>
       </DetailColumns>
     </ConfigurationPage>

@@ -6,18 +6,9 @@ import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Exit, Option, Queue, Semaphore } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableStorageFailed, HarnessListener } from "../harness.ts";
+import type { ChildDelivery } from "./delegation/journal.ts";
 import { ATTEMPT_RECORD_KIND, type AttemptRecord } from "./documents.ts";
-
-/**
- * Whether a child read a queued operator input, with the child's state when it read it, or `None`
- * if it stopped first.
- */
-export interface ChildDelivery {
-  readonly _tag: "Delivery";
-  readonly inputSequence: AttemptChannel.Sequence;
-  readonly intervention: AttemptChannel.Intervention;
-  readonly delivered: Option.Option<AttemptChannel.InterventionState>;
-}
+import { keepNotice } from "./notices.ts";
 
 /** Activity queued for relay, in order of occurrence. */
 export type RelayItem =
@@ -64,7 +55,7 @@ export interface AttemptHub {
   readonly childInputs: Set<number>;
   parent: Option.Option<ConversationId>;
   channel: Option.Option<AttachedChannel>;
-  /** The Worker notices received before the parent started, sent right after `Started`. */
+  /** The Worker notices received before the Attempt started, sent right after `Started`. */
   early: ReadonlyArray<AttemptChannel.WorkerNotice>;
   /**
    * Completes with the request of the `execute` call relaying this Attempt. Replaced when that call
@@ -80,20 +71,6 @@ export interface EndedAttempt {
   readonly attemptId: AttemptId;
   readonly taskId: TaskId;
 }
-
-/**
- * Returns the notices to buffer after `notice`: the latest one, preceded by the last
- * `WorkerUnresponsive` if the latest is a `WorkerResponsive`.
- */
-export const keepNotice = (
-  kept: ReadonlyArray<AttemptChannel.WorkerNotice>,
-  notice: AttemptChannel.WorkerNotice,
-): ReadonlyArray<AttemptChannel.WorkerNotice> => {
-  const previous = kept.at(-1);
-  return notice._tag === "WorkerResponsive" && previous?._tag === "WorkerUnresponsive"
-    ? [previous, notice]
-    : [notice];
-};
 
 /** The result of `AttemptHubs.notice`. */
 export type NoticeRouting =

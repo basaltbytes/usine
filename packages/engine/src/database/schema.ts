@@ -540,7 +540,7 @@ export const boardMoves = snakeCase.table(
   ],
 );
 
-/** Operator runtime toggles, separate from Loop files (ADR 0009). */
+/** Operator runtime toggles, separate from the authored Loop configuration. */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<LoopName>().primaryKey(),
   paused: integer({ mode: "boolean" }).notNull(),

@@ -14,8 +14,9 @@ A signed-in browser session with project viewer access or a higher role.
 1. Open **Overview**. Select a running attempt, recent run, or Needs attention entry. Alternatively, open the project’s **Board** or **Tasks** and select its task.
 2. On a task page, select a run under **Runs**. The drawer shows its item, loop, state, agent, worker, duration, and available actions. Select **Open run page** for the conversation.
 3. In the attempt outline, select an attempt and expand grouped session messages. Errors, blockers, questions, operator messages, and outcomes stay visible. Error counts navigate failures; recovered counts navigate failed tool calls after which the agent continued.
-4. Expand **Prompt received by** in the attempt details to read the exact initial prompt sent to a child. Each child receives the rendered loop task unchanged, followed by the standard completion instructions; parent context appears separately. These disclosures appear for attempts recorded with child prompts.
-5. Inspect **Task** and **Event** to compare the rendered task with its saved trigger payload. Select **Tokens** for per-session and per-pool usage and cost.
+4. Read the attempt details for the worker, the parent model, and each child's harness, model, and effort. An attempt that runs without a parent session shows **No parent session** instead of a parent model.
+5. Expand **Prompt received by** in the attempt details to read the exact initial prompt sent to a child. Each child receives the rendered loop task unchanged, followed by the standard completion instructions; parent context appears separately. These disclosures appear for attempts recorded with child prompts.
+6. Inspect **Task** and **Event** to compare the rendered task with its saved trigger payload. Select **Tokens** for per-session and per-pool usage and cost.
 
 ## Check the result
 
@@ -53,4 +54,4 @@ Open-issue checks run at most once every 10 minutes after a successful check. Fa
 
 A GitHub server error (HTTP 5xx) for one item's snapshot doesn't fail the poll. usine logs a warning with the item, operation, and status, processes the other items, and fetches that item again in the next poll.
 
-Memory warnings below an attempt's outcome show the total processes killed across its containers and the last affected container's memory limit. Available process details list kernel task names and host PIDs. These names can be truncated and exclude command-line arguments. A separate count identifies kills without process details, including older records and workers without readable kernel logs. A successful attempt can still have memory kills when its build or test subprocesses died.
+Memory warnings below an attempt's outcome show the total processes killed across its containers and the last affected container's memory limit. Available process details list kernel task names and host PIDs, up to 20 per attempt. These names can be truncated and exclude command-line arguments. A separate count identifies kills without process details, including older records and workers without readable kernel logs. A successful attempt can still have memory kills when its build or test subprocesses died.

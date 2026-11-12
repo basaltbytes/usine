@@ -1,12 +1,13 @@
 import { AgentSessionId, RateLimitWindow as CoreRateLimitWindow } from "@usine/core/agent/session";
 import { DateTime, Effect, Option, Schema } from "effect";
 import {
+  AgentMessageItem,
   type ErrorNotification,
   isCodexErrorCode,
   type RateLimitWindow,
-  type ToolItem,
+  ToolItem,
   type TurnCompleted,
-  type UserMessageItem,
+  UserMessageItem,
   UserTextInput,
 } from "../../protocol/codex/codex.ts";
 import {
@@ -60,6 +61,58 @@ export const decodeNotification = <S extends Schema.Top>(
       ),
     ),
   );
+
+/**
+ * Decodes a thread item whose kind the caller has checked. If it does not decode, logs a warning
+ * annotated with its `itemType` and returns `None`.
+ */
+export const decodeItem = <S extends Schema.Top>(
+  schema: S,
+  label: string,
+  sessionId: AgentSessionId,
+  item: Schema.Json & { readonly type: string },
+): Effect.Effect<Option.Option<S["Type"]>, never, S["DecodingServices"]> =>
+  decodeNotification(schema, label, sessionId, item).pipe(
+    Effect.annotateLogs({ itemType: item.type }),
+  );
+
+const ToolKindItem = Schema.Struct({ type: ToolItem.fields.type });
+/** Matches a thread item of the agent message kind, whether or not it decodes. */
+export const AgentMessageKindItem = Schema.Struct({ type: AgentMessageItem.fields.type });
+/** Matches a thread item of the user message kind, whether or not it decodes. */
+export const UserMessageKindItem = Schema.Struct({ type: UserMessageItem.fields.type });
+const MessageKindItem = Schema.Union([AgentMessageKindItem, UserMessageKindItem]);
+const ItemKind = Schema.Struct({ type: Schema.String });
+
+/**
+ * Decodes a thread item as a tool item, or returns `None` when its type names no tool kind. If an
+ * item of a tool kind does not decode, logs a warning and returns `None`.
+ */
+export const decodeToolItem = (
+  sessionId: AgentSessionId,
+  item: Schema.Json,
+): Effect.Effect<Option.Option<typeof ToolItem.Type>> =>
+  Schema.is(ToolKindItem)(item)
+    ? decodeItem(ToolItem, "tool item", sessionId, item)
+    : Effect.succeedNone;
+
+/**
+ * Decodes a notified thread item as a tool item, like `decodeToolItem`. Returns `None` for message
+ * items: each notification handler decodes the message kind it handles before calling this, and
+ * the other message kind has no event there. Logs every other skipped kind at Info.
+ */
+export const decodeNotifiedToolItem = (
+  sessionId: AgentSessionId,
+  item: Schema.Json,
+): Effect.Effect<Option.Option<typeof ToolItem.Type>> =>
+  Schema.is(ToolKindItem)(item)
+    ? decodeItem(ToolItem, "tool item", sessionId, item)
+    : Schema.is(MessageKindItem)(item)
+      ? Effect.succeedNone
+      : Effect.logInfo("Skipping a Codex item without a transcript event", { sessionId }).pipe(
+          Effect.annotateLogs({ itemType: Schema.is(ItemKind)(item) ? item.type : undefined }),
+          Effect.as(Option.none()),
+        );
 
 /** Returns the transcript tool name for a Codex tool item. */
 export const toolName = (item: typeof ToolItem.Type): string => {

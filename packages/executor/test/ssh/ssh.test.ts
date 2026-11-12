@@ -23,6 +23,7 @@ import {
   TEST_AGENT,
   TOKEN_PREFIX,
   WORKER,
+  WORKER_ROOT,
   WORKTREE,
   capturedLogs,
   fails,
@@ -560,6 +561,57 @@ describe("SSH Worker", () => {
           yield* Fiber.join(launch);
         }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent, storage)));
         assert.strictEqual(machine.state.credentials.size, 0);
+      });
+    },
+  );
+
+  it.effect(
+    "skips the worktree of an Attempt that isLive reported live when another Attempt triggers the sweep",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const storage = new StubStorage();
+      const stray = `${WORKER_ROOT}/attempts/crashed-before-a-record`;
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const first = yield* workingAttempts([request.attemptId]);
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const launch = yield* (yield* executor.prepare(request))
+            .launch(first.sinkFor(request.attemptId))
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(first.signalsOf(request.attemptId).working);
+          yield* Fiber.interrupt(launch);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtime(machine, credentials, first.parent, storage)),
+        );
+        machine.state.attemptPaths.push(stray);
+
+        // After the restart, the live Attempt's Run reattaches it after another Attempt prepares.
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const live = yield* executor.isLive(request.attemptId);
+          assert.isTrue(live);
+          yield* executor.prepare(requestFor(2));
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.merge(runtime(machine, credentials, completes, storage), logs.layer),
+          ),
+        );
+
+        const warnings = logs.warnings.filter((line) =>
+          line.includes("Preserving abandoned remote paths for salvage reconciliation"),
+        );
+        assert.lengthOf(warnings, 1);
+        assert.include(warnings[0] ?? "", '"paths":1');
+        assert.include(warnings[0] ?? "", `"attemptId":"${requestFor(2).attemptId}"`);
+        const completed = logs.lines.filter((line) =>
+          line.includes("Remote abandoned-worktree sweep completed"),
+        );
+        assert.lengthOf(completed, 1);
+        assert.include(completed[0] ?? "", '"reattached":1,"abandoned":1');
       });
     },
   );

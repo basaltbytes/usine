@@ -120,7 +120,7 @@ Check {{ repo.name }} for outdated dependencies at {{ item.tick.scheduledAtLocal
 Open one pull request with passing checks. Do not merge.
 ```
 
-Quote cron expressions and CEL containing YAML punctuation. A loop must reference an existing agent. Selectors must reference registered repositories and tags and can only narrow project membership. Undeclared labels in conditions or lanes produce warnings.
+Quote cron expressions and CEL containing YAML punctuation. A loop must reference an existing agent. Selectors must reference registered repositories and tags and can only narrow project membership. Undeclared labels in conditions, lanes, or `outcome_labels` produce warnings. A schedule loop can't set `outcome_labels`.
 
 ## Agent Markdown
 

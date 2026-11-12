@@ -8,3 +8,4 @@ Control who can use an instance and which projects they can access. Network reac
 1. [Sign in to an instance](/guides/sign-in/)
 2. [Grant member access](/guides/manage-members/)
 3. [Create a device token](/guides/create-a-device-token/)
+4. [Connect an MCP client](/guides/connect-an-mcp-client/)

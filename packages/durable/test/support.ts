@@ -6,16 +6,19 @@ import { mkdtempSync, rmSync } from "node:fs";
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
 import { assert } from "@effect/vitest";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { type ChildHost, LocalProcess } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { type AgentSessionEvent, ChildSessionBudget } from "@usine/core/agent/session";
+import { type AgentSessionEvent, ChildSessionBudget, TokenCount } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { BotLogin, WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Option, Result } from "effect";
+import { DateTime, Effect, Layer, Option, Result } from "effect";
 import { AttemptRequest } from "../src/attempt-runtime.ts";
+import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
+import { HandlerSession, HandlerUsage } from "../src/coordinator/wake-up.ts";
 import { PARENT_MODEL } from "../src/testing.ts";
 
 const agent = Agent.make({
@@ -68,6 +71,13 @@ export const temporaryDatabase = Effect.acquireRelease(
   (directory) => Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
 ).pipe(Effect.map((directory) => join(directory, "durable.sqlite")));
 
+/** The attempt journal on the SQLite file `database`. To simulate a restart, build it again. */
+export const sqliteJournal = (database: string) =>
+  sqliteAttemptJournalLayer.pipe(
+    Layer.provide(SqliteClient.layer({ filename: database })),
+    Layer.orDie,
+  );
+
 /**
  * Returns a sink that records envelopes like the transcript store, one row per direction and
  * sequence.
@@ -107,6 +117,18 @@ export const recordingSink = () => {
 };
 
 /**
+ * Returns `sink` with each `Interrupted` envelope appended after a pause, so a test can tell
+ * whether a call returned before or after the channel ended.
+ */
+export const slowToInterrupt = (sink: AttemptChannel.Sink): AttemptChannel.Sink => ({
+  ...sink,
+  append: (direction, envelope) =>
+    envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Interrupted"
+      ? Effect.sleep("100 millis").pipe(Effect.andThen(sink.append(direction, envelope)))
+      : sink.append(direction, envelope),
+});
+
+/**
  * Asserts that every outbound envelope passes `AttemptChannel.admit` and the final state is
  * `Terminal`.
  */
@@ -139,3 +161,15 @@ export const trace = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>)
       event._tag === "ToolStarted" || event._tag === "ToolFinished" ? `:${event.tool}` : "";
     return [`${role}.${event._tag}${tool}`];
   });
+
+/** The model call of a decision that a `session` or `completion` handler made in a test. */
+export const handlerSession = HandlerSession.make({
+  brain: BrainSpec.make({
+    harness: Harness.make("claude"),
+    model: ModelId.make("claude-haiku-4-5"),
+    effort: "low",
+  }),
+  route: "host-login",
+  pool: "claudePlan",
+  usage: HandlerUsage.make({ totalTokens: TokenCount.make(1_200), costUsd: Option.none() }),
+});

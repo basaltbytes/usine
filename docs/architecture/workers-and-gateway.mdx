@@ -8,7 +8,7 @@ sidebar:
 import { FileTree, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code and Codex pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), a renamed repository's new name ([#528][], 2026-10-25), a container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548), 2026-10-25), a machine per attempt on an SSH worker with a provisioner ([#550][], 2026-10-25), new names learned only from a rename that GitHub's API confirms ([#558][], 2026-10-26), container limits derived from the machine ([#588](https://github.com/basaltbytes/usine/issues/588), 2026-10-26), the instance ID label on attempt containers and one Node.js major version for the attempt image and the worker machine ([#589][], 2026-10-26), the orchestrator's server in the gateway's network ([#609](https://github.com/basaltbytes/usine/issues/609), 2026-10-27), gateway ChatGPT subscriptions ([#560](https://github.com/basaltbytes/usine/pull/560)), provisioner lifecycle and timing settings ([#564](https://github.com/basaltbytes/usine/issues/564), 2026-10-28), the Codex 0.164.0 baseline and image pins ([#480](https://github.com/basaltbytes/usine/issues/480), 2026-10-29), and the boxd CLI in the attempt image ([#1109](https://github.com/basaltbytes/usine/issues/1109), 2026-11-10). The gateway-held Codex login, attempt home cleanup, and session resume sections reflect [#561](https://github.com/basaltbytes/usine/issues/561) (2026-10-28), building on commit [`80f2eb6`](https://github.com/basaltbytes/usine/commit/80f2eb6).
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code and Codex pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), a renamed repository's new name ([#528][], 2026-10-25), a container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548), 2026-10-25), a machine per attempt on an SSH worker with a provisioner ([#550][], 2026-10-25), new names learned only from a rename that GitHub's API confirms ([#558][], 2026-10-26), container limits derived from the machine ([#588](https://github.com/basaltbytes/usine/issues/588), 2026-10-26), the instance ID label on attempt containers and one Node.js major version for the attempt image and the worker machine ([#589][], 2026-10-26), the orchestrator's server in the gateway's network ([#609](https://github.com/basaltbytes/usine/issues/609), 2026-10-27), gateway ChatGPT subscriptions ([#560](https://github.com/basaltbytes/usine/pull/560)), provisioner lifecycle and timing settings ([#564](https://github.com/basaltbytes/usine/issues/564), 2026-10-28), the Codex 0.164.0 baseline and image pins ([#480](https://github.com/basaltbytes/usine/issues/480), 2026-10-29), the boxd CLI in the attempt image ([#1109](https://github.com/basaltbytes/usine/issues/1109), 2026-11-10), and the secret variables on each SSH command's standard input ([#1107](https://github.com/basaltbytes/usine/pull/1107), 2026-11-10). The gateway-held Codex login, attempt home cleanup, and session resume sections reflect [#561](https://github.com/basaltbytes/usine/issues/561) (2026-10-28), building on commit [`80f2eb6`](https://github.com/basaltbytes/usine/commit/80f2eb6).
 Configuration storage and revision behavior on this page describe commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b) (2026-10-29). See [Storage and configuration](./storage-and-config.mdx#configuration-store). The harness-version examples reflect commit [`1fd206e`](https://github.com/basaltbytes/usine/commit/1fd206e) (2026-10-30). Other sections retain the source versions cited above.
 :::
 
@@ -115,13 +115,13 @@ State is in `<instance>/.usine/workers/<worker>/`: `repos/` caches, `attempts/` 
 
 Every command is `ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 [-p port] [-i key -o IdentitiesOnly=yes] <destination> -- <quoted command>` ([commands.ts:87][], [ssh/ssh.ts:22][], [child-host.ts:85][]), and the client inherits only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` ([commands.ts:70][]).
 
-A shell script writes the token from standard input, never a command line, to `<root>/workers/<name>/credentials/<attempt>` ([ssh/credentials.ts:25][]), with mode 700 directories and mode 600 files. A process's first attempt on a worker removes earlier processes' credential directories. Each attempt's container mounts only its own directory, so attempts can't read each other's tokens; on a machine without Docker, they share a user and can ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md), [#231][]).
+A shell script writes the token from standard input, never a command line, to `<root>/workers/<name>/credentials/<attempt>` ([ssh/credentials.ts:25][]), with mode 700 directories and mode 600 files. A process's first attempt on a worker removes earlier processes' credential directories. Each attempt's container mounts only its own directory, so attempts can't read each other's tokens; on a machine without Docker, they share a user and can ([ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md), [#231][]).
 
 ### ssh behind a gateway
 
 `gatewayAttachmentsFor` ([attachments.ts:58][]) writes gh's configuration, `http_unix_socket: /run/usine-gateway/http.sock` and host `git.<domain>`, to `<worker directory>/gh` without a token ([gateway/environment.ts:42][]), and manages the attachment in [Credential flow](#credential-flow). It stores it again every two minutes, because the gateway keeps attachments only in memory ([attachments.ts:35][]); the caller token never changes. Once per process and worker, it detaches what earlier processes left ([attachments.ts:64][]).
 
-The children's environment has an exported part, on each command line and without secrets, and a sent part, passed with OpenSSH `SendEnv` and accepted by the worker's sshd with `AcceptEnv`, which keeps the caller token off command lines ([gateway/environment.ts:88][], [commands.ts:101][]). The clone URL is `http://git.<domain>/<owner>/<repo>.git` ([gateway/environment.ts:33][]).
+The children's environment has an exported part, on each command line and without secrets, and a sent part, which keeps the caller token off command lines and out of the SSH client's environment ([gateway/environment.ts:106][], [commands.ts:107][]). Each SSH command receives the sent part as a base64 environment block on the first line of its standard input. The remote shell reads that line, decodes it with `base64`, and exports the variables before the command and its input start ([child-host.ts:189][], [child-host.ts:212][]). The worker needs a POSIX `sh` and `base64`, and no sshd `AcceptEnv` entry. The clone URL is `http://git.<domain>/<owner>/<repo>.git` ([gateway/environment.ts:33][]).
 
 | Variable                                                 | Value                                                                     | Part     |
 | -------------------------------------------------------- | ------------------------------------------------------------------------- | -------- |
@@ -141,7 +141,7 @@ The children's environment has an exported part, on each command line and withou
 | `CODEX_HOME`                                             | `<root>/workers/<name>/codex/<attempt>`, with `openai` in `llm_providers` | exported |
 | `USINE_GATEWAY_TOKEN`                                    | the caller token, with `openai` in `llm_providers`                        | sent     |
 
-In an attempt's container, the exported part is the container's environment and each command line's, and the sent part goes into the container on `docker run`'s standard input (`--env-file /dev/stdin`). Children and checkout commands run with `docker exec` and send nothing over SSH. Only the fetch into the cached clone, as the SSH user, still sends the caller token with `SendEnv`. Each container sees only its own attempt's caller token ([#243](https://github.com/basaltbytes/usine/issues/243)).
+In an attempt's container, the exported part is the container's environment and each command line's, and the sent part goes into the container on `docker run`'s standard input (`--env-file /dev/stdin`). Children and checkout commands run with `docker exec` and send nothing over SSH. Only the fetch into the cached clone, as the SSH user, still sends the caller token in the standard input block. Each container sees only its own attempt's caller token ([#243](https://github.com/basaltbytes/usine/issues/243)).
 
 #### Forward to the admin API
 
@@ -343,7 +343,7 @@ flowchart LR
   executor -->|"attach, renew, detach,<br/>list: bearer admin token"| forward
   forward -->|"ssh -N -L over the tailnet,<br/>reopened by the executor"| sshd
   sshd --> adminapi
-  executor -->|"ssh -J over the tailnet,<br/>caller token in SendEnv"| sshd
+  executor -->|"ssh -J over the tailnet,<br/>caller token on stdin"| sshd
   sshd -->|"SSH into the private<br/>network only"| worker
 ```
 
@@ -590,7 +590,7 @@ sequenceDiagram
   G-->>O: installation token
   O->>A: POST /v1/attachments with Worker, repository, token, expiry
   A-->>O: attachment id and caller token
-  O->>C: ssh with SendEnv: GIT_CONFIG_VALUE_0, GH_TOKEN, GH_ENTERPRISE_TOKEN
+  O->>C: ssh with GIT_CONFIG_VALUE_0, GH_TOKEN, GH_ENTERPRISE_TOKEN on stdin
   C->>P: http://git.gw.internal/ with x-usine-gateway-token
   P->>P: verify the caller token and its attachment
   P->>G: HTTPS with the installation token
@@ -632,7 +632,7 @@ The orchestrator reads the gateway's admin token from the `admin_token_env` vari
 
 With `openai` in a worker's `llm_providers`, the gateway stores the ChatGPT login in the Codex `auth.json` named by `USINE_GATEWAY_CHATGPT_AUTH_FILE`. It refreshes the access token before expiry and writes the rotated tokens back to that file. Use a separate login for the gateway: two copies that refresh the same token invalidate each other. The [gateway setup guide](https://docs.usine.dev/guides/add-a-worker/) describes the configuration. An OpenAI API key can occupy the same provider slot.
 
-Each attempt uses a caller token instead of the ChatGPT credential. The executor writes `<root>/workers/<name>/codex/<attempt>/config.toml`, sets `CODEX_HOME` to that directory, and configures a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key = "USINE_GATEWAY_TOKEN"`, `wire_api = "responses"`, and `requires_openai_auth = false`. The file contains no token; the caller token reaches the attempt through SSH environment forwarding or the container's standard input. The gateway validates its attachment, replaces it with the ChatGPT access token and account ID, and forwards Responses requests to the ChatGPT backend. See [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-25.
+Each attempt uses a caller token instead of the ChatGPT credential. The executor writes `<root>/workers/<name>/codex/<attempt>/config.toml`, sets `CODEX_HOME` to that directory, and configures a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key = "USINE_GATEWAY_TOKEN"`, `wire_api = "responses"`, and `requires_openai_auth = false`. The file contains no token; the caller token reaches the attempt on standard input. The gateway validates its attachment, replaces it with the ChatGPT access token and account ID, and forwards Responses requests to the ChatGPT backend. See [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md).
 
 With `anthropic` in `llm_providers`, Claude Code calls `llm.<domain>/anthropic` with the caller token, and the gateway substitutes its API key or subscription token. A harness whose provider isn't listed uses the login on a long-lived worker, through the forward proxy when configured. Those logins need their hosts in the proxy's allowlist. A provisioned machine has no saved login; see [Harness credentials](#harness-credentials).
 
@@ -677,7 +677,7 @@ The run page hides **Resume details** for a Codex child with a recorded external
 | `infra/hetzner/gateway/gateway.sh`              | `create`, `delete`, `tailnet-up`, `install <tarballs>`, `worker-user-data`, which renders the two worker files as one MIME cloud-init, and `orchestrator`, `orchestrator-user-data`, and `orchestrator-tailnet-up` for the orchestrator's server.                                                                                                                                                                                                                                                                                                                |
 | `infra/worker-image/Dockerfile`                 | The attempt image: Debian 13, Node.js `NODE_MAJOR` (24), which `render-cloud-init.sh` puts in `cloud-init.yaml` too, pnpm, Git, gh, Chromium, Claude Code, and Codex at the versions of `cloud-init.yaml`, the signed-out boxd CLI at a pinned version when boxd still serves it, and the `usine` user with ID 1000. `.github/workflows/worker-image.yml` pushes it to `ghcr.io/basaltbytes/usine-worker`.                                                                                                                                                                                                                              |
 
-Every SSH session reads these `worker-cloud-init.yaml` parts:
+Every SSH session reads this `worker-cloud-init.yaml` part:
 
 ```yaml title="infra/hetzner/gateway/worker-cloud-init.yaml"
 write_files:
@@ -694,12 +694,6 @@ write_files:
       NO_PROXY=@@DOMAIN@@
       no_proxy=@@DOMAIN@@
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-  # ...
-  # The executor sends each Attempt's caller token in these variables over the SSH connection, so the token never appears on a command line.
-  - path: /etc/ssh/sshd_config.d/40-usine-gateway.conf
-    permissions: "0644"
-    content: |
-      AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN
 ```
 
 These variables use the gateway's address and serve SSH sessions such as logins; attempt children get the executor's exported values, which use the domain: `http://<domain>:3128`. `gateway.sh` writes the gateway's address into the worker nftables file and the domain into the worker cloud-init, by default `10.42.0.2` and `gw.internal` ([gateway.sh:19][]):
@@ -718,7 +712,7 @@ LABEL=${LABEL:-usine=gateway}
 GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 ```
 
-[Gaps](./gaps.md) lists the open gateway issues, such as [#254][] and [#264][].
+Open gateway issues are in the issue tracker, such as [#254][] and [#264][].
 
 [factory.ts:150]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L150
 [factory.ts:214]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L214
@@ -736,7 +730,9 @@ GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 [ssh/preflight.ts:31]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/preflight.ts#L31
 [commands.ts:70]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L70
 [commands.ts:87]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L87
-[commands.ts:101]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L101
+[commands.ts:107]: https://github.com/basaltbytes/usine/blob/3fef8e2c5d2df6e3317efa04c3ab8b9cf1c4e3cf/packages/executor/src/remote/commands.ts#L107
+[child-host.ts:189]: https://github.com/basaltbytes/usine/blob/3fef8e2c5d2df6e3317efa04c3ab8b9cf1c4e3cf/packages/agents/src/child-host/child-host.ts#L189
+[child-host.ts:212]: https://github.com/basaltbytes/usine/blob/3fef8e2c5d2df6e3317efa04c3ab8b9cf1c4e3cf/packages/agents/src/child-host/child-host.ts#L212
 [remote.ts:44]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/remote.ts#L44
 [remote.ts:236]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/remote.ts#L236
 [child-host.ts:85]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/child-host/child-host.ts#L85
@@ -748,7 +744,7 @@ GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 [attachments.ts:64]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/attachments.ts#L64
 [gateway/environment.ts:33]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L33
 [gateway/environment.ts:42]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L42
-[gateway/environment.ts:88]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L88
+[gateway/environment.ts:106]: https://github.com/basaltbytes/usine/blob/3fef8e2c5d2df6e3317efa04c3ab8b9cf1c4e3cf/packages/executor/src/ssh/gateway/environment.ts#L106
 [gateway/forward.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/gateway/forward.ts
 [ssh/workers.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/workers.ts
 [scheduler.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts

@@ -1,74 +1,87 @@
-import { Link, useNavigate } from "@tanstack/react-router";
-import { ConfigurationEntityKind, type ConfigurationEntityKey } from "@usine/config/configuration";
-import { Schema } from "effect";
-import { useId, useState } from "react";
-import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
-import { Label } from "~/components/ui/label";
-import { NativeSelect } from "~/components/ui/native-select";
+import {
+  ArrowsClockwiseIcon,
+  BookBookmarkIcon,
+  GearSixIcon,
+  HardDrivesIcon,
+  KanbanIcon,
+  RobotIcon,
+  TagIcon,
+  UsersIcon,
+  type Icon,
+} from "@phosphor-icons/react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import type { ConfigurationEntityKey, ConfigurationEntityKind } from "@usine/config/configuration";
+import type { ConfigurationView } from "@usine/orchestrator/operator";
+import { FilterBar } from "~/components/filter/bar";
+import type { FilterField } from "~/components/filter/field";
 import { entityKey } from "~/features/configuration/lib/entities";
 import { historyCopy } from "~/features/configuration/strings";
+import { configurationQuery } from "~/lib/configuration/queries";
+
+const fieldKinds: ReadonlyArray<readonly [ConfigurationEntityKind, Icon]> = [
+  ["loop", ArrowsClockwiseIcon],
+  ["agent", RobotIcon],
+  ["worker", HardDrivesIcon],
+  ["project", KanbanIcon],
+  ["repository", BookBookmarkIcon],
+  ["label", TagIcon],
+  ["binding", UsersIcon],
+  ["settings", GearSixIcon],
+];
+
+const identifiers = (
+  kind: ConfigurationEntityKind,
+  configuration: ConfigurationView,
+): readonly string[] => {
+  switch (kind) {
+    case "loop":
+      return configuration.loops.map(({ name }) => name);
+    case "agent":
+      return configuration.agents.map(({ name }) => name);
+    case "worker":
+      return configuration.workers.map(({ name }) => name);
+    case "project":
+      return configuration.projects.map(({ id }) => id);
+    case "repository":
+      return configuration.repositories.map(({ name }) => name);
+    case "label":
+      return configuration.labels.map(({ name }) => name);
+    case "binding":
+      return configuration.bindings.map(({ name }) => name);
+    case "settings":
+      return ["instance"];
+  }
+};
 
 type HistoryFilterProps = { readonly entity?: ConfigurationEntityKey | undefined };
 
 export const HistoryFilter = ({ entity }: HistoryFilterProps) => {
+  const { data } = useSuspenseQuery(configurationQuery());
   const navigate = useNavigate({ from: "/configuration/history" });
-  const id = useId();
-  const [kind, setKind] = useState<ConfigurationEntityKind>(entity?.kind ?? "loop");
-  const [identifier, setIdentifier] = useState<string>(entity?.identifier ?? "");
+  const fields: readonly FilterField<ConfigurationEntityKind>[] = fieldKinds.map(([kind, icon]) => {
+    const names = identifiers(kind, data);
+    // A filter from the URL can name an entity that no longer exists.
+    const missing =
+      entity?.kind === kind && !names.includes(entity.identifier) ? [entity.identifier] : [];
+    return {
+      id: kind,
+      label: historyCopy.kinds[kind],
+      icon,
+      options: [...names, ...missing].map((name) => ({ value: name, label: name })),
+    };
+  });
   return (
-    <form
-      className="grid min-w-0 grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (identifier.trim() === "") return;
-        const key = entityKey(kind, identifier.trim());
+    <FilterBar
+      fields={fields}
+      value={entity === undefined ? [] : [{ field: entity.kind, value: entity.identifier }]}
+      onValueChange={(next) => {
+        const latest = next.at(-1);
+        const key = latest === undefined ? undefined : entityKey(latest.field, latest.value);
         void navigate({
-          search: (previous) => ({ ...previous, kind: key.kind, identifier: key.identifier }),
+          search: key === undefined ? {} : { kind: key.kind, identifier: key.identifier },
         });
       }}
-    >
-      <div className="flex flex-col gap-2">
-        <Label htmlFor={`${id}-kind`}>{historyCopy.type}</Label>
-        <NativeSelect
-          id={`${id}-kind`}
-          value={kind}
-          onChange={(event) => {
-            const next = Schema.decodeUnknownSync(ConfigurationEntityKind)(event.target.value);
-            setKind(next);
-            if (next === "settings") setIdentifier("instance");
-          }}
-        >
-          {Object.entries(historyCopy.kinds).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </NativeSelect>
-      </div>
-      <div className="flex min-w-0 flex-col gap-2 sm:w-64">
-        <Label htmlFor={`${id}-name`}>{historyCopy.name}</Label>
-        <Input
-          id={`${id}-name`}
-          value={identifier}
-          required
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(event) => setIdentifier(event.target.value)}
-        />
-      </div>
-      <Button type="submit" variant="outline">
-        {historyCopy.filter}
-      </Button>
-      {entity !== undefined && (
-        <Link
-          to="/configuration/history"
-          search={{}}
-          className="inline-flex min-h-7 items-center rounded-sm px-2 text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        >
-          {historyCopy.all}
-        </Link>
-      )}
-    </form>
+    />
   );
 };

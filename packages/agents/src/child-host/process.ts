@@ -44,6 +44,16 @@ export interface ProcessCommand {
   readonly cwd: string;
 }
 
+/** How a process owner launches a child and checkpoints its output. */
+export interface ProcessOptions {
+  /** `replace` stops the child's retained process first; `resume` can adopt it. */
+  readonly transport?: "replace" | "resume" | undefined;
+  /** `received`, the default, checkpoints output on arrival; `handled` waits for `acknowledgeOutput`. */
+  readonly acknowledgement?: "received" | "handled";
+  /** Runs for each input chunk the child acknowledges; returns the output bytes that became checkpointed. */
+  readonly onInputAcknowledged?: (bytes: Uint8Array) => Effect.Effect<number>;
+}
+
 export const processError = (target: ProcessTarget, message: string, cause: unknown) =>
   SessionOperationError.make({ operation: "stream", sessionId: target.sessionId, message, cause });
 
@@ -101,9 +111,11 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   target: ProcessTarget & { readonly sessionId: Option.Some<AgentSessionId> },
   command: ProcessCommand,
   input: Stream.Stream<Uint8Array>,
-  transport?: "replace" | "resume",
-  acknowledgement: "received" | "handled" = "received",
-  onInputAcknowledged: (bytes: Uint8Array) => Effect.Effect<number> = () => Effect.succeed(0),
+  {
+    transport,
+    acknowledgement = "received",
+    onInputAcknowledged = () => Effect.succeed(0),
+  }: ProcessOptions = {},
 ) {
   const lifecycle = yield* ChildSessionLifecycle.current;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -129,26 +141,29 @@ export const remoteProcess = Effect.fn("ChildHost.remoteProcess")(function* (
   yield* Effect.annotateCurrentSpan(fields);
   if (transport === "replace") yield* stopChildProcess(target);
 
-  const send = (frame: { readonly data: string } | { readonly eof: true }) =>
+  /** Sends `data`, or end of file when it is `None`. */
+  const send = (data: Option.Option<Uint8Array>) =>
     Effect.gen(function* () {
       if (yield* lifecycle.isStopping) return;
       yield* Deferred.await(ready);
       const id = yield* Ref.updateAndGet(sequence, (value) => value + 1);
-      const line = yield* Schema.encodeEffect(Schema.fromJsonString(InputFrame))({
-        ...frame,
-        sequence: id,
-      }).pipe(Effect.orDie);
-      const data =
-        "data" in frame ? yield* Effect.fromResult(Base64.decode(frame.data)) : new Uint8Array();
-      yield* SubscriptionRef.update(history, (entries) => new Map(entries).set(id, { line, data }));
+      const line = yield* Schema.encodeEffect(Schema.fromJsonString(InputFrame))(
+        Option.match(data, {
+          onNone: () => ({ sequence: id, eof: true as const }),
+          onSome: (data) => ({ sequence: id, data: Base64.encode(data) }),
+        }),
+      ).pipe(Effect.orDie);
+      yield* SubscriptionRef.update(history, (entries) =>
+        new Map(entries).set(id, { line, data: Option.getOrElse(data, () => new Uint8Array()) }),
+      );
       yield* Queue.offer(outgoing, line);
     });
   yield* input.pipe(
-    Stream.runForEach((data) => send({ data: Base64.encode(data) })),
+    Stream.runForEach((data) => send(Option.some(data))),
     Effect.andThen(
       Effect.gen(function* () {
         if (yield* lifecycle.isStopping) return;
-        yield* send({ eof: true });
+        yield* send(Option.none());
         yield* Queue.end(outgoing);
       }),
     ),

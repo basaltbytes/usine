@@ -7,7 +7,7 @@ import { StepResult } from "@usine/core/step/result";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { Executor, ExecutorError } from "@usine/executor";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -97,7 +97,7 @@ it.live(
             outcome: remote.outcome,
             recover: (attempt, sink) =>
               Effect.gen(function* () {
-                yield* remote
+                const leftovers = yield* remote
                   .recover(attempt, sink, Effect.succeed(COMMIT_AUTHOR))
                   .pipe(
                     Effect.catchIf(Schema.is(ExecutorError), (error) =>
@@ -110,6 +110,7 @@ it.live(
                   yield* Deferred.succeed(recovering, undefined);
                   yield* Deferred.await(finish);
                 }
+                return leftovers;
               }),
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             reserve: () => Effect.die("finished runs start no attempt"),
@@ -125,7 +126,8 @@ it.live(
         Layer.provide(scheduler),
         Layer.provide(
           Layer.succeed(TriggerCondition)({
-            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+            recheck: (submission) =>
+              Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
           }),
         ),
         Layer.provide(CompletionCheck.unverified),

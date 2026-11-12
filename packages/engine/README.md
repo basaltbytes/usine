@@ -8,7 +8,7 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 ## Stores and readers
 
-Operations without arguments are Effect values: `yield* reader.revision`, `yield* engine.reconcile`, and `yield* budgets.asks`. This also applies to `awaitingCi`, `drain`, `recoverWorkspaces`, `latestPoolRateLimits`, `pendingResets`, and attention acknowledgement `list`. Each execution reads current state.
+Operations without arguments are Effect values: `yield* reader.revision`, `yield* engine.reconcile`, and `yield* budgets.asks`. This also applies to `admitCiFixes`, `awaitingCi`, `drain`, `recoverWorkspaces`, `latestPoolRateLimits`, `pendingResets`, and attention acknowledgement `list`. Each execution reads current state.
 
 - `CursorStore` stores typed keys with JSON values, for efficiency-only trigger cursors such as GitHub watermarks and ETags. Deleting one safely replays events; the ledger deduplicates.
 - `LoopControl` stores loop pause state; pausing never edits the loop file.
@@ -65,7 +65,7 @@ An attempt ending with `QuestionFailure` or `BlockedFailure` starts a suppressio
 
 ### Run fibers and restarts
 
-Each open run has one fiber, and the run tables are the only durable state. At startup and every `ReconcileInterval` (three minutes by default), the engine starts a fiber for each open run without one, except runs waiting for approval, and opens the newest queued event of each loop item without an open run, if the item has a closed run or that event is a CI fix. CI fixes and trigger matches follow the same rule: events are rechecked from newest to oldest. A CI fix that does not match is revoked on its own before the next candidate is rechecked. A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks. The first matching event opens the next run and supersedes older queued events. A missing item revokes the whole queued group. Reconcile skips items with an open run, so their queued CI fixes wait for that run's continuation without a trigger recheck. A failed store operation is retried four times with exponential backoff. If the engine fails while driving a run (a defect, or a write that still fails), the fiber logs the cause and stops until the next reconcile or restart.
+Each open run has one fiber, and the run tables are the only durable state. At startup and every `ReconcileInterval` (three minutes by default), the engine starts a fiber for each open run without one, except runs waiting for approval, and admits the queued events of each loop item without an open run, open budget ask, or suppression. It reads that set once per reconcile. `RunEngine.admitCiFixes` admits only the queues whose newest event is a CI fix; after that fix mismatches, the next event it rechecks can be a trigger match. CI fixes and trigger matches follow the same rule: events are rechecked from newest to oldest. A CI fix that does not match is revoked on its own before the next candidate is rechecked. A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks. The first matching event opens the next run and supersedes older queued events. A missing item revokes the whole queued group. Reconcile skips items with an open run, so their queued CI fixes wait for that run's continuation without a trigger recheck. After a mismatch, the next candidate is read only while the item has no open run or suppression. A recheck returns the settings the run opens with as `Matches({ settings })`; the engine keeps only the setting keys from it, so the event, item, revision, and CI evidence stay as recorded. A recheck that can't read the item returns `Undetermined`: a trigger match opens with its saved settings, and a CI fix stays queued for the next reconcile. A failed store operation is retried four times with exponential backoff. If the engine fails while driving a run (a defect, or a write that still fails), the fiber logs the cause and stops until the next reconcile or restart.
 
 After a stop during an attempt, the engine asks `StepExecutor.isLive` whether its parent task survived:
 
@@ -79,7 +79,7 @@ A recorded `SalvageRetained.pushFailure` ends the attempt with `GitHubPushFailur
 
 Startup checkout reconciliation logs its attempt count, progress every 50 attempts, and completion at Info. It completes before run fibers start; hosts can serve a health endpoint while building the engine.
 
-Also at startup, the engine passes every stored attempt on a worker in `StepExecutor.workers` to `StepExecutor.recover`, which records its salvage and reconciles its checkout. An attempt whose recorded salvage is `Rejected` carries it in `AttemptRecovery.rejected`, so the recovery doesn't push the same commit again. It first stops the parent task of each closed attempt. An open attempt whose parent task is live, or whose liveness can't be read, keeps its checkout for the run. Each reconcile, the startup one included, ends with `StepExecutor.sweep`, which removes the worker resources that no attempt holds, such as a provisioned worker's machines ([#550](https://github.com/basaltbytes/usine/issues/550)) or the Codex homes that a crash left on an SSH worker ([#592](https://github.com/basaltbytes/usine/issues/592)).
+Also at startup, the engine passes every stored attempt on a worker in `StepExecutor.workers` to `StepExecutor.recover`, which records its salvage and reconciles its checkout. An attempt whose recorded salvage is `Rejected` carries it in `AttemptRecovery.rejected`, so the recovery doesn't push the same commit again. It first stops the parent task of each closed attempt. An open attempt whose parent task is live, or whose liveness can't be read, keeps its checkout for the run. When `recover` returns `gone` for a closed attempt, because neither its machine nor its checkout is left, the engine stops tracking it with `RunStore.discardClosedAttempt`, so later startups skip it. Open attempts and failed recoveries stay tracked. Startup logs one line per worker in `StepExecutor.workers` with the attempts visited, kept, and discarded. Each reconcile, the startup one included, ends with `StepExecutor.sweep`, which removes the worker resources that no attempt holds, such as a provisioned worker's machines ([#550](https://github.com/basaltbytes/usine/issues/550)) or the Codex homes that a crash left on an SSH worker ([#592](https://github.com/basaltbytes/usine/issues/592)).
 
 The engine handles that checkout's recovery until the reattaching execution runs `ExecutionSink.checkoutAcquired`, which `StepExecutor.execute` runs once preparation has the checkout, never on a failed preparation. If the run closes the attempt first (the task stopped before the run reserved a worker, liveness can't be read, the reattachment failed, or the operator canceled), the engine stops the parent task with `interrupt` and passes the still-open attempt to `recover`, which reconciles regardless of `isLive`. The next attempt resumes from that salvage.
 
@@ -89,7 +89,7 @@ Attempts on a worker that `StepExecutor.workers` doesn't list aren't reconciled.
 
 ### Transcripts
 
-Attempt channel envelopes go to an append-only transcript. A redelivered envelope (same attempt, direction, and channel sequence, as a reattached parent can send) keeps the first copy. Envelopes from protocol v3 to v6 still read under v7. Parent and child session events keep their session identity. A protocol v4 `Started` writes the SDK-selected parent model to the attempt.
+Attempt channel envelopes go to an append-only transcript. A redelivered envelope (same attempt, direction, and channel sequence, as a reattached parent can send) keeps the first copy. Envelopes from protocol v3 to v6 still read under v7. Parent and child session events keep their session identity. A protocol v4 `Started` writes the SDK-selected parent model to the attempt; a `Started` without a model, from an attempt without a parent session, clears it.
 
 `RunReader.latestPoolRateLimits()` reads the newest stored `PoolRateLimitsUpdated` event for each pool by global transcript append order, across all attempts. It queries the existing transcript table through a partial index of rate-limit events, including reports below warning thresholds and reports whose windows have reset.
 
@@ -107,13 +107,13 @@ The run ledger keeps the submitted agent, rendered task, payload snapshot, effec
 
 ### Attempt windows
 
-The sink given to `StepExecutor.execute`, and the `RecoverySink` given to `StepExecutor.recover`, read as `windows` the attempt's own window on the item and the agent's overlapping windows there (`RunStore.attemptWindows`). The harvest reads them after GitHub lists the comments, so attempts started meanwhile count, as does an end recorded when a cancel closed the attempt before the executor stopped. It keeps only comments inside the own window and no other ([ADR 0006](../../docs/adr/0006-executor-contract-run-host-attempt-channel.md), #429). An attempt that ended before end times were recorded has no window: its harvest keeps no comment, and it overlaps no other attempt.
+The sink given to `StepExecutor.execute`, and the `RecoverySink` given to `StepExecutor.recover`, read as `windows` the attempt's own window on the item and the agent's overlapping windows there (`RunStore.attemptWindows`). The harvest reads them after GitHub lists the comments, so attempts started meanwhile count, as does an end recorded when a cancel closed the attempt before the executor stopped. It keeps only comments inside the own window and no other (#429). An attempt that ended before end times were recorded has no window: its harvest keeps no comment, and it overlaps no other attempt.
 
 The sink also reads back the attempt's current-protocol envelopes in append order as `transcript` (`TranscriptAllQuery`), so a reattaching executor resumes its runaway guard.
 
 ### Lifecycle decisions
 
-The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, interrupted-attempt recovery, cancellation, operator retry, and whether a new event can replace a run. `RunStore` applies each decision and its step result in one transaction. Completion and restart recovery share the three-attempt cap, and a late executor result can't settle a replacement attempt. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. [ADR 0003](../../docs/adr/0003-durable-execution-on-effect-workflow.md) records why the engine drives runs itself.
+The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, interrupted-attempt recovery, cancellation, operator retry, and whether a new event can replace a run. `RunStore` applies each decision and its step result in one transaction. Completion and restart recovery share the three-attempt cap, and a late executor result can't settle a replacement attempt. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. [ADR 0002](../../docs/adr/0002-run-model-event-run-step-attempt.md) records why the engine drives runs itself.
 
 ## Cycle budgets
 
@@ -127,7 +127,7 @@ A reset records a fresh polling request. Trigger adapters read `CycleBudgets.gen
 
 ## Drain and shutdown
 
-`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Pending reservations release their slots; approval gates and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md)).
+`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Pending reservations release their slots; approval gates and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([Drain](../../docs/architecture/run-lifecycle.mdx#drain)).
 
 `RunEngine.waitForUpgrade(target)` defers new reservations and waits for admitted attempts to persist their outcomes. `upgradeDrain` reports the target version, start time, and deferred run IDs. `cancelUpgrade` resumes these runs without a restart; it does not reopen admission after process shutdown. Cancel the caller's wait before canceling the upgrade. Repeated waits join the pending drain.
 
@@ -143,7 +143,7 @@ import { WorkerName } from "@usine/core/worker"
 import { InstanceDirectory } from "@usine/core/instance"
 import { StepCompletion, StepResult } from "@usine/core/step/result"
 import { StepExecutor } from "@usine/engine/step-executor"
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition"
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition"
 import { CompletionCheck } from "@usine/engine/completion-check"
 import { layer } from "@usine/engine/local-sqlite"
 import { RunEngine } from "@usine/engine/engine"
@@ -153,7 +153,7 @@ import { LoopControl } from "@usine/engine/loop-control"
 const StepExecutorLive = Layer.succeed(StepExecutor)({
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
-  recover: () => Effect.void,
+  recover: () => Effect.succeed("found" as const),
   intervene: () => Effect.void,
   reserve: () => Effect.succeed({
     worker: WorkerName.make("local"),
@@ -166,9 +166,11 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
   interrupt: () => Effect.void,
 })
 
-// Re-checks a queued Event's trigger before its Run opens; this one always matches.
+// Re-checks a queued Event's trigger before its Run opens; this one always matches with the
+// saved settings.
 const TriggerConditionLive = Layer.succeed(TriggerCondition)({
-  recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+  recheck: (submission) =>
+    Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
 })
 
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
@@ -251,7 +253,7 @@ Polling run summaries omit task prompts, step results, attempt prompts, harveste
 
 ## Persistence contracts
 
-The domain services are the persistence boundary. `RunDatabase` is the current SQLite composition service; another SQL dialect supplies the same domain ports through Effect layers. [ADR 0020](../../docs/adr/0020-drizzle-portable-sqlite-projection.md#amendment-2026-11-03-896-sqlite-and-postgres-adapters) defines SQLite for self-hosted instances and Postgres as the next hosted backend, with schemas and migrations owned by each adapter.
+The domain services are the persistence boundary. `RunDatabase` is the current SQLite composition service; another SQL dialect supplies the same domain ports through Effect layers. [ADR 0010](../../docs/adr/0010-runtime-state-in-sqlite-or-postgres-behind-domain-ports.md) records SQLite for self-hosted instances and Postgres for hosted instances, with schemas and migrations owned by each adapter.
 
 `src/database/dialect.ts` centralizes SQLite query expressions, including JSON access and aggregation. Keep JSON paths literal where they match expression indexes. The [persistence inventory](../../docs/persistence.md) lists every store and its dialect dependencies.
 

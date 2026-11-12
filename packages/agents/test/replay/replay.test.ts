@@ -5,6 +5,7 @@ import { SessionTokensUpdated } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessageId, Release, Steer } from "@usine/core/attempt/channel";
 import { childPidFile } from "../../src/child-host/child-host.ts";
 import {
+  Cause,
   DateTime,
   Deferred,
   Effect,
@@ -50,13 +51,38 @@ const fileWithLines = (file: string, count: number) =>
     }
   });
 
+/** Fails with a `TimeoutError` after `duration` of wall-clock time while `effect` runs on `TestClock`. */
+const wallClockTimeout =
+  (duration: `${number} seconds`) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.raceFirst(
+      effect,
+      Effect.sleep(duration).pipe(
+        TestClock.withLive,
+        Effect.andThen(Effect.fail(new Cause.TimeoutError(`replay exceeded ${duration}`))),
+      ),
+    );
+
+const RecordedRateLimits = Schema.Struct({
+  method: Schema.Literal("account/rateLimits/updated"),
+  params: Schema.Struct({
+    rateLimits: Schema.Struct({
+      limitId: Schema.String,
+      primary: Schema.Struct({
+        usedPercent: Schema.Finite,
+        windowDurationMins: Schema.Int,
+        resetsAt: Schema.Int,
+      }),
+      secondary: Schema.Null,
+    }),
+  }),
+});
+
 describe("recorded harness transports", () => {
   for (const provider of providers)
     for (const scenario of scenarios) {
       const clocked = provider === "claude" && scenario === "transport-loss";
-      (clocked ? it.effect : it.live).skipIf(
-        process.platform !== "linux" && provider === "claude" && scenario === "transport-loss",
-      )(
+      (clocked ? it.effect : it.live).skipIf(clocked && process.platform !== "linux")(
         `${provider}: ${scenario}`,
         () =>
           Effect.scoped(
@@ -83,7 +109,15 @@ describe("recorded harness transports", () => {
                       Effect.forkScoped,
                     );
                     yield* Effect.raceFirst(Deferred.await(reconnecting), Fiber.join(fiber));
-                    yield* TestClock.adjust("1 second");
+                    // Each adjustment releases at most one reconnect backoff.
+                    for (;;) {
+                      yield* TestClock.adjust("1 second");
+                      const settled = yield* Fiber.await(fiber).pipe(
+                        Effect.timeoutOption("100 millis"),
+                        TestClock.withLive,
+                      );
+                      if (Option.isSome(settled)) break;
+                    }
                     return yield* Fiber.join(fiber);
                   })
                 : replay;
@@ -92,25 +126,41 @@ describe("recorded harness transports", () => {
                 assert.lengthOf(limits, 1);
                 const update = limits[0];
                 assert(update !== undefined);
+                const source = fixture.tape.source;
+                assert(source !== "record");
+                const recorded = source.entries.flatMap((entry) => {
+                  if (entry.type !== "emit_inbound") return [];
+                  const frame = Schema.decodeUnknownOption(RecordedRateLimits)(entry.payload);
+                  return Option.isSome(frame) ? [frame.value.params.rateLimits] : [];
+                });
+                assert.lengthOf(recorded, 1, "the fixture records one rate-limit update");
+                const expected = recorded[0];
+                assert(expected !== undefined);
                 assert.strictEqual(update.pool, "chatgptPlan");
                 assert.deepStrictEqual(update.session.pool, Option.some("chatgptPlan"));
                 assert.deepStrictEqual(update.login, Option.none());
-                assert.deepStrictEqual(update.rateLimits.limitId, Option.some("codex"));
+                assert.deepStrictEqual(update.rateLimits.limitId, Option.some(expected.limitId));
                 assert(Option.isSome(update.rateLimits.primary));
-                assert.strictEqual(update.rateLimits.primary.value.usedPercent, 66);
+                assert.strictEqual(
+                  update.rateLimits.primary.value.usedPercent,
+                  expected.primary.usedPercent,
+                );
                 assert.deepStrictEqual(
                   update.rateLimits.primary.value.windowDurationMinutes,
-                  Option.some(10080),
+                  Option.some(expected.primary.windowDurationMins),
                 );
                 assert.deepStrictEqual(
                   update.rateLimits.primary.value.resetsAt,
-                  Option.some(DateTime.makeUnsafe(1794314556000)),
+                  Option.some(DateTime.makeUnsafe(expected.primary.resetsAt * 1000)),
                 );
                 assert.deepStrictEqual(update.rateLimits.secondary, Option.none());
               }
               yield* fixture.save;
             }),
-          ).pipe(Effect.provide(NodeServices.layer), Effect.timeout("15 seconds")),
+          ).pipe(
+            Effect.provide(NodeServices.layer),
+            clocked ? wallClockTimeout("15 seconds") : Effect.timeout("15 seconds"),
+          ),
         20_000,
       );
     }
@@ -605,11 +655,21 @@ for (const checkpointState of ["caught-up", "pending-hook"] as const)
               assert(increased._tag === "SessionTokensUpdated");
               assert.strictEqual(increased.totalTokens, committed.totalTokens + 5);
               if (checkpointState === "pending-hook") {
+                yield* fs.writeFileString(`${fixture.cwd}/usage-after-hook`, "ready");
                 yield* resumed.intervene(
                   Steer.make({ message: "Continue after the pending hook replay" }),
                   () => Effect.void,
                 );
                 yield* fileWithLines(`${fixture.cwd}/hook-responses`, 1);
+                // Claude writes z first after the hook response, ahead of the queued steer turn.
+                const afterHook = yield* until("SessionTokensUpdated");
+                assert(afterHook._tag === "SessionTokensUpdated");
+                assert(Option.isSome(afterHook.processUsage));
+                assert.strictEqual(afterHook.processUsage.value.messages?.z, 1010);
+                assert.isUndefined(
+                  afterHook.processUsage.value.messages?.["old-x"],
+                  "the acknowledged hook response lets the checkpoint discard superseded IDs",
+                );
               }
               yield* fixture.controls.releaseCommand;
               yield* resumed.intervene(Release.make(), () => Effect.void);

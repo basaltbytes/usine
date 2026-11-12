@@ -9,13 +9,16 @@ import { GitHubCredentials } from "@usine/github/github-app";
 import { Effect, Layer, Option } from "effect";
 import { cloudflareWorkersOf, layer as cloudflareLayer } from "./cloudflare.ts";
 import { layer as localLayer } from "./local.ts";
+import { UnsupportedWorkerError } from "./scheduler/scheduler.ts";
 import { layer as sshLayer, sshWorkerRecordsDirectory, sshWorkersOf } from "./ssh.ts";
 
 /**
  * Provides the engine for the Workers in `config`: the SSH executor if every Worker is `ssh`, the
  * Cloudflare executor if every Worker is `cloudflare`, otherwise the local one. Fails at startup
- * with `UnsupportedWorkerError` on any other mix. The SSH executor labels its Attempt containers
- * with `instanceId`, so that instances that share the GitHub App and a machine keep each other's.
+ * with `UnsupportedWorkerError` naming the first `exe.dev` Worker, which no executor runs, and
+ * otherwise the first Worker whose kind differs from the selected executor's. The SSH executor
+ * labels its Attempt containers with `instanceId`, so that instances that share the GitHub App
+ * and a machine keep each other's.
  */
 export const workerEngineLayer = (
   instanceDirectory: InstanceDirectory,
@@ -29,8 +32,16 @@ export const workerEngineLayer = (
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const ssh = sshWorkersOf(config);
       const workers = config.workers.map(({ name }) => name).join(",");
+      const exeDev = config.workers.find(({ kind }) => kind === "exe.dev");
+      if (exeDev !== undefined) {
+        yield* Effect.logError("Refused an exe.dev Worker, which no executor runs", {
+          worker: exeDev.name,
+          workers,
+        });
+        return yield* UnsupportedWorkerError.make({ worker: exeDev.name, kind: exeDev.kind });
+      }
+      const ssh = sshWorkersOf(config);
       if (ssh.length === config.workers.length) {
         // The GitHub App is the instance's identity (ADR 0011).
         const { appId } = yield* GitHubCredentials;

@@ -1,5 +1,5 @@
 import type { ItemRunHistory } from "@usine/engine/run-reader";
-import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/core/label";
 import {
   isSettledItemState,
   LabelLaneSource,
@@ -246,7 +246,7 @@ export const projectBoard = Effect.fn("Board.project")(
 
 /**
  * Returns labels to add for `target` and labels to remove from the other authored lane sources in
- * `board`. Labels outside the authored lane map are preserved (ADR 0024).
+ * `board`. Labels outside the authored lane map are preserved (ADR 0008).
  */
 export const labelMutationForBoardMove = (
   board: BoardView,

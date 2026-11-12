@@ -60,7 +60,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { LaneName } from "@usine/config/board";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { runDetailKey, runDetailKeys } from "~/lib/runs/queries";
 import {
   mergeEarlierTranscript,
@@ -166,7 +166,7 @@ const event = (
     payload:
       scope === "channel"
         ? AttemptChannel.Started.make({
-            parentModel: ModelId.make("gpt-5"),
+            parentModel: Option.some(ModelId.make("gpt-5")),
           })
         : AttemptChannel.SessionEvent.make({
             event: TextOutput.make({ session: sessionView, text }),
@@ -290,11 +290,13 @@ describe("run transcript", () => {
   });
 
   it("separates an attempt's total out-of-memory kills from its last recorded container's limit", () => {
-    const ended = (outOfMemory: OutOfMemoryKills | null) =>
+    const markup = (outOfMemory: OutOfMemoryKills | null) =>
       reader(
         [event(1, "Running the test gate.")],
         [AttemptView.make({ ...liveAttempt, outcome: CanceledAttemptView.make(), outOfMemory })],
-      ).replace(/<[^>]+>/gu, "");
+      );
+    const ended = (outOfMemory: OutOfMemoryKills | null) =>
+      markup(outOfMemory).replace(/<[^>]+>/gu, "");
     const total = totalOutOfMemoryKills([
       ContainerOutOfMemoryKills.make({
         container: ContainerId.make("a".repeat(64)),
@@ -318,6 +320,11 @@ describe("run transcript", () => {
     );
     assert.include(ended(total), "vitest worker (host PID 1234)");
     assert.include(ended(total), "Process details unavailable for 2 kills.");
+    // Screen readers announce the visible label once, as the list's name.
+    assert.match(
+      markup(total),
+      /<p id="([^"]+)">Killed processes \(kernel task names\)<\/p><ul aria-labelledby="\1">/u,
+    );
     assert.notInclude(ended(null), "The kernel killed");
   });
 
@@ -525,9 +532,43 @@ describe("run transcript", () => {
     assert.notInclude(markup.replace(/<[^>]+>/gu, ""), "running");
   });
 
+  it("says an Attempt without a parent session has none in its metadata line", () => {
+    const events = [
+      record(1, AttemptChannel.Started.make({})),
+      sessionEvent(2, TextOutput.make({ session: child, text: "Child explanation" })),
+    ];
+    const document = readerDocument(
+      projectTranscript(events, [liveAttempt]),
+      [liveAttempt],
+      events,
+    );
+    assert.deepStrictEqual(document.chapters[0]?.parent, { _tag: "NoSession" });
+    const markup = reader(events);
+    assert.include(markup, "No parent session");
+    assert.include(markup, "Child reviewer on Codex,");
+    assert.include(markup, "Child explanation");
+    assert.notInclude(markup, "Parent on");
+    assert.notInclude(markup, "Parent model");
+  });
+
+  it("reports the parent model of a started Attempt and none before it starts", () => {
+    const started = [
+      record(1, AttemptChannel.Started.make({ parentModel: Option.some(brain.model) })),
+    ];
+    const unstarted = [
+      sessionEvent(1, TextOutput.make({ session: child, text: "Child explanation" })),
+    ];
+    const parentOf = (events: ReadonlyArray<TranscriptEventView>) =>
+      readerDocument(projectTranscript(events, [liveAttempt]), [liveAttempt], events).chapters[0]
+        ?.parent;
+    assert.deepStrictEqual(parentOf(started), { _tag: "Model", model: brain.model });
+    assert.deepStrictEqual(parentOf(unstarted), { _tag: "Unreported" });
+    assert.notInclude(reader(unstarted), "No parent session");
+  });
+
   it("names the Attempt's models in its metadata line instead of a start row, and keeps every session's prose", () => {
     const events = [
-      record(1, AttemptChannel.Started.make({ parentModel: brain.model })),
+      record(1, AttemptChannel.Started.make({ parentModel: Option.some(brain.model) })),
       sessionEvent(2, TextOutput.make({ session: parent, text: "A useful explanation" })),
       sessionEvent(
         3,

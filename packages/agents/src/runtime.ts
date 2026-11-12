@@ -84,21 +84,14 @@ export class ChildSessionJournal extends Context.Service<
   );
 }
 
-/** A task delegated to one child, with its session and the checkout it shares with the parent. */
-export class ChildRequest extends Schema.Class<
-  ChildRequest,
-  Brand.Brand<"@usine/agents/runtime/ChildRequest">
->("@usine/agents/ChildRequest")({
-  /** The child identity, parent session, and brain spec selected for the delegated task. */
-  session: ChildSession,
-  /** The checkout directory on `host`. */
-  cwd: WorkingDirectory,
-  /** The complete instructions to send as the child's first message. */
-  prompt: Schema.NonEmptyString,
-  /** The saved conversation to continue in this checkout instead of starting a new one. */
-  resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
-  ),
+/** Usage that the orchestrator committed for a session before it reopened the conversation. */
+const CommittedUsage = Schema.Struct({
+  totalTokens: TokenCount,
+  costUsd: Schema.OptionFromNullOr(UsdAmount),
+  processUsage: Schema.optionalKey(SessionTokensUpdated.fields.processUsage),
+});
+
+const restartFields = {
   /**
    * Whether the native process acknowledged the task prompt before the restart. Only Claude records
    * it; Codex reads the thread's turns, and Pi saves a conversation only after its first user
@@ -115,22 +108,48 @@ export class ChildRequest extends Schema.Class<
   unread: Schema.Array(QueuedOperatorMessage).pipe(
     Schema.withConstructorDefault(Effect.succeed([])),
   ),
-  /** Cumulative usage committed before the orchestrator resumed this child. */
-  usage: Schema.OptionFromOptionalKey(
-    Schema.Struct({
-      totalTokens: TokenCount,
-      costUsd: Schema.OptionFromNullOr(UsdAmount),
-      processUsage: Schema.optionalKey(SessionTokensUpdated.fields.processUsage),
-    }),
-  ).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
-  /** Keeps the child addressable after a turn until the operator releases its persisted Hold. */
+  /** Cumulative usage committed before the orchestrator reopened the session. */
+  usage: Schema.OptionFromOptionalKey(CommittedUsage).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
+  /** Keeps the session addressable after a turn until the operator releases its persisted Hold. */
   held: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
-  /** Waits for operator guidance before starting a turn in a restored paused child. */
+  /** Waits for operator guidance before starting a turn in a restored paused session. */
   paused: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
-  /** Restores an idle child's completed report without starting another turn. */
+  /** Restores an idle session's completed report without starting another turn. */
   idle: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
     Schema.withConstructorDefault(Effect.succeedNone),
   ),
+};
+
+/**
+ * The conversation state that a saved session had when the orchestrator stopped. The continuation
+ * policy owns it; `RestartState.make({})` is a session without a restart.
+ */
+export class RestartState extends Schema.Class<
+  RestartState,
+  Brand.Brand<"@usine/agents/runtime/RestartState">
+>("@usine/agents/RestartState")(restartFields) {}
+
+/**
+ * A task delegated to one child, with its session and the checkout it shares with the parent. The
+ * child continuation builds a `SessionSpec` and a `RestartState` from it.
+ */
+export class ChildRequest extends Schema.Class<
+  ChildRequest,
+  Brand.Brand<"@usine/agents/runtime/ChildRequest">
+>("@usine/agents/ChildRequest")({
+  /** The child identity, parent session, and brain spec selected for the delegated task. */
+  session: ChildSession,
+  /** The checkout directory on `host`. */
+  cwd: WorkingDirectory,
+  /** The complete instructions to send as the child's first message. */
+  prompt: Schema.NonEmptyString,
+  /** The saved conversation to continue in this checkout instead of starting a new one. */
+  resume: Schema.OptionFromOptionalKey(HarnessSession).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<HarnessSession>())),
+  ),
+  ...restartFields,
   /**
    * The complete environment of the child process and its commands: the worker's allowlisted
    * variables plus the attempt's credential configuration, with nothing inherited from the launching
@@ -223,7 +242,7 @@ export const FAILED_MARKER = "[usine:failed]";
 /** The reserved report prefix for a temporary provider capacity refusal. */
 export const CAPACITY_MARKER = "[usine:provider-capacity]";
 
-/** A harness refusal because its model provider has no capacity. */
+/** A harness refusal because its model provider has no capacity or the usage limit is reached. */
 export class AgentCapacityError extends Schema.TaggedError<
   AgentCapacityError,
   Brand.Brand<"@usine/agents/runtime/AgentCapacityError">
@@ -232,6 +251,10 @@ export class AgentCapacityError extends Schema.TaggedError<
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   /** The provider's capacity refusal, or the details after the capacity report marker. */
   message: Schema.NonEmptyString,
+  /** The time the provider's usage limit resets, or `None` if the provider didn't report one. */
+  resetsAt: Schema.OptionFromOptionalKey(Schema.DateTimeUtcFromString).pipe(
+    Schema.withConstructorDefault(Effect.succeedNone),
+  ),
 }) {}
 
 /** An error for a session that finished and reported that the work failed. */
@@ -374,9 +397,61 @@ export type AgentReport =
   | AgentBlockedError
   | AgentQuestionError;
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+const reportMarker = `(?:${[BLOCKED_MARKER, QUESTION_MARKER].map(escapeRegExp).join("|")})`;
+
 /**
- * Returns a blocker or question report from any line of a final answer, including a report header
- * appended to narration before a line break. Failure and capacity prefixes take precedence.
+ * A report marker that starts a line, or that directly follows narration and ends the line. A run
+ * of one repeated quote character at the start of a line or after whitespace, `(`, or `=` opens a
+ * quoted string, so a marker directly after it is a mention. Any other quote character closes a
+ * string or inline code, as in ``-m ""`[usine:blocked]``.
+ */
+const reportHeader = new RegExp(
+  `^[ \\t]*${reportMarker}|(?<=\\S)(?<!(?:^|[\\s(=])\\1*(["'\`]))${reportMarker}(?=[ \\t]*\\r?$)`,
+  "u",
+);
+
+/**
+ * A Markdown code fence at any indentation, so a fence nested in a list item still quotes its
+ * contents: its group is the run of backticks or tildes.
+ */
+const codeFence = /^[ \t]*(`{3,}|~{3,})/u;
+
+/** Returns whether `line` closes a code block opened by `opener`: same character, no shorter. */
+const closesFence = (line: string, opener: string): boolean => {
+  const [fence, run] = codeFence.exec(line) ?? [];
+  return (
+    fence !== undefined &&
+    run !== undefined &&
+    run[0] === opener[0] &&
+    run.length >= opener.length &&
+    line.slice(fence.length).trim() === ""
+  );
+};
+
+/** Returns the offset of the first report header in `answer` outside fenced code blocks. */
+const reportHeaderOffset = (answer: string): Option.Option<number> => {
+  let offset = 0;
+  let opener: string | undefined;
+  for (const line of answer.split("\n")) {
+    if (opener !== undefined) {
+      if (closesFence(line, opener)) opener = undefined;
+    } else {
+      opener = codeFence.exec(line)?.[1];
+      const header = opener === undefined ? reportHeader.exec(line) : null;
+      if (header !== null) return Option.some(offset + header.index);
+    }
+    offset += line.length + 1;
+  }
+  return Option.none();
+};
+
+/**
+ * Returns a blocker or question report from a final answer. A report header starts a line, or
+ * directly follows narration without a space or opening quote and ends the line. Headers inside
+ * fenced code blocks, quoted strings, and inline mentions are ordinary text. Failure and capacity
+ * prefixes take precedence.
  */
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
@@ -401,10 +476,10 @@ export const reportedOutcome = (
       }),
     );
   }
-  const report = prefix.match(
-    /^[ \t]*\[usine:(?:blocked|question)\]|\[usine:(?:blocked|question)\](?=[ \t]*(?:\r?\n|\\n|$))/mu,
-  );
-  const trimmed = (report === null ? prefix : prefix.slice(report.index)).trim();
+  const trimmed = Option.match(reportHeaderOffset(prefix), {
+    onNone: () => prefix,
+    onSome: (offset) => prefix.slice(offset).trim(),
+  });
   if (trimmed.startsWith(QUESTION_MARKER)) {
     return Option.some(
       AgentQuestionError.make({
@@ -441,8 +516,8 @@ export const reportText = (report: AgentReport): string => {
 
 /**
  * Maps a session error to an attempt failure: SDK and process failures are retryable infrastructure
- * failures; capacity refusals use a delayed retry. Roster errors and other agent-reported
- * failures wait for the operator (ADR 0002).
+ * failures; capacity refusals and usage limits use a delayed retry. Roster errors and other
+ * agent-reported failures wait for the operator (ADR 0002).
  */
 export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
   Match.valueTags(error, {
@@ -455,7 +530,8 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
     PoolUnavailableError: ({ message }) => AgentFailure.make({ message }),
     UnsupportedEffortError: ({ message }) => AgentFailure.make({ message }),
     AgentResultError: ({ message }) => AgentFailure.make({ message }),
-    AgentCapacityError: ({ message }) => ProviderCapacityFailure.make({ message }),
+    AgentCapacityError: ({ message, resetsAt }) =>
+      ProviderCapacityFailure.make({ message, resetsAt }),
     AgentBlockedError: ({ message }) => BlockedFailure.make({ message }),
     AgentQuestionError: ({ message }) => QuestionFailure.make({ question: message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>

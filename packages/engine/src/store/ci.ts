@@ -79,17 +79,30 @@ export const ciQueries = (
             }),
           CiSuperseded: ({ head }) =>
             RunState.Canceled.make({ reason: RunState.HeadChanged.make({ head }) }),
+          CiPullRequestClosed: ({ pullRequest }) =>
+            RunState.Canceled.make({ reason: RunState.PullRequestClosed.make({ pullRequest }) }),
         });
         const outcome = Match.valueTags(resolution, {
           CiPassed: () => AttemptSucceeded.make(),
           CiHandedOff: () => AttemptHandedOff.make(),
           CiFailed: ({ message }) =>
             AttemptFailed.make({ failure: AgentFailure.make({ message }) }),
-          CiTimedOut: ({ message }) =>
-            AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
-          CiIncomplete: ({ message }) =>
-            AttemptFailed.make({ failure: InfraFailure.make({ message, cause: message }) }),
+          CiTimedOut: ({ _tag, message }) =>
+            AttemptFailed.make({
+              failure: InfraFailure.make({
+                message,
+                cause: { resolution: _tag, pullRequest: handoff.pullRequest, head },
+              }),
+            }),
+          CiIncomplete: ({ _tag, message }) =>
+            AttemptFailed.make({
+              failure: InfraFailure.make({
+                message,
+                cause: { resolution: _tag, pullRequest: handoff.pullRequest, head },
+              }),
+            }),
           CiSuperseded: () => AttemptCanceled.make(),
+          CiPullRequestClosed: () => AttemptCanceled.make(),
         });
         yield* queries.settleCiAttempt(runId, outcome);
         const observedAt = yield* DateTime.now;

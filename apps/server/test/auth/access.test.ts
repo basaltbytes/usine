@@ -18,34 +18,39 @@ import { sqliteAuthLayer } from "../../src/auth/sqlite.ts";
 import { configurationLayer, initializeConfiguration } from "../../src/configuration/runtime.ts";
 import { alice, bob } from "./fixture.ts";
 
+/** Opens an initialized configuration and auth store in a temporary SQLite instance. */
+const accessFixture = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const currentDirectory = yield* fs.makeTempDirectoryScoped({
+    directory: sqliteTempDirectory(),
+    prefix: "usine-access-",
+  });
+  const directory = InstanceDirectory.make(currentDirectory);
+  const services = yield* Layer.build(localSqliteLayer(directory));
+  const database = Layer.succeedContext(services);
+  const context = yield* Layer.build(
+    Layer.merge(configurationLayer, sqliteAuthLayer).pipe(Layer.provide(database)),
+  );
+  yield* initializeConfiguration(directory).pipe(Effect.provideContext(context));
+  const build = () =>
+    Layer.build(
+      memberAccessLayer.pipe(Layer.provide(Layer.succeedContext(context)), Layer.provide(database)),
+    );
+  return {
+    store: Context.get(context, AuthStore),
+    config: Context.get(context, ConfigurationStore),
+    build,
+  };
+});
+
 for (const existing of [true, false])
   it.live(`records admin bindings atomically (${existing ? "upgrade" : "first enrollment"})`, () =>
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const currentDirectory = yield* fs.makeTempDirectoryScoped({
-        directory: sqliteTempDirectory(),
-        prefix: "usine-access-",
-      });
-      const directory = InstanceDirectory.make(currentDirectory);
-      const services = yield* Layer.build(localSqliteLayer(directory));
-      const database = Layer.succeedContext(services);
-      const context = yield* Layer.build(
-        Layer.merge(configurationLayer, sqliteAuthLayer).pipe(Layer.provide(database)),
-      );
-      yield* initializeConfiguration(directory).pipe(Effect.provideContext(context));
-      const store = Context.get(context, AuthStore);
-      const config = Context.get(context, ConfigurationStore);
+      const { store, config, build } = yield* accessFixture;
       if (existing) {
         yield* store.add(alice, true);
         yield* store.add(bob, false);
       }
-      const build = () =>
-        Layer.build(
-          memberAccessLayer.pipe(
-            Layer.provide(Layer.succeedContext(context)),
-            Layer.provide(database),
-          ),
-        );
       const currentServices = yield* build();
       const access = Context.get(currentServices, MemberAccess);
       if (!existing) yield* access.enroll(alice);
@@ -106,3 +111,33 @@ for (const existing of [true, false])
       assert.deepEqual(latestPermissions, []);
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
+
+it.live("refuses to remove the only instance admin while another member remains", () =>
+  Effect.gen(function* () {
+    const { store, build } = yield* accessFixture;
+    const services = yield* build();
+    const access = Context.get(services, MemberAccess);
+    yield* access.enroll(alice);
+    yield* store.add(bob, false);
+    const bobPermissions = yield* access.permissions(bob.id);
+    assert.deepEqual(bobPermissions, []);
+
+    const refused = yield* access.remove(alice.id).pipe(Effect.flip);
+    assert.equal(refused.status, 409);
+    assert.include(refused.message, "before removing the last admin");
+    const alicePermissions = yield* access.permissions(alice.id);
+    assert.equal(alicePermissions[0]?.permission, "admin");
+    const members = yield* store.members;
+    assert.deepEqual(
+      members.map(({ id }) => id),
+      [alice.id, bob.id],
+    );
+
+    yield* access.remove(bob.id);
+    const remaining = yield* store.members;
+    assert.deepEqual(
+      remaining.map(({ id }) => id),
+      [alice.id],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);

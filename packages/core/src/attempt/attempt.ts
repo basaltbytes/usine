@@ -1,4 +1,12 @@
-import { type Brand, Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
+import {
+  type Brand,
+  Array as EffectArray,
+  DateTime,
+  Effect,
+  Option,
+  Schema,
+  SchemaTransformation,
+} from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { closedStruct } from "../closed-struct.ts";
@@ -77,7 +85,23 @@ export class MemoryKilledProcess extends Schema.Class<
   pid: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
+/** The most killed processes a record keeps; its kill count includes the ones it drops. */
+export const MAX_KILLED_PROCESSES = 20;
+
 const killedProcesses = Schema.Array(MemoryKilledProcess).pipe(
+  // Records written before the cap keep their first processes.
+  Schema.decodeTo(
+    Schema.toType(
+      Schema.Array(MemoryKilledProcess).check(Schema.isMaxLength(MAX_KILLED_PROCESSES)),
+    ),
+    SchemaTransformation.transform<
+      ReadonlyArray<MemoryKilledProcess>,
+      ReadonlyArray<MemoryKilledProcess>
+    >({
+      decode: (processes) => processes.slice(0, MAX_KILLED_PROCESSES),
+      encode: (processes) => processes,
+    }),
+  ),
   Schema.withDecodingDefaultKey(Effect.succeed([])),
   Schema.withConstructorDefault(Effect.succeed([])),
 );
@@ -94,7 +118,10 @@ export class OutOfMemoryKills extends Schema.Class<
   kills: Kills,
   /** The memory limit, in MiB, of the last container that recorded kills. */
   memoryMib: ContainerMemoryMib,
-  /** Available kernel process identities; older records and unreadable logs have none. */
+  /**
+   * Available kernel process identities, at most `MAX_KILLED_PROCESSES`; older records and
+   * unreadable logs have none.
+   */
   processes: killedProcesses,
 }) {}
 
@@ -112,7 +139,10 @@ export class ContainerOutOfMemoryKills extends Schema.Class<
   kills: Kills,
   /** This container's memory limit in MiB. */
   memoryMib: ContainerMemoryMib,
-  /** Available kernel process identities; older records and unreadable logs have none. */
+  /**
+   * Available kernel process identities, at most `MAX_KILLED_PROCESSES`; older records and
+   * unreadable logs have none.
+   */
   processes: killedProcesses,
 }) {}
 
@@ -123,7 +153,7 @@ export const totalOutOfMemoryKills = (
   OutOfMemoryKills.make({
     kills: containers.reduce((total, { kills }) => total + kills, 0),
     memoryMib: EffectArray.lastNonEmpty(containers).memoryMib,
-    processes: containers.flatMap(({ processes }) => processes),
+    processes: containers.flatMap(({ processes }) => processes).slice(0, MAX_KILLED_PROCESSES),
   });
 
 /**
@@ -161,7 +191,7 @@ export class Attempt extends Schema.Class<
   agent: AgentName,
   /** Whether an operator action was accepted during this attempt. */
   operatorIntervened: Schema.Boolean,
-  /** The Pi parent model recorded for this attempt, or `None` if unavailable. */
+  /** The Pi parent model recorded for this attempt, or `None` if unavailable or the attempt has no parent session. */
   parentModel: Schema.OptionFromNullOr(ModelId),
   /** The time this attempt started, also the start of its attribution window. */
   startedAt: Schema.DateTimeUtc,
@@ -293,7 +323,8 @@ export class ProviderRetry extends Schema.Class<
  * Returns a pending capacity retry from persisted state, including after an orchestrator restart.
  * `attempts` must be ordered oldest to newest. Returns `None` unless the run is running and its
  * latest attempt has a recorded end time and a capacity failure below the automatic retry cap.
- * The retry starts no earlier than two minutes after attempt 1 or five minutes after attempt 2.
+ * The retry starts no earlier than two minutes after attempt 1 or five minutes after attempt 2,
+ * and no earlier than the usage-limit reset time that the failure reports.
  */
 export const pendingProviderRetry = (
   state: RunState,
@@ -311,11 +342,13 @@ export const pendingProviderRetry = (
   const outcome = last.outcome.value;
   if (outcome._tag !== "Failed" || outcome.failure._tag !== "ProviderCapacityFailure")
     return Option.none();
+  const backoff = DateTime.add(last.endedAt.value, { minutes: last.number === 1 ? 2 : 5 });
   return Option.some(
     ProviderRetry.make({
       nextAttempt: AttemptNumber.make(last.number + 1),
-      retryAt: DateTime.add(last.endedAt.value, {
-        minutes: last.number === 1 ? 2 : 5,
+      retryAt: Option.match(outcome.failure.resetsAt, {
+        onNone: () => backoff,
+        onSome: (resetsAt) => DateTime.max(backoff, resetsAt),
       }),
       message: outcome.failure.message,
     }),

@@ -5,19 +5,27 @@ import { repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
 import {
   CiFailed,
+  type CiHandoff,
   CiHandedOff,
   CiIncomplete,
   CiPassed,
+  CiPullRequestClosed,
   CiSuperseded,
   CiTimedOut,
 } from "@usine/core/ci";
+import type { RunId } from "@usine/core/run";
 import {
   canonicalRepositoryName,
   type RepositoryName,
   RepositoryRevision,
 } from "@usine/core/repository";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { ciFixDedupKey, Submission, RunEngine, EnginePersistenceError } from "@usine/engine/engine";
+import {
+  ciFixDedupKey,
+  type EnginePersistenceError,
+  RunEngine,
+  Submission,
+} from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
@@ -26,6 +34,7 @@ import {
   HeadWorkflowRunState,
   type IncompleteWorkflowRun,
   type PendingCheck,
+  type PendingCheckReport,
   type RunningWorkflowRun,
 } from "@usine/github/checks";
 import { GitHubItemWriter, ItemLabelMutation } from "@usine/github/item-writer";
@@ -44,25 +53,29 @@ import { observeItem } from "./polling/repository-sync.ts";
 
 const durationMinutes = (milliseconds: number) => `${Math.ceil(milliseconds / 60000)} min`;
 
-const pendingCheckDetails = (checks: ReadonlyArray<PendingCheck>) =>
+const pendingCheckDetail = (check: PendingCheck) => {
+  if (check.status !== "in_progress")
+    return `${check.name} is ${check.status.replaceAll("_", " ")}.`;
+  const running = Option.match(check.elapsedMilliseconds, {
+    onNone: () => `${check.name} is running with no recorded start time`,
+    onSome: (milliseconds) => `${check.name} has been running for ${durationMinutes(milliseconds)}`,
+  });
+  const previous = Option.match(check.previousDurationMilliseconds, {
+    onNone: () => "no previous successful duration is available",
+    onSome: (milliseconds) => `its last successful run took ${durationMinutes(milliseconds)}`,
+  });
+  return `${running}; ${previous}.`;
+};
+
+const pendingCheckDetails = ({ checks, omitted }: PendingCheckReport) =>
   checks.length === 0
-    ? "No pending check jobs were reported for this head."
-    : checks
-        .map((check) => {
-          const elapsed = Option.match(check.elapsedMilliseconds, {
-            onNone: () => "unknown duration",
-            onSome: durationMinutes,
-          });
-          const current = `${check.name} is ${check.status}${check.status === "in_progress" ? ` and has run for ${elapsed}` : ""}`;
-          if (check.status !== "in_progress") return `${current}.`;
-          const previous = Option.match(check.previousDurationMilliseconds, {
-            onNone: () => "unavailable",
-            onSome: (milliseconds) =>
-              `${durationMinutes(milliseconds)} in the last successful workflow run`,
-          });
-          return `${current}; previous successful duration: ${previous}.`;
-        })
-        .join(" ");
+    ? "No pending check runs or commit statuses were reported for this head."
+    : [
+        ...checks.map(pendingCheckDetail),
+        ...(omitted === 0
+          ? []
+          : [`${omitted} more pending ${omitted === 1 ? "check is" : "checks are"} not listed.`]),
+      ].join(" ");
 
 const incompleteRunDetails = (runs: ReadonlyArray<IncompleteWorkflowRun>) =>
   runs
@@ -73,6 +86,9 @@ const runningRunDetails = (runs: ReadonlyArray<RunningWorkflowRun>) =>
   runs
     .map(({ workflow, id, status, url }) => `${workflow} (run ${id}, ${status}): ${url}`)
     .join("; ");
+
+const PENDING_DIAGNOSTICS_LIMIT = "10 seconds";
+const PENDING_HISTORY_LIMIT = { seconds: 7 };
 
 const noWorkflowRuns = HeadWorkflowRunState.make({ incomplete: [], running: [] });
 
@@ -109,6 +125,38 @@ export class CiMonitor extends Context.Service<
       const observationServices = (yield* Effect.context<
         CycleBudgets | GitHubPolling | ItemProjectionWriter
       >()).pipe(Context.pick(CycleBudgets, GitHubPolling, ItemProjectionWriter));
+      // A person decided the outcome of a closed or merged pull request, so the Run ends without
+      // an agent failure: a merge passes, and a close without a merge cancels the Run.
+      const settleClosed = Effect.fn("CiMonitor.settleClosed")(function* (
+        runId: RunId,
+        handoff: CiHandoff,
+        merged: boolean,
+        when: string,
+      ) {
+        const { head, pullRequest } = handoff;
+        if (merged) {
+          yield* Effect.logInfo(
+            "The pull request was merged before CI passed; the CI wait passes without completion labels",
+            {
+              runId,
+              head,
+              pullRequest,
+              detail: `Pull request #${pullRequest} was merged ${when} on head ${head}. usine applied no completion labels and started no fix.`,
+            },
+          );
+          return yield* engine.settleCi(runId, head, CiPassed.make());
+        }
+        yield* Effect.logInfo(
+          "The pull request was closed without a merge before CI passed; the run is canceled",
+          {
+            runId,
+            head,
+            pullRequest,
+            detail: `Pull request #${pullRequest} was closed ${when} on head ${head}. usine applied no completion labels and started no fix.`,
+          },
+        );
+        return yield* engine.settleCi(runId, head, CiPullRequestClosed.make({ pullRequest }));
+      });
       const reconcileOne = Effect.fn("CiMonitor.reconcileOne")(function* (
         instance: LoadedInstance,
         wait: RunSnapshot,
@@ -152,23 +200,48 @@ export class CiMonitor extends Context.Service<
           });
           return yield* engine.settleCi(runId, head, CiSuperseded.make({ head: observed.head }));
         }
+        // GitHub stops updating a closed pull request's head, so its CI wait would last until the
+        // deadline, and a fix can't land on it. Green CI on a merged head still passes with labels.
+        if (
+          observed.pullRequestState === "closed" ||
+          (observed.pullRequestState === "merged" && observed.state !== "success")
+        ) {
+          return yield* settleClosed(
+            runId,
+            handoff,
+            observed.pullRequestState === "merged",
+            observed.state === "pending"
+              ? "before CI settled"
+              : observed.state === "conflict"
+                ? "while it conflicted with its base branch"
+                : observed.state === "failure"
+                  ? "after CI failed"
+                  : "after CI passed",
+          );
+        }
         const now = yield* DateTime.now;
         const timedOut =
           DateTime.toEpochMillis(now) >=
           DateTime.toEpochMillis(endedAt.value) + handoff.timeoutSeconds * 1000;
         if (observed.state === "pending") {
           if (timedOut) {
-            const details = yield* checks.pendingDetails(wait.repository, head).pipe(
-              Effect.timeout("10 seconds"),
-              Effect.map(pendingCheckDetails),
-              Effect.catch((error) =>
-                Effect.logWarning("Pending CI diagnostics unavailable", {
-                  runId,
-                  head,
-                  errorTag: error._tag,
-                }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
-              ),
-            );
+            // History reads stop early, so the job list survives a slow history read.
+            const historyDeadline = DateTime.add(now, PENDING_HISTORY_LIMIT);
+            const details = yield* checks
+              .pendingDetails(wait.repository, head, historyDeadline)
+              .pipe(
+                Effect.timeout(PENDING_DIAGNOSTICS_LIMIT),
+                Effect.map(pendingCheckDetails),
+                Effect.catch((error) =>
+                  Effect.logWarning("Pending CI diagnostics unavailable", {
+                    runId,
+                    head,
+                    ...(error._tag === "TimeoutError"
+                      ? { errorTag: error._tag, message: error.message }
+                      : repositoryFailureLogFields(error)),
+                  }).pipe(Effect.as("Pending job diagnostics are unavailable.")),
+                ),
+              );
             yield* Effect.logWarning("CI wait timed out; operator attention is required", {
               runId,
               head,
@@ -322,12 +395,14 @@ export class CiMonitor extends Context.Service<
         }
         if (observation.projection.payload.state !== "OPEN") {
           yield* Effect.logInfo("CI fix skipped because the pull request closed", { runId, head });
-          return yield* engine.settleCi(
+          return yield* settleClosed(
             runId,
-            head,
-            CiFailed.make({
-              message: `${failureReason} The pull request closed; no fix was started.`,
-            }),
+            handoff,
+            observation.projection.payload.merged === true ||
+              observation.projection.payload.state === "MERGED",
+            observed.state === "conflict"
+              ? "while it conflicted with its base branch"
+              : "after CI failed",
           );
         }
         const task = yield* parser.renderPrompt(fix.loop, {
@@ -400,21 +475,33 @@ export class CiMonitor extends Context.Service<
         );
       });
 
+      // A cycle reset returns blocked CI fixes to the queue; admitting them here spares them the
+      // wait for the periodic reconcile.
+      const admitReplayedCiFixes = Effect.gen(function* () {
+        const resets = yield* budgets.pendingResets;
+        if (resets.length === 0) return;
+        const opened = yield* engine.admitCiFixes;
+        yield* Effect.logDebug("Admitted the queued CI fixes while cycle resets are pending", {
+          itemKeys: resets.map(({ itemKey }) => itemKey),
+          openedRunIds: opened,
+        });
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning(
+            "Could not admit the CI fixes replayed by a cycle reset; the periodic reconcile retries them",
+            { errorTag: error._tag },
+          ),
+        ),
+        Effect.ignore,
+        Effect.withSpan("CiMonitor.admitReplayedCiFixes"),
+      );
+
       return {
         reconcile: Effect.fn("CiMonitor.reconcile")(function* (
           instance: LoadedInstance,
           repository: Option.Option<RepositoryName>,
         ) {
-          if ((yield* budgets.pendingResets).length > 0) {
-            yield* engine.reconcile.pipe(
-              Effect.mapError((cause) =>
-                EnginePersistenceError.make({
-                  operation: "reconcile cycle reset CI fixes",
-                  cause,
-                }),
-              ),
-            );
-          }
+          yield* admitReplayedCiFixes;
           const waits = (yield* engine.awaitingCi).filter((wait) =>
             Option.match(repository, {
               onNone: () => true,

@@ -1,12 +1,14 @@
 import { jsonKey } from "../src/json-key.ts";
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Effect, Logger, Option, Schema } from "effect";
+import { DateTime, Effect, Fiber, Logger, Option, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { Agent, AgentName, AgentPersona } from "../src/agent/agent.ts";
 import { Harness, BrainSpec, ModelId } from "../src/agent/brain.ts";
 import { AttemptId, AttemptWindow, AttemptWindows } from "../src/attempt/attempt.ts";
 import { CommitSha, RepositoryName, RepositoryRevision } from "../src/repository.ts";
 import {
   type AttemptWindowsRead,
+  HarvestError,
   type HarvestSpec,
   harvestFacts,
   harvestPostedComments,
@@ -101,7 +103,13 @@ const harvest = (
     windows,
     handoff,
   ).pipe(
-    Effect.map(({ facts }) => ({ facts, commands, warnings, infos })),
+    Effect.map(({ facts, unverifiedHandoff }) => ({
+      facts,
+      unverifiedHandoff,
+      commands,
+      warnings,
+      infos,
+    })),
     Effect.provide(
       Logger.layer([
         Logger.make(({ logLevel, message }) => {
@@ -112,6 +120,33 @@ const harvest = (
     ),
   );
 };
+
+/** Returns GitHub's REST response for an open pull request of `acme/demo` whose head is `sha`. */
+const pullResponse = (
+  number: number,
+  sha: CommitSha,
+  { state = "open", mergedAt = null }: { state?: string; mergedAt?: string | null } = {},
+) => ({
+  number,
+  html_url: `https://github.com/acme/demo/pull/${number}`,
+  state,
+  merged_at: mergedAt,
+  head: { sha, ref: "usine/fix", repo: { id: 1, full_name: "acme/demo" } },
+  base: { repo: { id: 1 } },
+});
+
+const GH_FAILED = CommandFailed.make({ message: "gh exited with code 1" });
+const PULL_71 = "gh api repos/acme/demo/pulls/71";
+const LS_REMOTE = "git ls-remote origin refs/heads/* refs/pull/*/head";
+const HANDOFF_71 = Option.some(
+  CiHandoff.make({
+    pullRequest: ItemNumber.make(71),
+    head: HEAD,
+    fixLoop: LoopName.make("fix"),
+    timeoutSeconds: 1800,
+    onGreen: [],
+  }),
+);
 
 const NEVER_ASKED: Answer = Effect.die("the final commit was never pushed");
 const BOT = "usine-test[bot]";
@@ -148,12 +183,7 @@ describe("harvesting an Attempt's facts", () => {
 
   it.effect("records the pull request whose head is the pushed final commit", () =>
     Effect.gen(function* () {
-      const json1 = jsonKey([
-        [
-          { number: 71, html_url: "https://github.com/acme/demo/pull/71", head: { sha: HEAD } },
-          { number: 5, html_url: "https://github.com/acme/demo/pull/5", head: { sha: OTHER } },
-        ],
-      ]);
+      const json1 = jsonKey([[pullResponse(71, HEAD), pullResponse(5, OTHER)]]);
       const { facts, warnings } = yield* harvest(
         [`${OTHER}\trefs/heads/main`, `${HEAD}\trefs/heads/usine/fix`],
         Effect.succeed([json1]),
@@ -174,25 +204,25 @@ describe("harvesting an Attempt's facts", () => {
     }),
   );
 
+  // GitHub answers for a renamed repository under its new name, so repositories match by ID.
   it.effect.each([
-    { branchHead: HEAD, repository: "acme/demo", expected: [HEAD] },
-    { branchHead: OTHER, repository: "acme/demo", expected: [] },
-    { branchHead: HEAD, repository: "someone/demo", expected: [] },
+    { branchHead: HEAD, repository: { id: 1, full_name: "acme/old-demo" }, expected: [71, 72] },
+    { branchHead: OTHER, repository: { id: 1, full_name: "acme/demo" }, expected: [] },
+    { branchHead: HEAD, repository: { id: 2, full_name: "acme/demo" }, expected: [] },
   ])(
-    "verifies a handoff with a stale PR head against $repository at $branchHead",
+    "verifies a handoff with a stale PR head from $repository.full_name at $branchHead",
     ({ branchHead, repository, expected }) =>
       Effect.gen(function* () {
-        const { facts, commands, warnings } = yield* harvest(
+        const { facts, warnings } = yield* harvest(
           [`${branchHead}\trefs/heads/usine/fix`, `${HEAD}\trefs/heads/unrelated`],
-          Effect.die("An explicit handoff must not depend on the commit-to-PR index"),
+          pages(pullResponse(71, HEAD), pullResponse(72, HEAD)),
           [
             [
               "gh api repos/acme/demo/pulls/71",
               Effect.succeed([
                 jsonKey({
-                  number: 71,
-                  html_url: "https://github.com/acme/demo/pull/71",
-                  head: { sha: BASE, ref: "usine/fix", repo: { full_name: repository } },
+                  ...pullResponse(71, BASE),
+                  head: { sha: BASE, ref: "usine/fix", repo: repository },
                 }),
               ]),
             ],
@@ -210,12 +240,140 @@ describe("harvesting an Attempt's facts", () => {
           ),
         );
         assert.deepStrictEqual(
-          facts.flatMap((fact) => (fact._tag === "PullRequest" ? Option.toArray(fact.head) : [])),
+          facts.flatMap((fact) =>
+            fact._tag === "PullRequest" && Option.contains(fact.head, HEAD) ? [fact.number] : [],
+          ),
           expected,
         );
-        assert.notInclude(commands, PULL_REQUESTS);
         assert.deepStrictEqual(warnings, []);
       }),
+  );
+
+  it.effect.each([
+    { lifecycle: "closed", mergedAt: null },
+    { lifecycle: "merged", mergedAt: "2026-10-19T12:05:00Z" },
+  ])("names a $lifecycle handoff pull request as $lifecycle", ({ lifecycle, mergedAt }) =>
+    Effect.gen(function* () {
+      const { unverifiedHandoff } = yield* harvest(
+        [`${HEAD}\trefs/heads/usine/fix`, `${HEAD}\trefs/pull/71/head`],
+        NEVER_ASKED,
+        [
+          [
+            PULL_71,
+            Effect.succeed([jsonKey(pullResponse(71, HEAD, { state: "closed", mergedAt }))]),
+          ],
+        ],
+        spec,
+        Effect.succeed(ALONE),
+        HANDOFF_71,
+      );
+      assert(Option.isSome(unverifiedHandoff));
+      assert(unverifiedHandoff.value._tag === "PullRequestNotOpen");
+      assert.strictEqual(unverifiedHandoff.value.state, lifecycle);
+    }),
+  );
+
+  it.effect(
+    "adds only the open pull requests from the Run's repository at the handoff's head",
+    () =>
+      Effect.gen(function* () {
+        const { facts, infos } = yield* harvest(
+          [`${HEAD}\trefs/heads/usine/fix`, `${HEAD}\trefs/pull/71/head`],
+          pages(
+            pullResponse(71, HEAD),
+            pullResponse(72, HEAD),
+            pullResponse(73, HEAD, { state: "closed" }),
+            pullResponse(74, HEAD, { state: "closed", mergedAt: "2026-10-19T12:05:00Z" }),
+            {
+              ...pullResponse(75, HEAD),
+              head: { sha: HEAD, ref: "fix", repo: { id: 2, full_name: "someone/demo" } },
+            },
+          ),
+          [[PULL_71, Effect.succeed([jsonKey(pullResponse(71, HEAD))])]],
+          spec,
+          Effect.succeed(ALONE),
+          HANDOFF_71,
+        );
+        assert.deepStrictEqual(
+          facts.flatMap((fact) => (fact._tag === "PullRequest" ? [fact.number] : [])),
+          [71, 72],
+        );
+        assert.deepInclude(infos, [
+          "Left out the indexed pull requests at the handoff's head that aren't open or come from another repository",
+          { attemptId: spec.attemptId, repository: spec.repository, pullRequests: [73, 74, 75] },
+        ]);
+      }),
+  );
+
+  it.effect.each([
+    { pullRequestHead: HEAD, verified: [71] },
+    { pullRequestHead: OTHER, verified: [] },
+  ])(
+    "verifies a detached HEAD's pull request ref read by number only at head $pullRequestHead",
+    ({ pullRequestHead, verified }) =>
+      Effect.gen(function* () {
+        const { facts, unverifiedHandoff } = yield* harvest(
+          [`${HEAD}\trefs/pull/71/head`],
+          NEVER_ASKED,
+          [[PULL_71, Effect.succeed([jsonKey(pullResponse(71, pullRequestHead))])]],
+          { ...spec, requiresCi: true },
+        );
+        assert.deepStrictEqual(
+          facts.flatMap((fact) => (fact._tag === "PullRequest" ? [fact.number] : [])),
+          verified,
+        );
+        assert.deepStrictEqual(
+          Option.map(unverifiedHandoff, ({ _tag }) => _tag),
+          verified.length === 0 ? Option.some("PullRequestNotFound") : Option.none(),
+        );
+      }),
+  );
+
+  it.effect("keeps the runner's error as the cause of a failed git read", () =>
+    Effect.gen(function* () {
+      const failure = CommandFailed.make({ message: "git exited with code 128" });
+      const { unverifiedHandoff } = yield* harvest(
+        [],
+        NEVER_ASKED,
+        [[LS_REMOTE, Effect.fail(failure)]],
+        spec,
+        Effect.succeed(ALONE),
+        HANDOFF_71,
+      );
+      assert(Option.isSome(unverifiedHandoff));
+      assert(unverifiedHandoff.value._tag === "GitReadFailed");
+      assert.strictEqual(unverifiedHandoff.value.cause, failure);
+    }),
+  );
+
+  it.effect.each([
+    { read: "a failed read", answer: Effect.fail(GH_FAILED), cause: "CommandFailed" },
+    { read: "invalid output", answer: Effect.succeed(["invalid JSON"]), cause: "HarvestError" },
+  ])("keeps the last error as the cause of $read of GitHub after retries", ({ answer, cause }) =>
+    Effect.gen(function* () {
+      const running = yield* Effect.forkChild(
+        harvest(
+          [`${HEAD}\trefs/heads/usine/fix`, `${HEAD}\trefs/pull/71/head`],
+          NEVER_ASKED,
+          [[PULL_71, answer]],
+          spec,
+          Effect.succeed(ALONE),
+          HANDOFF_71,
+        ),
+      );
+      // The two retries wait about 1 and 3 seconds, with jitter.
+      yield* TestClock.adjust("5 seconds");
+      const { unverifiedHandoff } = yield* Fiber.join(running);
+      assert(Option.isSome(unverifiedHandoff));
+      assert(unverifiedHandoff.value._tag === "GitHubReadFailed");
+      const kept = unverifiedHandoff.value.cause;
+      if (cause === "CommandFailed") {
+        assert.strictEqual(kept, GH_FAILED);
+      } else {
+        assert(Schema.is(HarvestError)(kept));
+        assert.strictEqual(kept.stage, "github");
+      }
+    }),
   );
 
   it.effect("finds a pushed final commit by its pull request ref once its branch is gone", () =>

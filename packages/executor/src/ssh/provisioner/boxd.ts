@@ -1,17 +1,24 @@
 import {
   type BoxdEgressAllowlist,
+  boxdSizeParts,
   isBoxdEgressAddress,
   MachineId,
   type WorkerName,
 } from "@usine/core/worker";
-import { type Brand, DateTime, Effect, Option, type Redacted, Schema } from "effect";
+import { type Brand, DateTime, Effect, Option, Schema } from "effect";
 import {
   MachineUnavailableError,
   WorkerCapabilityError,
   type MachineUnavailableReason,
 } from "../../executor.ts";
 import type { BoxdProvisioner } from "../model.ts";
-import { BoxdApi, BoxdCallError, type BoxdMachine, type BoxdUnknownRegion } from "./boxd/client.ts";
+import {
+  BoxdApi,
+  BoxdCallError,
+  type BoxdMachine,
+  type BoxdPlainTextEndpoint,
+  type BoxdUnknownRegion,
+} from "./boxd/client.ts";
 import { BoxdExec, boxdTransport } from "./boxd/exec.ts";
 import {
   attemptTag,
@@ -47,11 +54,15 @@ const isTransient = (code: string): boolean => {
 
 const terminalStates = new Set(["stopped", "failed", "destroyed"]);
 
-/** How long boxd takes to enforce an egress allowlist after `SetVmEgressAllow` returns. */
+/**
+ * How long after the create response a restored machine's resumed processes may still reach hosts
+ * outside the allowlist of its spec (question 23 of `docs/research/boxd-attempt-machine-sources.md`).
+ * The measured window ended about 650 ms after the create response.
+ */
 const EGRESS_IN_FORCE = "1 second";
 
 /**
- * The error when boxd accepts `SetVmEgressAllow` but reports an empty list in effect, which leaves
+ * The error when boxd accepts an egress allowlist but reports an empty list in effect, which leaves
  * the machine's egress unrestricted.
  */
 class BoxdEgressNotApplied extends Schema.TaggedError<
@@ -62,15 +73,35 @@ class BoxdEgressNotApplied extends Schema.TaggedError<
   requested: Schema.Int,
 }) {}
 
-const assignment = (tags: MachineTags) => ({
-  "usine.run": tagValue(tags.run),
-  "usine.process": tagValue(tags.process),
-  "usine.attempt": attemptTag(tags.attempt),
-  "usine.attempts": String(tags.attempts),
-});
+/**
+ * The error when boxd reports egress entries on a machine that its configured allowlist doesn't
+ * list, such as the allowlist of the snapshot that it restores.
+ */
+class BoxdEgressWider extends Schema.TaggedError<
+  BoxdEgressWider,
+  Brand.Brand<"@usine/executor/boxd/BoxdEgressWider">
+>()("BoxdEgressWider", {
+  machine: MachineId,
+  unlisted: Schema.Array(Schema.String),
+}) {}
+
+/** The entries of `inEffect` that `entries` doesn't list. */
+const unlistedEntries = (inEffect: ReadonlyArray<string>, entries: ReadonlyArray<string>) => {
+  const listed = new Set(entries);
+  return [...new Set(inEffect)].filter((entry) => !listed.has(entry));
+};
+
+/** Whether `inEffect` lists exactly the entries of `entries`, in any order. */
+const sameEntries = (inEffect: ReadonlyArray<string>, entries: ReadonlyArray<string>) =>
+  unlistedEntries(inEffect, entries).length === 0 &&
+  unlistedEntries(entries, inEffect).length === 0;
 
 const transientMessage = (worker: WorkerName, failure: BoxdCallError): string =>
-  `boxd didn't answer ${failure.operation} for worker "${worker}": ${failure.code}: ${failure.message}. Check that this host reaches app.boxd.sh, boxd.sh:9443, and the API endpoint of the region, or wait for the boxd rate limit to reset.`;
+  `boxd didn't answer ${failure.operation} for worker "${worker}" at ${failure.url}: ${failure.code}: ${failure.message}. Check that this host reaches ${failure.url}, or wait for the boxd rate limit to reset.`;
+
+/** Returns where boxd keeps `region`, which is `""` when boxd runs in one place. */
+const placeOf = (region: string): string =>
+  region === "" ? "the only location of the boxd cluster" : `region ${region}`;
 
 /** Returns the configuration fault of `worker`'s boxd provisioner that `message` explains. */
 const providerFault = (worker: WorkerName, message: string): WorkerCapabilityError =>
@@ -81,20 +112,27 @@ const providerFault = (worker: WorkerName, message: string): WorkerCapabilityErr
     cause: new Error(message),
   });
 
+/** A failure while connecting a boxd Worker to its region. */
+export type BoxdConnectFailure = BoxdCallError | BoxdUnknownRegion | BoxdPlainTextEndpoint;
+
 /** Explains a boxd failure at preflight or while connecting to the region, naming the fix. */
 export const boxdPreflightError = (
   worker: WorkerName,
-  failure: BoxdCallError | BoxdUnknownRegion,
+  failure: BoxdConnectFailure,
 ): WorkerCapabilityError =>
   providerFault(
     worker,
-    failure._tag === "BoxdUnknownRegion"
-      ? `boxd has no region "${failure.region}" with an API endpoint. Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ") || "none"}.`
-      : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
-        ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
-        : isTransient(failure.code)
-          ? transientMessage(worker, failure)
-          : `boxd preflight couldn't ${failure.operation}: ${failure.code}: ${failure.message}.${failure.operation === "snapshot" ? " Check the snapshot; build it with boxd snapshots save." : ""}`,
+    failure._tag === "BoxdPlainTextEndpoint"
+      ? `boxd serves the machines of worker "${worker}" at ${failure.endpoint} without TLS, and usine sends the API key over plain HTTP only to a loopback address. Serve that endpoint over TLS, or set provisioner.endpoint and provisioner.region to a cluster and region that use https://.`
+      : failure._tag === "BoxdUnknownRegion"
+        ? failure.available.length === 0
+          ? `boxd lists no regions, so it runs in one place, but worker "${worker}" sets provisioner.region ${failure.region}. Remove provisioner.region from the worker.`
+          : `boxd has no region "${failure.region}" with an API endpoint. Set provisioner.region of worker "${worker}" to one of the regions boxd lists: ${failure.available.join(", ")}.`
+        : failure.code === "UNAUTHENTICATED" || failure.code === "PERMISSION_DENIED"
+          ? `boxd refused the API key of worker "${worker}". Create one with boxd auth keys create usine --kind member and set provisioner.token_env.`
+          : isTransient(failure.code)
+            ? transientMessage(worker, failure)
+            : `boxd preflight couldn't ${failure.operation}: ${failure.code}: ${failure.message}.${failure.operation === "snapshot" ? " Check the snapshot; build it with boxd snapshots save." : ""}`,
   );
 
 /**
@@ -104,7 +142,7 @@ export const boxdPreflightError = (
  */
 export const boxdConnectError = (
   worker: WorkerName,
-  failure: BoxdCallError | BoxdUnknownRegion,
+  failure: BoxdConnectFailure,
 ): MachineUnavailableError | WorkerCapabilityError =>
   failure._tag === "BoxdCallError" && isTransient(failure.code)
     ? MachineUnavailableError.make({
@@ -116,17 +154,10 @@ export const boxdConnectError = (
     : boxdPreflightError(worker, failure);
 
 /**
- * Returns the bearer of the `Exec` calls: the API key itself. boxd accepts it as a bearer without
- * documenting it (question 3 of `docs/research/boxd-byoc.md`). A session token file that the
- * orchestrator renews can replace it here.
- */
-export const execCredential = (settings: BoxdProvisioner): Redacted.Redacted<string> =>
-  settings.token;
-
-/**
  * Returns the boxd driver for `worker`. Its machines' endpoints are `Exec` endpoints, which run
- * commands through `BoxdExec` with the API key, so no SSH key is involved: preflight warns that
- * `identityFile`, the worker's `identity_file`, is ignored. A driver retains the create response
+ * commands through `BoxdExec` with `BoxdApi.execBearer`, so no SSH key is involved: preflight warns that
+ * `identityFile`, the worker's `identity_file`, is ignored. Every attempt gets a new machine, so
+ * preflight also warns that a set `settings.ignoredReuse` is ignored. A driver retains the create response
  * only until endpoint discovery consumes it.
  */
 export const boxdDriverFor = (
@@ -150,27 +181,30 @@ export const boxdDriverFor = (
     const capability = (message: string) => providerFault(worker, message);
     const verify = Effect.fn("BoxdDriver.verify")(
       function* (_worker: WorkerName, maxConcurrentAttempts: number) {
-        yield* Effect.annotateCurrentSpan({ worker, region: settings.region });
+        const region = Option.getOrElse(settings.region, () => "");
+        yield* Effect.annotateCurrentSpan({ worker, region });
         yield* api.whoami;
         const snapshot = yield* api.snapshot(settings.snapshot);
         if (snapshot.status !== "ready")
           return yield* capability(
             `boxd snapshot "${settings.snapshot}" is ${snapshot.status}; wait for it to be ready or rebuild it with boxd snapshots save.`,
           );
-        if (snapshot.region !== settings.region)
-          return yield* capability(
-            `boxd snapshot "${settings.snapshot}" is in ${snapshot.region}; set provisioner.region to that region or rebuild it in ${settings.region}.`,
-          );
-        const vcpu = Number(settings.size.split("x")[0]);
-        if (snapshot.vcpu !== vcpu || snapshot.memoryBytes !== vcpu * 4 * 1024 ** 3)
-          return yield* capability(
-            `boxd snapshot "${settings.snapshot}" captured ${snapshot.vcpu} vCPU and ${snapshot.memoryBytes / 1024 ** 3} GiB, but provisioner.size is ${settings.size}. Rebuild the snapshot at ${settings.size} or change size to match the captured size.`,
-          );
         const served = yield* api.servedRegion;
-        if (served !== settings.region)
+        if (snapshot.region !== served)
           return yield* capability(
-            `boxd endpoint ${api.endpoint}, set by providerEndpoints.boxd, serves region ${served}, but provisioner.region of worker "${worker}" is ${settings.region}. Set providerEndpoints.boxd to the API endpoint of ${settings.region}, or remove it so usine finds the endpoint in boxd's region list.`,
+            `boxd snapshot "${settings.snapshot}" is in ${placeOf(snapshot.region)}, but worker "${worker}" creates machines in ${placeOf(served)}. Set provisioner.region to the region of the snapshot, or rebuild the snapshot where the worker creates machines.`,
           );
+        const captured = `${snapshot.vcpu}x${snapshot.memoryBytes / 1024 ** 3}`;
+        if (Option.isSome(settings.size)) {
+          const expected = boxdSizeParts(settings.size.value);
+          if (
+            snapshot.vcpu !== expected.vcpu ||
+            snapshot.memoryBytes !== expected.memoryGib * 1024 ** 3
+          )
+            return yield* capability(
+              `boxd snapshot "${settings.snapshot}" captured ${snapshot.vcpu} vCPU and ${snapshot.memoryBytes / 1024 ** 3} GiB, but provisioner.size is ${settings.size.value}. Rebuild the snapshot at ${settings.size.value}, set size to ${captured}, or remove size to accept the captured size.`,
+            );
+        }
         const limit = yield* api.orgMachineLimit;
         const addresses = Option.isSome(settings.tailnet)
           ? Option.getOrElse(settings.egress, () => []).filter(isBoxdEgressAddress)
@@ -182,6 +216,11 @@ export const boxdDriverFor = (
               `Worker "${worker}" sets identity_file ${file}, which usine ignores: it runs commands on boxd machines through boxd's Exec API with the API key. Remove identity_file from the worker.`,
             ],
           }),
+          ...(Option.isSome(settings.ignoredReuse)
+            ? [
+                `Worker "${worker}" sets provisioner.reuse, which usine ignores: boxd restores each attempt's machine from its snapshot in under a second, so every attempt gets a new machine. Remove provisioner.reuse from the worker.`,
+              ]
+            : []),
           ...(limit.maxVms - limit.vmCount < maxConcurrentAttempts
             ? [
                 `boxd has ${limit.maxVms - limit.vmCount} machine slots available, fewer than max_concurrent_attempts (${maxConcurrentAttempts}). Free machines or request a higher machine limit.`,
@@ -200,7 +239,9 @@ export const boxdDriverFor = (
         ];
         yield* Effect.logInfo("boxd provisioner verified", {
           worker,
-          region: settings.region,
+          region: served,
+          endpoint: api.endpoint,
+          size: captured,
           egress: Option.match(settings.egress, {
             onNone: () => "unrestricted",
             onSome: (entries) => `${entries.length} entries`,
@@ -217,18 +258,42 @@ export const boxdDriverFor = (
         ),
     );
     /**
-     * Replaces the egress allowlist of machine `id` with `entries` and fails when boxd leaves a
-     * restricted machine unrestricted, so no attempt runs on it.
+     * Fails when boxd reports new machine `id`, created with `entries` in its spec, unrestricted.
+     * Reads the machine when the create response, `machine`, omits it. boxd merges the spec of a
+     * restore over the snapshot's, so a snapshot with its own allowlist can leave the machine with
+     * entries that `entries` doesn't list. Then this replaces the machine's allowlist with `entries`,
+     * fails when boxd still reports another list, and waits until the edit is in force.
      */
-    const restrictEgress = Effect.fn("BoxdDriver.restrictEgress")(function* (
+    const checkEgress = Effect.fn("BoxdDriver.checkEgress")(function* (
       id: MachineId,
+      machine: Option.Option<BoxdMachine>,
       entries: BoxdEgressAllowlist,
     ) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
-      const inEffect = yield* api.setEgressAllow(id, entries);
+      const inEffect = Option.isSome(machine)
+        ? machine.value.egressAllow
+        : (yield* api.vm(id)).egressAllow;
       if (inEffect.length === 0)
         return yield* BoxdEgressNotApplied.make({ machine: id, requested: entries.length });
-      yield* Effect.logInfo("Restricted boxd machine egress", {
+      if (!sameEntries(inEffect, entries)) {
+        const replaced = yield* api.setEgressAllow(id, entries);
+        if (replaced.length === 0)
+          return yield* BoxdEgressNotApplied.make({ machine: id, requested: entries.length });
+        if (!sameEntries(replaced, entries))
+          return yield* BoxdEgressWider.make({
+            machine: id,
+            unlisted: unlistedEntries(replaced, entries),
+          });
+        yield* Effect.logInfo("Replaced the snapshot's egress allowlist on new boxd machine", {
+          worker,
+          machine: id,
+          unlisted: unlistedEntries(inEffect, entries).length,
+          entries: replaced.length,
+        });
+        yield* Effect.sleep(EGRESS_IN_FORCE);
+        return;
+      }
+      yield* Effect.logInfo("Created boxd machine with restricted egress", {
         worker,
         machine: id,
         entries: inEffect.length,
@@ -236,19 +301,15 @@ export const boxdDriverFor = (
     });
     /**
      * Explains a failed creation of machine `name`. A request that boxd refuses as invalid, such as
-     * a reserved name, fails the same way on retry, so it is a fault of the worker's configuration.
+     * a reserved name or an allowlist entry, fails the same way on retry, so it is a fault of the
+     * worker's configuration.
      */
     const creationError = (name: string, failure: BoxdCallError) =>
       failure.operation === "createFromSnapshot" && failure.code === "INVALID_ARGUMENT"
         ? capability(
-            `boxd refused to create machine "${name}" from snapshot "${settings.snapshot}": ${failure.message}. If boxd refuses the name, rename worker "${worker}"; otherwise check its provisioner settings.`,
+            `boxd refused to create machine "${name}" from snapshot "${settings.snapshot}": ${failure.message}. If boxd refuses the name, rename worker "${worker}"; otherwise check its provisioner settings, such as provisioner.egress.`,
           )
-        : unavailable(
-            failure.code,
-            failure.operation === "setEgressAllow"
-              ? `boxd didn't apply provisioner.egress to the new machine, which usine deleted: ${failure.message}`
-              : `boxd didn't create the machine: ${failure.message}`,
-          );
+        : unavailable(failure.code, `boxd didn't create the machine: ${failure.message}`);
     const create = Effect.fn("BoxdDriver.create")(
       function* (name: string, tags: MachineTags) {
         yield* Effect.annotateCurrentSpan({ worker, attemptId: tags.attempt });
@@ -259,17 +320,25 @@ export const boxdDriverFor = (
           labels: {
             "usine.instance": tagValue(tags.instance),
             "usine.worker": tagValue(tags.worker),
-            ...assignment(tags),
+            "usine.run": tagValue(tags.run),
+            "usine.process": tagValue(tags.process),
+            "usine.attempt": attemptTag(tags.attempt),
+            "usine.attempts": String(tags.attempts),
           },
+          egress: Option.getOrElse(settings.egress, () => []),
         });
-        yield* Effect.gen(function* () {
+        const setup = Effect.gen(function* () {
           if (Option.isSome(settings.egress))
-            yield* restrictEgress(result.id, settings.egress.value);
+            yield* checkEgress(result.id, result.machine, settings.egress.value);
           yield* api.setAutoHibernateTimeout(result.id, 0);
           yield* api.setAutoSuspendTimeout(result.id, 0);
-          // The timer calls count toward the time boxd takes to enforce the allowlist.
-          if (Option.isSome(settings.egress)) yield* Effect.sleep(EGRESS_IN_FORCE);
-        }).pipe(
+        });
+        // Nothing connects to a restricted machine before its allowlist is fully in force. When
+        // `checkEgress` replaces the list, it waits again after the edit.
+        yield* Effect.all(
+          [setup, Option.isSome(settings.egress) ? Effect.sleep(EGRESS_IN_FORCE) : Effect.void],
+          { concurrency: "unbounded", discard: true },
+        ).pipe(
           Effect.onError(() =>
             api.destroy(result.id).pipe(
               Effect.tap(() =>
@@ -302,7 +371,16 @@ export const boxdDriverFor = (
                   worker,
                   provider: "boxd",
                   reason: "provider",
-                  message: `boxd reported unrestricted egress after usine set ${failure.requested} provisioner.egress entries on the new machine, which usine deleted`,
+                  message: `boxd reported unrestricted egress on the new machine created with ${failure.requested} provisioner.egress entries, which usine deleted`,
+                }),
+              ),
+            BoxdEgressWider: (failure) =>
+              Effect.fail(
+                MachineUnavailableError.make({
+                  worker,
+                  provider: "boxd",
+                  reason: "provider",
+                  message: `boxd kept egress entries that provisioner.egress doesn't list on the new machine, which usine deleted: ${failure.unlisted.join(", ")}`,
                 }),
               ),
             BoxdCallError: (failure) => Effect.fail(creationError(name, failure)),
@@ -375,33 +453,6 @@ export const boxdDriverFor = (
       }
       return Option.some(endpointOf(id));
     });
-    const assign = Effect.fn("BoxdDriver.assign")(function* (id: MachineId, tags: MachineTags) {
-      yield* Effect.annotateCurrentSpan({ worker, machine: id, attemptId: tags.attempt });
-      yield* Effect.gen(function* () {
-        yield* api.updateLabels(id, assignment(tags));
-        if (Option.isSome(settings.egress)) yield* restrictEgress(id, settings.egress.value);
-        yield* api.setAutoHibernateTimeout(id, 0);
-        yield* api.setAutoSuspendTimeout(id, 0);
-      }).pipe(
-        Effect.catchTags({
-          BoxdEgressNotApplied: (failure) =>
-            Effect.fail(
-              ProviderApiError.make({
-                provider: "boxd",
-                operation: "assign the machine",
-                status: Option.none(),
-                message: `boxd reported unrestricted egress after usine set ${failure.requested} provisioner.egress entries on machine ${failure.machine}`,
-              }),
-            ),
-          BoxdCallError: (failure) => Effect.fail(apiError("assign the machine")(failure)),
-        }),
-      );
-      yield* Effect.logInfo("Assigned boxd machine to attempt", {
-        worker,
-        machine: id,
-        attemptId: tags.attempt,
-      });
-    });
     const remove = Effect.fn("BoxdDriver.remove")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       created.delete(id);
@@ -452,7 +503,6 @@ export const boxdDriverFor = (
       create,
       endpoint,
       refreshEndpoint,
-      assign,
       remove,
       list,
     } satisfies MachineDriver;

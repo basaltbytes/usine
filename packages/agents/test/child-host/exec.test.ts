@@ -7,6 +7,7 @@ import {
   Effect,
   Exit,
   Option,
+  PlatformError,
   Queue,
   Redacted,
   Schema,
@@ -144,6 +145,36 @@ describe("exec shell", () => {
       const stillRunning = yield* handle.isRunning;
       assert.isFalse(stillRunning);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("closes the command's stdin when its input fails, even with endOnDone false", () =>
+    Effect.gen(function* () {
+      const { transport } = yield* localTransport;
+      const host = ExecShell.make({ transport, destination: "vm-1" });
+      const failure = PlatformError.badArgument({
+        module: "test",
+        method: "input",
+        description: "the input failed",
+      });
+      for (const endOnDone of [true, false]) {
+        const output = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* hostSpawn(
+              host,
+              { environment: {}, command: "sh", args: ["-c", "cat; echo EOF"] },
+              { stdin: { stream: Stream.fail(failure), endOnDone } },
+            );
+            const stdout = yield* handle.stdout.pipe(Stream.decodeText(), Stream.mkString);
+            const exitCode = yield* handle.exitCode;
+            return { stdout: stdout.trim(), exitCode };
+          }),
+        ).pipe(Effect.timeout("5 seconds"));
+        assert.deepStrictEqual(output, {
+          stdout: "EOF",
+          exitCode: ChildProcessSpawner.ExitCode(0),
+        });
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live(

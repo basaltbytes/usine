@@ -34,7 +34,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 
@@ -74,7 +74,7 @@ const executor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeedNone,
-  recover: () => Effect.void,
+  recover: () => Effect.succeed("found" as const),
   intervene: () => Effect.void,
   occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
   sweep: Effect.void,
@@ -94,7 +94,9 @@ const executor = Layer.succeed(StepExecutor)({
             sentAt: now,
             payload:
               sequence === 1
-                ? AttemptChannel.Started.make({ parentModel: ModelId.make("selected-parent") })
+                ? AttemptChannel.Started.make({
+                    parentModel: Option.some(ModelId.make("selected-parent")),
+                  })
                 : AttemptChannel.SessionEvent.make({
                     event: TextOutput.make({ session: parent, text: `row ${sequence}` }),
                   }),
@@ -171,7 +173,8 @@ const seed = (directory: string) =>
         Layer.provide(executor),
         Layer.provide(
           Layer.succeed(TriggerCondition)({
-            recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+            recheck: (submission) =>
+              Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
           }),
         ),
         Layer.provide(CompletionCheck.unverified),

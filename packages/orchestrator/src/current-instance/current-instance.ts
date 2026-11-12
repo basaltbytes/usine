@@ -7,6 +7,7 @@ import {
   Configuration,
   ConfigurationStore,
   commit,
+  replay,
   type ConfigurationRevisionNumber,
   type ConfigurationCommit,
   type ConfigurationRevision,
@@ -14,7 +15,7 @@ import {
   type ConfigurationStoreError,
   type StaleRevision,
 } from "@usine/config/configuration";
-import { LoadedInstance } from "@usine/config/instance";
+import { LoadedInstance, logConfigWarnings } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { WorkerName } from "@usine/core/worker";
@@ -224,6 +225,7 @@ export class CurrentInstance extends Context.Service<
           (loaded: LoadedInstance) => Effect.Effect<ReadonlyArray<ConfigFileError>>
         >(() => Effect.succeed([]));
         const reloading = yield* Semaphore.make(1);
+        yield* logConfigWarnings(initial.warnings);
 
         const beforeWorkersStart = Effect.fn("CurrentInstance.beforeWorkersStart")(function* (
           running: LoadedInstance,
@@ -283,6 +285,7 @@ export class CurrentInstance extends Context.Service<
                     target: { kind: "configuration", id: "instance" },
                   })),
                 );
+                yield* logConfigWarnings(loaded.warnings);
                 yield* Effect.logInfo(
                   "Stored configuration applied; new runs use the new configuration",
                   {
@@ -387,7 +390,8 @@ export class CurrentInstance extends Context.Service<
             Effect.gen(function* () {
               const previous = yield* Ref.get(observed);
               if (revision.number <= previous.number) return;
-              const next = yield* commit(
+              // The store accepted this revision, so replay it as stored.
+              const next = yield* replay(
                 parser,
                 previous,
                 previous.number,

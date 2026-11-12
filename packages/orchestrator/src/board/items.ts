@@ -1,4 +1,4 @@
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { isSettledItemState, type LaneItemState, type SettledItemState } from "@usine/config/board";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { type ItemProjection, ItemProjectionReader } from "@usine/engine/item-projection";

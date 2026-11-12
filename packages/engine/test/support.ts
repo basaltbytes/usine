@@ -22,7 +22,7 @@ import { Submission } from "../src/engine/submission.ts";
 import { CompletionCheck } from "../src/completion-check.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
-import { TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "../src/trigger-condition.ts";
 
 export const stepResult = (message: string) => StepResult.make({ message, facts: [] });
 export const testAgent = Agent.make({
@@ -46,7 +46,7 @@ export const conditionLayer = (
 
 /** A recheck that matches the queued Event with its saved settings. */
 export const stillMatches = (submission: Submission) =>
-  Effect.succeed(TriggerRecheck.Matches({ submission }));
+  Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) }));
 
 /**
  * Returns the local engine over a scripted `StepExecutor`. Queued Events still match unless the
@@ -65,7 +65,7 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeedNone,
-    recover: () => Effect.void,
+    recover: () => Effect.succeed("found" as const),
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
     occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
@@ -105,7 +105,7 @@ export const slottedExecutor = Effect.fn("test.slottedExecutor")(function* (
     workers: Effect.succeed([local]),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeedNone,
-    recover: () => Effect.void,
+    recover: () => Effect.succeed("found" as const),
     intervene: () => Effect.void,
     interrupt: (attemptId, reason) =>
       Effect.gen(function* () {

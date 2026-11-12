@@ -633,9 +633,21 @@ describe("Task view", () => {
                 ? Effect.succeed([`${head}\trefs/heads/feature`])
                 : git(...args).pipe(Effect.map((text) => text.split("\n")))
               : Effect.succeed([
-                  jsonKey([[{ number: 41, html_url: pullUrl(41), head: { sha: head } }]]),
+                  jsonKey([
+                    [
+                      {
+                        number: 41,
+                        html_url: pullUrl(41),
+                        state: "open",
+                        merged_at: null,
+                        head: { sha: head, ref: "feature", repo: { id: 1, full_name: repository } },
+                        base: { repo: { id: 1 } },
+                      },
+                    ],
+                  ]),
                 ]),
           Effect.succeed(AttemptWindows.make({ own: Option.none(), overlapping: [] })),
+          Option.none(),
         );
         assert.deepStrictEqual(
           facts.flatMap((fact) => (fact._tag === "Commit" ? [fact.sha] : [])).slice(0, 1),
@@ -666,7 +678,7 @@ describe("Task view", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("omits attempt comparisons without a checkout base or new commits", () =>
+  it.effect("omits attempts without a checkout base and keeps attempts without new commits", () =>
     Effect.gen(function* () {
       const legacy = yield* Schema.decodeEffect(PullRequest)({
         _tag: "PullRequest",
@@ -707,7 +719,13 @@ describe("Task view", () => {
           }),
         ),
       });
-      assert.deepStrictEqual(harvestedAttemptChanges(noPush), []);
+      assert.deepStrictEqual(
+        harvestedAttemptChanges(noPush).map(({ base, head }) => ({ base, head })),
+        noPush.attempts.map(() => ({
+          base: CommitSha.make("a".repeat(40)),
+          head: CommitSha.make("a".repeat(40)),
+        })),
+      );
     }),
   );
 

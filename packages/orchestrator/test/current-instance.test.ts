@@ -2,8 +2,15 @@ import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import {
+  ConfigurationChange,
+  ConfigurationEntityId,
+  ConfigurationEntityKey,
+  ConfigurationRevision,
+  ConfigurationRevisionNumber,
+} from "@usine/config/configuration";
 import { InstancePath } from "@usine/config/file";
-import { GitHubLabelName } from "@usine/config/label";
+import { GitHubLabelName } from "@usine/core/label";
 import { DurableHarness } from "@usine/durable/harness";
 import { gatewayModelAccess } from "@usine/durable/gateway";
 import { fauxParent } from "@usine/durable/testing";
@@ -12,7 +19,17 @@ import { AgentName } from "@usine/core/agent";
 import { InstanceId, InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { Executor, WorkerCapabilityError, fullPreflight } from "@usine/executor";
-import { ConfigProvider, Effect, Option, FileSystem, Layer, Logger, Path } from "effect";
+import {
+  ConfigProvider,
+  DateTime,
+  Effect,
+  Option,
+  FileSystem,
+  Layer,
+  Logger,
+  Path,
+  Schedule,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { parentModels } from "../src/parent-models.ts";
 import { fakeMachine } from "../../executor/test/ssh/support.ts";
@@ -399,6 +416,39 @@ describe("CurrentInstance", () => {
     ).pipe(Effect.provide(changeBusLayer), Effect.scoped),
   );
 
+  it.live("logs undeclared outcome labels at startup and when it applies a revision", () => {
+    const logged: Array<unknown> = [];
+    const outcomeLabels = Logger.make<unknown, void>(({ message }) => {
+      if (
+        Array.isArray(message) &&
+        message[0] === "Loop outcome label is not a declared GitHub label"
+      )
+        logged.push(message[1]);
+    });
+    const startDev = (label: string) =>
+      [
+        "loops/start-dev.md",
+        loopFile("developer").replace("step:", `outcome_labels: [${label}]\nstep:`),
+      ] as const;
+    return withFolder(
+      (root) =>
+        Effect.gen(function* () {
+          // The test store reads the folder, which logs once before each install logs again.
+          assert.deepStrictEqual(logged, [
+            { loop: "start-dev", label: "shipped" },
+            { loop: "start-dev", label: "shipped" },
+          ]);
+          yield* writeInstanceFiles(root, [startDev("shipped-v2")]);
+          yield* (yield* CurrentInstance).reload;
+          assert.deepStrictEqual(logged.slice(2), [
+            { loop: "start-dev", label: "shipped-v2" },
+            { loop: "start-dev", label: "shipped-v2" },
+          ]);
+        }),
+      [...initialFiles.filter(([file]) => file !== "loops/start-dev.md"), startDev("shipped")],
+    ).pipe(Effect.withLogger(outcomeLabels));
+  });
+
   it.live("keeps the running instance when the configuration store cannot be read", () =>
     withFolder((root) =>
       Effect.gen(function* () {
@@ -420,6 +470,52 @@ describe("CurrentInstance", () => {
         assert.strictEqual(currentInstance, running);
       }),
     ),
+  );
+
+  it.live("applies a stored revision over a configuration that holds an exe.dev Worker", () =>
+    Effect.gen(function* () {
+      const directory = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+        prefix: "usine-reload-",
+      });
+      const root = InstanceDirectory.make(directory);
+      yield* writeInstanceFiles(root, [
+        ["usine.yaml", `${usineYaml()}  - name: edge\n    kind: exe.dev\n`],
+        ...initialFiles.filter(([file]) => file !== "usine.yaml"),
+      ]);
+      const addExtra = ConfigurationRevision.make({
+        number: ConfigurationRevisionNumber.make(2),
+        actor: Option.none(),
+        time: DateTime.makeUnsafe("2026-11-12T12:00:00Z"),
+        message: Option.none(),
+        changes: [
+          ConfigurationChange.make({
+            key: ConfigurationEntityKey.make({
+              kind: "label",
+              identifier: ConfigurationEntityId.make("extra"),
+            }),
+            before: Option.none(),
+            after: Option.some({ name: "extra" }),
+          }),
+        ],
+      });
+      const warnings: Array<unknown> = [];
+      const labels = yield* Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        return yield* instances.get.pipe(
+          Effect.map(({ config }) => config.labels.map(({ name }) => name)),
+          Effect.repeat({
+            until: (names) => names.includes(GitHubLabelName.make("extra")),
+            schedule: Schedule.spaced("20 millis"),
+          }),
+          Effect.timeout("3 seconds"),
+        );
+      }).pipe(
+        Effect.provide(reloadableInstanceLayer(root, [addExtra])),
+        Effect.withLogger(warningsIn(warnings)),
+      );
+      assert.deepStrictEqual(labels, ["ready", "extra"]);
+      assert.notInclude(warnings, "Configuration revision stream failed; retrying");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.live("rejects a workers change while no Worker runs, as in setup mode", () =>

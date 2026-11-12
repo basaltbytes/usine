@@ -29,9 +29,13 @@ import { tmpdir } from "node:os";
 import { PROCESS_OWNER } from "../src/child-host/supervisor.ts";
 import { CHILD_LIFELINE, childProcessCommand, startChildProcess } from "../src/child-host/node.ts";
 import { signal } from "../src/child-host/worker/files.ts";
-import { claudeOutputCheckpoint } from "../src/harness/claude/sdk.ts";
 import { ChildSessionLifecycle } from "../src/runtime.ts";
-import { scriptedOwner } from "./child-host/scripted-owner.ts";
+import {
+  detachAfterHookResponse,
+  scriptedCommand,
+  scriptedOwner,
+  scriptedTarget,
+} from "./child-host/scripted-owner.ts";
 // Synchronous Node path callbacks retain the host platform’s path semantics.
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { join } from "node:path";
@@ -269,6 +273,7 @@ describe("remote shell commands", () => {
       container: { runtime: "docker", name: "usine-attempt" },
     });
     const [, , , , line] = sshArguments(contained, {
+      cwd: "/workspace/repository",
       command: "node",
       args: [
         "-e",
@@ -280,12 +285,25 @@ describe("remote shell commands", () => {
         "claude",
         "--output-format",
         "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+        "--model",
+        "opus",
+        "--permission-mode",
+        "bypassPermissions",
+        "--setting-sources",
+        "user",
+        "--resume",
+        "6f1c2a9e-3d4b-4c8a-9e2f-1b7d5a0c3e84",
       ],
       environment: {},
     });
     assert(line !== undefined);
-    // Linux MAX_ARG_STRLEN: the remote shell receives this line as one exec argument.
-    assert.isBelow(Buffer.byteLength(line), 128 * 1024);
+    // A size guard, not a minification check. Linux MAX_ARG_STRLEN (128 KiB) applies because the
+    // remote shell receives this line as one exec argument; half of it stays free for longer
+    // harness arguments than these, such as an MCP server configuration.
+    assert.isBelow(Buffer.byteLength(line), 64 * 1024);
   });
 
   it("refuses a variable name the shell would not read as one", () => {
@@ -512,7 +530,10 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
           const scope = yield* Scope.make();
           const received: Array<string> = [];
           const owner = yield* Effect.gen(function* () {
-            const owner = yield* startChildProcess(target, harness, input, transport, "handled");
+            const owner = yield* startChildProcess(target, harness, input, {
+              transport,
+              acknowledgement: "handled",
+            });
             yield* owner.stdout.pipe(
               Stream.runForEach((bytes) =>
                 Effect.sync(() => received.push(Buffer.from(bytes).toString())),
@@ -847,84 +868,19 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
   );
 });
 
-const scriptedTarget = {
-  host: RemoteShell.make({
-    ssh: { command: "ssh", args: [] },
-    sshEnvironment: {},
-    destination: "worker",
-  }),
-  cwd: "/worktree",
-  environment: {},
-  sessionId: Option.some(AgentSessionId.make("attempt:child:1")),
-};
-const scriptedCommand = { command: "claude", args: [], cwd: "/worktree" };
-
 it.live(
   "checkpoints output that input acknowledged while detaching releases",
   () =>
     Effect.gen(function* () {
-      const line = (message: Schema.Json) =>
-        Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(message).pipe(
-          Effect.map((text) => Buffer.from(`${text}\n`)),
-        );
-      const hook = yield* line({
-        type: "control_request",
-        request_id: "hook",
-        request: { subtype: "hook_callback" },
-      });
-      const response = yield* line({
-        type: "control_response",
-        response: { request_id: "hook", subtype: "success" },
-      });
-      const responseSent = yield* Deferred.make<void>();
       // An owner whose acknowledgement of the hook response arrives after the detach starts.
-      const { spawner, saved } = yield* scriptedOwner(
-        [
-          { offset: 10, ready: true, sequence: 0, retained: false },
-          { offset: 20, stdout: hook.toString("base64") },
-        ],
-        (sequence, frame) =>
-          Deferred.succeed(responseSent, undefined).pipe(
+      const cursor = yield* detachAfterHookResponse(
+        (sequence, frame, responded) =>
+          responded.pipe(
             Effect.andThen(Effect.sleep("300 millis")),
             Effect.andThen(frame({ offset: 30, ack: sequence })),
           ),
+        (response) => [response],
       );
-      const stopping = yield* Ref.make(false);
-      const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const hookRead = yield* Deferred.make<void>();
-      const checkpoint = claudeOutputCheckpoint();
-      const scope = yield* Scope.make();
-      yield* Effect.gen(function* () {
-        const owner = yield* startChildProcess(
-          scriptedTarget,
-          scriptedCommand,
-          Stream.fromQueue(input),
-          undefined,
-          "handled",
-          checkpoint.inputAcknowledged,
-        );
-        yield* owner.stdout.pipe(
-          Stream.runForEach((bytes) =>
-            checkpoint
-              .read(bytes)
-              .pipe(
-                Effect.flatMap(owner.acknowledgeOutput),
-                Effect.andThen(Deferred.succeed(hookRead, undefined)),
-              ),
-          ),
-          Effect.forkScoped,
-        );
-      }).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
-        Scope.provide(scope),
-      );
-      yield* Deferred.await(hookRead);
-      yield* Queue.offer(input, response);
-      yield* Deferred.await(responseSent);
-      yield* Ref.set(stopping, true);
-      yield* Scope.close(scope, Exit.void);
-      const cursor = yield* Deferred.await(saved).pipe(Effect.timeout("1 second"));
       assert.deepStrictEqual(cursor, { offset: 30, skip: 0 }, "the answered hook is not replayed");
     }),
   10_000,
@@ -934,69 +890,14 @@ it.live(
   "checkpoints a hook whose response spans two input frames under one acknowledgement",
   () =>
     Effect.gen(function* () {
-      const line = (message: Schema.Json) =>
-        Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(message).pipe(
-          Effect.map((text) => Buffer.from(`${text}\n`)),
-        );
-      const hook = yield* line({
-        type: "control_request",
-        request_id: "hook",
-        request: { subtype: "hook_callback" },
-      });
-      const response = yield* line({
-        type: "control_response",
-        response: { request_id: "hook", subtype: "success" },
-      });
-      const acknowledged = yield* Deferred.make<void>();
       // The owner acknowledges both frames at once, as after a reattachment.
-      const { spawner, saved } = yield* scriptedOwner(
-        [
-          { offset: 10, ready: true, sequence: 0, retained: false },
-          { offset: 20, stdout: hook.toString("base64") },
-        ],
-        (sequence, frame) =>
+      const cursor = yield* detachAfterHookResponse(
+        (sequence, frame, responded) =>
           sequence === 2
-            ? frame({ offset: 30, ack: sequence }).pipe(
-                Effect.andThen(Deferred.succeed(acknowledged, undefined)),
-              )
+            ? frame({ offset: 30, ack: sequence }).pipe(Effect.andThen(responded))
             : Effect.void,
+        (response) => [response.subarray(0, 20), response.subarray(20)],
       );
-      const stopping = yield* Ref.make(false);
-      const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const hookRead = yield* Deferred.make<void>();
-      const checkpoint = claudeOutputCheckpoint();
-      const scope = yield* Scope.make();
-      yield* Effect.gen(function* () {
-        const owner = yield* startChildProcess(
-          scriptedTarget,
-          scriptedCommand,
-          Stream.fromQueue(input),
-          undefined,
-          "handled",
-          checkpoint.inputAcknowledged,
-        );
-        yield* owner.stdout.pipe(
-          Stream.runForEach((bytes) =>
-            checkpoint
-              .read(bytes)
-              .pipe(
-                Effect.flatMap(owner.acknowledgeOutput),
-                Effect.andThen(Deferred.succeed(hookRead, undefined)),
-              ),
-          ),
-          Effect.forkScoped,
-        );
-      }).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.provideService(ChildSessionLifecycle, { isStopping: Ref.get(stopping) }),
-        Scope.provide(scope),
-      );
-      yield* Deferred.await(hookRead);
-      yield* Queue.offerAll(input, [response.subarray(0, 20), response.subarray(20)]);
-      yield* Deferred.await(acknowledged);
-      yield* Ref.set(stopping, true);
-      yield* Scope.close(scope, Exit.void);
-      const cursor = yield* Deferred.await(saved).pipe(Effect.timeout("1 second"));
       assert.deepStrictEqual(cursor, { offset: 30, skip: 0 }, "the answered hook is not replayed");
     }),
   10_000,
@@ -1058,13 +959,13 @@ it.live("hands each acknowledged input to its callback once across later acknowl
         scriptedTarget,
         scriptedCommand,
         Stream.fromQueue(input),
-        undefined,
-        "received",
-        (bytes) =>
-          Effect.sync(() => {
-            acknowledged.push(Buffer.from(bytes).toString());
-            return 0;
-          }),
+        {
+          onInputAcknowledged: (bytes) =>
+            Effect.sync(() => {
+              acknowledged.push(Buffer.from(bytes).toString());
+              return 0;
+            }),
+        },
       );
       yield* Queue.offerAll(input, [Buffer.from("first"), Buffer.from("second")]);
       yield* owner.stdout.pipe(Stream.take(1), Stream.runDrain);

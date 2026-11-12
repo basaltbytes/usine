@@ -26,7 +26,7 @@ labels:
   - name: ready-for-review
 ```
 
-An undeclared label in a lane source or a trigger expression string literal adds a non-blocking entry to `LoadedInstance.warnings`. Prompt prose isn't checked.
+An undeclared label in a lane source, a trigger expression string literal, or a loop's `outcome_labels` adds a non-blocking entry to `LoadedInstance.warnings`. Prompt prose isn't checked. A schedule loop with `outcome_labels` fails schema validation.
 
 Each project owns an ordered list of registered repositories and one lane map. A repository belongs to at most one project. A registered repository without a project has no board and runs no loops. Label lanes match by name in every member repository, and polling creates missing lane labels.
 
@@ -83,7 +83,7 @@ A loop's optional `priority` (`LoopFile.priority`, `LoopPriority`) accepts a saf
 
 ## Imports
 
-Subpaths: `/factory` (settings and registry), `/board` (lanes), `/project` (project schema, loop scope, migration, and unique short-name resolution), `/label`, `/loop`, `/trigger`, `/agent`, `/selector` (schema and matching), `/instance` (`LoadedInstance` and warnings), and `/file` (file paths and loading failures). Shared identities and agent personas come from `@usine/core`.
+Subpaths: `/factory` (settings and registry), `/board` (lanes), `/project` (project schema, loop scope, migration, and unique short-name resolution), `/label` (declared labels; label names come from `@usine/core/label`), `/loop`, `/trigger`, `/agent`, `/selector` (schema and matching), `/instance` (`LoadedInstance` and warnings), and `/file` (file paths and loading failures). Shared identities and agent personas come from `@usine/core`.
 
 `InstanceFolder` (`/instance-folder`) and `ConfigParser` (`/parser`) are Effect services. `InstanceFolder.layer` needs `FileSystem.FileSystem` and `Path.Path`; `ConfigParser.layer` needs `ExpressionEngine` from `@usine/expression/expression-engine`.
 
@@ -151,4 +151,4 @@ Configuration records use nominal Schema brands. `configurationEntities`, `forma
 
 Run `pnpm --filter @usine/config check` after building dependencies to check TypeScript and Effect diagnostics with the patched compiler.
 
-SSH workers accept `provisioner.provider: boxd`, a required snapshot, a captured-size assertion (default `2x8`), a region id (default `fra`), isolation (default enabled), an optional egress allowlist, and optional gateway tailnet settings. A boxd worker ignores `identity_file`, since usine runs its commands through boxd's `Exec` API with the API key; a stored worker that sets it, as earlier releases required, still loads. Behind a gateway, an egress allowlist must include `*.tailscale.com` and must not admit GitHub or the API and login hosts of a provider whose credential the gateway holds.
+SSH workers accept `provisioner.provider: boxd`, a required snapshot, an optional size assertion as `<vcpu>x<GiB>` that preflight compares with the snapshot, an optional region id, isolation (default enabled), an optional egress allowlist, and optional gateway tailnet settings. A boxd worker ignores `reuse`, since boxd restores each attempt's machine in under a second; a stored worker that sets it, as earlier releases allowed, still loads, and preflight warns about it. A boxd worker ignores `identity_file`, since usine runs its commands through boxd's `Exec` API with the API key; a stored worker that sets it, as earlier releases required, still loads. Behind a gateway, an egress allowlist must include `*.tailscale.com` and must not admit GitHub or the API and login hosts of a provider whose credential the gateway holds.
