@@ -1,30 +1,12 @@
 import type { AgentSession, AgentSessionId } from "@usine/core/agent/session";
 import { SessionTokensUpdated, TokenCount } from "@usine/core/agent/session";
-import {
-  type Cause,
-  type DateTime,
-  Effect,
-  Option,
-  type Queue,
-  Result,
-  Schema,
-  Stream,
-} from "effect";
-import { AgentCapacityError, AgentResultError, SessionOperationError } from "../../runtime.ts";
+import { type Cause, DateTime, Effect, Option, type Queue, Result, Schema, Stream } from "effect";
+import { type AgentCapacityError, AgentResultError, SessionOperationError } from "../../runtime.ts";
 import { CompletionReply, type CompletionRequest } from "../completion.ts";
 import type { SessionSpec } from "../contract.ts";
 import { claudeTokenMeter } from "../usage.ts";
-import {
-  apiErrorRefusal,
-  apiRetryFailure,
-  apiRetryMessage,
-  assistantFailure,
-  ClaudeResultMessage,
-  decodeApiRetry,
-  isAssistantMessage,
-  resultFailure,
-} from "./codec.ts";
-import { isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
+import { apiRetryMessage, ClaudeResultMessage } from "./codec.ts";
+import { type ClaudeProviderFailures, claudeProviderFailures } from "./provider.ts";
 
 /**
  * Returns what a structured completion's result answered, or the failure that ended it: Claude
@@ -34,7 +16,7 @@ import { isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
 const completionOutcome = (
   sessionId: AgentSessionId,
   result: typeof ClaudeResultMessage.Type,
-  providerFailure: Option.Option<AgentCapacityError | AgentResultError>,
+  provider: ClaudeProviderFailures,
 ): Result.Result<CompletionReply, AgentCapacityError | AgentResultError> => {
   if (result.subtype === "error_max_structured_output_retries")
     return Result.succeed(
@@ -42,9 +24,8 @@ const completionOutcome = (
         message: "Claude Code returned no value that matches the output schema within its retries",
       }),
     );
-  if (result.subtype !== "success")
-    return Result.fail(resultFailure(sessionId, result, providerFailure));
-  const refusal = apiErrorRefusal(sessionId, result, providerFailure);
+  if (result.subtype !== "success") return Result.fail(provider.failedResult(result));
+  const refusal = provider.refusal(result);
   if (Option.isSome(refusal)) return Result.fail(refusal.value);
   const text = result.result?.trim() ?? "";
   if (result.is_error === true)
@@ -76,8 +57,8 @@ export interface CompletionMessages {
 
 /**
  * Reads a completion's messages to its result and returns what it answered, reporting the usage
- * of `session` to `spent`. A capacity refusal while the usage limit rejects requests carries the
- * limit's reset time.
+ * of `session` to `spent`. Provider retries, assistant errors, and rate limits classify a failed
+ * result as they do for a session.
  */
 export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(function* (
   spec: SessionSpec,
@@ -87,8 +68,7 @@ export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(fu
 ) {
   const tokens = claudeTokenMeter();
   yield* spent(SessionTokensUpdated.make({ session, totalTokens: TokenCount.make(0) }));
-  let providerFailure = Option.none<AgentCapacityError | AgentResultError>();
-  let limitResetsAt = Option.none<DateTime.Utc>();
+  const provider = claudeProviderFailures(session.id);
   let result = Option.none<typeof ClaudeResultMessage.Type>();
   yield* Stream.concat(Stream.fromIterable(launch.read), Stream.fromQueue(launch.output)).pipe(
     Stream.takeUntil(Schema.is(ClaudeResultMessage)),
@@ -103,17 +83,17 @@ export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(fu
               costUsd: used.value.costUsd,
             }),
           );
-        if (isRateLimitEvent(message)) limitResetsAt = rejectedUntil(message);
-        const retry = decodeApiRetry(message);
-        if (Option.isSome(retry)) {
-          providerFailure = apiRetryFailure(session.id, retry.value);
+        const reported = provider.read(message);
+        if (Option.isSome(reported.rejectedUntil))
+          yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
+            sessionId: session.id,
+            resetsAt: DateTime.formatIso(reported.rejectedUntil.value),
+          });
+        if (Option.isSome(reported.retry))
           yield* Effect.logWarning("Claude completion cannot reach its provider and will retry", {
             sessionId: session.id,
-            message: apiRetryMessage(retry.value),
+            message: apiRetryMessage(reported.retry.value),
           });
-        }
-        if (isAssistantMessage(message))
-          providerFailure = assistantFailure(session.id, message, providerFailure);
         if (Schema.is(ClaudeResultMessage)(message)) result = Option.some(message);
         yield* launch.acknowledge(message);
       }),
@@ -126,14 +106,7 @@ export const readClaudeCompletion = Effect.fn("ClaudeRuntime.readCompletion")(fu
       message: "Claude output closed without a completion",
       cause: new Error("unexpected end of output"),
     });
-  const outcome = completionOutcome(session.id, result.value, providerFailure);
+  const outcome = completionOutcome(session.id, result.value, provider);
   if (outcome._tag === "Success") return outcome.success;
-  const failure = outcome.failure;
-  if (Schema.is(AgentCapacityError)(failure))
-    return yield* AgentCapacityError.make({
-      sessionId: failure.sessionId,
-      message: failure.message,
-      resetsAt: Option.orElse(failure.resetsAt, () => limitResetsAt),
-    });
-  return yield* failure;
+  return yield* outcome.failure;
 });

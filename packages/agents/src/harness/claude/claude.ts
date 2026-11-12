@@ -37,8 +37,6 @@ import {
 } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import {
-  AgentCapacityError,
-  type AgentResultError,
   HostLoginLock,
   ChildBackend,
   ChildSessionLifecycle,
@@ -60,17 +58,13 @@ import {
   structuredCompletion,
 } from "../completion.ts";
 import { readClaudeCompletion } from "./completion.ts";
-import { claudeRateLimits, isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
+import { claudeRateLimits } from "./rate-limits.ts";
+import { claudeProviderFailures } from "./provider.ts";
 import {
   apiRetryMessage,
   ClaudeApiRetry,
   ClaudeCompletionHeader,
   ClaudeResultMessage,
-  decodeApiRetry,
-  apiRetryFailure,
-  apiErrorRefusal,
-  assistantFailure,
-  resultFailure,
   decodeMessageAcknowledgement,
   decodeCompletionUpdate,
   isAssistantMessage,
@@ -625,24 +619,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         );
       });
 
-      let providerFailure = Option.none<AgentCapacityError | AgentResultError>();
-      // The reset time of the usage limit that the latest rate-limit report rejects requests under.
-      let limitResetsAt = Option.none<DateTime.Utc>();
-
-      /**
-       * Fails the session with `error`. A capacity refusal while the usage limit rejects requests
-       * carries the limit's reset time, so the retry waits for it.
-       */
-      const failTurn = (error: AgentCapacityError | AgentResultError) =>
-        channel.fail(
-          Schema.is(AgentCapacityError)(error) && Option.isSome(limitResetsAt)
-            ? AgentCapacityError.make({
-                sessionId: error.sessionId,
-                message: error.message,
-                resetsAt: limitResetsAt,
-              })
-            : error,
-        );
+      const provider = claudeProviderFailures(session.id);
 
       /** Applies one message from Claude to the session. */
       const handle = (message: Schema.Json) =>
@@ -658,21 +635,13 @@ const makeClaudeSessions = Effect.gen(function* () {
           }
           const limits = yield* readRateLimits(message);
           if (Option.isSome(limits)) yield* channel.emit(limits.value);
-          if (isRateLimitEvent(message)) {
-            limitResetsAt = rejectedUntil(message);
-            if (Option.isSome(limitResetsAt))
-              yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
-                sessionId: session.id,
-                resetsAt: DateTime.formatIso(limitResetsAt.value),
-              });
-          }
-          const retry = decodeApiRetry(message);
-          if (Option.isSome(retry)) {
-            providerFailure = apiRetryFailure(session.id, retry.value);
-            return yield* reportRetry(retry.value);
-          }
-          if (isAssistantMessage(message))
-            providerFailure = assistantFailure(session.id, message, providerFailure);
+          const reported = provider.read(message);
+          if (Option.isSome(reported.rejectedUntil))
+            yield* Effect.logWarning("Claude reports that its usage limit rejects requests", {
+              sessionId: session.id,
+              resetsAt: DateTime.formatIso(reported.rejectedUntil.value),
+            });
+          if (Option.isSome(reported.retry)) return yield* reportRetry(reported.retry.value);
           if (retrying && isAssistantMessage(message)) yield* reportRecovery();
           if (Schema.is(ClaudeCompletionHeader)(message)) {
             const update = yield* decodeCompletionUpdate(message).pipe(
@@ -724,20 +693,22 @@ const makeClaudeSessions = Effect.gen(function* () {
           retries = 0;
           retrying = false;
           if (message.subtype !== "success" || message.result === undefined) {
-            yield* failTurn(resultFailure(session.id, message, providerFailure));
+            yield* channel.fail(provider.failedResult(message));
             return;
           }
-          const refusal = apiErrorRefusal(session.id, message, providerFailure);
+          const refusal = provider.refusal(message);
           if (Option.isSome(refusal)) {
             yield* Effect.logWarning(
               "Claude turn ended on a provider capacity refusal or usage limit",
               {
                 sessionId: session.id,
                 apiErrorStatus: message.api_error_status,
-                resetsAt: Option.getOrUndefined(Option.map(limitResetsAt, DateTime.formatIso)),
+                resetsAt: Option.getOrUndefined(
+                  Option.map(refusal.value.resetsAt, DateTime.formatIso),
+                ),
               },
             );
-            yield* failTurn(refusal.value);
+            yield* channel.fail(refusal.value);
             return;
           }
           if (message.is_error === true)
@@ -745,7 +716,7 @@ const makeClaudeSessions = Effect.gen(function* () {
               "Claude turn ended on an API error that is not a capacity refusal; its text is the session's answer",
               { sessionId: session.id, apiErrorStatus: message.api_error_status },
             );
-          providerFailure = Option.none();
+          provider.clear();
           // Typed-prompt turns stamp only their first assistant frame, even after folding guidance.
           // A result that lists `user_message_uuids` already names every folded message.
           if (message.queued_turn_count !== undefined && Option.isNone(acknowledged)) {
@@ -836,7 +807,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         backgroundTasks = [];
         completedTurn = Option.none();
         reportsSessionState = false;
-        providerFailure = Option.none();
+        provider.clear();
         retries = 0;
         retrying = false;
         const { sessionId: _assignedId, ...resumeOptions } = options;

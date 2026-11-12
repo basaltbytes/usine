@@ -76,6 +76,54 @@ const claudeResult = (fields: Readonly<Record<string, Schema.Json>>) =>
     return { ...result, ...fields };
   });
 
+/**
+ * Claude Code's output with `messages` sent before its result, and the result rewritten with
+ * `fields`, without its structured value.
+ */
+const claudeBeforeResult = (
+  messages: ReadonlyArray<Schema.Json>,
+  fields: Readonly<Record<string, Schema.Json>>,
+) => {
+  const rewrite = claudeResult(fields);
+  return (transcript: Transcript): Transcript => ({
+    ...rewrite(transcript),
+    entries: rewrite(transcript).entries.flatMap((entry) =>
+      entry.type === "emit_inbound" &&
+      isJsonObject(entry.payload) &&
+      entry.payload.type === "result"
+        ? [...messages.map((payload) => ({ ...entry, payload })), entry]
+        : [entry],
+    ),
+  });
+};
+
+/** When Claude's five-hour usage limit resets in the messages below. */
+const CLAUDE_LIMIT_RESETS_AT = "2026-11-11T05:00:00.000Z";
+const CLAUDE_LIMIT_TEXT = "You've hit your limit · resets 5am (UTC)";
+const claudeLimitRejected = {
+  type: "rate_limit_event",
+  rate_limit_info: {
+    status: "rejected",
+    rateLimitType: "five_hour",
+    utilization: 1,
+    resetsAt: Date.parse(CLAUDE_LIMIT_RESETS_AT) / 1000,
+  },
+};
+const claudeLimitError = {
+  type: "assistant",
+  error: "rate_limit",
+  message: { content: [{ type: "text", text: CLAUDE_LIMIT_TEXT }] },
+};
+const claudeRateLimitRetry = {
+  type: "system",
+  subtype: "api_retry",
+  attempt: 1,
+  max_retries: 10,
+  retry_delay_ms: 5_000,
+  error_status: 429,
+  error: "unknown",
+};
+
 /** The Codex turn completion rewritten as failed with `error`. */
 const codexFailedTurn = (error: Readonly<Record<string, Schema.Json>>) =>
   rewritePayloads((payload) => {
@@ -186,6 +234,38 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
       is_error: true,
       api_error_status: 429,
       result: "You've hit your limit.",
+    }),
+    reason: "AgentCapacityError",
+  },
+  {
+    harness: "claude",
+    answer: "an API retry with HTTP 429 before a failed turn",
+    transform: claudeBeforeResult([claudeLimitRejected, claudeRateLimitRetry], {
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["API failed"],
+    }),
+    reason: "AgentCapacityError",
+    resetsAt: CLAUDE_LIMIT_RESETS_AT,
+  },
+  {
+    harness: "claude",
+    answer: "an assistant rate-limit error before a result without an HTTP status",
+    transform: claudeBeforeResult([claudeLimitRejected, claudeLimitError], {
+      is_error: true,
+      api_error_status: null,
+      result: CLAUDE_LIMIT_TEXT,
+    }),
+    reason: "AgentCapacityError",
+    resetsAt: CLAUDE_LIMIT_RESETS_AT,
+  },
+  {
+    harness: "claude",
+    answer: "a rate limit without a reported reset time",
+    transform: claudeBeforeResult([claudeLimitError], {
+      is_error: true,
+      api_error_status: 429,
+      result: CLAUDE_LIMIT_TEXT,
     }),
     reason: "AgentCapacityError",
   },
