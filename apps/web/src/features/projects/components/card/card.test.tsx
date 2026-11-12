@@ -347,6 +347,18 @@ describe("Board lane order", () => {
     assert.isFalse(foldsByDefault(unmapped([...itemsOf("Done"), ...itemsOf("Pull requests")])));
     assert.isTrue(foldsByDefault(unmapped(itemsOf("Done"))));
     assert.isTrue(foldsByDefault(unmapped([])));
+    // An open issue whose linked pull request merged without closing it: the merged pull request
+    // is the current Item, and the open issue keeps the lane open.
+    const merged = itemsOf("Done").map((task) =>
+      BoardTaskView.make({
+        ...task,
+        items: task.items.map((item) =>
+          item.kind === "issue" ? BoardItemLink.make({ ...item, state: "issue-open" }) : item,
+        ),
+      }),
+    );
+    assert.strictEqual(merged[0]?.state, "pr-merged");
+    assert.isFalse(foldsByDefault(unmapped(merged)));
     assert.isTrue(foldsByDefault(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
     assert.isFalse(foldsByDefault(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
     assert.isFalse(foldsByDefault(readOnly("backlog", "authored")));

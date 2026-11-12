@@ -8,6 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page } from "vitest/browser";
 import { BoardColumn } from "~/features/projects/components/column";
+import { laneFoldMemory } from "~/features/projects/lib/folds";
 import { boardOverview } from "~/lib/projects/fixture";
 import { PermissionsContext } from "~/lib/permissions";
 import { WithRouter } from "~/lib/testing/memory-router";
@@ -24,11 +25,12 @@ const fixtureLane = (name: string): BoardLaneView => {
   return lane;
 };
 
-const render = (lane: BoardLaneView, project = ProjectId.make("board-test")) => {
-  root?.unmount();
-  root = createRoot(host);
+/** Renders `lane` in the mounted column, as the board does when it refreshes or switches project. */
+const show = (lane: BoardLaneView, project = ProjectId.make("board-test")) => {
+  const mounted = root ?? createRoot(host);
+  root = mounted;
   flushSync(() =>
-    root?.render(
+    mounted.render(
       <PermissionsContext.Provider value={administratorPermissions}>
         <QueryClientProvider client={new QueryClient()}>
           <WithRouter>
@@ -56,6 +58,22 @@ const render = (lane: BoardLaneView, project = ProjectId.make("board-test")) => 
     ),
   );
 };
+
+/** Renders `lane` in a new column. */
+const render = (lane: BoardLaneView, project = ProjectId.make("board-test")) => {
+  flushSync(() => root?.unmount());
+  root = undefined;
+  show(lane, project);
+};
+
+const withItems = (lane: BoardLaneView, items: BoardLaneView["items"]) =>
+  ReadOnlyBoardLaneView.make({
+    id: lane.id,
+    name: lane.name,
+    sources: lane.sources,
+    origin: lane.origin,
+    items,
+  });
 
 const rail = (name: string, count: number) =>
   page.getByRole("button", { name: `${name} ${count}`, exact: true });
@@ -85,17 +103,25 @@ it("starts the Unmapped lane open when it holds an open Item, with its cards vis
 it("starts a lane that holds only closed Items folded to a rail with its count", async () => {
   render(fixtureLane("Done"));
   await expect.element(rail("Done", 1)).toHaveAttribute("aria-expanded", "false");
-  const unmapped = fixtureLane("Unmapped");
-  render(
-    ReadOnlyBoardLaneView.make({
-      id: unmapped.id,
-      name: unmapped.name,
-      sources: unmapped.sources,
-      origin: unmapped.origin,
-      items: fixtureLane("Done").items,
-    }),
-  );
+  render(withItems(fixtureLane("Unmapped"), fixtureLane("Done").items));
   await expect.element(rail("Unmapped", 1)).toHaveAttribute("aria-expanded", "false");
+});
+
+it("opens the Unmapped lane when an open Item arrives while the board is open", async () => {
+  const unmapped = fixtureLane("Unmapped");
+  show(withItems(unmapped, fixtureLane("Done").items));
+  await expect.element(rail("Unmapped", 1)).toBeVisible();
+  show(withItems(unmapped, [...fixtureLane("Done").items, ...unmapped.items]));
+  await expect.element(page.getByRole("heading", { name: "Unmapped 2" })).toBeVisible();
+  await expect.element(foldButton("Unmapped")).toHaveAttribute("aria-expanded", "true");
+});
+
+it("keeps a lane open when a saved choice folds a lane that the operator can't fold", async () => {
+  const pullRequests = fixtureLane("Pull requests");
+  laneFoldMemory(() => localStorage).write(ProjectId.make("board-test"), pullRequests.id, true);
+  render(pullRequests);
+  await expect.element(page.getByRole("heading", { name: "Pull requests 2" })).toBeVisible();
+  expect(page.getByRole("button", { name: /^Fold /u }).elements()).toHaveLength(0);
 });
 
 it("remembers the operator's fold choice for each lane in this browser", async () => {
@@ -114,4 +140,17 @@ it("remembers the operator's fold choice for each lane in this browser", async (
   // Another project's Unmapped lane keeps its default.
   render(fixtureLane("Unmapped"), ProjectId.make("other-project"));
   await expect.element(foldButton("Unmapped")).toBeVisible();
+});
+
+it("shows each project's own fold choice when the same column switches project", async () => {
+  const unmapped = fixtureLane("Unmapped");
+  show(unmapped, ProjectId.make("alpha"));
+  await foldButton("Unmapped").click();
+  await expect.element(rail("Unmapped", 1)).toBeVisible();
+
+  show(unmapped, ProjectId.make("beta"));
+  await expect.element(foldButton("Unmapped")).toHaveAttribute("aria-expanded", "true");
+
+  show(unmapped, ProjectId.make("alpha"));
+  await expect.element(rail("Unmapped", 1)).toBeVisible();
 });

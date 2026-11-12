@@ -26,11 +26,18 @@ const closedOnly = (lane: BoardLaneView): boolean =>
 export const foldableLane = (lane: BoardLaneView): boolean =>
   lane.origin === "fallback" || closedOnly(lane);
 
-/** Returns whether a lane starts folded: a lane of closed Items, or the fallback lane with no open
- * Item. */
+/**
+ * Returns whether a lane starts folded: a lane of closed Items, or the fallback lane with no open
+ * Item. A Task's open linked Item counts even when its current Item is closed or merged.
+ */
 export const foldsByDefault = (lane: BoardLaneView): boolean =>
   closedOnly(lane) ||
-  (lane.origin === "fallback" && lane.items.every(({ state }) => isSettledItemState(state)));
+  (lane.origin === "fallback" &&
+    lane.items.every(
+      (task) =>
+        isSettledItemState(task.state) &&
+        task.items.every(({ state }) => isSettledItemState(state)),
+    ));
 
 /** Returns the lane of a drop target, which is either a lane or one of its cards. */
 export const laneUnder = (
