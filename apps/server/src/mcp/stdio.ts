@@ -1,5 +1,5 @@
 import { PermissionGrant } from "@usine/core/access";
-import { type Brand, Duration, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { type Brand, Duration, Effect, Layer, Option, Redacted, Schema, Stream } from "effect";
 import { McpServer } from "effect/ai";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { OperationId } from "../auth/model.ts";
@@ -13,6 +13,10 @@ import {
 import { operatorTools, PublishedApi, visibleTools } from "./tools.ts";
 
 const REQUEST_TIMEOUT = Duration.seconds(30);
+/** The largest response, in bytes, that `usine mcp` reads from the instance at start. */
+export const MAX_START_RESPONSE_BYTES = 8 * 1024 * 1024;
+const JsonText = Schema.fromJsonString(Schema.Json);
+const decoder = new TextDecoder();
 
 /** `usine mcp` could not read the instance's API document or the token's session. */
 export class McpStartError extends Schema.TaggedError<
@@ -37,6 +41,7 @@ export const stdioServer = (
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
+      const instance = new URL(origin);
       const client = (yield* HttpClient.HttpClient).pipe(
         HttpClient.mapRequest(HttpClientRequest.bearerToken(Redacted.value(token))),
       );
@@ -51,15 +56,48 @@ export const stdioServer = (
           );
       const get = Effect.fn("Mcp.readInstance")(function* (path: string) {
         yield* Effect.annotateCurrentSpan({ origin, path });
+        const url = new URL(path, origin);
         const response = yield* client
-          .get(new URL(path, origin))
+          .get(url)
           .pipe(Effect.timeout(requestTimeout), Effect.catch(failure(path)));
         if (response.status === 401 || response.status === 403)
           return yield* McpStartError.make({
             message: `${origin} refused the token (HTTP ${response.status}). Set USINE_TOKEN to an instance token from usine sign-in, or check its scopes.`,
           });
-        return yield* HttpClientResponse.filterStatusOk(response).pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Json)),
+        const ok = yield* HttpClientResponse.filterStatusOk(response).pipe(
+          Effect.catch(failure(path)),
+        );
+        const body = yield* ok.stream.pipe(
+          Stream.runFoldEffect(
+            () => ({ size: 0, chunks: new Array<Uint8Array>() }),
+            (read, chunk) => {
+              const size = read.size + chunk.length;
+              if (size <= MAX_START_RESPONSE_BYTES) {
+                read.chunks.push(chunk);
+                return Effect.succeed({ size, chunks: read.chunks });
+              }
+              return Effect.logWarning("MCP start response refused: too large", {
+                path,
+                limit: MAX_START_RESPONSE_BYTES,
+              }).pipe(
+                Effect.andThen(
+                  McpStartError.make({
+                    message: `${url.href} returned more than ${MAX_START_RESPONSE_BYTES} bytes. Check that usine runs at ${origin}.`,
+                  }),
+                ),
+              );
+            },
+          ),
+          Effect.timeout(requestTimeout),
+          Effect.catchTags({ HttpClientError: failure(path), TimeoutError: failure(path) }),
+        );
+        const bytes = new Uint8Array(body.size);
+        let offset = 0;
+        for (const chunk of body.chunks) {
+          bytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return yield* Schema.decodeEffect(JsonText)(decoder.decode(bytes)).pipe(
           Effect.catch(failure(path)),
         );
       });
@@ -78,7 +116,19 @@ export const stdioServer = (
       );
       const call: OperatorCall = Effect.fn("Mcp.remoteOperatorRequest")(function* (request) {
         yield* Effect.annotateCurrentSpan({ method: request.method, url: request.url });
-        const outgoing = HttpClientRequest.make(request.method)(new URL(request.url, origin));
+        const url = new URL(request.url, origin);
+        // A path key of the instance's document, such as `//other.example/x`, can name another
+        // host; the token goes only to `origin`.
+        if (url.origin !== instance.origin) {
+          yield* Effect.logWarning("MCP tool call refused: its URL leaves the instance origin", {
+            origin,
+            target: url.origin,
+          });
+          return yield* OperatorUnavailableError.make({
+            message: `Refused to send the token to ${url.origin}: the tool's path leaves ${origin}.`,
+          });
+        }
+        const outgoing = HttpClientRequest.make(request.method)(url);
         const response = yield* client
           .execute(
             Option.match(request.body, {

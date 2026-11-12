@@ -1,8 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
-import { administratorPermissions, InstanceScope } from "@usine/core/access";
+import { administratorPermissions, InstanceScope, PermissionGrant } from "@usine/core/access";
+import { jsonKey } from "@usine/core/json-key";
 import { ChangeBus, changeBusLayer } from "@usine/core/changes";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
-import { Context, Effect, Layer, Option, Redacted } from "effect";
+import { Clock, Context, Effect, Layer, Option, Redacted } from "effect";
 import { HttpRouter } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { OperationCeilingChange, OperationId, TokenName } from "../../src/auth/model.ts";
@@ -74,15 +75,23 @@ const fixture = Effect.gen(function* () {
   );
   const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
   yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
-  const device = Effect.fn(function* (operations: ReadonlyArray<string>) {
+  const device = Effect.fn(function* (
+    operations: Option.Option<ReadonlyArray<string>>,
+    options: {
+      readonly scopes?: ReadonlyArray<PermissionGrant>;
+      readonly expiresAt?: number;
+    } = {},
+  ) {
     const issued = yield* auth.createToken(session, {
       name: TokenName.make("Agent"),
-      scopes: administratorPermissions,
-      operations: Option.some(operations.map((operation) => OperationId.make(operation))),
-      expiresAt: Option.none(),
+      scopes: options.scopes ?? administratorPermissions,
+      operations: Option.map(operations, (ids) => ids.map((id) => OperationId.make(id))),
+      expiresAt: Option.fromUndefinedOr(options.expiresAt),
     });
     return Redacted.value(issued.secret);
   });
+  const tokenId = (token: string) =>
+    auth.authenticate(token).pipe(Effect.map((access) => Option.getOrThrow(access.token).id));
   const send = (token: string, method: string, path: string, body?: string) =>
     Effect.promise(() => {
       const options: RequestInit = {
@@ -109,7 +118,7 @@ const fixture = Effect.gen(function* () {
     requests: ReadonlyArray<readonly [token: string, method: string, path: string, body?: string]>,
   ) =>
     Effect.forEach(requests, ([token, method, path, body]) => outcome(token, method, path, body));
-  return { services, session, bus, device, send, outcomes };
+  return { services, session, bus, device, tokenId, send, outcomes };
 });
 
 const decoder = new TextDecoder();
@@ -126,8 +135,8 @@ describe("operation ceiling guard", () => {
   it.live("identifies an operation by its method as well as its path", () =>
     Effect.gen(function* () {
       const { device, outcomes } = yield* fixture;
-      const tokens = yield* device(["authentication.tokens"]);
-      const members = yield* device(["authentication.members"]);
+      const tokens = yield* device(Option.some(["authentication.tokens"]));
+      const members = yield* device(Option.some(["authentication.members"]));
       const child =
         '{"name":"Child","scopes":[{"permission":"admin","scope":{"_tag":"Instance"}}]}';
       const results = yield* outcomes([
@@ -148,8 +157,10 @@ describe("operation ceiling guard", () => {
   it.live("enforces the ceiling on setup and provider routes", () =>
     Effect.gen(function* () {
       const { device, outcomes } = yield* fixture;
-      const approver = yield* device(["operator.approve"]);
-      const admitted = yield* device(["setup.runtime", "providers.status", "providers.cancel"]);
+      const approver = yield* device(Option.some(["operator.approve"]));
+      const admitted = yield* device(
+        Option.some(["setup.runtime", "providers.status", "providers.cancel"]),
+      );
       const results = yield* outcomes([
         [approver, "GET", "/api/setup/runtime"],
         [approver, "GET", "/api/providers"],
@@ -172,8 +183,8 @@ describe("operation ceiling guard", () => {
   it.live("compares full operation IDs, so a repeated identifier admits one group only", () =>
     Effect.gen(function* () {
       const { device, outcomes } = yield* fixture;
-      const cancel = yield* device(["operator.cancel"]);
-      const status = yield* device(["setup.status"]);
+      const cancel = yield* device(Option.some(["operator.cancel"]));
+      const status = yield* device(Option.some(["setup.status"]));
       const results = yield* outcomes([
         [cancel, "DELETE", "/api/providers/login/x"],
         [status, "GET", "/api/providers"],
@@ -182,10 +193,62 @@ describe("operation ceiling guard", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("keeps a ceiling token from widening another token through a scope edit", () =>
+    Effect.gen(function* () {
+      const { services, device, tokenId, outcomes } = yield* fixture;
+      const caller = yield* device(
+        Option.some(["authentication.setScopes", "authentication.tokens"]),
+      );
+      const reader = [PermissionGrant.make({ permission: "read", scope: InstanceScope.make() })];
+      const open = yield* device(Option.none(), { scopes: reader });
+      const wider = yield* device(Option.some(["operator.overview"]), { scopes: reader });
+      const within = yield* device(Option.some(["authentication.tokens"]), { scopes: reader });
+      const admin = '{"scopes":[{"permission":"admin","scope":{"_tag":"Instance"}}]}';
+      const [openId, widerId, withinId] = yield* Effect.forEach([open, wider, within], tokenId);
+      const results = yield* outcomes([
+        [caller, "PUT", `/api/tokens/${openId}/scopes`, admin],
+        [caller, "PUT", `/api/tokens/${widerId}/scopes`, admin],
+        [caller, "PUT", `/api/tokens/${withinId}/scopes`, admin],
+      ]);
+      assert.deepEqual(results, [403, 403, 200]);
+      const unchanged = yield* services.authentication.authenticate(open);
+      assert.deepEqual(
+        unchanged.permissions.map(({ permission }) => permission),
+        ["read"],
+      );
+      assert.isTrue(Option.isNone(unchanged.operations));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps a device token with an expiry from creating a token that outlives it", () =>
+    Effect.gen(function* () {
+      const { device, outcomes } = yield* fixture;
+      const now = yield* Clock.currentTimeMillis;
+      const expiresAt = now + 3_600_000;
+      const caller = yield* device(Option.none(), { expiresAt });
+      const lasting = yield* device(Option.none());
+      const child = (expiry?: number) => {
+        const request = {
+          name: "Child",
+          scopes: [{ permission: "read", scope: { _tag: "Instance" } }],
+        };
+        return jsonKey(expiry === undefined ? request : { ...request, expiresAt: expiry });
+      };
+      const results = yield* outcomes([
+        [caller, "POST", "/api/tokens", child()],
+        [caller, "POST", "/api/tokens", child(expiresAt + 1)],
+        [caller, "POST", "/api/tokens", child(expiresAt)],
+        [caller, "POST", "/api/tokens", child(now + 60_000)],
+        [lasting, "POST", "/api/tokens", child()],
+      ]);
+      assert.deepEqual(results, [403, 403, 200, 200, 200]);
+    }).pipe(Effect.scoped),
+  );
+
   it.live("serves public operations to a token whose ceiling omits them", () =>
     Effect.gen(function* () {
       const { device, outcomes } = yield* fixture;
-      const approver = yield* device(["operator.approve"]);
+      const approver = yield* device(Option.some(["operator.approve"]));
       const results = yield* outcomes([
         [approver, "GET", "/api/version"],
         [approver, "GET", "/api/overview"],
@@ -197,7 +260,7 @@ describe("operation ceiling guard", () => {
   it.live("closes an open change stream when the token's ceiling narrows", () =>
     Effect.gen(function* () {
       const { services, session, bus, device, send } = yield* fixture;
-      const token = yield* device(["operator.changes", "operator.overview"]);
+      const token = yield* device(Option.some(["operator.changes", "operator.overview"]));
       const access = yield* services.authentication.authenticate(token);
       const id = Option.getOrThrow(access.token).id;
       const response = yield* send(token, "GET", "/api/changes");

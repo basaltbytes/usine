@@ -31,15 +31,16 @@ import {
   Stdio,
   Stream,
 } from "effect";
-import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
+import { FetchHttpClient, HttpRouter, HttpServer, HttpServerResponse } from "effect/http";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { OperationId, TokenName } from "../../src/auth/model.ts";
 import { FactoryBackend } from "../../src/backend.ts";
 import { Port } from "../../src/cli.ts";
 import { apiRoutes, serverLayer } from "../../src/http.ts";
+import { operatorOpenApi } from "../../src/openapi.ts";
 import { startupListener } from "../../src/listener.ts";
 import { MCP_PATH, mcpRoutes } from "../../src/mcp/http.ts";
-import { stdioServer } from "../../src/mcp/stdio.ts";
+import { MAX_START_RESPONSE_BYTES, stdioServer } from "../../src/mcp/stdio.ts";
 import { MAX_RESULT_BYTES } from "../../src/mcp/tools.ts";
 import { ServerUpgrades } from "../../src/upgrade/control.ts";
 import {
@@ -554,6 +555,97 @@ describe("operator MCP endpoint", () => {
         assert.include(slow.result.content[0]?.text ?? "", `Could not reach ${origin}`);
       }).pipe(Effect.timeout("20 seconds"), Effect.scoped),
     slowCall,
+  );
+
+  it.live("sends the token of usine mcp --origin only to the origin", () =>
+    Effect.gen(function* () {
+      const elsewhere: Array<string> = [];
+      const other = yield* serveOnLoopback(
+        HttpRouter.add(
+          "*",
+          "*",
+          Effect.sync(() => {
+            elsewhere.push("request");
+            return HttpServerResponse.empty();
+          }),
+        ),
+      );
+      const document = structuredClone(operatorOpenApi());
+      const approvePath = "/api/runs/{runId}/approve";
+      // A path key that starts with `//` names another host.
+      document.paths = Object.fromEntries(
+        Object.entries(document.paths).map(([path, item]) => [
+          path === approvePath ? `//${new URL(other).host}${path}` : path,
+          item,
+        ]),
+      );
+      const origin = yield* serveOnLoopback(
+        Layer.mergeAll(
+          HttpRouter.add("GET", "/api/openapi.json", HttpServerResponse.jsonUnsafe(document)),
+          HttpRouter.add(
+            "GET",
+            "/api/auth/session",
+            HttpServerResponse.jsonUnsafe({
+              permissions: [{ permission: "admin", scope: { _tag: "Instance" } }],
+              operations: ["operator.approve"],
+            }),
+          ),
+        ),
+      );
+      const stdio = yield* memoryStdio;
+      yield* Layer.build(
+        stdioServer(origin, Redacted.make("token"), "2 seconds").pipe(
+          Layer.provide(stdio.layer),
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(NodeServices.layer),
+        ),
+      );
+      yield* stdio.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: initializeParams });
+      yield* stdio.reply(1);
+      yield* stdio.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+      yield* stdio.send({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "approve", arguments: { runId: "run-1" } },
+      });
+      const refused = yield* stdio
+        .reply(2)
+        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(ToolCall)));
+      assert.isTrue(refused.result.isError);
+      assert.include(
+        refused.result.content[0]?.text ?? "",
+        `Refused to send the token to ${other}`,
+      );
+      assert.deepEqual(elsewhere, []);
+    }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
+  );
+
+  it.live("stops usine mcp --origin when a start response is over the size cap", () =>
+    Effect.gen(function* () {
+      const origin = yield* serveOnLoopback(
+        HttpRouter.add(
+          "GET",
+          "/api/openapi.json",
+          HttpServerResponse.text(`"${"x".repeat(MAX_START_RESPONSE_BYTES)}"`, {
+            contentType: "application/json",
+          }),
+        ),
+      );
+      const stdio = yield* memoryStdio;
+      const failure = yield* Layer.build(
+        stdioServer(origin, Redacted.make("token"), "5 seconds").pipe(
+          Layer.provide(stdio.layer),
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(NodeServices.layer),
+        ),
+      ).pipe(Effect.flip);
+      assert.equal(failure._tag, "McpStartError");
+      assert.include(
+        failure.message,
+        `${origin}/api/openapi.json returned more than ${MAX_START_RESPONSE_BYTES} bytes`,
+      );
+    }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
   );
 
   it.live("stops usine mcp --origin when the instance doesn't answer at start", () =>

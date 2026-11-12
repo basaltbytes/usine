@@ -42,8 +42,16 @@ describe("operator MCP tools", () => {
       assert.isFalse(approve?.descriptor.annotations?.destructiveHint);
       const cancel = generated.find(({ name }) => name === "cancel");
       assert.isTrue(cancel?.descriptor.annotations?.destructiveHint);
-      const deleteEntity = generated.find(({ name }) => name === "deleteConfigurationEntity");
-      assert.isTrue(deleteEntity?.descriptor.annotations?.destructiveHint);
+      for (const name of [
+        "deleteConfigurationEntity",
+        "discardLeftovers",
+        "replaceConfigurationEntity",
+        "revertConfigurationRevision",
+        "requestUpgrade",
+      ]) {
+        const write = generated.find((tool) => tool.name === name);
+        assert.isTrue(write?.descriptor.annotations?.destructiveHint, name);
+      }
       const overview = generated.find(({ name }) => name === "overview");
       assert.isTrue(overview?.descriptor.annotations?.readOnlyHint);
       const editAndRetry = generated.find(({ name }) => name === "editAndRetry");
@@ -84,6 +92,49 @@ describe("operator MCP tools", () => {
       const small = toolResult(overview, { status: 403, text: '{"error":"AccessDenied"}' });
       assert.isTrue(small.isError);
       assert.lengthOf(small.content, 1);
+    }),
+  );
+
+  it.effect("bounds the inlined schema of references that fan out", () =>
+    Effect.gen(function* () {
+      // Each level references the next twice, so full inlining would build 2^22 objects.
+      const levels = 22;
+      const schemas = Object.fromEntries(
+        Array.from({ length: levels }, (_, level) => [
+          `Level${level}`,
+          level === levels - 1
+            ? { type: "string" }
+            : {
+                type: "object",
+                properties: {
+                  left: { $ref: `#/components/schemas/Level${level + 1}` },
+                  right: { $ref: `#/components/schemas/Level${level + 1}` },
+                },
+              },
+        ]),
+      );
+      const document = yield* Schema.decodeEffect(PublishedApi)({
+        paths: {
+          "/api/fan-out": {
+            post: {
+              operationId: "operator.fanOut",
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": { schema: { $ref: "#/components/schemas/Level0" } },
+                },
+              },
+              responses: { "200": {} },
+              "x-usine-permission": "operate",
+            },
+          },
+        },
+        components: { schemas },
+      });
+      const [fanOut] = operatorTools(document);
+      const size = jsonKey(fanOut?.descriptor.inputSchema ?? {}).length;
+      assert.isBelow(size, 2_000_000);
+      assert.include(jsonKey(fanOut?.descriptor.inputSchema ?? {}), '"left"');
     }),
   );
 });

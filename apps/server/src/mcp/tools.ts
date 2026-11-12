@@ -85,25 +85,37 @@ const componentName = (reference: Schema.Json | undefined) =>
     Option.map((value) => value.slice(COMPONENT_PREFIX.length)),
   );
 
-/** Returns `schema` with every component `$ref` replaced by its definition. */
+/** The most objects and arrays that inlining builds for one input schema. */
+const MAX_INLINED_NODES = 10_000;
+
+/**
+ * Returns `schema` with every component `$ref` replaced by its definition. Once `budget` runs out,
+ * a `$ref` is left unresolved and accepts any value, so a document whose references fan out can't
+ * make the expansion grow without bound.
+ */
 const inline = (
   schema: Schema.Json,
   components: Readonly<Record<string, JsonSchema>>,
   resolving: ReadonlySet<string>,
+  budget: { remaining: number },
 ): Schema.Json => {
-  if (Array.isArray(schema)) return schema.map((entry) => inline(entry, components, resolving));
+  if (Array.isArray(schema)) {
+    budget.remaining -= 1;
+    return schema.map((entry) => inline(entry, components, resolving, budget));
+  }
   if (!isObject(schema)) return schema;
+  budget.remaining -= 1;
   const { $ref, ...rest } = schema;
   const siblings = Object.fromEntries(
-    Object.entries(rest).map(([key, value]) => [key, inline(value, components, resolving)]),
+    Object.entries(rest).map(([key, value]) => [key, inline(value, components, resolving, budget)]),
   );
   const reference = componentName($ref);
   if (Option.isNone(reference)) return siblings;
   const name = reference.value;
   const target = components[name];
   // A recursive schema accepts any value at the point where it repeats.
-  if (target === undefined || resolving.has(name)) return siblings;
-  const resolved = inline(target, components, new Set([...resolving, name]));
+  if (target === undefined || resolving.has(name) || budget.remaining <= 0) return siblings;
+  const resolved = inline(target, components, new Set([...resolving, name]), budget);
   return isObject(resolved) ? { ...resolved, ...siblings } : siblings;
 };
 
@@ -112,7 +124,7 @@ const inlineObject = (
   components: Readonly<Record<string, JsonSchema>>,
 ): JsonSchema => {
   if (schema === undefined) return {};
-  const inlined = inline(schema, components, new Set());
+  const inlined = inline(schema, components, new Set(), { remaining: MAX_INLINED_NODES });
   return isObject(inlined) ? inlined : {};
 };
 
@@ -130,6 +142,19 @@ const describe = (operation: Operation) =>
     .filter((part): part is string => part !== undefined && part !== "")
     .map((part) => (part.endsWith(".") ? part : `${part}.`))
     .join(" ");
+
+/** Writes that discard, overwrite, or restart something without the DELETE or PUT method. */
+const DESTRUCTIVE_WRITES: ReadonlySet<string> = new Set([
+  "discardLeftovers",
+  "requestUpgrade",
+  "revertConfigurationRevision",
+]);
+
+const destructive = (method: Method, name: string) =>
+  method === "delete" ||
+  method === "put" ||
+  name.startsWith("cancel") ||
+  DESTRUCTIVE_WRITES.has(name);
 
 const tool = (
   path: string,
@@ -183,7 +208,7 @@ const tool = (
       annotations: {
         title: operation.summary,
         readOnlyHint: readOnly,
-        destructiveHint: !readOnly && (method === "delete" || name.startsWith("cancel")),
+        destructiveHint: !readOnly && destructive(method, name),
         idempotentHint: readOnly || method === "put" || method === "delete",
         openWorldHint: false,
       },

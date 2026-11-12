@@ -310,6 +310,20 @@ export const authenticationLayer = (options: {
             });
             return yield* authFailure("Set a token expiry in the future.", 400);
           }
+          // A device token can't issue a token that outlives it.
+          const callerExpiry = Option.filter(
+            caller.token,
+            ({ kind, expiresAt }) => kind === "device" && expiresAt !== NO_EXPIRY,
+          ).pipe(Option.map(({ expiresAt }) => expiresAt));
+          if (
+            Option.isSome(callerExpiry) &&
+            !Option.exists(request.expiresAt, (expiresAt) => expiresAt <= callerExpiry.value)
+          ) {
+            yield* Effect.logWarning("Token creation refused: expiry exceeds the caller's", {
+              memberId: caller.member.value.id,
+            });
+            return yield* authFailure("Set a token expiry no later than your token's expiry.", 403);
+          }
           return yield* issue(
             caller.member.value,
             "device",
@@ -355,8 +369,10 @@ export const authenticationLayer = (options: {
             );
             return yield* authFailure("Token scopes exceed your permissions.", 403);
           }
+          // The target's resulting ceiling must fit the caller's, including a ceiling the edit keeps.
           yield* OperationCeilingChange.$match(change, {
-            Keep: () => Effect.void,
+            Keep: () =>
+              current === undefined ? Effect.void : narrowCeiling(caller, current.operations),
             Remove: () => narrowCeiling(caller, Option.none()),
             Replace: ({ operations }) => narrowCeiling(caller, Option.some(operations)),
           });
