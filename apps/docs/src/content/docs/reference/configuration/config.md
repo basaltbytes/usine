@@ -99,7 +99,20 @@ These settings require a restart:
 
 For example, after changing browser origins with the CLI, run `usine restart` when no attempt is running.
 
-The UI refuses a revision that requires a restart or fails preflight. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. `SIGUSR1` requests an explicit store reread.
+Before applying a revision, the orchestrator checks the coordinator brain of each agent: the parent model, effort, and credential. Agents that share a parent model and effort share one check. If the check doesn't finish within 10 seconds, the save or reload is refused with `ValidationTimeoutError` (HTTP 504), and no revision is stored. Each step of a save or reload logs `Configuration step finished` with its `step`, `durationMillis`, and `outcome`:
+
+| Step | Type | Default | Description |
+| --- | --- | --- | --- |
+| `wait` | step | none | Waits for a save or reload that is already running. |
+| `read` | step | none | Reads the configuration store. |
+| `parse` | step | none | Parses and validates the changed entities. |
+| `restart` | step | none | Checks for changes that require a restart. |
+| `coordinator-brains` | step | 10-second limit | Checks each agent's coordinator brain. |
+| `worker-preflight` | step | none | Runs preflight for added workers, added capacity, and new brains. |
+| `store` | step | none | Stores the revision. |
+| `apply` | step | none | Applies the revision to new work. |
+
+The UI refuses a revision that requires a restart, fails preflight, or runs out of time. CLI commands can save it while the process keeps the accepted configuration. A successful CLI exit confirms storage. Check logs for `Stored configuration applied; new runs use the new configuration` or `Configuration revision could not be applied; the running configuration is unchanged`. Correct rejected settings or restart to apply them. `SIGUSR1` requests an explicit store reread.
 
 ## Exit status
 
