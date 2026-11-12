@@ -9,6 +9,9 @@ export const created = "Created";
 export const expires = "Expires";
 export const operationsLabel = "Operations";
 export const noOperations = "No operations";
+export const unknownOperationsLabel = "Unknown operations";
+export const unknownOperationsHint =
+  "These IDs match no operation, so this token can't call them. Edit scopes to replace them.";
 
 export const scopeCopy = {
   title: "Scopes",

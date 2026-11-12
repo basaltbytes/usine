@@ -21,6 +21,8 @@ import {
   expires,
   operationsLabel,
   noOperations,
+  unknownOperationsLabel,
+  unknownOperationsHint,
 } from "./strings";
 
 export const TokensPage = () => {
@@ -72,6 +74,12 @@ export const TokensPage = () => {
                   <p className="text-sm">
                     {operationsLabel}:{" "}
                     {token.operations.length > 0 ? token.operations.join(", ") : noOperations}
+                  </p>
+                )}
+                {token.unknownOperations !== undefined && (
+                  <p className="text-sm text-destructive">
+                    {unknownOperationsLabel}: {token.unknownOperations.join(", ")}.{" "}
+                    {unknownOperationsHint}
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">

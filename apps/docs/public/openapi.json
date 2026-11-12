@@ -36842,6 +36842,14 @@
                         },
                         "description": "Operation IDs from this document, such as operator.approve, that the token may call. Requests also need the token's scopes."
                       },
+                      "unknownOperations": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z]+\\.[A-Za-z]+$"
+                        },
+                        "description": "The operation IDs of the ceiling that match no operation, such as an ID that a release renamed. The token cannot call them."
+                      },
                       "expiresAt": {
                         "anyOf": [
                           {

@@ -13,7 +13,15 @@ import { authenticatedRoutes } from "../../src/auth/http.ts";
 import { seedOperator } from "../../src/auth/authentication.ts";
 import { GitHubSignIn } from "../../src/auth/github.ts";
 import { AuthStore } from "../../src/auth/store.ts";
-import { authFailure, Member, TokenName } from "../../src/auth/model.ts";
+import { secretHash } from "../../src/auth/crypto.ts";
+import {
+  authFailure,
+  InstanceToken,
+  Member,
+  OperationId,
+  TokenId,
+  TokenName,
+} from "../../src/auth/model.ts";
 import { authFixture, alice, bob, localSecret } from "./fixture.ts";
 
 const request = (
@@ -616,6 +624,7 @@ const ListedTokens = Schema.Array(
     id: Schema.String,
     kind: Schema.String,
     operations: Schema.optionalKey(Schema.Array(Schema.String)),
+    unknownOperations: Schema.optionalKey(Schema.Array(Schema.String)),
     expiresAt: Schema.NullOr(Schema.Finite),
   }),
 );
@@ -718,6 +727,64 @@ it.live("creates, lists, and edits a device token's operation ceiling and expiry
       (yield* Effect.promise(() => request(app, "/api/members", "GET", undefined, bearer))).status,
       200,
     );
+  }).pipe(Effect.scoped),
+);
+
+it.live("warns once about a stored ceiling's unknown operation IDs and lists them", () =>
+  Effect.gen(function* () {
+    const warnings: Array<{ readonly message: unknown; readonly fields: unknown }> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      const [text, fields] = Array.isArray(message) ? message : [message];
+      if (logLevel === "Warn") warnings.push({ message: text, fields });
+    });
+    const services = yield* authFixture();
+    const { routes } = authenticatedRoutes(services);
+    const logged = HttpRouter.middleware(
+      (handler) => Effect.provide(handler, Logger.layer([logger])),
+      { global: true },
+    );
+    const app = HttpRouter.toWebHandler(Layer.merge(routes, logged), { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const { headers } = yield* signInWithLink(services, app);
+    // A release renamed `operator.renamed` after the ceiling was stored.
+    const now = yield* Clock.currentTimeMillis;
+    yield* services.store.issue(
+      InstanceToken.make({
+        id: TokenId.make("stale"),
+        memberId: alice.id,
+        name: TokenName.make("Stale"),
+        hash: secretHash("stale-secret"),
+        kind: "device",
+        createdAt: now,
+        lastUsedAt: now,
+        expiresAt: now + 3_600_000,
+        operations: Option.some([
+          OperationId.make("operator.detail"),
+          OperationId.make("operator.renamed"),
+        ]),
+      }),
+    );
+    const bearer = { authorization: "Bearer stale-secret" };
+    for (let count = 0; count < 2; count++)
+      assert.equal(
+        (yield* Effect.promise(() => request(app, "/api/auth/session", "GET", undefined, bearer)))
+          .status,
+        200,
+      );
+    assert.deepEqual(warnings, [
+      {
+        message: "Token operation ceiling names operations that don't exist",
+        fields: { tokenId: "stale", unknown: "operator.renamed" },
+      },
+    ]);
+    const listed = yield* Effect.promise(() =>
+      request(app, "/api/tokens", "GET", undefined, headers).then((response) => response.json()),
+    );
+    const tokens = yield* Schema.decodeUnknownEffect(ListedTokens)(listed);
+    const stale = tokens.find(({ id }) => id === "stale");
+    assert.deepEqual(stale?.operations, ["operator.detail", "operator.renamed"]);
+    assert.deepEqual(stale?.unknownOperations, ["operator.renamed"]);
+    assert.isUndefined(tokens.find(({ kind }) => kind === "session")?.unknownOperations);
   }).pipe(Effect.scoped),
 );
 
