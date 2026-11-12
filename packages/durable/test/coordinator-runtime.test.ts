@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import { BLOCKED_MARKER, FAILED_MARKER, QUESTION_MARKER } from "@usine/agents/runtime";
 import {
   HarnessSession,
@@ -42,7 +41,6 @@ import {
 import { AttemptJournal, Settled } from "../src/coordinator/journal.ts";
 import { outboxFor } from "../src/coordinator/outbox.ts";
 import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
-import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { RecordedDecision, WakeUp } from "../src/coordinator/wake-up.ts";
 import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
 import {
@@ -50,6 +48,7 @@ import {
   attemptRequest,
   recordingSink,
   slowToInterrupt,
+  sqliteJournal,
   temporaryDatabase,
   trace,
 } from "./support.ts";
@@ -62,12 +61,6 @@ const coordinated = (attemptId: string, maxChildren = 3) => {
     spec: AttemptChannel.RunSpec.make({ ...request.spec, parent: "none" }),
   });
 };
-
-const sqliteJournal = (database: string) =>
-  sqliteAttemptJournalLayer.pipe(
-    Layer.provide(SqliteClient.layer({ filename: database })),
-    Layer.orDie,
-  );
 
 /** Interrupts, as a process stop does, each transition whose event has tag `tag`. */
 const interruptingTransition = (tag: string) => (journal: Layer.Layer<AttemptJournal>) =>
