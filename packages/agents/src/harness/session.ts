@@ -43,8 +43,23 @@ export interface SessionChannel {
   readonly onTerminal: (cleanup: () => void) => void;
   /** Queues an event; after the terminal transition, logs and drops it. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
+  /**
+   * Queues an event synchronously, for vendor callbacks. Returns false after the terminal
+   * transition, when the event is dropped.
+   */
+  readonly emitUnsafe: (event: AgentSessionEvent) => boolean;
+  /** The number of tool calls that the session started, counted from the queued events. */
+  readonly toolCalls: Effect.Effect<number>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
-  readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
+  /**
+   * Ends the session with `message`, or fails it with the report that `message` marks.
+   * `answeredOperator` becomes the result's `answeredOperator`.
+   */
+  readonly finish: (
+    session: AgentSession,
+    message: string,
+    answeredOperator?: boolean,
+  ) => Effect.Effect<void>;
 }
 
 export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
@@ -58,9 +73,19 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const runCleanups = Effect.sync(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
   });
+  let toolCalls = 0;
+  const count = (event: AgentSessionEvent) => {
+    if (event._tag === "ToolStarted") toolCalls += 1;
+  };
+
+  const emitUnsafe = (event: AgentSessionEvent) => {
+    count(event);
+    return Queue.offerUnsafe(events, event);
+  };
 
   const emit = (event: AgentSessionEvent) =>
-    Queue.offer(events, event).pipe(
+    Effect.sync(() => count(event)).pipe(
+      Effect.andThen(Queue.offer(events, event)),
       Effect.flatMap((accepted) =>
         accepted
           ? Effect.void
@@ -102,17 +127,19 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const finish = Effect.fn("SessionChannel.finish")(function* (
     session: AgentSession,
     message: string,
+    answeredOperator = false,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
     const own = reportedOutcome(Option.some(session.id), message);
     if (Option.isSome(own)) return yield* fail(own.value);
     if (yield* Ref.getAndSet(terminal, true)) return;
     yield* Queue.offer(events, SessionFinished.make({ session }));
-    yield* Deferred.succeed(result, SessionResult.make({ message }));
+    yield* Deferred.succeed(result, SessionResult.make({ message, answeredOperator }));
     yield* Queue.end(events);
     yield* runCleanups;
     yield* Effect.logInfo(`${options.label} finished`, {
       sessionId: options.sessionId,
+      answeredOperator,
     });
   });
 
@@ -124,6 +151,8 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
       cleanups.push(cleanup);
     },
     emit,
+    emitUnsafe,
+    toolCalls: Effect.sync(() => toolCalls),
     fail,
     finish,
   } satisfies SessionChannel;
@@ -249,7 +278,7 @@ export const subscribePiSession = (
     let retries = 0;
     let retrying = false;
     const offer = (sessionEvent: AgentSessionEvent) => {
-      if (!Queue.offerUnsafe(channel.events, sessionEvent)) {
+      if (!channel.emitUnsafe(sessionEvent)) {
         log(
           Effect.logWarning("Dropped a Pi session event after the terminal transition", {
             event: sessionEvent._tag,

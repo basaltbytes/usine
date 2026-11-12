@@ -56,7 +56,8 @@ interface QueuedMessage {
 /**
  * Keeps an idle child addressable while on Hold, and keeps an interrupted session waiting until
  * guidance arrives. Queued operator messages are reported as read when the harness acknowledges their IDs,
- * and as unread if the scope closes first.
+ * and as unread if the scope closes first. The result's `answeredOperator` is true when the session
+ * read an operator message or steer after its last tool call.
  */
 export const sessionConversation = Effect.fn("SessionConversation.make")(function* (
   options: ConversationOptions,
@@ -66,6 +67,11 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   let held = options.held;
   let paused = options.paused;
   let idle = Option.none<string>();
+  /**
+   * The session's tool-call count when it last read an operator message or steer, or `None` after
+   * its own input, such as a continuation turn.
+   */
+  let operatorInput = Option.none<number>();
   let closing = false;
   let resume = yield* Deferred.make<void>();
   const journal = yield* ChildSessionJournal.current;
@@ -84,6 +90,12 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       unsent.delete(id);
     });
 
+  const readOperatorInput = Effect.flatMap(channel.toolCalls, (count) =>
+    Effect.sync(() => {
+      operatorInput = Option.some(count);
+    }),
+  );
+
   /** Reports the identified messages as read, with the current session state. */
   const deliver = (ids: ReadonlyArray<OperatorMessageId>) =>
     Effect.suspend(() => {
@@ -99,6 +111,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         read: read.length,
         stillQueued: queued.length,
       }).pipe(
+        Effect.andThen(readOperatorInput),
         Effect.andThen(
           Effect.forEach(read, ({ onDelivery }) => onDelivery(Option.some(state)), {
             discard: true,
@@ -139,7 +152,13 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     }
     closing = true;
     yield* options.beforeFinish.pipe(Effect.tapError(channel.fail));
-    yield* channel.finish(session, message);
+    // The answer replies to the operator if no tool call started after the last operator input.
+    const calls = yield* channel.toolCalls;
+    yield* channel.finish(
+      session,
+      message,
+      Option.exists(operatorInput, (at) => at === calls),
+    );
   });
 
   const intervene = Effect.fn("SessionConversation.intervene")(function* (
@@ -185,6 +204,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       // Completion takes the same lock, so an accepted message sets the Hold before a running turn
       // can return; a rejected message changes no state.
       taken = yield* options.send(action.message, activity, action.id);
+      if (taken === "read") yield* readOperatorInput;
       if (action._tag === "OperatorMessage") held = true;
       paused = false;
       idle = Option.none();
@@ -229,7 +249,15 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
         queued,
         channel.emit,
         (message, id) =>
-          send(message, id).pipe(Effect.andThen(id === undefined ? Effect.void : sent(id))),
+          send(message, id).pipe(
+            Effect.andThen(
+              id === undefined
+                ? Effect.sync(() => {
+                    operatorInput = Option.none();
+                  })
+                : sent(id),
+            ),
+          ),
       );
     }, mutex.withPermits(1)),
     /** Acknowledges only the messages identified by the native harness. */
