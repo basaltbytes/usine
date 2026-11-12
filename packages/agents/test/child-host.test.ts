@@ -28,7 +28,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { PROCESS_OWNER } from "../src/child-host/supervisor.ts";
 import { CHILD_LIFELINE, childProcessCommand, startChildProcess } from "../src/child-host/node.ts";
-import { signal } from "../src/child-host/worker/files.ts";
+import { ownerFiles, processIdentity, signal } from "../src/child-host/worker/files.ts";
 import { ChildSessionLifecycle } from "../src/runtime.ts";
 import {
   detachAfterHookResponse,
@@ -846,6 +846,32 @@ describe.skipIf(process.platform !== "linux")("worker process owner", () => {
     );
     assert.strictEqual(result.status, 1);
     assert.include(result.stderr, "Invalid child process PID");
+  });
+
+  it.live("reports an owner stopped when its PID file disappears while it is checked", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "usine-owner-race-"));
+    const pidFile = childPidFile(cwd, AgentSessionId.make("attempt:child:1"));
+    const files = ownerFiles(pidFile, processIdentity);
+    // Replaces the PID file atomically and removes it, as a supervisor does when its harness exits.
+    const churn = spawn(
+      process.execPath,
+      [
+        "-e",
+        `const fs = require('node:fs');
+for (;;) {
+  fs.writeFileSync(process.argv[1] + '.next', process.argv[2]);
+  fs.renameSync(process.argv[1] + '.next', process.argv[1]);
+  fs.rmSync(process.argv[1], { force: true });
+}`,
+        pidFile,
+        String(process.pid),
+      ],
+      { stdio: "ignore" },
+    );
+    return Effect.gen(function* () {
+      yield* eventually(() => existsSync(pidFile));
+      for (let n = 0; n < 20_000; n++) files.ownerAlive(pidFile);
+    }).pipe(Effect.ensuring(Effect.sync(() => churn.kill("SIGKILL"))));
   });
 
   it.live(
