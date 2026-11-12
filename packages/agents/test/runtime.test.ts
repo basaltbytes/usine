@@ -220,6 +220,10 @@ it("does not treat ordinary narration or an embedded harness failure as a reserv
     "The child was [usine:provider-capacity] but recovery completed.",
     "Published. The earlier [usine:blocked] outcome is resolved.",
     "Answered the earlier [usine:question] and completed the review.",
+    "The child ended with **[usine:blocked]** and I resolved it.",
+    "The markers ([usine:blocked] and [usine:question]) are reserved.",
+    "See the [[usine:blocked]](https://example.com) marker docs.",
+    "Published.[usine:blocked] was the earlier outcome, now resolved.",
   ]) {
     assert(Option.isNone(reportedOutcome(Option.none(), answer)));
   }
