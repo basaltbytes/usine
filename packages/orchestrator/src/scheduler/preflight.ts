@@ -7,7 +7,10 @@ import {
   type Executor,
   ExecutorOperationError,
   type ExecutorError,
+  fullPreflight,
+  type MachineCheck,
   type PreflightReport,
+  type WorkerCapabilityError,
 } from "@usine/executor";
 import {
   DateTime,
@@ -28,6 +31,22 @@ import {
   type WorkerPreflight,
 } from "../worker-status.ts";
 
+const withoutWorker = <A>(
+  current: ReadonlyMap<WorkerName, A>,
+  worker: WorkerName,
+): ReadonlyMap<WorkerName, A> =>
+  current.has(worker) ? new Map([...current].filter(([name]) => name !== worker)) : current;
+
+interface PreflightRecords {
+  /** The last preflight of each Worker. */
+  readonly current: ReadonlyMap<WorkerName, WorkerPreflight>;
+  /**
+   * The record of each Worker before the machine creation failures that `current` shows, which
+   * the Worker's next machine creation restores.
+   */
+  readonly beforeMachineFailures: ReadonlyMap<WorkerName, WorkerPreflight>;
+}
+
 interface PreflightConfiguration {
   readonly workers: ReadonlyArray<Worker>;
   readonly roster: ReadonlyArray<BrainSpec>;
@@ -41,7 +60,10 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
   const changed = (worker: WorkerName) =>
     bus.publish([{ audience: InstanceScope.make(), target: { kind: "worker", id: worker } }]);
   const configuration = yield* Ref.make<PreflightConfiguration>({ workers: [], roster: [] });
-  const records = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
+  const records = yield* Ref.make<PreflightRecords>({
+    current: new Map(),
+    beforeMachineFailures: new Map(),
+  });
   const blocked = yield* TxRef.make<ReadonlyMap<WorkerName, string>>(new Map());
   const requested = yield* TxRef.make<ReadonlySet<WorkerName>>(new Set());
   const checking = yield* TxRef.make<ReadonlySet<WorkerName>>(new Set());
@@ -64,12 +86,78 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
       : Option.map(Exit.findErrorOption(exit), Result.fail);
     if (Option.isNone(outcome)) return;
     const checkedAt = yield* DateTime.now;
-    yield* Ref.update(records, (current) =>
-      new Map(current).set(
+    yield* Ref.update(records, ({ current, beforeMachineFailures }) => ({
+      current: new Map(current).set(
         worker,
         recordPreflight(current.get(worker) ?? unchecked(worker), roster, checkedAt, outcome.value),
       ),
+      beforeMachineFailures: withoutWorker(beforeMachineFailures, worker),
+    }));
+  });
+
+  /**
+   * Records a check that failed while the Worker created a machine. The next machine that the
+   * Worker creates clears the failure.
+   */
+  const machineFailed = Effect.fn("WorkerScheduler.recordMachineFailure")(function* (
+    worker: WorkerName,
+    roster: ReadonlyArray<BrainSpec>,
+    error: WorkerCapabilityError,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker });
+    const checkedAt = yield* DateTime.now;
+    yield* Ref.update(records, ({ current, beforeMachineFailures }) => {
+      const previous = current.get(worker) ?? unchecked(worker);
+      return {
+        current: new Map(current).set(
+          worker,
+          recordPreflight(previous, roster, checkedAt, Result.fail(error)),
+        ),
+        beforeMachineFailures: beforeMachineFailures.has(worker)
+          ? beforeMachineFailures
+          : new Map(beforeMachineFailures).set(worker, previous),
+      };
+    });
+    yield* Effect.logInfo("Machine creation failed a worker check; the next machine clears it", {
+      worker,
+      capability: error.capability,
+    });
+    yield* changed(worker);
+  });
+
+  /**
+   * Records a machine that the Worker created: its check if it got one, or else the record from
+   * before the machine creation failures that the current record shows.
+   */
+  const machineCreated = Effect.fn("WorkerScheduler.recordMachineCreation")(function* (
+    worker: WorkerName,
+    checked: Option.Option<MachineCheck>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker });
+    if (Option.isSome(checked)) {
+      const { brains, containerLimits, findings } = checked.value;
+      yield* record(worker, brains, Exit.succeed({ ...fullPreflight, containerLimits, findings }));
+      return yield* changed(worker);
+    }
+    const restored = yield* Ref.modify(records, (state) => {
+      const before = state.beforeMachineFailures.get(worker);
+      if (before === undefined) return [false, state] as const;
+      return [
+        true,
+        {
+          current: new Map(state.current).set(worker, before),
+          beforeMachineFailures: withoutWorker(state.beforeMachineFailures, worker),
+        },
+      ] as const;
+    });
+    if (!restored) return;
+    yield* Effect.logInfo(
+      "Machine created; cleared the worker check that a machine creation failed",
+      {
+        worker,
+      },
     );
+    yield* changed(worker);
   });
 
   const check = Effect.fn("WorkerScheduler.checkPreflight")(function* (
@@ -239,7 +327,7 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
             }
             yield* changed(name);
 
-            return (yield* Ref.get(records)).get(name) ?? unchecked(name);
+            return (yield* Ref.get(records)).current.get(name) ?? unchecked(name);
           }),
         ),
       () =>
@@ -328,7 +416,8 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     checking: inFlight,
     refresh,
     check,
-    record,
+    machineFailed,
+    machineCreated,
     accept,
     exclusive,
     blocked: Effect.all([TxRef.get(blocked), TxRef.get(requested)]).pipe(
@@ -337,6 +426,6 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
     unavailable: TxRef.get(blocked).pipe(
       Effect.map((current) => [...current].map(([worker, message]) => ({ worker, message }))),
     ),
-    records: Ref.get(records).pipe(Effect.map((current) => [...current.values()])),
+    records: Ref.get(records).pipe(Effect.map(({ current }) => [...current.values()])),
   };
 });

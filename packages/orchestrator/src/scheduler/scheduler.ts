@@ -17,7 +17,6 @@ import {
   CheckoutRequest,
   Executor,
   ExecutorError,
-  fullPreflight,
   githubBotLogin,
   type MachineHold,
   type WorkerMachines,
@@ -895,20 +894,13 @@ export const stepExecutorLayer = (
               continue;
             }
             if (created.failure._tag === "WorkerCapabilityError")
-              yield* preflight.record(worker, roster, Exit.fail(created.failure));
+              yield* preflight.machineFailed(worker, roster, created.failure);
             yield* provisioning.pause(worker, created.failure);
             yield* Effect.logInfo("Attempt waits to retry machine creation", fields);
             continue;
           }
           yield* provisioning.clear(worker);
-          if (Option.isSome(created.success.checked)) {
-            const { brains, containerLimits, findings } = created.success.checked.value;
-            yield* preflight.record(
-              worker,
-              brains,
-              Exit.succeed({ ...fullPreflight, containerLimits, findings }),
-            );
-          }
+          yield* preflight.machineCreated(worker, created.success.checked);
           yield* Effect.logInfo("Machine ready for the persisted Attempt", {
             ...fields,
             machine: created.success.id,

@@ -30,6 +30,7 @@ import {
   MachineHold,
   MachineStatus,
   MachineUnavailableError,
+  WorkerCapabilityError,
   WorkerMachines,
 } from "@usine/executor";
 import { Context, DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
@@ -73,7 +74,7 @@ const configWithTimings = (timings: Record<string, number>, slots = 1) =>
 const fakeMachines = () =>
   Effect.gen(function* () {
     const calls: Array<string> = [];
-    const failures: Array<MachineUnavailableError> = [];
+    const failures: Array<MachineUnavailableError | WorkerCapabilityError> = [];
     const checks: Array<MachineCheck> = [];
     const gate = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
     const provisioned = yield* Ref.make(true);
@@ -335,6 +336,53 @@ describe("Worker scheduler on a provisioned Worker", () => {
       }).pipe(Effect.scoped),
     );
   }
+
+  it.effect(
+    "clears a failed gateway check from a machine creation when the next one succeeds",
+    () =>
+      Effect.gen(function* () {
+        const fake = yield* fakeMachines();
+        fake.failures.push(
+          WorkerCapabilityError.make({
+            worker: POOL,
+            capability: "gateway",
+            message:
+              'Provisioned worker "pool" could not join the tailnet or configure the gateway.',
+            cause: new Error("tailnet bootstrap failed"),
+          }),
+        );
+        const context = yield* scheduler(fake.machines);
+        const steps = Context.get(context, StepExecutor);
+        const status = Context.get(context, WorkerStatus);
+        const prerequisites = status.preflights.pipe(
+          Effect.map((preflights) =>
+            Option.flatMap(
+              Option.fromNullishOr(preflights.find(({ worker }) => worker === POOL)),
+              ({ prerequisites }) => prerequisites,
+            ),
+          ),
+        );
+        const startup = yield* prerequisites;
+        assert(Option.isSome(startup) && startup.value._tag === "Passed");
+        const lease = yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
+        const waiting = yield* Effect.forkChild(
+          steps
+            .execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink)
+            .pipe(Effect.flip),
+        );
+        yield* settle;
+        const failed = yield* prerequisites;
+        assert(Option.isSome(failed) && failed.value._tag === "Failed");
+        assert.deepStrictEqual(failed.value.capability, Option.some("gateway"));
+
+        yield* TestClock.adjust("30 seconds");
+        yield* settle;
+        yield* Fiber.join(waiting);
+        yield* lease.release;
+        const restored = yield* prerequisites;
+        assert.deepStrictEqual(restored, startup, "the startup record is back");
+      }).pipe(Effect.scoped),
+  );
 
   for (const transition of ["backoff", "revision", "creation"] as const) {
     it.effect(
