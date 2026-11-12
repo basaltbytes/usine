@@ -471,3 +471,69 @@ for (const address of [boatAddress, boxdAddress, boxdEgressAddress]) {
     }
   });
 }
+
+describe("boxd tailnet gateway check", () => {
+  const gatewayChecks = (machine: ReturnType<typeof fakeMachine>) =>
+    machine.state.calls.filter(
+      (call) =>
+        call.line.startsWith("exec 'curl' '--silent'") && call.line.includes("http://git.gw.test/"),
+    ).length;
+  const setup = (timeouts: number) => {
+    const machine = fakeMachine();
+    machine.state.gatewayTimeouts = timeouts;
+    const boat = fakeProviders();
+    const api = fakeTailnet();
+    const gateway = fakeGateway(machine, providers);
+    const layer = sshLayer({
+      workers: [boxdAddress],
+      instance: INSTANCE,
+      instanceId: INSTANCE_ID,
+      boxdClient: boat.boxdClient,
+      boxdExec: boat.boxdExecOn(machine),
+      providerEndpoints: { boat: BOAT_TEST_API },
+      machinePollInterval: "1 millis",
+      machineReadyTimeout: "5 seconds",
+    }).pipe(
+      Layer.provide(harnessesLive),
+      Layer.provide(machine.layer),
+      Layer.provide(mintingProvider().layer),
+      Layer.provide(stubAttemptRuntime(new StubStorage(), completes)),
+      Layer.provide(hostLoginLockLayer),
+      Layer.provide(boat.over(api.over(gateway.layer))),
+    );
+    return { machine, boat, api, layer };
+  };
+
+  it.live("keeps the machine when the gateway answers a later check", () => {
+    const { machine, boat, api, layer } = setup(2);
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const grant = yield* machines.create(
+        WORKER,
+        MACHINE_RUN,
+        AttemptId.make("remote-run/execute/1"),
+        [TEST_AGENT.brain],
+      );
+      assert.strictEqual(gatewayChecks(machine), 3);
+      assert.strictEqual(boat.boxd.machines.size, 1);
+      assert.strictEqual(
+        api.calls.filter((call) => call.method === "POST" && call.path.endsWith("/keys")).length,
+        1,
+      );
+      yield* machines.release(grant.hold);
+    }).pipe(Effect.scoped, Effect.provide(layer));
+  });
+
+  it.live("discards the machine after three gateway checks time out", () => {
+    const { machine, boat, layer } = setup(3);
+    return Effect.gen(function* () {
+      const machines = yield* WorkerMachines;
+      const failure = yield* machines
+        .create(WORKER, MACHINE_RUN, AttemptId.make("remote-run/execute/1"), [TEST_AGENT.brain])
+        .pipe(Effect.flip);
+      assert.include(failure.message, "could not join");
+      assert.strictEqual(gatewayChecks(machine), 3);
+      assert.strictEqual(boat.boxd.machines.size, 0);
+    }).pipe(Effect.scoped, Effect.provide(layer));
+  });
+});
