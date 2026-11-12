@@ -8,7 +8,7 @@ import {
 import type { AgentSessionEvent, HarnessSession } from "@usine/core/agent/session";
 import { Effect, Fiber, FileSystem, Option, Queue, Result, Schema, Stream } from "effect";
 import { ChildBackend, ChildRequest, SessionOperationError } from "../../src/runtime.ts";
-import type { Scenario } from "./transcript.ts";
+import type { SessionScenario } from "./transcript.ts";
 
 export const waitScript = `const fs = require('node:fs');
 fs.writeFileSync('started', 'ready');
@@ -70,7 +70,7 @@ const restart = (base: ChildRequest) =>
   });
 
 export const runScenario = (
-  scenario: Scenario,
+  scenario: SessionScenario,
   base: ChildRequest,
   controls?: {
     readonly drop: Effect.Effect<void>;

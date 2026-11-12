@@ -289,7 +289,7 @@ describe("brain admission", () => {
       assert.strictEqual(refused.failure.role, "reviewer");
       assert.deepStrictEqual(
         refused.failure.missing.map(({ capability }) => capability),
-        ["closed-tools", "structured-output", "ephemeral"],
+        ["closed-tools"],
       );
     }
     const claude = catalog.get(Harness.make("claude"));
@@ -300,11 +300,8 @@ describe("brain admission", () => {
       capabilities: Arr.map(claude.value.capabilities, (profile) =>
         CapabilityProfile.make({
           ...profile,
-          supported: [...profile.supported, "closed-tools", "structured-output", "ephemeral"],
-          lacking: profile.lacking.filter(
-            ({ capability }) =>
-              !["closed-tools", "structured-output", "ephemeral"].includes(capability),
-          ),
+          supported: [...profile.supported, "closed-tools"],
+          lacking: profile.lacking.filter(({ capability }) => capability !== "closed-tools"),
         }),
       ),
     });

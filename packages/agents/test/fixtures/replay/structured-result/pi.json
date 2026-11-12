@@ -1,0 +1,337 @@
+{
+  "protocol": "pi-provider-stream",
+  "harnessVersion": "1.4.0",
+  "model": "openai/gpt-5.6-luna",
+  "scenario": "structured-result",
+  "environment": { "HOME": "$HOME", "PATH": "$PATH" },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "pi:1.1",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": "Answer by calling the structured_output tool exactly once, with the answer as its arguments. Don't reply with text.",
+        "tools": ["structured_output"],
+        "messages": [
+          { "role": "user", "content": "Classify the word apple as a fruit or a vegetable." }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": {},
+              "partialJson": "{\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "{\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": {},
+              "partialJson": "{\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "label",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": {},
+              "partialJson": "{\"label"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\":\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": { "label": "fruit" },
+              "partialJson": "{\"label\":\"fruit"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "fruit",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": { "label": "fruit" },
+              "partialJson": "{\"label\":\"fruit\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\"}",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": { "label": "fruit" },
+              "partialJson": "{\"label\":\"fruit\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_end",
+        "contentIndex": 0,
+        "toolCall": {
+          "type": "toolCall",
+          "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+          "name": "structured_output",
+          "arguments": { "label": "fruit" }
+        },
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": { "label": "fruit" }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "done",
+        "reason": "toolUse",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6946983735154243a66b2988bd60b72d|fc_0f3ea30f7742828f016af57c0d3d8887d2b2458fcb09a41023",
+              "name": "structured_output",
+              "arguments": { "label": "fruit" }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 173,
+            "output": 19,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 192,
+            "cost": {
+              "input": 0.0000346,
+              "output": 0.0000228,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0000574
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794472972021,
+          "responseId": "resp_0f3ea30f7742828f016af57c0c8d8c87d288db27296449dbaa",
+          "rawStopReason": "completed",
+          "durationMs": 1468
+        }
+      }
+    }
+  ]
+}

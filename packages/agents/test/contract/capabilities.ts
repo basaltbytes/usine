@@ -4,19 +4,15 @@ import type { AgentSessionEvent } from "@usine/core/agent/session";
 import { Option } from "effect";
 import type { Capability } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
+import { completionScenarios } from "../replay/completion.ts";
 import { piScenarios, type Provider, scenarios } from "../replay/fixture.ts";
 import type { Scenario } from "../replay/transcript.ts";
 
 /**
  * A scenario of the contract suite. The recorded ones are `Scenario`s; the rest name the scenarios
- * that the adapter steps for tool sets and structured completion add, which no adapter passes yet.
+ * that the adapter steps for tool sets add, which no adapter passes yet.
  */
-export type ContractScenario =
-  | Scenario
-  | "host-tool"
-  | "closed-tools"
-  | "structured-result"
-  | "ephemeral";
+export type ContractScenario = Scenario | "host-tool" | "closed-tools";
 
 /** How the contract suite proves that a harness provides a capability. */
 export type Proof =
@@ -71,10 +67,15 @@ export const capabilityProofs = {
 
 /**
  * The scenarios that the replay suites run for `harness`. Claude Code and Codex replay `restart`
- * and `credential-changed` through the durable parent in `@usine/durable`.
+ * and `credential-changed` through the durable parent in `@usine/durable`, and every harness
+ * replays the completion scenarios in `completion.test.ts`.
  */
-export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> =>
-  harness === "pi" ? piScenarios : [...scenarios, "restart", "credential-changed"];
+export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
+  ...(harness === "pi"
+    ? piScenarios
+    : [...scenarios, "restart" as const, "credential-changed" as const]),
+  ...completionScenarios,
+];
 
 /** The capabilities that `harness` declares for any placement and credential route. */
 export const declaredCapabilities = (harness: Harness): ReadonlySet<Capability> =>
