@@ -19,7 +19,8 @@ const optionsJson = Schema.decodeUnknownSync(
 );
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-const ToolCall = Schema.Struct({ name: Schema.String, input: Schema.Json });
+/** A recorded tool call, without `input` when Claude Code's arguments weren't JSON. */
+const ToolCall = Schema.Struct({ name: Schema.String, input: Schema.optionalKey(Schema.Json) });
 
 const Models = Schema.Array(
   Schema.Struct({
@@ -81,7 +82,10 @@ export const claudeTransport = (
       const recordedTools = Option.map(tools, (server): ClaudeToolServer => ({
         ...server,
         call: async (name, toolInput, signal) => {
-          tape.inbound(`${port}/tools`, { name, input: toolInput });
+          tape.inbound(`${port}/tools`, {
+            name,
+            ...Option.match(toolInput, { onNone: () => ({}), onSome: (json) => ({ input: json }) }),
+          });
           const result = await server.call(name, toolInput, signal);
           tape.outbound(`${port}/tools`, json(encode(result)));
           return result;
@@ -94,7 +98,11 @@ export const claudeTransport = (
             const entry = await tape.read(`${port}/tools`);
             if (entry.type === "runtime_exit") return;
             const call = Schema.decodeUnknownSync(ToolCall)(entry.payload);
-            const result = await server.call(call.name, call.input, new AbortController().signal);
+            const result = await server.call(
+              call.name,
+              Option.fromUndefinedOr(call.input),
+              new AbortController().signal,
+            );
             tape.outbound(`${port}/tools`, json(encode(result)));
           }
         })().catch((cause: unknown) => tape.fail(cause));

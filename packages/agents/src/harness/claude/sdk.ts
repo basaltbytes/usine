@@ -11,7 +11,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { Context, Effect, type JsonSchema, Layer, Match, Option, Ref, Schema } from "effect";
-import type { HostToolResult } from "../tools.ts";
+import { decodeHostToolInput, type HostToolResult } from "../tools.ts";
 
 // The Claude SDK iterator synchronously normalizes vendor messages, including omitted undefined fields, as JSON.
 // @effect-diagnostics-next-line schemaSync:off
@@ -72,10 +72,15 @@ export interface ClaudeToolServer {
   readonly name: string;
   readonly tools: ReadonlyArray<ClaudeTool>;
   /**
-   * Runs one call of the tool `name`. A failed call resolves with an error result; the promise
-   * rejects only when `signal` aborts or the session stops.
+   * Runs one call of the tool `name`, whose `input` is `None` when Claude Code's arguments aren't
+   * JSON. A failed call resolves with an error result; the promise rejects only when `signal`
+   * aborts or the session stops.
    */
-  readonly call: (name: string, input: Schema.Json, signal: AbortSignal) => Promise<HostToolResult>;
+  readonly call: (
+    name: string,
+    input: Option.Option<Schema.Json>,
+    signal: AbortSignal,
+  ) => Promise<HostToolResult>;
 }
 
 /** A model name advertised by Claude Code, with its resolved ID when the SDK provides one. */
@@ -122,8 +127,6 @@ const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schem
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
   decodeVendorMessage(serializeVendorValue(message));
 
-const isJson = Schema.is(Schema.Json);
-
 /**
  * Returns an MCP server that lists `server`'s tools with their own JSON Schemas and runs their
  * calls. The Agent SDK connects it to the Claude Code process over the query's control messages.
@@ -144,10 +147,11 @@ const toolServer = (server: ClaudeToolServer): McpServer => {
     })),
   }));
   mcp.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const input = request.params.arguments ?? {};
-    const result = isJson(input)
-      ? await server.call(request.params.name, input, extra.signal)
-      : { isError: true, text: "The tool input is not JSON" };
+    const result = await server.call(
+      request.params.name,
+      decodeHostToolInput(request.params.arguments ?? {}),
+      extra.signal,
+    );
     return { content: [{ type: "text", text: result.text }], isError: result.isError };
   });
   return mcp;

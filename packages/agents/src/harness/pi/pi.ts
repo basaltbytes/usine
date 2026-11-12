@@ -9,10 +9,10 @@ import { HarnessCatalog } from "../harness.ts";
 import { piPreflight } from "./preflight.ts";
 import { pi } from "./descriptor.ts";
 import { type HarnessRuntime, openWithTools } from "../runtime.ts";
-import { callHostTool, type HostToolSet, hostToolNames } from "../tools.ts";
+import { callHostTool, decodeHostToolInput, type HostToolSet, hostToolNames } from "../tools.ts";
 import { Harness, BrainSpec } from "@usine/core/agent/brain";
 import { EndpointName, SessionStarted } from "@usine/core/agent/session";
-import { Deferred, Effect, FiberSet, Layer, Match, Option, Schema, Stream } from "effect";
+import { Deferred, Effect, FiberSet, Layer, Match, Option, Stream } from "effect";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   ChildBackend,
@@ -78,8 +78,6 @@ const piCatalog = HarnessCatalog.make({ descriptors: [pi] });
 /** Model APIs take tool names of at most 64 characters; Pi's own tools keep their names. */
 const toolNameRule = { maxLength: 64, reserved: piBuiltInToolNames };
 
-const isJson = Schema.is(Schema.Json);
-
 /**
  * Defines `tools` as Pi tools, whose calls run in the calling scope. Returns them with the
  * mapping from the name that Pi reports to the toolkit name.
@@ -97,12 +95,9 @@ const serveTools = Effect.fn("PiRuntime.serveTools")(function* (tools: HostToolS
       promptSnippet: tool.description,
       parameters: tool.parameters,
       execute: (toolCallId, params, signal) =>
-        run(
-          isJson(params)
-            ? call(names.alias(tool.name), params, Option.some(toolCallId))
-            : Effect.succeed({ isError: true, text: "The tool input is not JSON" }),
-          { signal },
-        ).then((result) => ({
+        run(call(names.alias(tool.name), decodeHostToolInput(params), Option.some(toolCallId)), {
+          signal,
+        }).then((result) => ({
           content: [{ type: "text", text: result.text }],
           details: undefined,
           isError: result.isError,

@@ -14,8 +14,14 @@ import { SessionSpec, StartPrompt } from "../src/harness/contract.ts";
 import { Harnesses, type HarnessRuntime } from "../src/harness/node.ts";
 import { RolePlacements, RoleSpec } from "../src/harness/role.ts";
 import { openWithTools } from "../src/harness/runtime.ts";
-import { callHostTool, hostToolNames, hostToolSet } from "../src/harness/tools.ts";
+import {
+  callHostTool,
+  decodeHostToolInput,
+  hostToolNames,
+  hostToolSet,
+} from "../src/harness/tools.ts";
 import { AgentResultError, RestartState, WorkingDirectory } from "../src/runtime.ts";
+import { collectLogs } from "./logs.ts";
 
 class NoteMissing extends Schema.TaggedError<
   NoteMissing,
@@ -85,6 +91,36 @@ describe("usine tool sets", () => {
     }),
   );
 
+  it.effect("return a failure of a tool that returns its failures as an error result", () =>
+    Effect.gen(function* () {
+      const Lookup = Tool.make("lookup", {
+        description: "Looks a key up.",
+        parameters: Schema.Struct({ key: Schema.String }),
+        success: Schema.String,
+        failure: Schema.Struct({ reason: Schema.String }),
+        failureMode: "return",
+      });
+      const kit = Toolkit.make(Lookup);
+      const bound = yield* hostToolSet(kit).pipe(
+        Effect.provide(
+          kit.toLayer({
+            lookup: ({ key }) =>
+              key === "known" ? Effect.succeed("found") : Effect.fail({ reason: "nope" }),
+          }),
+        ),
+      );
+      const [lookup] = bound.tools;
+      assert(lookup !== undefined);
+      const found = yield* lookup.call({ key: "known" }, Option.none());
+      assert.deepStrictEqual(found, { isError: false, text: "found" });
+      const missing = yield* lookup.call({ key: "other" }, Option.none());
+      assert.deepStrictEqual(missing, { isError: true, text: '{"reason":"nope"}' });
+      const invalid = yield* lookup.call({ name: "known" }, Option.none());
+      assert.isTrue(invalid.isError);
+      assert.include(invalid.text, '"_tag":"AiError"');
+    }),
+  );
+
   it.effect("keep names that a harness carries and alias the rest stably", () =>
     Effect.gen(function* () {
       const Named = (name: string) => Tool.make(name);
@@ -105,7 +141,15 @@ describe("usine tool sets", () => {
         ),
       );
       const rule = { maxLength: 52, reserved: new Set(["bash"]) };
-      const names = yield* hostToolNames(bound, rule);
+      const { records, layer } = collectLogs(["Info", "Warn"]);
+      const names = yield* hostToolNames(bound, rule).pipe(Effect.provide(layer));
+      assert.deepStrictEqual(
+        records.map(({ level, message }) => ({ level, message })),
+        ["notes.read", "bash", "x".repeat(70)].map((tool) => ({
+          level: "Info" as const,
+          message: ["Aliased a usine tool name", { tool, alias: names.alias(tool) }],
+        })),
+      );
       const again = yield* hostToolNames(bound, rule);
       assert.strictEqual(names.alias("read_note"), "read_note");
       for (const name of ["notes.read", "bash", "x".repeat(70)]) {
@@ -118,16 +162,37 @@ describe("usine tool sets", () => {
       assert.match(names.alias("notes.read"), /^notes_read_/);
       assert.deepStrictEqual(names.name("unknown"), Option.none());
       const call = callHostTool(bound, names);
-      const aliased = yield* call(names.alias("bash"), {}, Option.none());
+      const aliased = yield* call(names.alias("bash"), Option.some({}), Option.none());
       assert.deepStrictEqual(aliased, {
         isError: false,
         text: "null",
       });
-      const unknown = yield* call("unknown", {}, Option.none());
+      const unknown = yield* call("unknown", Option.some({}), Option.none());
       assert.deepStrictEqual(unknown, {
         isError: true,
         text: "No usine tool is named unknown",
       });
+      // Parsing reads an out-of-range number as `Infinity`, which isn't JSON.
+      records.length = 0;
+      const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        '{"n":1e999}',
+      );
+      const outOfRange = yield* call("read_note", decodeHostToolInput(parsed), Option.none()).pipe(
+        Effect.provide(layer),
+      );
+      assert.deepStrictEqual(outOfRange, { isError: true, text: "The tool input is not JSON" });
+      assert.deepStrictEqual(
+        records.map(({ level, message }) => ({ level, message })),
+        [
+          {
+            level: "Warn",
+            message: [
+              "Session called a usine tool with an input that is not JSON",
+              { tool: "read_note" },
+            ],
+          },
+        ],
+      );
       const clash = yield* Effect.exit(
         hostToolNames({ tools: [...bound.tools, ...bound.tools] }, rule),
       );

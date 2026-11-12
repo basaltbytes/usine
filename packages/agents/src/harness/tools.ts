@@ -187,7 +187,7 @@ export const hostToolNames = Effect.fn("HostTools.names")(function* (
       return yield* Effect.die(
         new Error(`The tool names "${taken ?? alias}" and "${name}" share the alias "${alias}"`),
       );
-    if (!kept) yield* Effect.logDebug("Aliased a usine tool name", { tool: name, alias });
+    if (!kept) yield* Effect.logInfo("Aliased a usine tool name", { tool: name, alias });
     aliases.set(name, alias);
     names.set(alias, name);
   }
@@ -198,12 +198,19 @@ export const hostToolNames = Effect.fn("HostTools.names")(function* (
 });
 
 /**
- * Runs the call of the tool that the harness names `alias`. A name outside the toolkit returns an
- * error result, so the model can correct the call.
+ * Parses the arguments of a harness's tool call. Returns `None` for a value that isn't JSON, such
+ * as a number out of range, which `JSON.parse` reads as `Infinity`.
+ */
+export const decodeHostToolInput = Schema.decodeUnknownOption(Schema.Json);
+
+/**
+ * Runs the call of the tool that the harness names `alias`. A name outside the toolkit, or an
+ * input that `decodeHostToolInput` refused, returns an error result, so the model can correct
+ * the call.
  */
 export const callHostTool = (tools: HostToolSet, names: HostToolNames) => {
   const byName = new Map(tools.tools.map((tool) => [tool.name, tool]));
-  return (alias: string, input: Schema.Json, callId: Option.Option<string>) =>
+  return (alias: string, input: Option.Option<Schema.Json>, callId: Option.Option<string>) =>
     Option.match(
       Option.flatMap(names.name(alias), (name) => Option.fromUndefinedOr(byName.get(name))),
       {
@@ -213,7 +220,16 @@ export const callHostTool = (tools: HostToolSet, names: HostToolNames) => {
           }).pipe(
             Effect.as<HostToolResult>({ isError: true, text: `No usine tool is named ${alias}` }),
           ),
-        onSome: (tool) => tool.call(input, callId),
+        onSome: (tool) =>
+          Option.match(input, {
+            onNone: () =>
+              Effect.logWarning("Session called a usine tool with an input that is not JSON", {
+                tool: tool.name,
+              }).pipe(
+                Effect.as<HostToolResult>({ isError: true, text: "The tool input is not JSON" }),
+              ),
+            onSome: (json) => tool.call(json, callId),
+          }),
       },
     );
 };
