@@ -490,6 +490,15 @@ describe("Provisioned SSH Worker", () => {
       assert(run !== undefined, "the Attempt ran in a container");
       assert.include(run.input, `ANTHROPIC_API_KEY=${KEY}`);
       assert.notInclude(run.line, KEY);
+      // The machine has the SSH user's Claude Code login, which an API-key Attempt must not mount.
+      assert.notInclude(run.line, ".claude/.credentials.json");
+      assert.notInclude(run.line, ".claude.json");
+      const preflight = machine.state.calls.find(
+        ({ line }) => line.startsWith("exec 'docker' 'run' ") && line.includes("'usine-preflight-"),
+      );
+      assert(preflight !== undefined, "the machine check ran in a container");
+      assert.notInclude(preflight.line, ".claude/.credentials.json");
+      assert.notInclude(preflight.line, ".claude.json");
     }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
   });
 

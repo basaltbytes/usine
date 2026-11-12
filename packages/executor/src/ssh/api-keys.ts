@@ -4,7 +4,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import { Effect, Option, Redacted } from "effect";
 import type { ExecutorOperation } from "../executor.ts";
 import { type RemoteCommands, sendingShell } from "../remote/commands.ts";
-import type { RemoteAccess } from "../remote/machine.ts";
+import type { MachineCredentialRoute, RemoteAccess } from "../remote/machine.ts";
 import type { AttemptHomes } from "./attempt-homes.ts";
 import { writeMachineFiles } from "./gateway/attachments.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress } from "./model.ts";
@@ -44,6 +44,22 @@ export const provisionedApiKey = (
     (provider) => machine.provisioner.apiKeys[provider],
   );
 };
+
+/**
+ * Returns how each Attempt's `harness` authenticates on a Worker's machine: through the Gateway
+ * if it holds the provider's credential, with the provisioner's API key if it sets one, or with
+ * the SSH user's login otherwise.
+ */
+export const machineCredentialRoute = (
+  catalog: HarnessCatalog,
+  worker: { readonly address: SshWorkerAddress; readonly gateway: Option.Option<MachineGateway> },
+  harness: Harness,
+): MachineCredentialRoute =>
+  gatewayHolds(catalog, worker.gateway, harness)
+    ? "gateway"
+    : Option.isSome(provisionedApiKey(catalog, worker, harness))
+      ? "api-key"
+      : "host-login";
 
 /** Adds the selected harness's provisioner API key and attempt configuration. */
 export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
