@@ -11,7 +11,7 @@ import {
   scenarios,
 } from "./fixture.ts";
 import { runScenario } from "./scenarios.ts";
-import { runToolScenario, toolProviders, toolScenarios } from "../contract/host-tools.ts";
+import { runToolScenario, toolProviders, toolScenariosOf } from "../contract/host-tools.ts";
 
 export const recordContracts = (provider: Provider): void => {
   for (const scenario of provider === "pi" ? piScenarios : scenarios)
@@ -35,7 +35,7 @@ export const recordContracts = (provider: Provider): void => {
     );
   for (const tools of toolProviders)
     if (tools === provider)
-      for (const scenario of toolScenarios)
+      for (const scenario of toolScenariosOf(tools))
         it.live.skipIf(recordingModel(provider) === undefined)(
           `records ${provider}: ${scenario}`,
           () =>
