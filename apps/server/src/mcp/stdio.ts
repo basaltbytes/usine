@@ -15,8 +15,43 @@ import { loadOperatorTools, PublishedApi, visibleTools } from "./tools.ts";
 const REQUEST_TIMEOUT = Duration.seconds(30);
 /** The largest response, in bytes, that `usine mcp` reads from the instance at start. */
 export const MAX_START_RESPONSE_BYTES = 8 * 1024 * 1024;
-const JsonText = Schema.fromJsonString(Schema.Json);
+/** The deepest nesting of arrays and objects that `usine mcp` accepts in a start response. */
+export const MAX_START_NESTING = 256;
+/** The most arrays and objects that `usine mcp` accepts in a start response. */
+export const MAX_START_CONTAINERS = 200_000;
 const decoder = new TextDecoder();
+
+const QUOTE = 0x22;
+const BACKSLASH = 0x5c;
+const OPEN_BRACE = 0x7b;
+const CLOSE_BRACE = 0x7d;
+const OPEN_BRACKET = 0x5b;
+const CLOSE_BRACKET = 0x5d;
+
+/**
+ * The deepest nesting and the number of arrays and objects in the JSON text `bytes`, counted
+ * outside strings. A UTF-8 byte below 0x80 is always a whole character, so the scan reads bytes.
+ */
+const measureJson = (bytes: Uint8Array) => {
+  let depth = 0;
+  let deepest = 0;
+  let containers = 0;
+  let inString = false;
+  let escaped = false;
+  for (const byte of bytes) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (byte === BACKSLASH) escaped = true;
+      else if (byte === QUOTE) inString = false;
+    } else if (byte === QUOTE) inString = true;
+    else if (byte === OPEN_BRACE || byte === OPEN_BRACKET) {
+      depth += 1;
+      containers += 1;
+      if (depth > deepest) deepest = depth;
+    } else if (byte === CLOSE_BRACE || byte === CLOSE_BRACKET) depth -= 1;
+  }
+  return { deepest, containers };
+};
 
 /** `usine mcp` could not read the instance's API document or the token's session. */
 export class McpStartError extends Schema.TaggedError<
@@ -54,6 +89,14 @@ export const stdioServer = (
               }),
             ),
           );
+      const refuse = (path: string, reason: string, limit: number, message: string) =>
+        Effect.logWarning(`MCP start response refused: ${reason}`, { path, limit }).pipe(
+          Effect.andThen(
+            McpStartError.make({
+              message: `${new URL(path, origin).href} ${message}. Check that usine runs at ${origin}.`,
+            }),
+          ),
+        );
       const get = Effect.fn("Mcp.readInstance")(function* (path: string) {
         yield* Effect.annotateCurrentSpan({ origin, path });
         const url = new URL(path, origin);
@@ -76,15 +119,11 @@ export const stdioServer = (
                 read.chunks.push(chunk);
                 return Effect.succeed({ size, chunks: read.chunks });
               }
-              return Effect.logWarning("MCP start response refused: too large", {
+              return refuse(
                 path,
-                limit: MAX_START_RESPONSE_BYTES,
-              }).pipe(
-                Effect.andThen(
-                  McpStartError.make({
-                    message: `${url.href} returned more than ${MAX_START_RESPONSE_BYTES} bytes. Check that usine runs at ${origin}.`,
-                  }),
-                ),
+                "too large",
+                MAX_START_RESPONSE_BYTES,
+                `returned more than ${MAX_START_RESPONSE_BYTES} bytes`,
               );
             },
           ),
@@ -97,14 +136,32 @@ export const stdioServer = (
           bytes.set(chunk, offset);
           offset += chunk.length;
         }
-        return yield* Schema.decodeEffect(JsonText)(decoder.decode(bytes)).pipe(
-          Effect.catch(failure(path)),
-        );
+        // Decoding walks every array and object, and its time grows faster than their number and
+        // depth, so a start response must fit both limits before it is decoded.
+        const { deepest, containers } = measureJson(bytes);
+        if (deepest > MAX_START_NESTING)
+          return yield* refuse(
+            path,
+            "nested too deeply",
+            MAX_START_NESTING,
+            `nests arrays and objects more than ${MAX_START_NESTING} levels deep`,
+          );
+        if (containers > MAX_START_CONTAINERS)
+          return yield* refuse(
+            path,
+            "too many values",
+            MAX_START_CONTAINERS,
+            `holds more than ${MAX_START_CONTAINERS} arrays and objects`,
+          );
+        return decoder.decode(bytes);
       });
+      // One decode from the text, so the document is walked once.
       const decode = <A, I>(path: string, schema: Schema.Codec<A, I>) =>
         get(path).pipe(
-          Effect.flatMap((body) =>
-            Schema.decodeUnknownEffect(schema)(body).pipe(Effect.catch(failure(path))),
+          Effect.flatMap((text) =>
+            Schema.decodeEffect(Schema.fromJsonString(schema))(text).pipe(
+              Effect.catch(failure(path)),
+            ),
           ),
         );
       const document = yield* decode("/api/openapi.json", PublishedApi);

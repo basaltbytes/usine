@@ -27,6 +27,7 @@ import {
   Option,
   Queue,
   Redacted,
+  Result,
   Schema,
   Sink,
   Stdio,
@@ -41,7 +42,12 @@ import { apiRoutes, serverLayer } from "../../src/http.ts";
 import { operatorOpenApi } from "../../src/openapi.ts";
 import { startupListener } from "../../src/listener.ts";
 import { MCP_PATH, mcpRoutes } from "../../src/mcp/http.ts";
-import { MAX_START_RESPONSE_BYTES, stdioServer } from "../../src/mcp/stdio.ts";
+import {
+  MAX_START_CONTAINERS,
+  MAX_START_NESTING,
+  MAX_START_RESPONSE_BYTES,
+  stdioServer,
+} from "../../src/mcp/stdio.ts";
 import { MAX_RESULT_BYTES } from "../../src/mcp/tools.ts";
 import { ServerUpgrades } from "../../src/upgrade/control.ts";
 import {
@@ -700,6 +706,88 @@ describe("operator MCP endpoint", () => {
       assert.include(
         failure.message,
         `${origin}/api/openapi.json returned more than ${MAX_START_RESPONSE_BYTES} bytes`,
+      );
+    }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
+  );
+
+  it.live("stops usine mcp --origin before decoding a start response nested too deeply", () =>
+    Effect.gen(function* () {
+      // The document nests 7 levels around `levels` arrays of an `enum`. The strings hold escaped
+      // quotes, an escaped backslash, and brackets, which the scan must read as text.
+      const document = (levels: number) =>
+        `{"paths": {"/api/deep": {"get": {"operationId": "operator.deep", "parameters": [{"name": "value", "in": "query", "description": "say \\"hi\\" \\\\", "schema": {"enum": ${"[".repeat(levels)}"\\"[[[{{{"${"]".repeat(levels)}}}], "responses": {"200": {}}, "x-usine-permission": "read"}}}, "components": {"schemas": {}}}`;
+      const start = (levels: number) =>
+        Effect.gen(function* () {
+          const origin = yield* serveOnLoopback(
+            Layer.mergeAll(
+              HttpRouter.add(
+                "GET",
+                "/api/openapi.json",
+                HttpServerResponse.text(document(levels), { contentType: "application/json" }),
+              ),
+              HttpRouter.add(
+                "GET",
+                "/api/auth/session",
+                HttpServerResponse.jsonUnsafe({
+                  permissions: [{ permission: "admin", scope: { _tag: "Instance" } }],
+                }),
+              ),
+            ),
+          );
+          const warnings: Array<string> = [];
+          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+            if (logLevel === "Warn") warnings.push(jsonKey(message));
+          });
+          const stdio = yield* memoryStdio;
+          const result = yield* Layer.build(
+            stdioServer(origin, Redacted.make("token"), "2 seconds").pipe(
+              Layer.provide(stdio.layer),
+              Layer.provide(FetchHttpClient.layer),
+              Layer.provide(NodeServices.layer),
+            ),
+          ).pipe(Effect.provide(Logger.layer([logger])), Effect.result);
+          return { origin, result, warnings };
+        });
+      const refused = yield* start(MAX_START_NESTING - 6);
+      const failure = Result.getFailure(refused.result).pipe(Option.getOrThrow);
+      assert.equal(failure._tag, "McpStartError");
+      assert.include(
+        failure.message,
+        `${refused.origin}/api/openapi.json nests arrays and objects more than ${MAX_START_NESTING} levels deep`,
+      );
+      assert.lengthOf(refused.warnings, 1);
+      assert.include(refused.warnings[0], "MCP start response refused: nested too deeply");
+      // Exactly at the limit, the document decodes, and inlining cuts the schema at its own limit.
+      const accepted = yield* start(MAX_START_NESTING - 7);
+      assert.isTrue(Result.isSuccess(accepted.result));
+      assert.lengthOf(accepted.warnings, 1);
+      assert.include(accepted.warnings[0], "the inlining budget or depth ran out");
+    }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
+  );
+
+  it.live("stops usine mcp --origin before decoding a start response with too many values", () =>
+    Effect.gen(function* () {
+      const origin = yield* serveOnLoopback(
+        HttpRouter.add(
+          "GET",
+          "/api/openapi.json",
+          HttpServerResponse.text(`[${Array.from({ length: MAX_START_CONTAINERS }, () => "[]")}]`, {
+            contentType: "application/json",
+          }),
+        ),
+      );
+      const stdio = yield* memoryStdio;
+      const failure = yield* Layer.build(
+        stdioServer(origin, Redacted.make("token"), "5 seconds").pipe(
+          Layer.provide(stdio.layer),
+          Layer.provide(FetchHttpClient.layer),
+          Layer.provide(NodeServices.layer),
+        ),
+      ).pipe(Effect.flip);
+      assert.equal(failure._tag, "McpStartError");
+      assert.include(
+        failure.message,
+        `${origin}/api/openapi.json holds more than ${MAX_START_CONTAINERS} arrays and objects`,
       );
     }).pipe(Effect.timeout("10 seconds"), Effect.scoped),
   );

@@ -309,6 +309,75 @@ describe("operator MCP tools", () => {
       );
       assert.isFalse(chained.complete);
       assert.lengthOf(chained.tools, 1);
+      // Each array entry nests one level deeper too: without that, 5,000 arrays overflow the stack.
+      const arrays = yield* decode({
+        enum: Array.from({ length: 5_000 }).reduce<Schema.Json>((entry) => [entry], 0),
+      });
+      assert.isFalse(arrays.complete);
+      assert.lengthOf(arrays.tools, 1);
+      // A resolved `$ref` keeps its level, so the limit counts across references: 32 levels, then
+      // a component of 31 levels, fit; one more level is cut.
+      const across = (inner: number) =>
+        decode(
+          { $ref: "#/components/schemas/Outer" },
+          {
+            Outer: nested(32, { $ref: "#/components/schemas/Inner" }),
+            Inner: nested(inner, { type: "string" }),
+          },
+        );
+      const acrossFits = yield* across(31);
+      assert.isTrue(acrossFits.complete);
+      assert.deepStrictEqual(valueSchema(acrossFits), nested(63, { type: "string" }));
+      const acrossCut = yield* across(32);
+      assert.isFalse(acrossCut.complete);
+      assert.deepStrictEqual(valueSchema(acrossCut), nested(64, {}));
+      // 32 chained components that each nest 63 levels before the next `$ref`: the count must not
+      // restart at each reference.
+      const justUnder = yield* decode(
+        { $ref: "#/components/schemas/Level0" },
+        Object.fromEntries(
+          Array.from({ length: 32 }, (_, index) => [
+            `Level${index}`,
+            nested(63, index === 31 ? {} : { $ref: `#/components/schemas/Level${index + 1}` }),
+          ]),
+        ),
+      );
+      assert.isFalse(justUnder.complete);
+      assert.lengthOf(justUnder.tools, 1);
+      // Inlining checks each object once, not its whole subtree at every level. The document is
+      // built already decoded, since decoding walks all 200,000 levels.
+      const document = yield* Schema.decodeEffect(PublishedApi)({
+        paths: {
+          "/api/nested": {
+            get: {
+              operationId: "operator.nested",
+              parameters: [{ name: "value", in: "query", schema: {} }],
+              responses: { "200": {} },
+              "x-usine-permission": "read",
+            },
+          },
+        },
+        components: {},
+      });
+      const get = document.paths["/api/nested"]?.get;
+      assert.isDefined(get);
+      const wide: PublishedApi = {
+        ...document,
+        paths: {
+          "/api/nested": {
+            get: {
+              ...get,
+              parameters: [
+                { name: "value", in: "query", schema: nested(200_000, { type: "string" }) },
+              ],
+            },
+          },
+        },
+      };
+      const started = performance.now();
+      const shallow = operatorTools(wide);
+      assert.isBelow(performance.now() - started, 1_000);
+      assert.isFalse(shallow.complete);
     }).pipe(Effect.orDie),
   );
 
