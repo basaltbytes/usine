@@ -353,6 +353,7 @@ describe("cycle reset polling", () => {
           seenByCi.push(pending);
           return { outcomes: [], failures: [], nextPollAt: Option.none() };
         }),
+      applyLabelsAfterGreen: () => Effect.die("unused CI labels"),
     });
     const github: GitHubPolling["Service"] = {
       itemLabels: () => Effect.die("unused item labels"),

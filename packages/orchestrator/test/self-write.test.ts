@@ -249,7 +249,7 @@ describe("Board self-writes", () => {
             }),
           );
           const pollingLayer = PollingTriggers.layer.pipe(
-            Layer.provide(idleCiMonitor),
+            Layer.provideMerge(idleCiMonitor),
             Layer.provideMerge(dependencies),
           );
           const layer = Operator.layer.pipe(

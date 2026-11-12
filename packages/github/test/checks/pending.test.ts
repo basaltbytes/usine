@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Result, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { TestClock } from "effect/testing";
 import { GitHubChecks, PendingCheck, PendingCheckReport } from "../../src/checks.ts";
@@ -26,13 +26,17 @@ const previousJobs = () =>
     total_count: 2,
     jobs: [
       {
+        id: 1,
         name: "test (engine)",
+        status: "completed",
         conclusion: "success",
         started_at: "2026-11-04T19:54:00Z",
         completed_at: "2026-11-04T19:55:00Z",
       },
       {
+        id: 2,
         name: "test (web)",
+        status: "completed",
         conclusion: "success",
         started_at: "2026-11-04T19:54:00Z",
         completed_at: "2026-11-04T20:00:00Z",
@@ -236,3 +240,78 @@ it.effect("keeps the duration history read before its deadline when a later read
 );
 
 // PR #827, Actions job 125150736388: the log retains the assertion and subsequent cleanup.
+
+it.effect("reads unfinished check runs and pending commit statuses with their Actions jobs", () =>
+  Effect.gen(function* () {
+    const checks = yield* (yield* GitHubChecks).unfinishedChecks(repository, head);
+    assert.deepStrictEqual(
+      checks.map(({ name, actionsJob }) => ({
+        name,
+        actionsJob: Option.map(actionsJob, ({ runId, jobId }) => ({ runId, jobId })),
+      })),
+      [
+        { name: "test (web)", actionsJob: Option.some({ runId: 1, jobId: 2 }) },
+        { name: "deploy", actionsJob: Option.none() },
+        { name: "external-ci", actionsJob: Option.none() },
+      ],
+    );
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("check-runs")
+          ? pendingRuns([
+              runningCheck("test (web)"),
+              queuedCheck("deploy"),
+              { ...runningCheck("lint"), status: "completed" },
+            ])
+          : json({
+              statuses: [
+                { context: "external-ci", state: "pending", description: null },
+                { context: "docs", state: "success", description: null },
+              ],
+            }),
+      ),
+    ),
+  ),
+);
+
+it.effect.each([
+  { status: 403, outcome: "reports the check runs alone" },
+  { status: 500, outcome: "fails" },
+] as const)("an unfinished-check read whose status read gets $status $outcome", ({ status }) =>
+  Effect.gen(function* () {
+    const read = yield* (yield* GitHubChecks)
+      .unfinishedChecks(repository, head)
+      .pipe(Effect.result);
+    if (status === 403) {
+      assert(Result.isSuccess(read));
+      assert.deepStrictEqual(
+        read.success.map(({ name }) => name),
+        ["deploy-preview"],
+      );
+      return;
+    }
+    assert(Result.isFailure(read));
+    assert(read.failure._tag === "GitHubApiError");
+    assert.deepStrictEqual(read.failure.status, Option.some(500));
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("check-runs")
+          ? pendingRuns([
+              // Another app's check run, with no Actions details URL.
+              {
+                name: "deploy-preview",
+                status: "in_progress",
+                started_at: null,
+                details_url: null,
+              },
+            ])
+          : new Response(
+              status === 403 ? "Resource not accessible by integration" : "server error",
+              { status },
+            ),
+      ),
+    ),
+  ),
+);

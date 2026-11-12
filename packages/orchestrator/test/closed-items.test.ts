@@ -308,7 +308,7 @@ const withFactory = <A, E>(
       }),
     );
     const polling = PollingTriggers.layer.pipe(
-      Layer.provide(idleCiMonitor),
+      Layer.provideMerge(idleCiMonitor),
       Layer.provideMerge(dependencies),
     );
     return yield* test.pipe(

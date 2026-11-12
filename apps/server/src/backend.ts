@@ -69,6 +69,10 @@ export class FactoryBackend extends Context.Service<
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, BackendError>;
+    readonly applyCiLabels: (
+      runId: RunId,
+      attemptId: AttemptId,
+    ) => Effect.Effect<void, BackendError>;
     readonly retry: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly agents: Effect.Effect<ReadonlyArray<AgentName>, BackendError>;
     readonly editAndRetry: (runId: RunId, edit: EditAndRetry) => Effect.Effect<void, BackendError>;
@@ -146,6 +150,10 @@ export const liveBackendLayer = (
       Effect.flatMap(instances.get, (instance) =>
         operator.resolveFailure(instance, runId, attemptId),
       ),
+    applyCiLabels: (runId, attemptId) =>
+      Effect.flatMap(instances.get, (instance) =>
+        operator.applyCiLabels(instance, runId, attemptId),
+      ),
     agents: rosterOf(instances),
     editAndRetry: (runId, edit) =>
       Effect.flatMap(instances.get, (instance) => operator.editAndRetry(instance, runId, edit)),
@@ -216,6 +224,7 @@ export const needsSetupBackendLayer = (
     undoDismissNeed: (key) => acknowledgements.undo(key, attentionAudiences(key)),
     retry: fail,
     resolveFailure: fail,
+    applyCiLabels: fail,
     agents: rosterOf(instances),
     editAndRetry: fail,
     runAgain: fail,

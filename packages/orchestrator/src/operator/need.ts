@@ -62,6 +62,11 @@ export class RunFailureNeed extends Schema.TaggedClass<
    * part of the attention revision, so a dismissed failure stays dismissed when its fix opens.
    */
   fixRun: Schema.NullOr(CiFixRun).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
+  /**
+   * The failed Attempt whose CI wait ended because CI on its head didn't finish. Once CI on that
+   * head passes, applying the wait's completion labels names it. Absent for other failures.
+   */
+  unfinishedCiAttemptId: Schema.optionalKey(AttemptId),
 }) {}
 
 /** A repository poll failure that needs operator attention. */
