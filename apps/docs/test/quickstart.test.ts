@@ -80,8 +80,15 @@ for (const route of quickstartRoutes) {
       );
       expect(exitCode).toEqual(0);
       const root = InstanceDirectory.make(`${home}/usine-instance`);
-      expect(yield* fs.readFileString(`${root}/agents/developer.md`)).toEqual(
-        developerAgent(route),
+      const committed = (file: string) => fs.readFileString(`${bootstrap}/${file}`);
+      const written = (file: string) => fs.readFileString(`${root}/${file}`);
+      expect(yield* written(".gitignore")).toEqual(".usine/\n.env\n");
+      expect(yield* written("usine.yaml")).toEqual(
+        (yield* committed("usine.yaml")).replaceAll("YOUR_GITHUB_LOGIN", "octo-quickstart"),
+      );
+      expect(yield* written("agents/developer.md")).toEqual(developerAgent(route));
+      expect(yield* written("projects/scratch/loops/first-pr.md")).toEqual(
+        yield* committed("projects/scratch/loops/first-pr.md"),
       );
       yield* loadsQuickstart(root, route);
     }).pipe(
