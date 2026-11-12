@@ -41,7 +41,17 @@ import {
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import { type Brand, Effect, Option, Schema, SchemaGetter } from "effect";
+import {
+  type Brand,
+  Effect,
+  Option,
+  Result,
+  Schema,
+  SchemaGetter,
+  SchemaIssue,
+  SchemaTransformation,
+} from "effect";
+import { IpNetwork } from "effect/net";
 import { nonBlankString, uniqueLabelNames, uniqueRepositoryNames } from "./checks.ts";
 import { Lanes, Project } from "./project/project.ts";
 import { DeclaredLabel } from "./label.ts";
@@ -630,6 +640,28 @@ export const UiOrigin = Schema.String.check(
 ).pipe(Schema.brand("UiOrigin"));
 export type UiOrigin = typeof UiOrigin.Type;
 
+/** A reverse proxy network in CIDR notation, such as `127.0.0.1/32`, without host bits. */
+const TrustedProxy = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.declare(IpNetwork.isIpNetwork, { identifier: "TrustedProxy" }),
+    SchemaTransformation.transformEffect({
+      decode: (input, options) => {
+        const network = IpNetwork.fromString(input);
+        return Result.isSuccess(network)
+          ? Effect.succeed(network.success)
+          : Effect.fail(
+              new SchemaIssue.InvalidValue(
+                { message: `Expected a network in CIDR notation: ${network.failure.message}` },
+                input,
+                options,
+              ),
+            );
+      },
+      encode: (network) => Effect.succeed(IpNetwork.format(network)),
+    }),
+  ),
+);
+
 /** Instance-wide defaults for polling, upgrades, and agent attempts. */
 export class Settings extends Schema.Class<Settings, Brand.Brand<"@usine/config/factory/Settings">>(
   "@usine/config/Settings",
@@ -785,12 +817,20 @@ export class UsineConfig extends Schema.Class<
      * The source of early-poll hints; decoding defaults to `off` while regular polling continues.
      */
     webhooks: Webhooks.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ mode: "off" }))),
-    /** Additional trusted browser origins; changes require a server restart. */
+    /** Browser origins and reverse proxies that the server trusts; changes require a restart. */
     auth: Schema.Struct({
       origins: Schema.Array(UiOrigin).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+      /**
+       * Networks whose `X-Forwarded-For` header names the client address for sign-in rate limits;
+       * decoding defaults to none.
+       */
+      trustedProxies: Schema.Array(TrustedProxy).pipe(
+        Schema.withDecodingDefaultKey(Effect.succeed([])),
+      ),
     }).pipe(
+      Schema.encodeKeys({ trustedProxies: "trusted_proxies" }),
       Schema.withDecodingDefaultKey(Effect.succeed({})),
-      Schema.withConstructorDefault(Effect.succeed({ origins: [] })),
+      Schema.withConstructorDefault(Effect.succeed({ origins: [], trustedProxies: [] })),
     ),
     /** The configured operator login for revision attribution, or `None` when unset. */
     operator: Schema.OptionFromOptionalKey(OperatorLogin),
