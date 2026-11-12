@@ -50,6 +50,8 @@ const Reported = Schema.TaggedStruct("Reported", {
   sessionId: AgentSessionId,
   /** The child's final message. */
   report: Schema.String,
+  /** Whether the final message replies to the operator (ADR 0018). */
+  answeredOperator: Schema.Boolean,
 });
 
 const Reserved = Schema.TaggedStruct("Reserved", {
@@ -208,7 +210,7 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
         Effect.gen(function* () {
           const queued = yield* journal.queuedInputs(sessionId);
           const decoded = yield* Effect.forEach(queued, (input) =>
-            Schema.decodeEffect(AttemptChannel.Intervention)(input.intervention).pipe(
+            Schema.decodeUnknownEffect(AttemptChannel.Intervention)(input.intervention).pipe(
               Effect.map((intervention) => ({
                 inputSequence: AttemptChannel.Sequence.make(input.inputSequence),
                 intervention,
@@ -590,8 +592,17 @@ export const delegate = Effect.fn("Delegation.delegate")(function* (
           return Reserved.make({ sessionId: session.id, report });
         }),
       onSuccess: (result) =>
-        Effect.logInfo("Child session returned its report", { sessionId: session.id }).pipe(
-          Effect.as(Reported.make({ sessionId: session.id, report: result.message })),
+        Effect.logInfo("Child session returned its report", {
+          sessionId: session.id,
+          answeredOperator: result.answeredOperator,
+        }).pipe(
+          Effect.as(
+            Reported.make({
+              sessionId: session.id,
+              report: result.message,
+              answeredOperator: result.answeredOperator,
+            }),
+          ),
         ),
     });
   }).pipe(Effect.scoped);

@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import { BLOCKED_MARKER, FAILED_MARKER, QUESTION_MARKER } from "@usine/agents/runtime";
 import {
   HarnessSession,
@@ -7,7 +6,6 @@ import {
   SessionStarted,
   TextOutput,
 } from "@usine/core/agent/session";
-import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   AgentFailure,
@@ -19,7 +17,6 @@ import {
 import { StepCompletion, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
-  Context,
   DateTime,
   Deferred,
   Effect,
@@ -30,9 +27,8 @@ import {
   Option,
   Ref,
   Schema,
-  Scope,
 } from "effect";
-import { AttemptRequest, ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
+import { ParentReported, ResultRecorded } from "../src/attempt-runtime.ts";
 import {
   type AttemptContext,
   Complete,
@@ -41,48 +37,24 @@ import {
 } from "../src/attempt/coordinator/rules.ts";
 import { AttemptJournal, Settled } from "../src/coordinator/journal.ts";
 import { outboxFor } from "../src/coordinator/outbox.ts";
-import { CoordinatorRuntime } from "../src/coordinator/runtime.ts";
-import { sqliteAttemptJournalLayer } from "../src/coordinator/sqlite/store.ts";
 import { RecordedDecision, WakeUp } from "../src/coordinator/wake-up.ts";
-import { stubChildBackendLayer, StubChildren } from "../src/testing.ts";
+import {
+  coordinated,
+  coordinator,
+  coordinatorWith,
+  interruptingTransition,
+  orchestrator,
+  sqliteJournal,
+  stored,
+  until,
+} from "./coordinator-support.ts";
 import {
   assertAdmitted,
-  attemptRequest,
   recordingSink,
   slowToInterrupt,
   temporaryDatabase,
   trace,
 } from "./support.ts";
-
-/** A request whose Attempt runs without a parent session. */
-const coordinated = (attemptId: string, maxChildren = 3) => {
-  const request = attemptRequest(attemptId, maxChildren);
-  return AttemptRequest.make({
-    ...request,
-    spec: AttemptChannel.RunSpec.make({ ...request.spec, parent: "none" }),
-  });
-};
-
-const sqliteJournal = (database: string) =>
-  sqliteAttemptJournalLayer.pipe(
-    Layer.provide(SqliteClient.layer({ filename: database })),
-    Layer.orDie,
-  );
-
-/** Interrupts, as a process stop does, each transition whose event has tag `tag`. */
-const interruptingTransition = (tag: string) => (journal: Layer.Layer<AttemptJournal>) =>
-  Layer.effect(
-    AttemptJournal,
-    Effect.gen(function* () {
-      const inner = yield* AttemptJournal;
-      const isTagged = Schema.is(Schema.Struct({ _tag: Schema.Literal(tag) }));
-      return AttemptJournal.of({
-        ...inner,
-        transition: (attemptId, expected, step) =>
-          isTagged(step.event) ? Effect.interrupt : inner.transition(attemptId, expected, step),
-      });
-    }),
-  ).pipe(Layer.provide(journal));
 
 /**
  * Holds the first `load` that finds the Attempt `Terminal` until `release` completes, after
@@ -222,46 +194,6 @@ const unresponsive = (reason: string) =>
 const unresponsiveReasons = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
   envelopes.flatMap(({ payload }) =>
     payload._tag === "WorkerUnresponsive" ? [payload.reason] : [],
-  );
-
-/** A coordinator runtime over the journal with stub children, waking `wakeUp`. */
-const coordinatorWith = (wakeUp: Layer.Layer<WakeUp>) => (journal: Layer.Layer<AttemptJournal>) =>
-  CoordinatorRuntime.layer.pipe(
-    Layer.provide(Layer.mergeAll(journal, wakeUp)),
-    Layer.provideMerge(stubChildBackendLayer),
-  );
-
-const coordinator = coordinatorWith(WakeUp.rules);
-
-/**
- * Starts a runtime in its own scope, as one orchestrator process. `stop` closes the scope, which
- * interrupts its `execute` calls and children as a process stop does.
- */
-const orchestrator = (layer: Layer.Layer<CoordinatorRuntime | StubChildren>) =>
-  Effect.gen(function* () {
-    const scope = yield* Scope.make();
-    const context = yield* Layer.buildWithScope(layer, scope);
-    const attempts = Context.get(context, CoordinatorRuntime);
-    return {
-      attempts,
-      nextChild: Context.get(context, StubChildren).next,
-      /** Forks `execute` in the process's scope. */
-      execute: (request: AttemptRequest, io: AttemptChannel.Sink) =>
-        Effect.forkIn(attempts.execute(request, io), scope),
-      stop: Scope.close(scope, Exit.void),
-    };
-  });
-
-/** Waits until `check` holds. */
-const until = (check: () => boolean): Effect.Effect<void> =>
-  Effect.suspend(() =>
-    check() ? Effect.void : Effect.sleep("10 millis").pipe(Effect.andThen(until(check))),
-  );
-
-/** Reads the Attempt's journal through a separate connection. */
-const stored = (database: string, attemptId: AttemptId) =>
-  Effect.flatMap(Effect.service(AttemptJournal), (journal) => journal.load(attemptId)).pipe(
-    Effect.provide(sqliteJournal(database)),
   );
 
 const decides = (message: string, handler: RecordedDecision["handler"]) =>
@@ -425,7 +357,7 @@ describe("event-driven coordinator runtime", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live("refuses operator input and relays Worker notices from Started until the outcome", () =>
+  it.live("relays Worker notices from Started until the outcome", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const request = coordinated("coordinator/notices");
@@ -436,27 +368,15 @@ describe("event-driven coordinator runtime", () => {
       const execution = yield* process.execute(request, recording.sink);
       const child = yield* process.nextChild;
       yield* process.attempts.notify(attemptId, unresponsive("while working"));
-      const refused = yield* process.attempts
-        .intervene(
-          attemptId,
-          AttemptChannel.Intervention.make({
-            operator: "octocat",
-            target: AttemptChannel.ParentTarget.make(),
-            action: AttemptChannel.Steer.make({ message: "Keep going." }),
-          }),
-        )
-        .pipe(Effect.flip);
       yield* child.reply("Done.");
       yield* Fiber.join(execution);
       yield* process.attempts.notify(attemptId, unresponsive("after the end"));
       yield* process.stop;
 
-      assert.strictEqual(refused._tag, "AgentFailure");
       const outbound = recording.outbound();
       assertAdmitted(attemptId, outbound);
       assert.deepStrictEqual(unresponsiveReasons(outbound), ["before start", "while working"]);
       assert.deepStrictEqual(trace(outbound).slice(0, 2), ["Started", "WorkerUnresponsive"]);
-      assert.deepStrictEqual(recording.inbound(), []);
     }).pipe(Effect.scoped),
   );
 

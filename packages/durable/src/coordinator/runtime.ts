@@ -11,16 +11,20 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { type StepCompletion, StepResult } from "@usine/core/step/result";
 import {
+  type Brand,
   Cause,
   Context,
   Deferred,
   type Duration,
   Effect,
   Exit,
+  FiberSet,
   Layer,
   Match,
   Option,
+  Result,
   Schema,
+  Scope,
   Semaphore,
 } from "effect";
 
@@ -54,7 +58,7 @@ import {
   ruleFor,
 } from "../attempt/coordinator/rules.ts";
 import { delegate, type DelegationOutcome } from "../attempt/delegation/delegation.ts";
-import type { DelegationHub } from "../attempt/delegation/journal.ts";
+import type { ChildDelivery, DelegationHub } from "../attempt/delegation/journal.ts";
 import { buildAttemptContext } from "./context.ts";
 import { coordinatorCall, journalDelegation } from "./delegation.ts";
 import {
@@ -66,16 +70,20 @@ import {
   type DelegationRecord,
   EncodedDecision,
   EncodedEvent,
+  EncodedIntervention,
   EncodedState,
   Failed,
   Finish,
   type Intent,
   type JournalError,
+  QueuedInput,
   Reported,
   type StaleRevision,
+  Supervision,
   Transition,
 } from "./journal.ts";
 import { type Outbox, outboxFor, startedWithoutParent } from "./outbox.ts";
+import { type Supervisor, supervisorFor } from "./supervision.ts";
 import { RecordedDecision, WakeUp } from "./wake-up.ts";
 
 /** The in-process state of one Attempt that the event-driven coordinator runs. */
@@ -85,7 +93,11 @@ interface CoordinatorHub {
   readonly children: Map<AgentSessionId, RunningSession>;
   readonly childSpawns: Set<string>;
   readonly childInputs: Set<number>;
+  /** Serializes operator input and its receipts. */
   readonly routing: Semaphore.Semaphore;
+  readonly supervisor: Supervisor;
+  /** The fibers that send the second receipt of queued operator inputs. */
+  readonly deliveries: FiberSet.FiberSet<void, never>;
   /** Completes with the request of the attached `execute` call; replaced when it detaches. */
   attached: Deferred.Deferred<AttemptRequest>;
   /** Completes when the attached `execute` call detaches; replaced when it does. */
@@ -104,6 +116,26 @@ const decodeDecision = Schema.decodeUnknownEffect(codec(RecordedDecision));
 
 const infra = (error: JournalError) => InfraFailure.make({ message: error.message, cause: error });
 
+/**
+ * An operator input that the coordinator couldn't apply. The reason is recorded in the transcript,
+ * and the Attempt continues.
+ */
+class InterventionRefused extends Schema.TaggedError<
+  InterventionRefused,
+  Brand.Brand<"@usine/durable/coordinator/runtime/InterventionRefused">
+>("@usine/durable/coordinator/InterventionRefused")("InterventionRefused", {
+  message: Schema.NonEmptyString,
+}) {}
+
+const refuse = (message: string) => InterventionRefused.make({ message });
+
+/** The second receipt's reason when a child stops before it reads a queued operator input. */
+const UNREAD_INPUT =
+  "The child stopped before it read this message. Send it again if it still applies.";
+
+const encodeIntervention = Schema.encodeEffect(codec(AttemptChannel.Intervention));
+const decodeIntervention = Schema.decodeUnknownEffect(codec(AttemptChannel.Intervention));
+
 const canceledFailure = () =>
   AgentFailure.make({ message: "The attempt was canceled, and its children stopped" });
 
@@ -112,8 +144,8 @@ const nonEmpty = (text: string, fallback: string) => (text.trim() === "" ? fallb
 /** Returns the event that ends delegation `child` with `outcome`. */
 const eventOf = (child: ChildSessionCount, outcome: DelegationOutcome): CoordinatorEvent =>
   Match.valueTags(outcome, {
-    Reported: ({ report }): CoordinatorEvent =>
-      ChildReported.make({ child, report, answeredOperator: false, reserved: Option.none() }),
+    Reported: ({ report, answeredOperator }): CoordinatorEvent =>
+      ChildReported.make({ child, report, answeredOperator, reserved: Option.none() }),
     Reserved: ({ report }): CoordinatorEvent =>
       Match.valueTags(report, {
         AgentCapacityError: ({ message, resetsAt }): CoordinatorEvent =>
@@ -185,6 +217,8 @@ const make = Effect.gen(function* () {
   const journal = yield* AttemptJournal;
   const backend = yield* ChildBackend;
   const wakeUp = yield* WakeUp;
+  // The runtime's scope, which owns the delivery fibers of every Attempt.
+  const scope = yield* Effect.scope;
   const creation = yield* Semaphore.make(1);
   const hubs = new Map<AttemptId, CoordinatorHub>();
 
@@ -200,6 +234,8 @@ const make = Effect.gen(function* () {
           childSpawns: new Set(),
           childInputs: new Set(),
           routing: yield* Semaphore.make(1),
+          supervisor: yield* supervisorFor(journal, attemptId),
+          deliveries: yield* FiberSet.make<void, never>().pipe(Scope.provide(scope)),
           attached: yield* Deferred.make<AttemptRequest>(),
           detached: yield* Deferred.make<void>(),
           canceled: yield* Deferred.make<void>(),
@@ -235,12 +271,114 @@ const make = Effect.gen(function* () {
       return hub.attached;
     },
     event: (event) => hub.outbox.relay([AttemptChannel.SessionEvent.make({ event })]),
-    // The coordinator restores no queued input, so no child reports one.
+    // A child can report a read while `intervene` holds the routing permit, so the receipt waits
+    // in its own fiber; `drive` waits for these fibers before it handles the child's end. An
+    // input the child didn't read stays stored: the resumed child reads it after a process stop,
+    // and `drive` rejects it once the child's delegation ends.
     delivery: (delivery) =>
-      Effect.logWarning("Dropped an operator input receipt the coordinator never queued", {
-        attemptId: hub.attemptId,
-        inputSequence: delivery.inputSequence,
+      Option.isSome(delivery.delivered)
+        ? FiberSet.run(hub.deliveries, hub.routing.withPermits(1)(delivered(hub, delivery))).pipe(
+            Effect.asVoid,
+          )
+        : Effect.sync(() => hub.childInputs.delete(delivery.inputSequence)).pipe(
+            Effect.andThen(
+              Effect.logInfo(
+                "The child stopped before it read a queued operator input; the input stays stored",
+                { attemptId: hub.attemptId, inputSequence: delivery.inputSequence },
+              ),
+            ),
+          ),
+  });
+
+  /** Sends the stored input's second receipt and forgets it. The caller holds the routing permit. */
+  const receipt = Effect.fn("CoordinatorRuntime.receipt")(function* (
+    hub: CoordinatorHub,
+    inputSequence: AttemptChannel.Sequence,
+    intervention: AttemptChannel.Intervention,
+    delivered: Option.Option<AttemptChannel.InterventionState>,
+  ) {
+    yield* hub.outbox.emit([
+      Option.match(delivered, {
+        onSome: (state): AttemptChannel.OutboundPayload =>
+          AttemptChannel.InterventionApplied.make({ inputSequence, intervention, state }),
+        onNone: () =>
+          AttemptChannel.InterventionRejected.make({
+            inputSequence,
+            intervention,
+            message: UNREAD_INPUT,
+          }),
       }),
+    ]);
+    yield* journal.forgetInput(hub.attemptId, inputSequence);
+  });
+
+  /**
+   * Sends the second receipt for an operator input that a child queued and then read, unless it
+   * was already sent. While no `execute` call is attached, the input stays stored for the child
+   * that resumes it. The caller holds the routing permit.
+   */
+  const delivered = Effect.fn("CoordinatorRuntime.delivered")(
+    function* (hub: CoordinatorHub, delivery: ChildDelivery) {
+      const { inputSequence, intervention } = delivery;
+      const fields = { attemptId: hub.attemptId, inputSequence, action: intervention.action._tag };
+      yield* Effect.annotateCurrentSpan(fields);
+      hub.childInputs.delete(inputSequence);
+      const snapshot = yield* loaded(hub.attemptId);
+      if (!snapshot.inputs.some((input) => input.inputSequence === inputSequence))
+        return yield* Effect.logDebug("A child reported an operator input already settled", fields);
+      if (!(yield* hub.outbox.attached))
+        return yield* Effect.logInfo(
+          "No execute call relays the Attempt; the read operator input stays stored for the resumed child",
+          fields,
+        );
+      yield* receipt(hub, inputSequence, intervention, delivery.delivered);
+      yield* Effect.logInfo("The child read a queued operator input", fields);
+    },
+    (effect, hub, delivery) =>
+      effect.pipe(
+        Effect.catch((failure) =>
+          Effect.logError("Could not send the second receipt of an operator input", {
+            attemptId: hub.attemptId,
+            inputSequence: delivery.inputSequence,
+            errorTag: failure._tag,
+            message: failure.message,
+          }),
+        ),
+      ),
+  );
+
+  /**
+   * Rejects the stored inputs of children that are no longer live: inputs a child stopped before
+   * reading, and inputs whose child's outcome a restart found recorded. The caller holds the
+   * routing permit.
+   */
+  const settleUnreported = Effect.fn("CoordinatorRuntime.settleUnreported")(function* (
+    hub: CoordinatorHub,
+  ) {
+    const snapshot = yield* loaded(hub.attemptId);
+    for (const input of snapshot.inputs) {
+      if (hub.children.has(input.sessionId)) continue;
+      const fields = {
+        attemptId: hub.attemptId,
+        inputSequence: input.inputSequence,
+        sessionId: input.sessionId,
+      };
+      const decoded = yield* decodeIntervention(input.intervention).pipe(Effect.result);
+      if (Result.isFailure(decoded)) {
+        yield* Effect.logWarning(
+          "Forgot a queued operator input that no longer decodes; it gets no second receipt",
+          fields,
+        );
+        yield* journal.forgetInput(hub.attemptId, input.inputSequence);
+        continue;
+      }
+      hub.childInputs.delete(input.inputSequence);
+      yield* receipt(hub, input.inputSequence, decoded.success, Option.none());
+      yield* Effect.logWarning(
+        "The child ended before it read a queued operator input; the input is rejected",
+        fields,
+      );
+    }
   });
 
   /** Runs delegation `record` to its outcome and records the event that ends it. */
@@ -254,7 +392,7 @@ const make = Effect.gen(function* () {
     const outcome = yield* delegate(backend, {
       spec: snapshot.request.spec,
       hub: delegationHub(hub),
-      journal: journalDelegation(journal, attemptId, record.number),
+      journal: journalDelegation(journal, hub.supervisor, attemptId, record.number),
       call: coordinatorCall(Deferred.await(hub.canceled)),
       assignment: Option.getOrElse(record.assignment, () => FIRST_ASSIGNMENT),
     }).pipe(
@@ -381,17 +519,20 @@ const make = Effect.gen(function* () {
     }
     const encodedEvent = yield* encodeEvent(event).pipe(Effect.orDie);
     const encodedState = yield* encodeState(next).pipe(Effect.orDie);
-    return yield* hub.outbox.commit(payloads, (outbound) =>
-      journal.transition(
-        attemptId,
-        snapshot.revision,
-        Transition.make({
-          event: EncodedEvent.make(encodedEvent),
-          decision: encodedDecision,
-          state: EncodedState.make(encodedState),
-          intents,
-          outbound,
-        }),
+    // Under the routing permit, so an operator input's receipts don't straddle the transition.
+    return yield* hub.routing.withPermits(1)(
+      hub.outbox.commit(payloads, (outbound) =>
+        journal.transition(
+          attemptId,
+          snapshot.revision,
+          Transition.make({
+            event: EncodedEvent.make(encodedEvent),
+            decision: encodedDecision,
+            state: EncodedState.make(encodedState),
+            intents,
+            outbound,
+          }),
+        ),
       ),
     );
   });
@@ -404,6 +545,9 @@ const make = Effect.gen(function* () {
       if (snapshot.status._tag !== "Open") return snapshot;
       const state = yield* stateOf(snapshot);
       const event = yield* nextEvent(hub, snapshot, state);
+      // Every receipt for the ended child's inputs precedes the event's envelopes.
+      yield* FiberSet.awaitEmpty(hub.deliveries);
+      yield* hub.routing.withPermits(1)(settleUnreported(hub));
       // Reload: the delegation saved progress that the context reads.
       const current = yield* loaded(hub.attemptId);
       if (current.status._tag !== "Open") {
@@ -630,20 +774,139 @@ const make = Effect.gen(function* () {
     Effect.catchTag("JournalError", (error) => Effect.fail(infra(error))),
   );
 
-  const intervene = Effect.fn("CoordinatorRuntime.intervene")(function* (
-    attemptId: AttemptId,
+  /**
+   * Applies operator input to its target child, or to the live child for input addressed to the
+   * parent (ADR 0018). A working child reads a message at its next boundary, so the message is
+   * first reported as queued and stored until the child reports it.
+   */
+  const route = Effect.fn("CoordinatorRuntime.route")(function* (
+    hub: CoordinatorHub,
     intervention: AttemptChannel.Intervention,
+    inputSequence: AttemptChannel.Sequence,
   ) {
-    yield* Effect.annotateCurrentSpan({ attemptId, action: intervention.action._tag });
-    yield* Effect.logWarning("The event-driven coordinator refused operator input", {
-      attemptId,
-      target: intervention.target._tag,
-      action: intervention.action._tag,
-    });
-    return yield* AgentFailure.make({
-      message: "This attempt runs without a parent session and doesn't accept operator input yet",
-    });
+    const target = intervention.target;
+    const live = [...hub.children.values()];
+    const [only] = live;
+    const child =
+      target._tag === "Child"
+        ? Option.fromUndefinedOr(hub.children.get(target.sessionId))
+        : Option.fromUndefinedOr(live.length === 1 ? only : undefined);
+    if (Option.isNone(child))
+      return yield* refuse(
+        target._tag === "Child"
+          ? "This session is no longer live"
+          : live.length === 0
+            ? "This attempt has no live child session to receive the input"
+            : "This attempt has several live child sessions; address one of them",
+      );
+    const sessionId = child.value.session.id;
+    yield* Effect.annotateCurrentSpan({ attemptId: hub.attemptId, sessionId, inputSequence });
+    const forwardedTo = target._tag === "Parent" ? Option.some(sessionId) : Option.none();
+    const state = yield* child.value
+      .intervene(intervention.action, (delivered) =>
+        delegationHub(hub).delivery({
+          _tag: "Delivery",
+          inputSequence,
+          intervention,
+          delivered: Option.map(delivered, (read) =>
+            AttemptChannel.InterventionState.make({ ...read, forwardedTo }),
+          ),
+        }),
+      )
+      .pipe(
+        Effect.mapBoth({
+          onFailure: (error) => refuse(error.message),
+          onSuccess: (applied) =>
+            AttemptChannel.InterventionState.make({ ...applied, forwardedTo }),
+        }),
+      );
+    yield* hub.supervisor.supervise(
+      Supervision.make({ sessionId, held: state.held, paused: state.paused }),
+    );
+    if (state.queued) {
+      hub.childInputs.add(inputSequence);
+      const encoded = yield* encodeIntervention(intervention).pipe(Effect.orDie);
+      yield* journal.queueInput(
+        hub.attemptId,
+        QueuedInput.make({
+          inputSequence,
+          sessionId,
+          intervention: EncodedIntervention.make(encoded),
+        }),
+      );
+      yield* Effect.logInfo("The working child reads the operator input at its next boundary", {
+        sessionId,
+        action: intervention.action._tag,
+      });
+    }
+    return state;
   });
+
+  const intervene = Effect.fn("CoordinatorRuntime.intervene")(
+    function* (attemptId: AttemptId, intervention: AttemptChannel.Intervention) {
+      yield* Effect.annotateCurrentSpan({
+        attemptId,
+        target: intervention.target._tag,
+        action: intervention.action._tag,
+      });
+      const hub = hubs.get(attemptId);
+      const noChannel = Effect.logWarning(
+        "Operator input addressed an Attempt with no live channel",
+        { action: intervention.action._tag },
+      ).pipe(Effect.andThen(AgentFailure.make({ message: "This attempt has no live channel" })));
+      if (hub === undefined) return yield* noChannel;
+      yield* hub.routing.withPermits(1)(
+        Effect.gen(function* () {
+          // Transitions commit under the same permit, so no receipt precedes `Started` or follows
+          // the terminal envelope.
+          const relaying =
+            (yield* hub.outbox.attached) &&
+            (yield* hub.outbox.started) &&
+            !(yield* hub.outbox.ended);
+          if (!relaying) return yield* noChannel;
+          const inputSequence = yield* hub.outbox.inbound(intervention);
+          const applied = yield* route(hub, intervention, inputSequence).pipe(
+            Effect.catchTag("JournalError", (error) => Effect.fail(refuse(error.message))),
+            Effect.result,
+          );
+          if (Result.isFailure(applied)) {
+            yield* Effect.logWarning("The coordinator refused operator input", {
+              action: intervention.action._tag,
+              target: intervention.target._tag,
+              message: applied.failure.message,
+            });
+            return yield* hub.outbox.emit([
+              AttemptChannel.InterventionRejected.make({
+                inputSequence,
+                intervention,
+                message: applied.failure.message,
+              }),
+            ]);
+          }
+          yield* hub.outbox.emit([
+            AttemptChannel.InterventionApplied.make({
+              inputSequence,
+              intervention,
+              state: applied.success,
+            }),
+          ]);
+          yield* Effect.logInfo("Operator input applied", {
+            action: intervention.action._tag,
+            target: intervention.target._tag,
+            held: applied.success.held,
+            paused: applied.success.paused,
+            queued: applied.success.queued,
+            forwardedTo: Option.getOrUndefined(applied.success.forwardedTo),
+          });
+        }),
+      );
+    },
+    (effect, attemptId) =>
+      effect.pipe(
+        Effect.catchTag("JournalError", (error) => Effect.fail(infra(error))),
+        Effect.annotateLogs({ attemptId }),
+      ),
+  );
 
   const attachedTo = Effect.fn("CoordinatorRuntime.attached")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -735,7 +998,8 @@ const make = Effect.gen(function* () {
  * `WakeUp`, whose decision the coordinator records, checks with the rules' `clamp`, and commits
  * with its effects and envelopes in one journal transition. Delegations run after their transition
  * commits, and an `execute` call after a restart resumes the open delegation from the journal.
- * Operator input is refused.
+ * Operator input goes to its target child, or to the live child for input addressed to the
+ * parent; the journal keeps each child's Hold, pause, and queued input across restarts.
  */
 export class CoordinatorRuntime extends Context.Service<
   CoordinatorRuntime,

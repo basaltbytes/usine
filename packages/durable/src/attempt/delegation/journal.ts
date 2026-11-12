@@ -83,7 +83,8 @@ export type DelegationStart = Admitted | Refused;
 /** An operator input queued for a child and not yet reported read. */
 export interface QueuedChildInput {
   readonly inputSequence: number;
-  readonly intervention: typeof AttemptChannel.Intervention.Encoded;
+  /** The encoded intervention as stored, which may no longer decode. */
+  readonly intervention: unknown;
 }
 
 /**

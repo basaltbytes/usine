@@ -108,7 +108,8 @@ export interface StubChild {
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   /**
    * Reads the queued operator messages, then finishes with `message` as the report. Under a Hold,
-   * the report is delayed until release.
+   * the report is delayed until release. The report answers the operator if the child read an
+   * operator message after its last emitted `ToolStarted`.
    */
   readonly reply: (message: string) => Effect.Effect<void>;
   /** Reads the queued operator messages, as a harness does at a turn boundary. */
@@ -160,14 +161,18 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   let paused = false;
   let pending = Option.none<string>();
   const queued: Array<OnDelivery> = [];
+  // Like the shared conversation: whether the child read operator input after its last tool call.
+  let answering = false;
 
   const stateNow = (isQueued: boolean) =>
     AttemptChannel.InterventionState.make({ held, paused, queued: isQueued });
-  const readQueued = Effect.suspend(() =>
-    Effect.forEach(queued.splice(0), (onDelivery) => onDelivery(Option.some(stateNow(false))), {
+  const readQueued = Effect.suspend(() => {
+    const read = queued.splice(0);
+    if (read.length > 0) answering = true;
+    return Effect.forEach(read, (onDelivery) => onDelivery(Option.some(stateNow(false))), {
       discard: true,
-    }),
-  );
+    });
+  });
   yield* Effect.addFinalizer(() =>
     Effect.suspend(() =>
       Effect.forEach(queued.splice(0), (onDelivery) => onDelivery(Option.none()), {
@@ -176,13 +181,16 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     ),
   );
 
-  const emit = (event: AgentSessionEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
+  const emit = (event: AgentSessionEvent) =>
+    Effect.sync(() => {
+      if (event._tag === "ToolStarted") answering = false;
+    }).pipe(Effect.andThen(Queue.offer(events, event)), Effect.asVoid);
   const finish = (message: string) =>
     Effect.gen(function* () {
       yield* emit(TextOutput.make({ session, text: message }));
       yield* emit(SessionFinished.make({ session }));
       yield* Queue.end(events);
-      yield* Deferred.succeed(result, SessionResult.make({ message }));
+      yield* Deferred.succeed(result, SessionResult.make({ message, answeredOperator: answering }));
     });
   const reply = (message: string) =>
     readQueued.pipe(
@@ -238,6 +246,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
           return stateNow(true);
         }
         pending = Option.none();
+        answering = true;
         yield* emit(SessionResumed.make({ session }));
       } else if (action._tag === "Release") {
         held = false;

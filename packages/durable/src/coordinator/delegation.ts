@@ -1,7 +1,7 @@
 import type { ChildRequest } from "@usine/agents/runtime";
 import type { ChildSessionCount } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 import type {
   DelegationCall,
@@ -11,6 +11,7 @@ import type {
 import {
   type AttemptJournal,
   ContinuationsSaved,
+  Supervision,
   IdleSaved,
   OutputSaved,
   type ProgressChange,
@@ -20,6 +21,7 @@ import {
   ToolStarted,
   UsageSaved,
 } from "./journal.ts";
+import type { Supervisor } from "./supervision.ts";
 
 /** The characters of a child's output that the coordinator retains, from its end. */
 const RETAINED_OUTPUT_CHARACTERS = 50_000;
@@ -31,11 +33,12 @@ const asJson = (
 
 /**
  * The journal of delegation `number`, which the transition that decided it numbered within the
- * child-session budget, so `start` never refuses it. The coordinator refuses operator input, so no
- * child is held or paused and none has queued input.
+ * child-session budget, so `start` never refuses it. The child's supervision and queued operator
+ * input come from the attempt journal.
  */
 export const journalDelegation = (
   journal: AttemptJournal["Service"],
+  supervisor: Supervisor,
   attemptId: AttemptId,
   number: ChildSessionCount,
 ): DelegationJournal => {
@@ -49,10 +52,25 @@ export const journalDelegation = (
         progress,
       })),
     ),
-    queuedInputs: () => Effect.succeed([]),
-    supervision: () => Effect.succeed({ held: false, paused: false }),
-    holdEnded: () => Effect.void,
-    releaseSupervision: () => Effect.void,
+    queuedInputs: (sessionId) =>
+      journal.load(attemptId).pipe(
+        Effect.map(
+          Option.match({
+            onNone: () => [],
+            onSome: ({ inputs }) =>
+              inputs.flatMap((input) =>
+                input.sessionId === sessionId
+                  ? [{ inputSequence: input.inputSequence, intervention: input.intervention }]
+                  : [],
+              ),
+          }),
+        ),
+      ),
+    supervision: (sessionId) =>
+      supervisor.of(sessionId).pipe(Effect.map(({ held, paused }) => ({ held, paused }))),
+    holdEnded: supervisor.holdEnded,
+    releaseSupervision: (sessionId) =>
+      supervisor.supervise(Supervision.make({ sessionId, held: false, paused: false })),
     saveSession: (saved, { beforePrompt }) =>
       asJson(saved).pipe(
         Effect.flatMap((json) => save(SessionSaved.make({ saved: json, beforePrompt }))),
