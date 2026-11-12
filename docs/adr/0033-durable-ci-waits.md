@@ -7,7 +7,7 @@ CI on the recorded head decides the outcome:
 - Green checks apply the label actions, and the run succeeds.
 - Failed checks, or a merge conflict that keeps checks from starting, submit one event to the fix loop through the ordinary cycle budget and approval. Once the fix is admitted, the source run closes as `HandedOff`, a neutral outcome, and the fix inherits the label actions.
 - A newer head or a closed pull request cancels the wait.
-- Checks still pending at the deadline, or CI that ran only in part, fail the run for the operator without an automatic retry.
+- Checks still pending at the deadline, or CI that ran only in part, fail the run for the operator without an automatic retry. A gate job that failed only because jobs it needs stayed queued counts as CI that ran only in part. The failed run keeps its handoff, so once CI on the same head passes, the operator applies its label actions in one step.
 
 ## Considered options
 
