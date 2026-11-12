@@ -8,4 +8,4 @@ projects:
 labels:
   - name: ready-for-agent
 settings:
-  parent_model: openai-codex/gpt-6-astra
+  coordinator: events

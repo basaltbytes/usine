@@ -3,18 +3,43 @@ title: Quickstart
 description: Install usine, connect a scratch repository, and approve an agent run that opens your first pull request.
 ---
 
-import { Code } from "@astrojs/starlight/components";
+import { Code, TabItem, Tabs } from "@astrojs/starlight/components";
 import settings from "../../../../quickstart/usine.yaml?raw";
-import agent from "../../../../quickstart/agents/developer.md?raw";
 import loop from "../../../../quickstart/projects/scratch/loops/first-pr.md?raw";
+import { developerAgent, quickstartRoutes } from "../../../quickstart/routes.ts";
 
-This quickstart opens a pull request that adds one sentence to a scratch repository's README. It uses one local worker, a Codex child coordinated by a Pi parent, and one loop that waits for your approval. Both sessions use your ChatGPT subscription.
+export const bootstrapCommand = (route) =>
+  [
+    "mkdir -p ~/usine-instance/agents ~/usine-instance/projects/scratch/loops",
+    "cd ~/usine-instance",
+    "printf '.usine/\\n.env\\n' > .gitignore",
+    "cat > usine.yaml <<YAML",
+    settings.replaceAll("YOUR_GITHUB_LOGIN", "$GITHUB_LOGIN").trimEnd(),
+    "YAML",
+    "cat > agents/developer.md <<'AGENT'",
+    developerAgent(route).trimEnd(),
+    "AGENT",
+    "cat > projects/scratch/loops/first-pr.md <<'LOOP'",
+    loop.trimEnd(),
+    "LOOP",
+    "ls agents projects/scratch/loops",
+  ].join("\n");
+
+This quickstart opens a pull request that adds one sentence to a scratch repository's README. It uses one local worker, one developer agent, and one loop that waits for your approval. The event-driven coordinator runs each attempt without a parent session, so the developer agent's harness credential is the only model credential the instance needs.
 
 ## Prerequisites
 
-Use macOS or Linux with Node.js 22.22 or later, npm, Git, and the [GitHub CLI](https://cli.github.com/) installed. You need a GitHub account that can create a repository and a GitHub App, plus a ChatGPT subscription that includes Codex. Model usage counts against your subscription's plan limits instead of being billed per token.
+Use macOS or Linux with Node.js 22.22 or later, npm, Git, and the [GitHub CLI](https://cli.github.com/) installed. You need a GitHub account that can create a repository and a GitHub App.
 
-Run the commands in the same terminal, as the user who will run `usine up`. Keep the computer awake while the run is open.
+You also need one model login or API key. Choose the harness that accepts it:
+
+- **Pi**: an API key for a provider that Pi supports, such as OpenAI, Anthropic, or OpenRouter; an OpenCode Zen or OpenCode Go key; a ChatGPT subscription through Pi's `openai-codex` login; or an OpenAI-compatible or local endpoint that you add to Pi's `models.json`. Pi's other subscription logins, such as a Claude subscription, aren't supported.
+- **Claude Code**: a Claude subscription, which works only inside Claude Code, or an Anthropic API key.
+- **Codex**: a ChatGPT subscription that includes Codex, or an OpenAI API key.
+
+Subscription usage counts against your plan's limits. The provider bills API-key usage per token.
+
+Run the commands in the same terminal, as the user who will run `usine up`. Keep the computer awake while the run is open. The tabs in the following steps show each harness; select the one that matches your credential.
 
 ## 1. Install the CLI
 
@@ -25,27 +50,45 @@ usine --version
 
 Expected: npm finishes installing, and `usine --version` prints the installed release number.
 
-## 2. Install Codex and sign in to Pi
+## 2. Install the harness
 
-Install the Codex CLI version that usine accepts:
+<Tabs syncKey="harness">
+  <TabItem label="Pi">
+    usine includes the Pi runtime. Install the Pi CLI to save your credential, then open its terminal interface:
 
-```sh
-npm install --global @openai/codex@0.164.0
-codex --version
-```
+    ```sh
+    npm install --global --ignore-scripts @earendil-works/pi-coding-agent@1.4.0
+    pi
+    ```
 
-Expected: `codex --version` prints `codex-cli 0.164.0`. You connect Codex from usine after starting the orchestrator in step 5.
+    In Pi, enter `/login` and choose your provider: its API key entry, or **OpenAI (ChatGPT Plus/Pro)**, the `openai-codex` provider, for a ChatGPT subscription. For an OpenAI-compatible or local endpoint, add the provider to `~/.pi/agent/models.json` instead. Use `/model` to select the model, then ask it to reply with `ready`.
 
-Install Pi to sign in separately for the parent, then open its terminal interface:
+    Expected: Pi replies `ready`. Note the model's `provider/model` ID, such as `openrouter/openai/gpt-6-astra` or `openai-codex/gpt-6-astra`, and exit Pi with Ctrl+C twice. Pi saves the credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set). Pi also reads a provider's key variable, such as `OPENROUTER_API_KEY`, from the environment of `usine up`; it doesn't read the instance `.env`.
 
-```sh
-npm install --global --ignore-scripts @earendil-works/pi-coding-agent@1.4.0
-pi
-```
+  </TabItem>
+  <TabItem label="Claude Code">
+    Install Claude Code:
 
-In Pi, enter `/login`, choose **OpenAI Codex (legacy)** (the `openai-codex` ChatGPT subscription provider), and complete the browser login with the same ChatGPT account. Use `/model` to select `openai-codex/gpt-6-astra`, then ask it to reply with `ready`.
+    ```sh
+    npm install --global @anthropic-ai/claude-code@2.1.311
+    claude --version
+    ```
 
-Expected: Pi replies `ready`. Exit Pi with Ctrl+C twice. Pi saves the parent's credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set). Keep both logins available to the user running `usine up`. See [Pi parent](/reference/configuration/agents/#parent-selection) for the credential requirements.
+    Expected: `claude --version` prints `2.1.311 (Claude Code)`. You connect Claude from usine after starting the orchestrator in step 5. On Linux, sign-in from usine also needs the `script` command from util-linux.
+
+  </TabItem>
+  <TabItem label="Codex">
+    Install the Codex CLI version that usine accepts:
+
+    ```sh
+    npm install --global @openai/codex@0.164.0
+    codex --version
+    ```
+
+    Expected: `codex --version` prints `codex-cli 0.164.0`. You connect ChatGPT or an OpenAI API key from usine after starting the orchestrator in step 5.
+
+  </TabItem>
+</Tabs>
 
 ## 3. Create a scratch repository
 
@@ -61,31 +104,21 @@ Expected: `gh` prints the URL of your new `usine-scratch` repository. Use a new 
 
 ## 4. Create the bootstrap files
 
-Create a separate instance folder on persistent storage and write these files. The command substitutes the GitHub login from step 3 into `usine.yaml`:
+Create a separate instance folder on persistent storage and write these files. The command substitutes the GitHub login from step 3 into `usine.yaml`. For Pi, replace the `model` value with the `provider/model` ID that you selected in step 2 before you run it.
 
-<Code
-  lang="sh"
-  title="Same terminal"
-  code={[
-    "mkdir -p ~/usine-instance/agents ~/usine-instance/projects/scratch/loops",
-    "cd ~/usine-instance",
-    "printf '.usine/\\n.env\\n' > .gitignore",
-    "cat > usine.yaml <<YAML",
-    settings.replaceAll("YOUR_GITHUB_LOGIN", "$GITHUB_LOGIN").trimEnd(),
-    "YAML",
-    "cat > agents/developer.md <<'AGENT'",
-    agent.trimEnd(),
-    "AGENT",
-    "cat > projects/scratch/loops/first-pr.md <<'LOOP'",
-    loop.trimEnd(),
-    "LOOP",
-    "ls agents projects/scratch/loops",
-  ].join("\n")}
-/>
+<Tabs syncKey="harness">
+  {quickstartRoutes.map((route) => (
+    <TabItem label={route.label}>
+      <Code lang="sh" title="Same terminal" code={bootstrapCommand(route)} />
+    </TabItem>
+  ))}
+</Tabs>
 
 Expected: `ls` lists `developer.md` under `agents` and `first-pr.md` under `projects/scratch/loops`. The `scratch` project contains your repository. Omitting `workers` selects the default local worker, which runs children on this machine as this user.
 
-The developer agent uses the `codex` harness with `gpt-6-astra`. The instance setting `parent_model: openai-codex/gpt-6-astra` selects the Pi parent's ChatGPT model.
+The tabs differ only in the developer agent's `harness` and `model`, which select the harness from step 2. For Claude Code, `sonnet` selects the latest Sonnet model. Use another model ID that the harness accepts if you prefer.
+
+The instance setting `coordinator: events` selects the event-driven coordinator. It starts one child with the task and turns the child's report into the attempt's outcome, so the instance needs no parent model or credential. See [Coordinator](/reference/configuration/agents/#coordinator).
 
 The loop selects open issues labeled `ready-for-agent` and requires approval. Its task removes that label before changing the README, then opens a pull request that closes the issue. Review the instructions before continuing.
 
@@ -107,7 +140,7 @@ usine is running in setup mode at http://127.0.0.1:7331
 
 The terminal also prints a one-time sign-in link, and the browser opens setup. Open the printed sign-in link to start the temporary setup session. Leave `usine up` running; use a second terminal for later commands. If the link expires, run `usine sign-in-link` from `~/usine-instance` to generate another.
 
-## 6. Connect a GitHub App
+## 6. Connect a GitHub App and your credential
 
 The App requires **Contents**, **Issues**, **Pull requests**, and **Workflows** read and write, with **Checks** and **Metadata** read-only. Write-access attempts can push changes under `.github/workflows/`; read-access tokens omit Workflows and cannot push code. For an existing App, enable **Workflows: read and write** in its repository permissions and accept the permission update on its installation. Installation checks report `workflows:write` until the installation grants it.
 
@@ -116,18 +149,32 @@ In the setup screen:
 1. Enter a unique App name, then select **Create App on GitHub** and confirm on GitHub. The instance supplies the required permissions and callback URLs.
 2. After GitHub returns you to setup, select **Install App on GitHub**. Install it on your account and select only `usine-scratch`.
 3. Return to setup and select **Check installation**. Then select **Sign in with GitHub**; this sign-in makes you the first instance admin.
-4. In **Provider connections**, select **Connect ChatGPT**. Open the displayed sign-in page and enter its device code. Enable device authorization in ChatGPT security settings if required. Wait for **Connected · Subscription**. usine saves the local worker’s Codex login in `~/.codex/auth.json` (`CODEX_HOME` when set).
-5. Select **Open usine** to activate the runtime. The bootstrap already registered `usine-scratch` and created the **Scratch** project.
+
+Then connect the credential for your harness in **Provider connections**:
+
+<Tabs syncKey="harness">
+  <TabItem label="Pi">
+    Skip **Provider connections**. Pi children use the credential that you saved in step 2.
+  </TabItem>
+  <TabItem label="Claude Code">
+    Select **Connect Claude**. Open the displayed authorization page, sign in with your Claude account, and paste the resulting code into usine. Wait for **Connected · Subscription**. For an Anthropic API key, select **Use an API key** instead. On a headless host, run `usine login claude` from the instance folder in a second terminal.
+
+    Local preflight and children use the same `CLAUDE_CONFIG_DIR` as the orchestrator. Set it before starting `usine up` when you use a custom credential directory.
+
+  </TabItem>
+  <TabItem label="Codex">
+    Select **Connect ChatGPT**. Open the displayed sign-in page and enter its device code. Enable device authorization in ChatGPT security settings if required. Wait for **Connected · Subscription**. For an OpenAI API key, select **Use an API key** instead. On a headless host, run `usine login chatgpt` from the instance folder in a second terminal.
+
+    usine saves the local worker's Codex login in `~/.codex/auth.json` (`CODEX_HOME` when set). Local preflight and children use the same `CODEX_HOME` as the orchestrator; set it before starting `usine up` when you use a custom credential directory. Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration, and ignore keyring credentials. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.
+
+  </TabItem>
+</Tabs>
+
+Finally, select **Open usine** to activate the runtime. The bootstrap already registered `usine-scratch` and created the **Scratch** project.
 
 Expected: the terminal reports `usine is running at http://127.0.0.1:7331`, and the web UI lists **Scratch**. The App credentials are saved in `.usine/github-app.json`. Open **Configuration > Loops** and confirm that `scratch/first-pr` is running; select **Resume** if it is paused.
 
-Local workers accept Claude subscription logins, Claude setup tokens, and API keys for both Claude and Codex. API-key children report usage in the API keys pool; subscription children use the matching plan pool.
-
-Local preflight checks and harness children use the same `CODEX_HOME` and `CLAUDE_CONFIG_DIR` as the orchestrator. Set these variables before starting `usine up` when you use custom credential directories.
-
-Local Codex preflight and children use file credential storage, overriding `cli_auth_credentials_store` in Codex configuration. Disconnect removes the managed `auth.json`; usine's local Codex launches ignore keyring credentials.
-
-For a headless host, run `usine login chatgpt` from the instance folder in a second terminal. Configuration > Settings provides the same connect, replace, and disconnect actions. `usine logout chatgpt` disconnects the local harness. To sign in directly for usine, run `codex -c 'cli_auth_credentials_store="file"' login --device-auth`.
+API-key children report usage in the API keys pool; subscription children use the matching plan pool. Configuration > Settings provides the same connect, replace, and disconnect actions as setup, and `usine logout claude` or `usine logout chatgpt` disconnects a local harness.
 
 Setup can resume at `/setup` if interrupted. See [Sign in to an instance](/guides/sign-in/) for existing App credentials and member access.
 
