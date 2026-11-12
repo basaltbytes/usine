@@ -51,6 +51,10 @@
       "types": "./dist/harness/pi/authentication.d.ts",
       "default": "./dist/harness/pi/authentication.js"
     },
+    "./pi/refusal": {
+      "types": "./dist/harness/pi/refusal.d.ts",
+      "default": "./dist/harness/pi/refusal.js"
+    },
     "./prompt": {
       "types": "./dist/prompt.d.ts",
       "default": "./dist/prompt.js"

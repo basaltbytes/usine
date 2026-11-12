@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
-import { AgentSessionId } from "@usine/core/agent/session";
-import { Effect, Option, Schema } from "effect";
-import { turnFailure } from "../src/harness/codex/codec.ts";
+import { AgentSessionId, RateLimitsSnapshot, RateLimitWindow } from "@usine/core/agent/session";
+import { DateTime, Effect, Option, Schema } from "effect";
+import { exhaustedUntil, turnFailure } from "../src/harness/codex/codec.ts";
 import { resultFailure } from "../src/harness/claude/codec.ts";
 import { AgentCapacityError } from "../src/runtime.ts";
 import { TurnCompleted } from "../src/protocol/codex/codex.ts";
@@ -14,7 +14,45 @@ it.effect.each([
   },
   { code: "other", message: "Selected model is at capacity", expected: "AgentCapacityError" },
   { code: "unauthorized", message: "Selected model is at capacity", expected: "AgentResultError" },
-  { code: "rateLimitExceeded", message: "Usage limit", expected: "AgentResultError" },
+  { code: "rateLimitExceeded", message: "Rate limit reached", expected: "AgentCapacityError" },
+  {
+    code: "usageLimitExceeded",
+    message: "You've hit your usage limit. Try again later.",
+    expected: "AgentCapacityError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message: "Quota exceeded. Check your plan and billing details.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message:
+      "To use Codex with your ChatGPT plan, upgrade to Plus: https://chatgpt.com/explore/plus.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message: "Your workspace is out of credits. Add credits to continue.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message:
+      "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message: "You hit your spend cap set in your workspace. Increase your spend cap to continue.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message:
+      "You hit your spend cap set by the owner of your workspace. Ask an owner to increase your spend cap to continue.",
+    expected: "AgentResultError",
+  },
   {
     code: { httpConnectionFailed: { httpStatusCode: 529 } },
     message: "Unavailable",
@@ -28,6 +66,21 @@ it.effect.each([
   {
     code: { httpConnectionFailed: { httpStatusCode: 503 } },
     message: "Unavailable",
+    expected: "AgentResultError",
+  },
+  {
+    code: { responseTooManyFailedAttempts: { httpStatusCode: 429 } },
+    message: "exceeded retry limit, last status: 429 Too Many Requests, request id: req_6",
+    expected: "AgentCapacityError",
+  },
+  {
+    code: { responseStreamDisconnected: { httpStatusCode: 429 } },
+    message: "Quota exceeded. Check your plan and billing details.",
+    expected: "AgentResultError",
+  },
+  {
+    code: { responseTooManyFailedAttempts: { httpStatusCode: 500 } },
+    message: "exceeded retry limit, last status: 500 Internal Server Error",
     expected: "AgentResultError",
   },
   {
@@ -45,9 +98,81 @@ it.effect.each([
       },
     });
     assert.strictEqual(
-      turnFailure(AgentSessionId.make("child"), turn.error, message)._tag,
+      turnFailure(AgentSessionId.make("child"), turn.error, message, Option.none())._tag,
       expected,
     );
+  }),
+);
+
+const window = (usedPercent: number, resetsAt: Option.Option<string>) =>
+  Option.some(
+    RateLimitWindow.make({
+      usedPercent,
+      windowDurationMinutes: Option.none(),
+      resetsAt: Option.map(resetsAt, DateTime.makeUnsafe),
+    }),
+  );
+const snapshot = (
+  primary: Option.Option<RateLimitWindow>,
+  secondary: Option.Option<RateLimitWindow> = Option.none(),
+) =>
+  RateLimitsSnapshot.make({ limitId: Option.none(), limitName: Option.none(), primary, secondary });
+
+it.each([
+  {
+    name: "the reset of the used-up window",
+    limits: snapshot(window(100, Option.some("2026-11-12T05:00:00Z")), window(40, Option.none())),
+    expected: Option.some("2026-11-12T05:00:00.000Z"),
+  },
+  {
+    name: "the later reset when both windows are used up",
+    limits: snapshot(
+      window(100, Option.some("2026-11-12T05:00:00Z")),
+      window(100, Option.some("2026-11-15T00:00:00Z")),
+    ),
+    expected: Option.some("2026-11-15T00:00:00.000Z"),
+  },
+  {
+    name: "no reset when no window is used up",
+    limits: snapshot(window(99, Option.some("2026-11-12T05:00:00Z"))),
+    expected: Option.none(),
+  },
+  {
+    name: "no reset when a used-up window has no reset time",
+    limits: snapshot(window(100, Option.some("2026-11-12T05:00:00Z")), window(100, Option.none())),
+    expected: Option.none(),
+  },
+])("dates a Codex usage limit with $name", ({ limits, expected }) => {
+  assert.deepStrictEqual(exhaustedUntil(limits).pipe(Option.map(DateTime.formatIso)), expected);
+});
+
+it.effect("dates a Codex API-key rate limit with the latest snapshot's reset", () =>
+  Effect.gen(function* () {
+    const message = "exceeded retry limit, last status: 429 Too Many Requests, request id: req_6";
+    const { turn } = yield* Schema.decodeEffect(TurnCompleted)({
+      turn: {
+        id: "turn",
+        status: "failed",
+        error: {
+          message,
+          codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } },
+          additionalDetails: null,
+        },
+      },
+    });
+    const sessionId = AgentSessionId.make("child");
+    const reset = (limits: Option.Option<RateLimitsSnapshot>) => {
+      const failure = turnFailure(sessionId, turn.error, message, limits);
+      assert.isTrue(Schema.is(AgentCapacityError)(failure));
+      return Schema.is(AgentCapacityError)(failure)
+        ? failure.resetsAt.pipe(Option.map(DateTime.formatIso))
+        : Option.none();
+    };
+    assert.deepStrictEqual(
+      reset(Option.some(snapshot(window(100, Option.some("2026-11-12T05:00:00Z"))))),
+      Option.some("2026-11-12T05:00:00.000Z"),
+    );
+    assert.deepStrictEqual(reset(Option.none()), Option.none());
   }),
 );
 

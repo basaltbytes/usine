@@ -2,16 +2,16 @@ import type { ContinuationPolicy } from "../continuation.ts";
 import type { OperatorMessageId } from "@usine/core/attempt/channel";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@usine/core/agent/session";
-import { Effect, Fiber, Option, Schema } from "effect";
+import { DateTime, Effect, Fiber, Option, Schema } from "effect";
 import {
   AgentCapacityError,
   type AgentSessionError,
-  harnessFailure,
   type RunningSession,
   type QueuedOperatorMessage,
   type InterruptedTool,
 } from "../../runtime.ts";
 import { sessionConversation } from "../conversation.ts";
+import { piFailure } from "./refusal.ts";
 import type { PiSession } from "./sdk.ts";
 import { lastPiMessageText, piUserMessageText, type SessionChannel } from "../session.ts";
 
@@ -77,11 +77,20 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
               lastAssistant.errorMessage !== undefined &&
               lastAssistant.errorMessage !== ""
             ) {
-              const failure = harnessFailure(
-                Option.some(options.session.id),
-                lastAssistant.errorMessage,
-              );
-              if (Schema.is(AgentCapacityError)(failure)) return Effect.fail(failure);
+              const failure = piFailure(options.session.id, {
+                errorMessage: lastAssistant.errorMessage,
+                timestamp: lastAssistant.timestamp,
+              });
+              if (Schema.is(AgentCapacityError)(failure))
+                return Effect.logWarning(
+                  "Pi turn ended on a provider capacity refusal or usage limit",
+                  {
+                    sessionId: options.session.id,
+                    resetsAt: Option.getOrUndefined(
+                      Option.map(failure.resetsAt, DateTime.formatIso),
+                    ),
+                  },
+                ).pipe(Effect.andThen(Effect.fail(failure)));
             }
             return conversation.finish(
               options.lastText() ??
