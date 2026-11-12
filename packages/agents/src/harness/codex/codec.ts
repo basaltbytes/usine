@@ -1,4 +1,8 @@
-import { AgentSessionId, RateLimitWindow as CoreRateLimitWindow } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  type RateLimitsSnapshot,
+  RateLimitWindow as CoreRateLimitWindow,
+} from "@usine/core/agent/session";
 import { DateTime, Effect, Option, Schema } from "effect";
 import {
   AgentMessageItem,
@@ -142,15 +146,38 @@ export const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLi
     resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
   });
 
+/**
+ * Returns the latest reset time among the snapshot's used-up windows, or `None` if no window is
+ * used up or a used-up window has no reset time.
+ */
+export const exhaustedUntil = (snapshot: RateLimitsSnapshot): Option.Option<DateTime.Utc> => {
+  const exhausted = [snapshot.primary, snapshot.secondary].flatMap((window) =>
+    Option.isSome(window) && window.value.usedPercent >= 100 ? [window.value.resetsAt] : [],
+  );
+  return Option.all(exhausted).pipe(
+    Option.flatMap(([first, ...rest]) =>
+      first === undefined ? Option.none() : Option.some(rest.reduce(DateTime.max, first)),
+    ),
+  );
+};
+
 const decodeHttpStatus = Schema.decodeUnknownOption(
   Schema.Struct({ httpStatusCode: Schema.NullOr(Schema.Finite) }),
 );
 
-/** Classifies the final turn error, preferring Codex's error code to message matching. */
+// Codex also reports a billing quota and a plan without Codex as a usage limit; neither resets.
+const permanentLimit = /^(?:Quota exceeded\b|To use Codex with your ChatGPT plan\b)/u;
+
+/**
+ * Classifies the final turn error, preferring Codex's error code to message matching. A usage or
+ * rate limit is a capacity refusal that resets when the latest rate-limit snapshot's used-up
+ * windows reset, if `rateLimits` has them.
+ */
 export const turnFailure = (
   sessionId: AgentSessionId,
   error: (typeof TurnCompleted.Type)["turn"]["error"],
   message: string,
+  rateLimits: Option.Option<RateLimitsSnapshot>,
 ): AgentResultError | AgentCapacityError => {
   const code = error?.codexErrorInfo;
   if (
@@ -159,6 +186,17 @@ export const turnFailure = (
     (Schema.is(Schema.String)(code) && isCodexErrorCode(code, "other"))
   )
     return harnessFailure(Option.some(sessionId), message);
+  if (
+    Schema.is(Schema.String)(code) &&
+    (isCodexErrorCode(code, "usageLimitExceeded") || isCodexErrorCode(code, "rateLimitExceeded"))
+  )
+    return permanentLimit.test(message)
+      ? AgentResultError.make({ sessionId: Option.some(sessionId), message })
+      : AgentCapacityError.make({
+          sessionId: Option.some(sessionId),
+          message,
+          resetsAt: Option.flatMap(rateLimits, exhaustedUntil),
+        });
   const capacity = Schema.is(Schema.String)(code)
     ? isCodexErrorCode(code, "serverOverloaded")
     : Object.values(code).some((detail) =>
