@@ -23,6 +23,17 @@ const encodeIdentifiers = Schema.encodeSync(Schema.fromJsonString(Schema.Array(S
 export const jsonArrayValues = (values: ReadonlyArray<string>) =>
   sql`select value from ${jsonEach(sql`${encodeIdentifiers(values)}`)}`;
 
+/**
+ * Matches `value` text that starts with the non-empty `prefix`. SQLite compares text in the
+ * BINARY collation, byte by byte, so this is a range that a column index serves. Binds two
+ * parameters.
+ */
+export const startsWith = (value: SQLWrapper, prefix: string) => {
+  const last = prefix.charCodeAt(prefix.length - 1);
+  const bound = `${prefix.slice(0, -1)}${String.fromCharCode(last + 1)}`;
+  return sql`(${value} >= ${prefix} and ${value} < ${bound})`;
+};
+
 export const jsonObject = (fields: ReadonlyArray<readonly [string, SQLWrapper]>) =>
   sql`json_object(${sql.join(
     fields.flatMap(([key, value]) => [sql.raw(quoted(key)), value]),

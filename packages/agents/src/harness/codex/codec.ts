@@ -1,9 +1,14 @@
-import { AgentSessionId, RateLimitWindow as CoreRateLimitWindow } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  RateLimitsSnapshot,
+  RateLimitWindow as CoreRateLimitWindow,
+} from "@usine/core/agent/session";
 import { DateTime, Effect, Option, Schema } from "effect";
 import {
   AgentMessageItem,
   ErrorNotification,
   isCodexErrorCode,
+  type RateLimitsUpdated,
   type RateLimitWindow,
   ToolItem,
   type TurnCompleted,
@@ -142,15 +147,51 @@ export const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLi
     resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
   });
 
+/** Converts the account's rate-limit snapshot from `account/rateLimits/updated`. */
+export const rateLimitsSnapshot = (
+  snapshot: (typeof RateLimitsUpdated.Type)["rateLimits"],
+): RateLimitsSnapshot =>
+  RateLimitsSnapshot.make({
+    limitId: Option.fromNullishOr(snapshot.limitId),
+    limitName: Option.fromNullishOr(snapshot.limitName),
+    primary: Option.fromNullishOr(snapshot.primary).pipe(Option.map(rateLimitWindow)),
+    secondary: Option.fromNullishOr(snapshot.secondary).pipe(Option.map(rateLimitWindow)),
+  });
+
+/**
+ * Returns the latest reset time among the snapshot's used-up windows, or `None` if no window is
+ * used up or a used-up window has no reset time.
+ */
+export const exhaustedUntil = (snapshot: RateLimitsSnapshot): Option.Option<DateTime.Utc> => {
+  const exhausted = [snapshot.primary, snapshot.secondary].flatMap((window) =>
+    Option.isSome(window) && window.value.usedPercent >= 100 ? [window.value.resetsAt] : [],
+  );
+  return Option.all(exhausted).pipe(
+    Option.flatMap(([first, ...rest]) =>
+      first === undefined ? Option.none() : Option.some(rest.reduce(DateTime.max, first)),
+    ),
+  );
+};
+
 const decodeHttpStatus = Schema.decodeUnknownOption(
   Schema.Struct({ httpStatusCode: Schema.NullOr(Schema.Finite) }),
 );
 
-/** Classifies the final turn error, preferring Codex's error code to message matching. */
+// Codex also reports a billing quota, a plan without Codex, and a workspace that is out of
+// credits or at its spend cap as a usage limit; none resets until someone changes the account.
+const permanentLimit =
+  /^(?:Quota exceeded\b|To use Codex with your ChatGPT plan\b|Your workspace is out of credits\b|You hit your spend cap\b)/u;
+
+/**
+ * Classifies the final turn error, preferring Codex's error code to message matching. A usage or
+ * rate limit, including a final HTTP 429 after Codex's own retries, is a capacity refusal that
+ * resets when the latest rate-limit snapshot's used-up windows reset, if `rateLimits` has them.
+ */
 export const turnFailure = (
   sessionId: AgentSessionId,
   error: (typeof TurnCompleted.Type)["turn"]["error"],
   message: string,
+  rateLimits: Option.Option<RateLimitsSnapshot>,
 ): AgentResultError | AgentCapacityError => {
   const code = error?.codexErrorInfo;
   if (
@@ -159,23 +200,68 @@ export const turnFailure = (
     (Schema.is(Schema.String)(code) && isCodexErrorCode(code, "other"))
   )
     return harnessFailure(Option.some(sessionId), message);
-  const capacity = Schema.is(Schema.String)(code)
-    ? isCodexErrorCode(code, "serverOverloaded")
-    : Object.values(code).some((detail) =>
-        Option.exists(
-          decodeHttpStatus(detail),
-          ({ httpStatusCode }) =>
-            httpStatusCode === 529 ||
-            (httpStatusCode === 503 &&
-              /\bretry(?:[- ]after)?\b|\btry again\b/iu.test(
-                message + " " + (error?.additionalDetails ?? ""),
-              )),
-        ),
-      );
-  return capacity
+  if (
+    Schema.is(Schema.String)(code) &&
+    (isCodexErrorCode(code, "usageLimitExceeded") || isCodexErrorCode(code, "rateLimitExceeded"))
+  )
+    return permanentLimit.test(message)
+      ? AgentResultError.make({ sessionId: Option.some(sessionId), message })
+      : AgentCapacityError.make({
+          sessionId: Option.some(sessionId),
+          message,
+          resetsAt: Option.flatMap(rateLimits, exhaustedUntil),
+        });
+  if (Schema.is(Schema.String)(code))
+    return isCodexErrorCode(code, "serverOverloaded")
+      ? AgentCapacityError.make({ sessionId: Option.some(sessionId), message })
+      : AgentResultError.make({ sessionId: Option.some(sessionId), message });
+  const statuses = Object.values(code).flatMap((detail) =>
+    Option.match(decodeHttpStatus(detail), {
+      onNone: () => [],
+      onSome: ({ httpStatusCode }) => (httpStatusCode === null ? [] : [httpStatusCode]),
+    }),
+  );
+  // Codex reports an exhausted API-key quota as `usageLimitExceeded`, so a final HTTP 429 is a
+  // rate limit.
+  if (statuses.includes(429) && !permanentLimit.test(message))
+    return AgentCapacityError.make({
+      sessionId: Option.some(sessionId),
+      message,
+      resetsAt: Option.flatMap(rateLimits, exhaustedUntil),
+    });
+  const overloaded = statuses.some(
+    (status) =>
+      status === 529 ||
+      (status === 503 &&
+        /\bretry(?:[- ]after)?\b|\btry again\b/iu.test(
+          message + " " + (error?.additionalDetails ?? ""),
+        )),
+  );
+  return overloaded
     ? AgentCapacityError.make({ sessionId: Option.some(sessionId), message })
     : AgentResultError.make({ sessionId: Option.some(sessionId), message });
 };
+
+/**
+ * Classifies the failed turn `turn` with `turnFailure`, and logs a capacity refusal or usage
+ * limit with its reset time. A session and a completion both end a failed turn here.
+ */
+export const failedTurn = Effect.fn("CodexRuntime.failedTurn")(function* (
+  sessionId: AgentSessionId,
+  turn: (typeof TurnCompleted.Type)["turn"],
+  message: string,
+  rateLimits: Option.Option<RateLimitsSnapshot>,
+) {
+  const failure = turnFailure(sessionId, turn.error, message, rateLimits);
+  if (Schema.is(AgentCapacityError)(failure))
+    yield* Effect.logWarning("Codex turn ended on a provider capacity refusal or usage limit", {
+      sessionId,
+      turnId: turn.id,
+      codexErrorInfo: turn.error?.codexErrorInfo,
+      resetsAt: Option.getOrUndefined(Option.map(failure.resetsAt, DateTime.formatIso)),
+    });
+  return failure;
+});
 
 /** The server notification methods with no session event equivalent; they are only logged. */
 export const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([

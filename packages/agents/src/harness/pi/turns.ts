@@ -6,12 +6,12 @@ import { Effect, Fiber, Option, Schema } from "effect";
 import {
   AgentCapacityError,
   type AgentSessionError,
-  harnessFailure,
   type RunningSession,
   type QueuedOperatorMessage,
   type InterruptedTool,
 } from "../../runtime.ts";
 import { sessionConversation } from "../conversation.ts";
+import { failedPiTurn } from "./refusal.ts";
 import type { PiSession } from "./sdk.ts";
 import { lastPiMessageText, piUserMessageText, type SessionChannel } from "../session.ts";
 
@@ -72,22 +72,25 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
             const lastAssistant = [...options.sdk.messages]
               .reverse()
               .find((message) => message.role === "assistant");
-            if (
-              lastAssistant?.stopReason === "error" &&
-              lastAssistant.errorMessage !== undefined &&
-              lastAssistant.errorMessage !== ""
-            ) {
-              const failure = harnessFailure(
-                Option.some(options.session.id),
-                lastAssistant.errorMessage,
-              );
-              if (Schema.is(AgentCapacityError)(failure)) return Effect.fail(failure);
-            }
-            return conversation.finish(
+            const finish = conversation.finish(
               options.lastText() ??
                 lastPiMessageText(options.sdk.messages) ??
                 "Pi session completed",
             );
+            if (
+              lastAssistant?.stopReason === "error" &&
+              lastAssistant.errorMessage !== undefined &&
+              lastAssistant.errorMessage !== ""
+            )
+              return failedPiTurn(options.session.id, {
+                errorMessage: lastAssistant.errorMessage,
+                timestamp: lastAssistant.timestamp,
+              }).pipe(
+                Effect.flatMap((failure) =>
+                  Schema.is(AgentCapacityError)(failure) ? Effect.fail(failure) : finish,
+                ),
+              );
+            return finish;
           }),
           Effect.catch(options.channel.fail),
           Effect.forkIn(scope),

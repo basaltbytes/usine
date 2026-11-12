@@ -23,7 +23,7 @@ import {
   ProviderRecovered,
   ProviderRetries,
   ProviderRetrying,
-  RateLimitsSnapshot,
+  type RateLimitsSnapshot,
   SessionStarted,
   HarnessSession,
   SessionTokensUpdated,
@@ -65,11 +65,11 @@ import {
   decodeNotifiedToolItem,
   decodeToolItem,
   providerRetryMessage,
-  turnFailure,
+  failedTurn,
   toolName,
   DIAGNOSTIC_METHODS,
   decodeRetry,
-  rateLimitWindow,
+  rateLimitsSnapshot,
   UserMessageKindItem,
 } from "./codec.ts";
 import {
@@ -305,6 +305,8 @@ const makeCodexSessions = Effect.gen(function* () {
       // Provider retries reported for the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
+      // The account's latest rate-limit snapshot, which dates a usage limit's reset.
+      let rateLimits = Option.none<RateLimitsSnapshot>();
       const startTurn = Effect.fn("CodexRuntime.startTurn")(function* (
         message: string,
         id?: OperatorMessageId,
@@ -659,22 +661,14 @@ const makeCodexSessions = Effect.gen(function* () {
                 params,
               );
               if (Option.isNone(notification)) return;
-              const snapshot = notification.value.rateLimits;
+              const latest = rateLimitsSnapshot(notification.value.rateLimits);
+              rateLimits = Option.some(latest);
               return yield* channel.emit(
                 PoolRateLimitsUpdated.make({
                   session,
                   pool: billing.pool,
                   login: billing.login,
-                  rateLimits: RateLimitsSnapshot.make({
-                    limitId: Option.fromNullishOr(snapshot.limitId),
-                    limitName: Option.fromNullishOr(snapshot.limitName),
-                    primary: Option.fromNullishOr(snapshot.primary).pipe(
-                      Option.map(rateLimitWindow),
-                    ),
-                    secondary: Option.fromNullishOr(snapshot.secondary).pipe(
-                      Option.map(rateLimitWindow),
-                    ),
-                  }),
+                  rateLimits: latest,
                 }),
               );
             }
@@ -725,7 +719,8 @@ const makeCodexSessions = Effect.gen(function* () {
                 (isTurnStatus(completed.turn.status, "interrupted")
                   ? "Codex child session was interrupted"
                   : "Codex child session failed");
-              return yield* fail(turnFailure(session.id, completed.turn.error, detail));
+              const failure = yield* failedTurn(session.id, completed.turn, detail, rateLimits);
+              return yield* fail(failure);
             }
             if (DIAGNOSTIC_METHODS.has(method)) {
               return yield* Effect.logWarning("Codex reported a diagnostic", {

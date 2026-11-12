@@ -202,7 +202,7 @@ fi
 `.trim();
 
 /** Waits until the machine answers through its remote shell and runs `READY_SCRIPT`. */
-export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function* (
+export const awaitMachineShell = Effect.fn("SshExecutor.awaitMachineShell")(function* (
   commands: RemoteCommands,
   interval: Effect.Effect<void>,
   machine: SshMachine,

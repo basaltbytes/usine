@@ -18,7 +18,7 @@ import { TestClock } from "effect/testing";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
 import { CapturedLog, capturedLogs, fakeMachine } from "../support.ts";
 import { boatSettings, boxdSettings, hetznerSettings } from "./support.ts";
-import { fakeBoxd } from "./fake-boxd.ts";
+import { fakeBoxd } from "./boxd/fake.ts";
 import { boxdDriverFor } from "../../../src/ssh/provisioner/boxd.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
 import { hetznerDriverFor } from "../../../src/ssh/provisioner/hetzner.ts";

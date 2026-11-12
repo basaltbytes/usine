@@ -42,7 +42,7 @@ The top-level YAML document uses snake_case keys. Each collection entry has the 
 | `settings` | [settings](/reference/configuration/settings/) | `{}` | Polling, attempt limits, parent defaults, and upgrade policy. |
 | `operator` | GitHub login | omitted | Login used for initial enrollment. |
 | `webhooks` | webhook settings | `{ mode: off }` | Optional source of early repository refreshes. |
-| `auth` | browser origin settings | `{ origins: [] }` | Extra trusted browser origins. |
+| `auth` | browser origin and proxy settings | `{ origins: [], trusted_proxies: [] }` | Extra trusted browser origins and reverse proxies. |
 | `tracing` | tracing settings | omitted | OTLP span export destination. |
 | `repos` | list of registry entries | required | Managed repositories and selector tags. |
 | `projects` | list of projects | `[]` | Project membership and lanes. |

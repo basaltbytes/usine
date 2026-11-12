@@ -29,6 +29,7 @@ import { BootScreen } from "~/components/boot-screen";
 import { cardIdentity } from "~/components/item/identity";
 import { itemLabel } from "~/components/item/mark";
 import { RepositoryMark } from "~/components/repository-mark";
+import { Toaster } from "~/components/ui/toast";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import {
   Breadcrumb,
@@ -201,79 +202,81 @@ const Shell = () => {
   if (run !== undefined && run !== shownRun) setShownRun(run);
   const live = data._tag !== "NeedsSetup";
   return (
-    <SidebarProvider>
-      <AppSidebar
-        projects={data.projects}
-        view={view}
-        project={project === undefined ? undefined : projectId(project)}
-        needsYou={needsYouByProject(needs, data.projects)}
-        needsYouTotal={needs.length}
-        runningTotal={
-          new Set(
-            data.projects.flatMap(({ runs }) =>
-              runs.filter(({ state }) => state === "Running").map(({ id }) => id),
-            ),
-          ).size
-        }
-        live={live}
-      />
-      <SidebarInset className="h-svh min-w-0 overflow-hidden">
-        <PageCommandsProvider>
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
-            <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-            <Breadcrumb className="min-w-0 flex-1">
-              <BreadcrumbList>
-                <Crumbs
-                  view={view}
-                  project={project}
-                  runId={params.run === undefined ? undefined : RunId.make(params.run)}
-                  task={
-                    project === undefined || params.number === undefined
-                      ? undefined
-                      : taskCrumb(data, repository ?? project.repository, params.number)
-                  }
-                />
-              </BreadcrumbList>
-            </Breadcrumb>
-            <CommandPalette overview={data} />
-            <NotificationTray needs={needs} />
-          </header>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            {data._tag === "NeedsSetup" && (
-              <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
-                <WarningIcon weight="fill" className="text-needs-you" />
-                <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
-                <AlertDescription className="max-w-prose">
-                  <p>
-                    <a href="/setup" className="underline underline-offset-4">
-                      Finish GitHub App setup
-                    </a>{" "}
-                    to connect this instance.
-                  </p>
-                </AlertDescription>
-              </Alert>
-            )}
-            <PageCommandsScope active={run === undefined}>
-              <RefreshProvider>
-                <Outlet />
-              </RefreshProvider>
+    <Toaster>
+      <SidebarProvider>
+        <AppSidebar
+          projects={data.projects}
+          view={view}
+          project={project === undefined ? undefined : projectId(project)}
+          needsYou={needsYouByProject(needs, data.projects)}
+          needsYouTotal={needs.length}
+          runningTotal={
+            new Set(
+              data.projects.flatMap(({ runs }) =>
+                runs.filter(({ state }) => state === "Running").map(({ id }) => id),
+              ),
+            ).size
+          }
+          live={live}
+        />
+        <SidebarInset className="h-svh min-w-0 overflow-hidden">
+          <PageCommandsProvider>
+            <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+              <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
+              <Breadcrumb className="min-w-0 flex-1">
+                <BreadcrumbList>
+                  <Crumbs
+                    view={view}
+                    project={project}
+                    runId={params.run === undefined ? undefined : RunId.make(params.run)}
+                    task={
+                      project === undefined || params.number === undefined
+                        ? undefined
+                        : taskCrumb(data, repository ?? project.repository, params.number)
+                    }
+                  />
+                </BreadcrumbList>
+              </Breadcrumb>
+              <CommandPalette overview={data} />
+              <NotificationTray needs={needs} />
+            </header>
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+              {data._tag === "NeedsSetup" && (
+                <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
+                  <WarningIcon weight="fill" className="text-needs-you" />
+                  <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
+                  <AlertDescription className="max-w-prose">
+                    <p>
+                      <a href="/setup" className="underline underline-offset-4">
+                        Finish GitHub App setup
+                      </a>{" "}
+                      to connect this instance.
+                    </p>
+                  </AlertDescription>
+                </Alert>
+              )}
+              <PageCommandsScope active={run === undefined}>
+                <RefreshProvider>
+                  <Outlet />
+                </RefreshProvider>
+              </PageCommandsScope>
+            </div>
+            <PageCommandsScope active={run !== undefined}>
+              {shownRun !== undefined && (
+                <Suspense fallback={null}>
+                  <RunDrawer
+                    key={shownRun}
+                    runId={shownRun}
+                    open={run !== undefined}
+                    close={closeRun}
+                  />
+                </Suspense>
+              )}
             </PageCommandsScope>
-          </div>
-          <PageCommandsScope active={run !== undefined}>
-            {shownRun !== undefined && (
-              <Suspense fallback={null}>
-                <RunDrawer
-                  key={shownRun}
-                  runId={shownRun}
-                  open={run !== undefined}
-                  close={closeRun}
-                />
-              </Suspense>
-            )}
-          </PageCommandsScope>
-        </PageCommandsProvider>
-      </SidebarInset>
-    </SidebarProvider>
+          </PageCommandsProvider>
+        </SidebarInset>
+      </SidebarProvider>
+    </Toaster>
   );
 };
 

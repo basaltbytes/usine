@@ -20,7 +20,6 @@ import {
 import { Clock, Deferred, Effect, Layer, Match, Option, Stream } from "effect";
 import {
   ChildBackend,
-  harnessFailure,
   ChildSessionJournal,
   PoolUnavailableError,
   type RunningSession,
@@ -38,6 +37,7 @@ import {
   usePiStart,
 } from "./sdk.ts";
 import type { PiPool } from "./authentication.ts";
+import { failedPiTurn } from "./refusal.ts";
 import { piMessageUsage } from "../usage.ts";
 import { CompletionReply, type CompletionRequest, structuredCompletion } from "../completion.ts";
 import { piPauseGate, piTurns } from "./turns.ts";
@@ -288,10 +288,10 @@ const makePiSessions = Effect.gen(function* () {
         message: message.errorMessage || "Pi's model declined to answer",
       });
     if (message.stopReason === "error" || message.stopReason === "aborted")
-      return yield* harnessFailure(
-        Option.some(session.id),
-        message.errorMessage || `Pi's model request ended with ${message.stopReason}`,
-      );
+      return yield* yield* failedPiTurn(session.id, {
+        errorMessage: message.errorMessage || `Pi's model request ended with ${message.stopReason}`,
+        timestamp: message.timestamp,
+      });
     const call = message.content.find(
       (content) => content.type === "toolCall" && content.name === PI_OUTPUT_TOOL,
     );

@@ -32,22 +32,25 @@ export const machineConnections = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan(fields);
     const gone = {
       _tag: "Gone",
-      reason: `The ${driver.provider} sandbox ${id} stopped or was removed`,
+      reason: `The ${driver.provider} machine ${id} stopped or was removed`,
     } satisfies ConnectionProbe;
+    /** Returns the endpoint that the provider advertises, or `current` when its API fails. */
+    const advertisedOr = (current: MachineEndpoint) =>
+      refresh(id).pipe(
+        Effect.catchTag("ProviderApiError", (error) =>
+          Effect.logWarning(
+            "Could not ask the provider for the machine's endpoint; keeping the last working one",
+            { ...fields, message: error.message },
+          ).pipe(Effect.as(Option.some(current))),
+        ),
+      );
     if (endpoint._tag === "Exec") {
       const probe: ProbeConnection = Effect.fn("SshExecutor.probeExecMachine")((inspect) =>
         Effect.gen(function* () {
           yield* Effect.annotateCurrentSpan(fields);
           const initial = yield* inspect(machine.shell);
           if (initial._tag === "Answered") return initial;
-          const current = yield* refresh(id).pipe(
-            Effect.catchTag("ProviderApiError", (error) =>
-              Effect.logWarning(
-                "Could not ask the provider whether the unanswering machine is gone",
-                { ...fields, message: error.message },
-              ).pipe(Effect.as(Option.some<MachineEndpoint>(endpoint))),
-            ),
-          );
+          const current = yield* advertisedOr(endpoint);
           return Option.isNone(current) ? gone : initial;
         }),
       );
@@ -94,14 +97,7 @@ export const machineConnections = Effect.gen(function* () {
         const initial = yield* inspect(shell);
         if (initial._tag === "Answered") return initial;
         const current = yield* Ref.get(state);
-        const advertised = yield* refresh(id).pipe(
-          Effect.catchTag("ProviderApiError", (error) =>
-            Effect.logWarning(
-              "Could not refresh the machine endpoint; trying the last working endpoints",
-              { ...fields, message: error.message },
-            ).pipe(Effect.as(Option.some(current.selected))),
-          ),
-        );
+        const advertised = yield* advertisedOr(current.selected);
         if (Option.isNone(advertised)) return gone;
 
         const tried = new Set([addressOf(current.selected)]);

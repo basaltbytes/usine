@@ -1,5 +1,5 @@
 import { Harnesses } from "@usine/agents/harness/node";
-import { awaitMachineSsh, machineChecksFor, harnessCredentialGap } from "./checks.ts";
+import { awaitMachineShell, machineChecksFor, harnessCredentialGap } from "./checks.ts";
 import { machineReuseFor } from "./reuse.ts";
 import { machineStartsFor } from "./starts.ts";
 import { machineHolds, machineStatusOf, type Held } from "./holds.ts";
@@ -437,7 +437,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       const ready = starts.record(worker, driver.provider).pipe(
         Effect.andThen(machineOf(entry, driver, id, created.hostKey)),
         Effect.tap((machine) =>
-          awaitMachineSsh(commands, interval, machine).pipe(
+          awaitMachineShell(commands, interval, machine).pipe(
             Effect.catchTag("ExecutorOperationError", (error) =>
               Effect.fail(
                 MachineUnavailableError.make({

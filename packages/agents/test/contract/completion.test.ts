@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import type { BillingPool } from "@usine/core/agent/session";
-import { Effect, Option, Predicate, Result, type Schema, type Scope } from "effect";
+import { DateTime, Effect, Option, Predicate, Result, type Schema, type Scope } from "effect";
 import type { CompletionError, CompletionFailure } from "../../src/harness/contract.ts";
 import { openCompletionFixture, recordedValues } from "../replay/completion.ts";
 import type { Provider } from "../replay/fixture.ts";
@@ -109,6 +109,28 @@ const piFinalMessage = (
       : { ...payload, message };
   });
 
+/** The account's rate-limit snapshots rewritten with their primary window used up. */
+const codexLimitReached = rewritePayloads((payload) => {
+  const params = payload.params;
+  if (
+    payload.method !== "account/rateLimits/updated" ||
+    params === undefined ||
+    !isJsonObject(params)
+  )
+    return payload;
+  const rateLimits = params.rateLimits;
+  if (rateLimits === undefined || !isJsonObject(rateLimits)) return payload;
+  const primary = rateLimits.primary;
+  if (primary === undefined || !isJsonObject(primary)) return payload;
+  return {
+    ...payload,
+    params: { ...params, rateLimits: { ...rateLimits, primary: { ...primary, usedPercent: 100 } } },
+  };
+});
+
+/** When Pi's rewritten final message ended. */
+const PI_FAILED_AT = "2026-11-12T10:00:00.000Z";
+
 const piError = (fields: Readonly<Record<string, Schema.Json>>) =>
   piFinalMessage((message) => ({ ...message, stopReason: "error", ...fields }));
 
@@ -118,6 +140,8 @@ interface FailedReplay {
   readonly answer: string;
   readonly transform: (transcript: Transcript) => Transcript;
   readonly reason: CompletionFailure["_tag"];
+  /** When the capacity refusal resets, as ISO 8601, or `undefined` when it states no reset. */
+  readonly resetsAt?: string;
 }
 
 const failedReplays: ReadonlyArray<FailedReplay> = [
@@ -191,6 +215,18 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
   },
   {
     harness: "codex",
+    answer: "a usage limit whose window is used up",
+    transform: (transcript) =>
+      codexFailedTurn({
+        message: "You've hit your usage limit.",
+        codexErrorInfo: "usageLimitExceeded",
+      })(codexLimitReached(transcript)),
+    reason: "AgentCapacityError",
+    // The recorded snapshot's primary window resets then.
+    resetsAt: "2026-11-17T12:42:41.000Z",
+  },
+  {
+    harness: "codex",
     answer: "a failed turn",
     transform: codexFailedTurn({ message: "The turn failed", codexErrorInfo: "other" }),
     reason: "SessionOperationError",
@@ -209,6 +245,18 @@ const failedReplays: ReadonlyArray<FailedReplay> = [
     answer: "an overloaded provider",
     transform: piError({ rawStopReason: "error", errorMessage: "overloaded_error" }),
     reason: "AgentCapacityError",
+  },
+  {
+    harness: "pi",
+    answer: "a ChatGPT plan usage limit",
+    transform: piError({
+      rawStopReason: "error",
+      errorMessage: "You have hit your ChatGPT usage limit (plus plan). Try again in ~5 min.",
+      timestamp: Date.parse(PI_FAILED_AT),
+    }),
+    reason: "AgentCapacityError",
+    // Pi rounds the stated wait, so the limit resets a minute after it.
+    resetsAt: "2026-11-12T10:06:00.000Z",
   },
   {
     harness: "pi",
@@ -246,8 +294,15 @@ const assertFailedWithUsage = (
   harness: Provider,
   failure: CompletionError,
   reason: CompletionFailure["_tag"],
+  resetsAt?: string,
 ) => {
   assert.strictEqual(failure.reason._tag, reason, failure.message);
+  if (failure.reason._tag === "AgentCapacityError")
+    assert.deepStrictEqual(
+      Option.map(failure.reason.resetsAt, DateTime.formatIso),
+      Option.fromUndefinedOr(resetsAt),
+      "the capacity refusal resets when the harness reported",
+    );
   assert(Option.isSome(failure.usage), "the failure carries the completion's usage");
   assert.isAbove(failure.usage.value.totalTokens, 0, "the failure reports its tokens");
   assert.deepStrictEqual(failure.usage.value.session.pool, Option.some(pools[harness]));
@@ -293,7 +348,7 @@ describe("structured completion contract", () => {
     );
   }
 
-  for (const { harness, answer, transform, reason } of failedReplays)
+  for (const { harness, answer, transform, reason, resetsAt } of failedReplays)
     it.live(
       `${harness}: structured-result with ${answer} fails with ${reason}`,
       () =>
@@ -304,7 +359,7 @@ describe("structured completion contract", () => {
             });
             const completion = yield* fixture.run;
             assert(Result.isFailure(completion), `${answer} has no value`);
-            assertFailedWithUsage(harness, completion.failure, reason);
+            assertFailedWithUsage(harness, completion.failure, reason, resetsAt);
             yield* fixture.save;
           }),
         ),

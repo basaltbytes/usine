@@ -1,5 +1,9 @@
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { SessionTokensUpdated, TokenCount } from "@usine/core/agent/session";
+import {
+  type RateLimitsSnapshot,
+  SessionTokensUpdated,
+  TokenCount,
+} from "@usine/core/agent/session";
 import { Effect, Option, Schema, Stream } from "effect";
 import {
   AgentMessageItem,
@@ -7,6 +11,7 @@ import {
   ItemNotification,
   isMessagePhase,
   isTurnStatus,
+  RateLimitsUpdated,
   ThreadStartParams,
   ThreadStartResponse,
   TurnCompleted,
@@ -29,8 +34,9 @@ import {
   decodeNotification,
   decodeResponse,
   decodeRetry,
+  failedTurn,
   providerRetryMessage,
-  turnFailure,
+  rateLimitsSnapshot,
 } from "./codec.ts";
 import { checkCodexModel } from "./model.ts";
 import { codexThreadTokens, codexTokenBreakdown } from "../usage.ts";
@@ -117,6 +123,8 @@ export const codexCompletion = (appServer: CodexAppServer["Service"]) =>
     let lastText = Option.none<string>();
     let finalText = Option.none<string>();
     let completion = Option.none<typeof TurnCompleted.Type>();
+    // The account's latest rate-limit snapshot, which dates a usage limit's reset.
+    let rateLimits = Option.none<RateLimitsSnapshot>();
     const isTurnCompletion = (notification: CodexNotification) =>
       notification.method === "turn/completed" &&
       Schema.is(Schema.Struct({ turn: Schema.Struct({ id: Schema.Literal(turn.turn.id) }) }))(
@@ -143,6 +151,17 @@ export const codexCompletion = (appServer: CodexAppServer["Service"]) =>
                 }),
               );
             }
+            return;
+          }
+          if (method === "account/rateLimits/updated") {
+            const notification = yield* decodeNotification(
+              RateLimitsUpdated,
+              "rate-limit notification",
+              session.id,
+              params,
+            );
+            if (Option.isSome(notification))
+              rateLimits = Option.some(rateLimitsSnapshot(notification.value.rateLimits));
             return;
           }
           if (method === "item/completed") {
@@ -199,10 +218,11 @@ export const codexCompletion = (appServer: CodexAppServer["Service"]) =>
       );
     const finished = completion.value.turn;
     if (!isTurnStatus(finished.status, "completed"))
-      return yield* turnFailure(
+      return yield* yield* failedTurn(
         session.id,
-        finished.error,
+        finished,
         finished.error?.message ?? "Codex completion turn failed",
+        rateLimits,
       );
     const text = Option.orElse(finalText, () => lastText);
     return Option.match(text, {

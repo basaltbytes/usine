@@ -41,7 +41,7 @@ import {
 } from "effect";
 import { CheckoutRequest, Executor, MachineCheck, WorkerMachines } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
-import { BOXD_ENDPOINT } from "./fake-boxd.ts";
+import { BOXD_ENDPOINT } from "./boxd/fake.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
 import {

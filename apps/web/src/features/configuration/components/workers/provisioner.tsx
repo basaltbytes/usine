@@ -3,6 +3,35 @@ import { Fact, Facts, Unset } from "~/features/configuration/components/section"
 import { Variable } from "~/features/configuration/components/workers/variable";
 import { providerLabel } from "~/lib/workers/strings";
 
+type BoxdFactsProps = {
+  readonly provisioner: Extract<ProvisionerFactsProps["provisioner"], { readonly _tag: "boxd" }>;
+};
+
+const BoxdFacts = ({ provisioner }: BoxdFactsProps) => (
+  <>
+    <Fact label="Region">
+      {provisioner.region === null ? (
+        <Unset>Where the endpoint runs machines</Unset>
+      ) : (
+        <code className="font-mono text-xs">{provisioner.region}</code>
+      )}
+    </Fact>
+    <Fact label="Snapshot">
+      <code className="font-mono text-xs">{provisioner.snapshot}</code>
+    </Fact>
+    <Fact label="Size">
+      {provisioner.size === null ? (
+        <Unset>The snapshot's</Unset>
+      ) : (
+        <code className="font-mono text-xs">{provisioner.size}</code>
+      )}
+    </Fact>
+    <Fact label="Isolation">
+      {provisioner.isolated ? "Isolated" : <Unset>The snapshot's</Unset>}
+    </Fact>
+  </>
+);
+
 type ProvisionerFactsProps = {
   readonly provisioner: NonNullable<WorkerConfigurationView["provisioner"]>;
 };
@@ -53,6 +82,8 @@ export const ProvisionerFacts = ({ provisioner }: ProvisionerFactsProps) => (
             </Fact>
           )}
         </>
+      ) : provisioner._tag === "boxd" ? (
+        <BoxdFacts provisioner={provisioner} />
       ) : (
         <Fact label="Size">
           <code className="font-mono text-xs">{provisioner.size}</code>
