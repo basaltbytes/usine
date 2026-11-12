@@ -65,18 +65,12 @@ export const claude = HarnessDescriptor.make({
         "steer",
         "interrupt",
         "token-usage",
+        "usine-tools",
+        "closed-tools",
         "cost-usd",
         "plan-windows",
       ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason: "The Claude Code adapter passes no usine tool set to a session",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Claude Code adapter keeps the harness's own tools on in every session",
-        }),
         Lacking.make({
           capability: "structured-output",
           reason: "The Claude Code adapter returns text, not a schema-checked value",
@@ -99,16 +93,16 @@ export const claude = HarnessDescriptor.make({
     CapabilityProfile.make({
       placements: ["orchestrator", "local", "ssh", "container", "sandbox"],
       credentials: ["gateway", "gateway-api-key", "api-key"],
-      supported: ["resume-session", "steer", "interrupt", "token-usage", "cost-usd"],
+      supported: [
+        "resume-session",
+        "steer",
+        "interrupt",
+        "token-usage",
+        "usine-tools",
+        "closed-tools",
+        "cost-usd",
+      ],
       lacking: [
-        Lacking.make({
-          capability: "usine-tools",
-          reason: "The Claude Code adapter passes no usine tool set to a session",
-        }),
-        Lacking.make({
-          capability: "closed-tools",
-          reason: "The Claude Code adapter keeps the harness's own tools on in every session",
-        }),
         Lacking.make({
           capability: "structured-output",
           reason: "The Claude Code adapter returns text, not a schema-checked value",

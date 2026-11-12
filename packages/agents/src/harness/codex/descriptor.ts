@@ -105,7 +105,8 @@ export const codex = HarnessDescriptor.make({
       lacking: [
         Lacking.make({
           capability: "usine-tools",
-          reason: "The Codex adapter passes no usine tool set to a session",
+          reason:
+            "The Codex adapter passes no usine tool set to a session until step 19 of the harness adapter plan",
         }),
         Lacking.make({
           capability: "closed-tools",
@@ -137,7 +138,8 @@ export const codex = HarnessDescriptor.make({
       lacking: [
         Lacking.make({
           capability: "usine-tools",
-          reason: "The Codex adapter passes no usine tool set to a session",
+          reason:
+            "The Codex adapter passes no usine tool set to a session until step 19 of the harness adapter plan",
         }),
         Lacking.make({
           capability: "closed-tools",

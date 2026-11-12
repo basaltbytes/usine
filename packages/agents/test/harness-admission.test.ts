@@ -119,48 +119,20 @@ describe("brain admission", () => {
 
   it("admits supervisors only on the orchestrator through gateway credentials", () => {
     const gateways = ["gateway", "gateway-subscription", "gateway-api-key"] as const;
-    // No adapter passes a usine tool set to a session yet, so every harness refuses the supervisor.
-    for (const id of catalog.ids)
-      for (const credential of gateways) {
-        const refused = admitBrain(
-          catalog,
-          supervisor,
-          brain(id),
-          AdmissionContext.make({ placement: "orchestrator", credential }),
-        );
-        assert(Result.isFailure(refused));
-        assert.deepStrictEqual(
-          refused.failure.missing.map(({ capability }) => capability),
-          ["usine-tools"],
-        );
-        assert.include(refused.failure.message, "passes no usine tool set to a session");
-      }
-    const claude = catalog.get(Harness.make("claude"));
-    assert(Option.isSome(claude));
-    const toolful = HarnessDescriptor.make({
-      ...claude.value,
-      id: Harness.make("toolful"),
-      capabilities: Arr.map(claude.value.capabilities, (profile) =>
-        CapabilityProfile.make({
-          ...profile,
-          supported: [...profile.supported, "usine-tools"],
-          lacking: profile.lacking.filter(({ capability }) => capability !== "usine-tools"),
-        }),
-      ),
-    });
-    const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, toolful] });
-    for (const credential of gateways)
-      assert(
-        Result.isSuccess(
-          admitBrain(
-            extended,
-            supervisor,
-            brain("toolful"),
-            AdmissionContext.make({ placement: "orchestrator", credential }),
-          ),
-        ),
+    for (const credential of gateways) {
+      const context = AdmissionContext.make({ placement: "orchestrator", credential });
+      for (const id of ["claude", "pi"])
+        assert(Result.isSuccess(admitBrain(catalog, supervisor, brain(id), context)), id);
+      // Codex serves no usine tool set until the next step of the harness adapter plan.
+      const codex = admitBrain(catalog, supervisor, brain("codex"), context);
+      assert(Result.isFailure(codex));
+      assert.deepStrictEqual(
+        codex.failure.missing.map(({ capability }) => capability),
+        ["usine-tools"],
       );
-    const login = admitBrain(extended, supervisor, brain("toolful"), orchestrator);
+      assert.include(codex.failure.message, "until step 19 of the harness adapter plan");
+    }
+    const login = admitBrain(catalog, supervisor, brain("claude"), orchestrator);
     assert(Result.isFailure(login));
     assert.deepStrictEqual(login.failure.missing, [
       Lacking.make({
@@ -170,9 +142,9 @@ describe("brain admission", () => {
       }),
     ]);
     const worker = admitBrain(
-      extended,
+      catalog,
       supervisor,
-      brain("toolful"),
+      brain("claude"),
       AdmissionContext.make({ placement: "ssh", credential: "gateway" }),
     );
     assert(Result.isFailure(worker));
@@ -289,7 +261,9 @@ describe("brain admission", () => {
       assert.strictEqual(refused.failure.role, "reviewer");
       assert.deepStrictEqual(
         refused.failure.missing.map(({ capability }) => capability),
-        ["closed-tools", "structured-output", "ephemeral"],
+        id === "claude"
+          ? ["structured-output", "ephemeral"]
+          : ["closed-tools", "structured-output", "ephemeral"],
       );
     }
     const claude = catalog.get(Harness.make("claude"));
@@ -300,7 +274,7 @@ describe("brain admission", () => {
       capabilities: Arr.map(claude.value.capabilities, (profile) =>
         CapabilityProfile.make({
           ...profile,
-          supported: [...profile.supported, "closed-tools", "structured-output", "ephemeral"],
+          supported: [...profile.supported, "structured-output", "ephemeral"],
           lacking: profile.lacking.filter(
             ({ capability }) =>
               !["closed-tools", "structured-output", "ephemeral"].includes(capability),
