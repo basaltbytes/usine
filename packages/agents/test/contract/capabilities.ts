@@ -64,14 +64,17 @@ export const capabilityProofs = {
  * The scenarios that the replay suites run for `harness`. Claude Code and Codex replay `restart`
  * and `credential-changed` through the durable parent in `@usine/durable`, every harness replays
  * the completion scenarios in `completion.test.ts`, and the harnesses that serve usine tool sets
- * replay the tool scenarios in `host-tools.test.ts`.
+ * replay the tool scenarios in `host-tools.test.ts` and the supervisor scenario in
+ * `supervisor.test.ts`.
  */
 export const replayedScenarios = (harness: Harness): ReadonlyArray<Scenario> => [
   ...(harness === "pi"
     ? piScenarios
     : [...scenarios, "restart" as const, "credential-changed" as const]),
   ...completionScenarios,
-  ...(toolProviders.some((provider) => provider === harness) ? toolScenarios : []),
+  ...(toolProviders.some((provider) => provider === harness)
+    ? [...toolScenarios, "supervisor" as const]
+    : []),
 ];
 
 /** The capabilities that `harness` declares for any placement and credential route. */
