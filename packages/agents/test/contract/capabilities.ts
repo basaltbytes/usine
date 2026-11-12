@@ -4,7 +4,7 @@ import type { AgentSessionEvent } from "@usine/core/agent/session";
 import { Option } from "effect";
 import type { Capability } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
-import { piScenarios, scenarios } from "../replay/fixture.ts";
+import { piScenarios, type Provider, scenarios } from "../replay/fixture.ts";
 import type { Scenario } from "../replay/transcript.ts";
 
 /**
@@ -27,8 +27,11 @@ export type Proof =
     }
   | {
       readonly _tag: "Suites";
-      /** The test files, relative to this package, that check the capability. */
-      readonly files: readonly [string, ...Array<string>];
+      /**
+       * The test files, relative to this package, that check the capability for each harness. A
+       * harness without an entry may not declare the capability.
+       */
+      readonly files: Partial<Record<Provider, readonly [string, ...Array<string>]>>;
       /** Why no session scenario shows the capability. */
       readonly reason: string;
     };
@@ -51,17 +54,17 @@ export const capabilityProofs = {
   ephemeral: proven("ephemeral"),
   "durable-coordination": {
     _tag: "Suites",
-    files: ["../durable/test/subagent-recovery.test.ts"],
+    files: { pi: ["../durable/test/subagent-recovery.test.ts"] },
     reason: "The durable journal belongs to the parent session, which runs outside the adapters",
   },
   "plan-windows": {
     _tag: "Suites",
-    files: ["test/pi/claude.test.ts", "test/pi/codex/codex.test.ts"],
+    files: { claude: ["test/pi/claude.test.ts"], codex: ["test/pi/codex/codex.test.ts"] },
     reason: "Rate windows come from the provider account, which the recorded scenarios don't vary",
   },
   "model-check": {
     _tag: "Suites",
-    files: ["test/pi/codex/codex.test.ts", "test/pi/pi.test.ts"],
+    files: { codex: ["test/pi/codex/codex.test.ts"], pi: ["test/pi/pi.test.ts"] },
     reason: "An unknown model is a launch failure, which the recorded scenarios don't include",
   },
 } satisfies Record<Capability, Proof>;

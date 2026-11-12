@@ -9,25 +9,48 @@ import { Capability, CapabilityProfile } from "../../src/harness/capability.ts";
 import { catalog } from "../../src/harness/catalog.ts";
 import { HarnessCatalog, HarnessDescriptor } from "../../src/harness/harness.ts";
 import { RolePlacements, RoleSpec } from "../../src/harness/role.ts";
-import { fixtureFile } from "../replay/fixture.ts";
+import { fixtureFile, type Provider } from "../replay/fixture.ts";
 import { Scenario } from "../replay/transcript.ts";
-import { capabilityProofs, replayedScenarios } from "./capabilities.ts";
+import { capabilityProofs, type Proof, replayedScenarios } from "./capabilities.ts";
 
 const packageFile = (file: string) => fileURLToPath(new URL(`../../${file}`, import.meta.url));
 const isScenario = Schema.is(Scenario);
 const isCapability = Schema.is(Capability);
 const isRecordedHarness = Schema.is(Schema.Literals(["claude", "codex", "pi"]));
 
+/** Where `unproven` looks up the proofs, replayed scenarios, and fixtures of a harness. */
+interface ProofSources {
+  readonly proofs: typeof capabilityProofs;
+  readonly replayed: (harness: Provider) => ReadonlyArray<Scenario>;
+  readonly fixture: (harness: Provider, scenario: Scenario) => string;
+}
+
+const contractSuite: ProofSources = {
+  proofs: capabilityProofs,
+  replayed: (harness) => replayedScenarios(Harness.make(harness)),
+  fixture: fixtureFile,
+};
+
 /** Why `descriptor` declares a capability that the contract suite doesn't prove for it. */
-const unproven = (descriptor: HarnessDescriptor) =>
+const unproven = (descriptor: HarnessDescriptor, sources: ProofSources = contractSuite) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const problems: Array<string> = [];
     const declared = new Set(descriptor.capabilities.flatMap(({ supported }) => supported));
+    const harness: Option.Option<Provider> = isRecordedHarness(descriptor.id)
+      ? Option.some(descriptor.id)
+      : Option.none();
     for (const capability of declared) {
-      const proof = capabilityProofs[capability];
+      const proof: Proof = sources.proofs[capability];
       if (proof._tag === "Suites") {
-        for (const file of proof.files)
+        const files = Option.flatMap(harness, (id) => Option.fromNullishOr(proof.files[id]));
+        if (Option.isNone(files)) {
+          problems.push(
+            `${descriptor.label} declares ${capability}, but no suite checks it for ${descriptor.label}`,
+          );
+          continue;
+        }
+        for (const file of files.value)
           if (!(yield* fs.exists(packageFile(file))))
             problems.push(`${capability} names the missing suite ${file}`);
         continue;
@@ -35,9 +58,9 @@ const unproven = (descriptor: HarnessDescriptor) =>
       for (const scenario of proof.scenarios) {
         const recorded =
           isScenario(scenario) &&
-          isRecordedHarness(descriptor.id) &&
-          replayedScenarios(descriptor.id).includes(scenario) &&
-          (yield* fs.exists(fixtureFile(descriptor.id, scenario)));
+          Option.isSome(harness) &&
+          sources.replayed(harness.value).includes(scenario) &&
+          (yield* fs.exists(sources.fixture(harness.value, scenario)));
         if (!recorded)
           problems.push(
             `${descriptor.label} declares ${capability}, but its adapter passes no ${scenario} scenario`,
@@ -46,6 +69,33 @@ const unproven = (descriptor: HarnessDescriptor) =>
     }
     return problems;
   });
+
+/** `harness`'s descriptor, with `capability` moved from lacking to supported in every profile. */
+const overclaiming = (harness: Provider, capability: Capability) => {
+  const descriptor = catalog.get(Harness.make(harness));
+  assert(Option.isSome(descriptor));
+  return HarnessDescriptor.make({
+    ...descriptor.value,
+    capabilities: Arr.map(descriptor.value.capabilities, (profile) =>
+      CapabilityProfile.make({
+        ...profile,
+        supported: [...profile.supported, capability],
+        lacking: profile.lacking.filter((gap) => gap.capability !== capability),
+      }),
+    ),
+  });
+};
+
+/** The capabilities that `descriptor` declares and that `scenario` proves. */
+const provenBy = (descriptor: HarnessDescriptor, scenario: Scenario) =>
+  new Set(
+    descriptor.capabilities.flatMap(({ supported }) =>
+      supported.filter((capability) => {
+        const proof: Proof = capabilityProofs[capability];
+        return proof._tag === "Scenarios" && proof.scenarios.includes(scenario);
+      }),
+    ),
+  );
 
 const base = RoleSpec.make({
   name: RoleName.make("capability-probe"),
@@ -107,22 +157,61 @@ describe("harness capability declarations", () => {
 
   it.effect("fail when a descriptor declares a capability without a passing scenario", () =>
     Effect.gen(function* () {
-      const claude = catalog.get(Harness.make("claude"));
-      assert(Option.isSome(claude));
-      const overclaimed = HarnessDescriptor.make({
-        ...claude.value,
-        capabilities: Arr.map(claude.value.capabilities, (profile) =>
-          CapabilityProfile.make({
-            ...profile,
-            supported: [...profile.supported, "usine-tools"],
-            lacking: profile.lacking.filter(({ capability }) => capability !== "usine-tools"),
-          }),
-        ),
-      });
-      const problems = yield* unproven(overclaimed);
+      const problems = yield* unproven(overclaiming("claude", "usine-tools"));
       assert.deepStrictEqual(problems, [
         "Claude Code declares usine-tools, but its adapter passes no host-tool scenario",
       ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("fail when no suite checks a capability for the declaring harness", () =>
+    Effect.gen(function* () {
+      const problems = yield* unproven(overclaiming("claude", "model-check"));
+      assert.deepStrictEqual(problems, [
+        "Claude Code declares model-check, but no suite checks it for Claude Code",
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("fail when the declaring harness has no fixture for a proving scenario", () =>
+    Effect.gen(function* () {
+      const codex = catalog.get(Harness.make("codex"));
+      assert(Option.isSome(codex));
+      // Claude Code's steer fixture exists, so only a lookup by Codex's own ID misses it.
+      const problems = yield* unproven(codex.value, {
+        ...contractSuite,
+        fixture: (harness, scenario) =>
+          harness === "codex" && scenario === "steer"
+            ? packageFile("test/fixtures/replay/steer/missing.json")
+            : fixtureFile(harness, scenario),
+      });
+      assert.isTrue(provenBy(codex.value, "steer").size > 0);
+      assert.deepStrictEqual(
+        problems,
+        [...provenBy(codex.value, "steer")].map(
+          (capability) => `Codex declares ${capability}, but its adapter passes no steer scenario`,
+        ),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("fail when the declaring harness doesn't replay a proving scenario", () =>
+    Effect.gen(function* () {
+      const pi = catalog.get(Harness.make("pi"));
+      assert(Option.isSome(pi));
+      // Pi's restart fixture exists, but the replay suite no longer runs it.
+      const problems = yield* unproven(pi.value, {
+        ...contractSuite,
+        replayed: (harness) =>
+          contractSuite.replayed(harness).filter((scenario) => scenario !== "restart"),
+      });
+      assert.isTrue(provenBy(pi.value, "restart").size > 0);
+      assert.deepStrictEqual(
+        problems,
+        [...provenBy(pi.value, "restart")].map(
+          (capability) => `Pi declares ${capability}, but its adapter passes no restart scenario`,
+        ),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

@@ -177,6 +177,13 @@ export const runScenario = (
         yield* running.intervene(OperatorMessage.make({ message: guidance }), () => Effect.void);
         yield* until("SessionResumed");
         yield* until("SessionIdle");
+        if (harness === "pi") {
+          // Pi's pause gate holds the model request after the interrupted tool, so no text
+          // arrives until the guidance resumes the session.
+          const resumed = events.findIndex((event) => event._tag === "SessionResumed");
+          const text = events.findIndex((event) => event._tag === "TextOutput");
+          assert.isAbove(text, resumed, "Pi writes no text before the guidance resumes it");
+        }
         yield* running.intervene(Release.make(), () => Effect.void);
         yield* control.sessionReleased;
       } else if (scenario !== "simple") {
