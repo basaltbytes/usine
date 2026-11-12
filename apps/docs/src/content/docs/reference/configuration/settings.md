@@ -1,6 +1,6 @@
 ---
 title: Settings
-description: Instance settings, webhook hints, browser origins, and tracing.
+description: Instance settings, webhook hints, browser origins, trusted proxies, and tracing.
 ---
 
 Edit stored instance settings in **Configuration > Settings** or with `usine config edit settings instance`. The editor contains `version`, `settings`, `operator`, `webhooks`, `auth`, and `tracing`. Secrets come from the instance environment; they are separate from configuration revisions.
@@ -75,6 +75,21 @@ auth:
 ```
 
 The canonical origin from `--origin` or `USINE_ORIGIN` is allowed automatically. An origin includes a scheme, host, and optional port, with no path or trailing slash. HTTPS is required except on loopback. Wildcards and `null` are invalid. Origin access does not grant authentication or roles. See [HTTPS access](/guides/expose-an-instance/).
+
+## Trusted proxies
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `auth.trusted_proxies` | list of networks in CIDR notation | `[]` | Reverse proxies whose `X-Forwarded-For` header names the client address. |
+
+```yaml
+auth:
+  trusted_proxies: [127.0.0.1/32, ::1/128]
+```
+
+Sign-in endpoints allow 60 requests per minute per operation from one client address, and 600 per minute for the whole instance. The client address is the address of the connection to usine. When that address is in `auth.trusted_proxies`, usine reads `X-Forwarded-For` from the right, skips addresses in the list, and uses the first other address. An entry can carry a port, such as `203.0.113.7:4711` or `[2001:db8::1]:443`. If the entry it reaches isn't an IP address, such as `unknown`, usine uses the connection address and logs a warning. A request from any other address keeps its connection address, whatever its headers say. With the default empty list, usine ignores `X-Forwarded-For`, so every request through a reverse proxy on the same machine counts as `127.0.0.1`. The warning logged for each refused request names the client address and its `source`: `forwarded`, or the reason usine used the connection address.
+
+Write each entry as a network without host bits, such as `127.0.0.1/32` or `10.0.0.0/8`. List only proxies that you run: a client that connects from a listed address can choose its own client address. Changes require a restart.
 
 ## Tracing
 
