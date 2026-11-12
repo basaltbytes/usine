@@ -7,17 +7,19 @@ import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import type { Agent } from "@usine/core/agent";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { AttemptId, AttemptTask } from "@usine/core/attempt";
+import type { CoordinatorKind } from "@usine/core/agent";
+import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { RunId } from "@usine/core/run";
-import { StepName } from "@usine/core/step";
+import { Run, RunId } from "@usine/core/run";
+import * as RunState from "@usine/core/run/state";
+import { Step, StepName } from "@usine/core/step";
 import { type WorkerKind, WorkerName } from "@usine/core/worker";
 import { Submission } from "@usine/engine/engine";
-import { StepExecutor } from "@usine/engine/step-executor";
+import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import {
   Executor,
   ExecutorOperationError,
@@ -446,6 +448,7 @@ const schedulerContext = (
   options: {
     readonly kind?: WorkerKind;
     readonly failing?: ReadonlyArray<string>;
+    readonly coordinators?: Array<CoordinatorKind>;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -468,18 +471,37 @@ const startScheduler = (...args: Parameters<typeof schedulerContext>) =>
 
 /**
  * Returns an executor of `kind` whose preflight records `worker xN: model` for each check and fails
- * for the Workers in `failing`.
+ * for the Workers in `failing`. With `coordinators`, its preparation records the coordinator of
+ * each request, then fails.
  */
 const recordingExecutor = (
   preflighted: Array<string>,
-  options: { readonly kind?: WorkerKind; readonly failing?: ReadonlyArray<string> },
+  options: {
+    readonly kind?: WorkerKind;
+    readonly failing?: ReadonlyArray<string>;
+    readonly coordinators?: Array<CoordinatorKind>;
+  },
 ) =>
   Layer.succeed(Executor)({
     kind: options.kind ?? "local",
     recover: unused,
     isLive: unused,
     outcome: unused,
-    prepare: unused,
+    prepare: (request) => {
+      const coordinators = options.coordinators;
+      if (coordinators === undefined) return unused();
+      return Effect.sync(() => coordinators.push(request.coordinator)).pipe(
+        Effect.andThen(
+          Effect.fail(
+            ExecutorOperationError.make({
+              operation: "prepare",
+              message: "The test stops at preparation",
+              cause: new Error("stop"),
+            }),
+          ),
+        ),
+      );
+    },
     cancel: unused,
     intervene: unused,
     sweep: Effect.void,
@@ -531,6 +553,57 @@ const submission = (
     agent,
     parentModel: Option.none(),
   });
+
+/** Returns the first Attempt of a Run of `selected` on the `local` Worker. */
+const executionOf = (selected: Submission, second: number) => {
+  const runId = runOf(second);
+  return StepExecution.make({
+    requiresCi: false,
+    attempt: Attempt.make({
+      task: selected.task,
+      agent: selected.agent.name,
+      operatorIntervened: false,
+      id: AttemptId.make(`${runId}/implement/1`),
+      runId,
+      stepName: selected.step,
+      worker: local,
+      number: AttemptNumber.make(1),
+      brain: selected.agent.brain,
+      parentModel: Option.none(),
+      startedAt: selected.event.receivedAt,
+      outcome: Option.none(),
+      endedAt: Option.none(),
+      salvage: Option.none(),
+    }),
+    event: selected.event,
+    run: Run.make({
+      id: runId,
+      eventId: selected.event.id,
+      loop: selected.loop,
+      state: RunState.start(RunState.Pending.make()),
+      openedAt: selected.event.receivedAt,
+    }),
+    step: Step.make({ runId, name: selected.step, result: Option.none() }),
+    repository: selected.repository,
+    revision: selected.revision,
+    task: selected.task,
+    agent: selected.agent,
+    parentModel: selected.parentModel,
+    permissions: selected.permissions,
+    resume: Option.none(),
+    reattach: false,
+  });
+};
+
+const executionSink = {
+  append: () => Effect.void,
+  salvage: () => Effect.void,
+  comments: () => Effect.void,
+  outOfMemory: () => Effect.void,
+  transcript: Effect.succeed([]),
+  windows: Effect.die("no windows"),
+  checkoutAcquired: Effect.void,
+};
 
 const developer = Effect.gen(function* () {
   const { agents } = yield* (yield* CurrentInstance).get;
@@ -1113,6 +1186,29 @@ describe("Worker scheduler on reload", () => {
             );
           }).pipe(Effect.scoped),
       ),
+  );
+
+  it.live("launches the next Attempt on the coordinator that a reload selects", () =>
+    withWorkers(localWorkers([["local", 1]]), (root) =>
+      Effect.gen(function* () {
+        const coordinators: Array<CoordinatorKind> = [];
+        const context = yield* schedulerContext([], { coordinators });
+        const steps = Context.get(context, StepExecutor);
+        const agent = yield* developer;
+        yield* steps.execute(executionOf(submission(agent, 1), 1), executionSink).pipe(Effect.flip);
+
+        yield* writeInstanceFiles(root, [
+          [
+            "usine.yaml",
+            `${usineYaml(localWorkers([["local", 1]]))}settings:\n  coordinator: events\n`,
+          ],
+        ]);
+        yield* (yield* CurrentInstance).reload;
+        yield* steps.execute(executionOf(submission(agent, 2), 2), executionSink).pipe(Effect.flip);
+
+        assert.deepStrictEqual(coordinators, ["session", "events"]);
+      }).pipe(Effect.scoped),
+    ),
   );
 
   it.live("a reload that raises max_concurrent_attempts admits a waiting Run at once", () =>

@@ -239,6 +239,27 @@ describe("Agents page", () => {
     assert.notInclude(page, "Parent model");
   });
 
+  it("shows an Agent that inherits the event-driven coordinator without parent settings", async () => {
+    const configuration = configurationFixture();
+    const page = text(
+      await render(() => (
+        <AgentDetail
+          name="developer"
+          configuration={ConfigurationView.make({
+            ...configuration,
+            settings: SettingsView.make({ ...configuration.settings, coordinator: "events" }),
+            agents: configuration.agents.map((agent) =>
+              AgentFileView.make({ ...agent, coordinator: null, resolvedCoordinator: "events" }),
+            ),
+          })}
+        />
+      )),
+    );
+    assert.include(page, "Coordinator events From settings.coordinator");
+    assert.notInclude(page, "Parent model");
+    assert.notInclude(page, "Parent effort");
+  });
+
   it("shows why an Agent file did not load", async () => {
     const page = text(
       await render(() => <AgentDetail name="broken" configuration={configurationFixture()} />),
