@@ -26,10 +26,10 @@ import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import { CompletionCheck } from "../completion-check.ts";
 import { StepExecutor, type WorkerLease } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
-import type { QueuedEvents } from "../store/queries.ts";
+import type { PendingQueue, QueuedEvents } from "../store/queries.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
 import { TranscriptAllQuery } from "../transcript.ts";
-import { TriggerCondition } from "../trigger-condition.ts";
+import { savedSettings, TriggerCondition } from "../trigger-condition.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { checkoutRecoveryFor, without } from "./checkout-recovery.ts";
 import type {
@@ -45,7 +45,7 @@ import {
   type FinishDecision,
   RejectedCompletion,
 } from "./lifecycle.ts";
-import { runIdFor, type Submission } from "./submission.ts";
+import { runIdFor, Submission } from "./submission.ts";
 import { UnconfirmedStop } from "./unconfirmed-stops.ts";
 
 // Executor sinks fail with `AttemptFailure`: a persistence error becomes an `InfraFailure`, and
@@ -142,6 +142,11 @@ export class RunDriver extends Context.Service<
      * `StepExecutor.sweep`.
      */
     readonly reconcile: Effect.Effect<void, RunStoreError>;
+    /**
+     * Rechecks the queued CI fixes that `reconcile` would admit and opens the Runs of those that
+     * still apply. Returns the opened Runs.
+     */
+    readonly admitCiFixes: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /** Returns pending stops and failed stops that `reconcile` retries. */
     readonly unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>>;
     /**
@@ -286,7 +291,7 @@ export class RunDriver extends Context.Service<
       });
 
       /**
-       * Rechecks the newest queued Event of a Loop's Item and opens its Run with the submission the
+       * Rechecks the newest queued Event of a Loop's Item and opens its Run with the settings the
        * recheck returns. A trigger mismatch revokes the queued trigger matches from the queue read;
        * a CI fix mismatch revokes only that fix before trying the next queued Event.
        * Returns the opened Run, or `None` if no Event can be admitted. `completedRunId` is the
@@ -323,7 +328,7 @@ export class RunDriver extends Context.Service<
             return Option.none<RunId>();
           }
           const recheck = yield* condition.recheck(submission);
-          if (recheck._tag !== "Matches") {
+          if (recheck._tag === "NoLongerMatches" || recheck._tag === "ItemGone") {
             const eventIds =
               recheck._tag === "ItemGone"
                 ? queued.eventIds
@@ -340,7 +345,7 @@ export class RunDriver extends Context.Service<
                 revokedEvents: revoked,
               });
               pending = yield* store
-                .queuedOn(submission.loop, submission.itemKey)
+                .admissibleQueue(submission.loop, submission.itemKey)
                 .pipe(retryingStore(runId, "read the remaining queued events"));
               continue;
             }
@@ -351,8 +356,26 @@ export class RunDriver extends Context.Service<
             );
             return Option.none<RunId>();
           }
+          if (recheck._tag === "Undetermined") {
+            if (Option.isSome(submission.ciFailureHead)) {
+              // A CI fix can outlive its head, so it opens only after a recheck that can tell.
+              yield* Effect.logInfo(
+                "Queued CI fix could not be rechecked; it stays queued for the next reconcile",
+                { ...fields, head: submission.ciFailureHead.value },
+              );
+              return Option.none<RunId>();
+            }
+            yield* Effect.logInfo(
+              "Queued trigger match could not be rechecked; opening it with its saved settings",
+              fields,
+            );
+          }
+          const admitted = Submission.make({
+            ...submission,
+            ...savedSettings(recheck._tag === "Matches" ? recheck.settings : submission),
+          });
           const claimed = yield* store
-            .claimQueued(recheck.submission, runId)
+            .claimQueued(admitted, runId)
             .pipe(retryingStore(runId, "claim the queued event"));
           if (Option.isNone(claimed)) {
             // During the check, the Event was ignored, another Run opened for the Item, or a cycle
@@ -366,7 +389,7 @@ export class RunDriver extends Context.Service<
           yield* Effect.logInfo("Queued Event still matches its trigger; opening its Run", {
             ...fields,
             runId: claimed.value,
-            approval: recheck.submission.approval,
+            approval: admitted.approval,
           });
           yield* launch(claimed.value);
           return claimed;
@@ -872,6 +895,36 @@ export class RunDriver extends Context.Service<
         );
       }).pipe(Effect.withSpan("RunDriver.recoverWorkspaces"));
 
+      /** Admits each queue in turn and returns the Runs it opened. */
+      const admitQueues = (queues: ReadonlyArray<PendingQueue>) =>
+        Effect.forEach(queues, ({ queued, closedRunId }) =>
+          continueQueued(queued, closedRunId).pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Could not admit the queued Events; the next reconcile retries", {
+                eventId: queued.submission.event.id,
+                loop: queued.submission.loop,
+                itemKey: queued.submission.itemKey,
+                errorTag: error._tag,
+              }),
+            ),
+            Effect.orElseSucceed(Option.none<RunId>),
+          ),
+        ).pipe(Effect.map((admitted) => admitted.flatMap(Option.toArray)));
+
+      const admitCiFixes = Effect.gen(function* () {
+        const queues = (yield* store.pendingQueues).filter(({ queued }) =>
+          Option.isSome(queued.submission.ciFailureHead),
+        );
+        const opened = yield* admitQueues(queues);
+        const fields = {
+          ciFixEventIds: queues.map(({ queued }) => queued.submission.event.id),
+          openedRunIds: opened,
+        };
+        if (opened.length === 0) yield* Effect.logDebug("No queued CI fix opened a Run", fields);
+        else yield* Effect.logInfo("Admitting the queued CI fixes opened Runs", fields);
+        return opened;
+      }).pipe(Effect.withSpan("RunDriver.admitCiFixes"));
+
       const reconcile = Effect.gen(function* () {
         // No Run fiber retries these stops, so reconcile does, before it starts the fibers they
         // keep from starting an Attempt.
@@ -884,33 +937,8 @@ export class RunDriver extends Context.Service<
             ),
           { discard: true },
         );
-        const ciFixes = yield* store.pendingCiFixes;
-        const admittedCiFixes = yield* Effect.forEach(ciFixes, (queued) =>
-          continueQueued(queued, Option.none()).pipe(
-            Effect.tapError((error) =>
-              Effect.logError("Could not admit the queued CI fix; reconciliation retries it", {
-                eventId: queued.submission.event.id,
-                errorTag: error._tag,
-              }),
-            ),
-            Effect.orElseSucceed(Option.none<RunId>),
-          ),
-        );
-        const continuations = yield* store.pendingContinuations;
-        yield* Effect.forEach(
-          continuations,
-          (runId) =>
-            continueWithNewest(runId).pipe(
-              Effect.tapError((error) =>
-                Effect.logError("Could not continue the queued Events behind a closed Run", {
-                  runId,
-                  errorTag: error._tag,
-                }),
-              ),
-              Effect.ignore,
-            ),
-          { discard: true },
-        );
+        const queues = yield* store.pendingQueues;
+        const opened = yield* admitQueues(queues);
         const driven = yield* store.runIdsToDrive;
         const withoutFiber = yield* Effect.filter(driven, (runId) =>
           Effect.map(FiberMap.has(fibers, runId), (running) => !running),
@@ -919,19 +947,13 @@ export class RunDriver extends Context.Service<
         // After the stops above, so a machine whose stop they confirmed is released before it.
         yield* executor.sweep;
         const fields = {
-          ciFixEventIds: ciFixes.map(({ submission }) => submission.event.id),
-          admittedCiFixRunIds: admittedCiFixes.flatMap(Option.toArray),
-          continuedAfterRunIds: continuations,
+          queuedEventIds: queues.map(({ queued }) => queued.submission.event.id),
+          openedRunIds: opened,
           startedRunIds: withoutFiber,
           drivenRunIds: driven.length,
           retriedStopAttemptIds: unstopped.map(({ attemptId }) => attemptId),
         };
-        if (
-          ciFixes.length === 0 &&
-          continuations.length === 0 &&
-          withoutFiber.length === 0 &&
-          unstopped.length === 0
-        )
+        if (opened.length === 0 && withoutFiber.length === 0 && unstopped.length === 0)
           yield* Effect.logDebug("Every Run to drive already has its fiber", fields);
         else yield* Effect.logInfo("Runs recovered from the run tables", fields);
       }).pipe(Effect.withSpan("RunDriver.reconcile"));
@@ -941,6 +963,7 @@ export class RunDriver extends Context.Service<
         resume,
         stop,
         continueWithNewest,
+        admitCiFixes,
         reconcile,
         recoverWorkspaces,
         holdSlot,

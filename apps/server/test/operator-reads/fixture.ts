@@ -26,7 +26,7 @@ import {
 } from "@usine/engine/item-projection";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import { savedSettings, TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
 import { CompletionCheck } from "@usine/engine/completion-check";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -230,7 +230,8 @@ export const checkReads = ({
       Layer.provide(slowWorker),
       Layer.provide(
         Layer.succeed(TriggerCondition)({
-          recheck: (submission) => Effect.succeed(TriggerRecheck.Matches({ submission })),
+          recheck: (submission) =>
+            Effect.succeed(TriggerRecheck.Matches({ settings: savedSettings(submission) })),
         }),
       ),
       Layer.provide(CompletionCheck.unverified),

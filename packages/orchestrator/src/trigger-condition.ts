@@ -4,8 +4,13 @@ import type { LoopFile } from "@usine/config/loop";
 import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
 import { matchesLoop } from "@usine/config/project";
 import { canonicalRepositoryName } from "@usine/core/repository";
-import { Submission } from "@usine/engine/engine";
-import { TriggerCondition, TriggerRecheck } from "@usine/engine/trigger-condition";
+import type { Submission } from "@usine/engine/engine";
+import {
+  type AdmissionSettings,
+  savedSettings,
+  TriggerCondition,
+  TriggerRecheck,
+} from "@usine/engine/trigger-condition";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
   ChangedIssue,
@@ -30,11 +35,11 @@ const logFields = (submission: Submission) => ({
 
 /**
  * Re-evaluates a queued Event's trigger against a fresh GitHub snapshot of its Item. Returns
- * `ItemGone` if the Item no longer exists, and `Matches` on any other failure or after five
- * seconds. A queued CI fix preserves its recorded prompt and failure evidence. Its approval,
- * Agent, models, permissions, CI policy, generated CI handoff instructions, outcome labels, and
- * cycle limit follow its Loop's current configuration. Admission persists the refreshed task
- * and settings.
+ * `ItemGone` if the Item no longer exists, and `Undetermined` on any other GitHub failure or
+ * after five seconds. A queued trigger match keeps its saved settings. A queued CI fix keeps its
+ * recorded prompt and failure evidence; its approval, Agent, models, permissions, CI policy,
+ * generated CI handoff instructions, outcome labels, and cycle limit follow its Loop's current
+ * configuration.
  */
 export const triggerConditionLayer: Layer.Layer<
   TriggerCondition,
@@ -47,7 +52,7 @@ export const triggerConditionLayer: Layer.Layer<
     const expressions = yield* ExpressionEngine;
     const instances = yield* CurrentInstance;
 
-    /** Returns the CI fix with its Loop's current settings, or `None` if the Loop lost its Agent. */
+    /** Returns the CI fix's current Loop settings, or `None` if the Loop lost its Agent. */
     const withCurrentSettings = Effect.fn("TriggerCondition.withCurrentSettings")(function* (
       instance: LoadedInstance,
       loop: LoopFile,
@@ -61,7 +66,7 @@ export const triggerConditionLayer: Layer.Layer<
           agent: resolved.failure.agent,
           errorTag: resolved.failure._tag,
         });
-        return Option.none<Submission>();
+        return Option.none<AdmissionSettings>();
       }
       const settings = yield* loopSettings(
         expressions,
@@ -76,22 +81,20 @@ export const triggerConditionLayer: Layer.Layer<
         permissions: settings.permissions,
         cycleLimit: Option.getOrNull(settings.cycleLimit),
       });
-      return Option.some(
-        Submission.make({
-          ...submission,
-          ...settings,
-          task: taskWithCiPolicy(submission.task, settings.ciPolicy, submission.ciPolicy),
-        }),
-      );
+      return Option.some<AdmissionSettings>({
+        ...settings,
+        task: taskWithCiPolicy(submission.task, settings.ciPolicy, submission.ciPolicy),
+      });
     });
 
     const evaluate = Effect.fn("TriggerCondition.evaluate")(function* (
       loop: LoopFile,
       repository: ManagedRepo,
       submission: Submission,
+      settings: AdmissionSettings,
     ) {
       const fields = logFields(submission);
-      const matches = TriggerRecheck.Matches({ submission });
+      const matches = TriggerRecheck.Matches({ settings });
       if (loop.trigger.on === "schedule") return matches;
       const item = decodeItemKey(submission.itemKey);
       if (Option.isNone(item)) {
@@ -161,13 +164,13 @@ export const triggerConditionLayer: Layer.Layer<
         });
         return TriggerRecheck.NoLongerMatches();
       }
-      const current = Option.isSome(submission.ciFailureHead)
+      const settings = Option.isSome(submission.ciFailureHead)
         ? yield* withCurrentSettings(instance, loop, repository, submission)
-        : Option.some(submission);
-      if (Option.isNone(current)) return TriggerRecheck.NoLongerMatches();
+        : Option.some(savedSettings(submission));
+      if (Option.isNone(settings)) return TriggerRecheck.NoLongerMatches();
       // Bound the GitHub read so a stalled request cannot retain the closed Run's continuation
       // and block the Item or an operator retry.
-      return yield* evaluate(loop, repository, current.value).pipe(
+      return yield* evaluate(loop, repository, submission, settings.value).pipe(
         Effect.timeout("5 seconds"),
         Effect.catchTag("GitHubItemNotFoundError", (error) =>
           Effect.logInfo("Queued Event's Item is gone from GitHub; its Events are revoked", {
@@ -178,12 +181,12 @@ export const triggerConditionLayer: Layer.Layer<
           }).pipe(Effect.as(TriggerRecheck.ItemGone())),
         ),
         Effect.catch((error) =>
-          Effect.logWarning("Trigger re-check failed; opening the queued Event as before", {
+          Effect.logWarning("Trigger re-check could not read the Item's current state", {
             ...fields,
             ...(error._tag === "TimeoutError"
               ? { errorTag: error._tag, message: "Trigger re-check exceeded five seconds" }
               : repositoryFailureLogFields(error)),
-          }).pipe(Effect.as(TriggerRecheck.Matches({ submission: current.value }))),
+          }).pipe(Effect.as(TriggerRecheck.Undetermined())),
         ),
       );
     });

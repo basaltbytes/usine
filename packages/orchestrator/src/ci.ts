@@ -20,7 +20,12 @@ import {
   RepositoryRevision,
 } from "@usine/core/repository";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
-import { ciFixDedupKey, Submission, RunEngine, EnginePersistenceError } from "@usine/engine/engine";
+import {
+  ciFixDedupKey,
+  type EnginePersistenceError,
+  RunEngine,
+  Submission,
+} from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
@@ -470,21 +475,33 @@ export class CiMonitor extends Context.Service<
         );
       });
 
+      // A cycle reset returns blocked CI fixes to the queue; admitting them here spares them the
+      // wait for the periodic reconcile.
+      const admitReplayedCiFixes = Effect.gen(function* () {
+        const resets = yield* budgets.pendingResets;
+        if (resets.length === 0) return;
+        const opened = yield* engine.admitCiFixes;
+        yield* Effect.logDebug("Admitted the queued CI fixes while cycle resets are pending", {
+          itemKeys: resets.map(({ itemKey }) => itemKey),
+          openedRunIds: opened,
+        });
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning(
+            "Could not admit the CI fixes replayed by a cycle reset; the periodic reconcile retries them",
+            { errorTag: error._tag },
+          ),
+        ),
+        Effect.ignore,
+        Effect.withSpan("CiMonitor.admitReplayedCiFixes"),
+      );
+
       return {
         reconcile: Effect.fn("CiMonitor.reconcile")(function* (
           instance: LoadedInstance,
           repository: Option.Option<RepositoryName>,
         ) {
-          if ((yield* budgets.pendingResets).length > 0) {
-            yield* engine.reconcile.pipe(
-              Effect.mapError((cause) =>
-                EnginePersistenceError.make({
-                  operation: "reconcile cycle reset CI fixes",
-                  cause,
-                }),
-              ),
-            );
-          }
+          yield* admitReplayedCiFixes;
           const waits = (yield* engine.awaitingCi).filter((wait) =>
             Option.match(repository, {
               onNone: () => true,

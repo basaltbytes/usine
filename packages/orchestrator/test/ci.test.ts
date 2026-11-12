@@ -33,7 +33,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunReader } from "@usine/engine/run-reader";
 import { LoopControl } from "@usine/engine/loop-control";
-import { RunEngine, Submission } from "@usine/engine/engine";
+import { EnginePersistenceError, RunEngine, Submission } from "@usine/engine/engine";
 import { layer as engineLayer } from "@usine/engine/local-sqlite";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -355,6 +355,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   );
   const runtime = CiMonitor.layer.pipe(Layer.provideMerge(dependencies));
   return {
+    dependencies,
     currentInstance,
     observed,
     itemState,
@@ -1313,6 +1314,117 @@ it.live("an exhausted fix-loop budget leaves a failed source run needing attenti
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.live("a failed admission of replayed CI fixes does not fail the CI poll", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const limited = LoadedInstance.make({
+        ...fixtureInstance,
+        loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) })],
+      });
+      const setup = yield* scenario(3600, limited);
+      const failingAdmission = Layer.effect(
+        RunEngine,
+        Effect.map(RunEngine, (engine) =>
+          RunEngine.of({
+            ...engine,
+            admitCiFixes: Effect.fail(
+              EnginePersistenceError.make({ operation: "list pending queues", cause: "locked" }),
+            ),
+          }),
+        ),
+      ).pipe(Layer.provide(setup.dependencies));
+      const runtime = CiMonitor.layer.pipe(
+        Layer.provide(failingAdmission),
+        Layer.provideMerge(setup.dependencies),
+      );
+      yield* Effect.gen(function* () {
+        const budgets = yield* CycleBudgets;
+        const monitor = yield* CiMonitor;
+        yield* openWait(setup.timeoutSeconds, true);
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+        );
+        yield* monitor.reconcile(limited, Option.none());
+        const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+        yield* budgets.reset(
+          ask.id,
+          Event.make({
+            id: EventId.make("reset-failed-admission"),
+            dedupKey: DedupKey.make("reset-failed-admission"),
+            receivedAt: yield* DateTime.now,
+            payload: {},
+          }),
+        );
+        assert.strictEqual((yield* budgets.pendingResets).length, 1);
+
+        const cycle = yield* monitor.reconcile(limited, Option.none());
+
+        assert.deepStrictEqual(cycle.failures, []);
+      }).pipe(Effect.provide(runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a pending cycle reset admits only the queued CI fixes, without a full reconcile", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const limited = LoadedInstance.make({
+        ...fixtureInstance,
+        loops: [LoopFile.make({ ...loop, maxCycles: CycleLimit.make(1) })],
+      });
+      const setup = yield* scenario(3600, limited);
+      const admissions = yield* Ref.make(0);
+      const narrowAdmission = Layer.effect(
+        RunEngine,
+        Effect.map(RunEngine, (engine) =>
+          RunEngine.of({
+            ...engine,
+            reconcile: Effect.die("CiMonitor ran a full reconcile"),
+            admitCiFixes: Ref.update(admissions, (count) => count + 1).pipe(
+              Effect.andThen(engine.admitCiFixes),
+            ),
+          }),
+        ),
+      ).pipe(Layer.provide(setup.dependencies));
+      const runtime = CiMonitor.layer.pipe(
+        Layer.provide(narrowAdmission),
+        Layer.provideMerge(setup.dependencies),
+      );
+      yield* Effect.gen(function* () {
+        const budgets = yield* CycleBudgets;
+        const monitor = yield* CiMonitor;
+        yield* openWait(setup.timeoutSeconds, true);
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+        );
+        yield* monitor.reconcile(limited, Option.none());
+        const beforeReset = yield* Ref.get(admissions);
+        assert.strictEqual(beforeReset, 0);
+        const ask = (yield* budgets.asks)[0] ?? assert.fail("missing cycle ask");
+        yield* budgets.reset(
+          ask.id,
+          Event.make({
+            id: EventId.make("reset-narrow-admission"),
+            dedupKey: DedupKey.make("reset-narrow-admission"),
+            receivedAt: yield* DateTime.now,
+            payload: {},
+          }),
+        );
+
+        const cycle = yield* monitor.reconcile(limited, Option.none());
+
+        assert.deepStrictEqual(cycle.failures, []);
+        const afterReset = yield* Ref.get(admissions);
+        assert.strictEqual(afterReset, 1);
+      }).pipe(Effect.provide(runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live("a cycle reset revokes a blocked CI fix when the PR moves to a failing head", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -1475,7 +1587,7 @@ it.live.each(["failure", "superseded", "success", "paused", "CLOSED", "MERGED", 
             const resets = yield* budgets.pendingResets;
             for (const reset of resets) yield* budgets.acknowledgeReset(reset);
             yield* controls.unpause(loop.name);
-            yield* engine.reconcile;
+            yield* engine.admitCiFixes;
           }
           if (state === "failure" || state === "paused") {
             yield* Ref.get(setup.tasks).pipe(
@@ -1540,7 +1652,7 @@ it.live.each([
     snapshotFails: false,
   },
 ] as const)(
-  "a replayed CI fix recorded with approval $recorded takes approval $current from the current loop (GitHub read fails: $snapshotFails)",
+  "a replayed CI fix recorded with approval $recorded takes approval $current from the current loop (first GitHub read fails: $snapshotFails)",
   ({ recorded, current, expected, snapshotFails }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1591,6 +1703,11 @@ it.live.each([
                 }),
               ),
             );
+            yield* engine.reconcile;
+            // The fix stays queued until a recheck can read the pull request.
+            const held = yield* reader.runForEvent(DedupKey.make(blocked.eventId));
+            assert(Option.isNone(held));
+            yield* Ref.set(setup.snapshotFailure, Option.none());
             yield* engine.reconcile;
           } else {
             const cycle = yield* (yield* PollingTriggers).poll(edited);
