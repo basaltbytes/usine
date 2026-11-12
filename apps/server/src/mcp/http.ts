@@ -36,40 +36,41 @@ const JsonBody = Schema.fromJsonString(Schema.Json);
  * Sends each operator request through `router` in this process, with the `credential` headers, so
  * the route policy, the auth guard, and audit apply to it as to an HTTP request.
  */
-export const routedOperatorCall =
-  (router: HttpRouter.HttpRouter, credential: Readonly<Record<string, string>>) =>
-  (request: OperatorRequest): Effect.Effect<OperatorResponse> =>
-    Effect.gen(function* () {
-      yield* Effect.annotateCurrentSpan({ method: request.method, url: request.url });
-      const headers = new Headers(credential);
-      const body = yield* Effect.transposeOption(
-        Option.map(request.body, (value) => Schema.encodeEffect(JsonBody)(value)),
-      ).pipe(Effect.orDie);
-      if (Option.isSome(body)) headers.set("content-type", "application/json");
-      const inner = HttpServerRequest.fromWeb(
-        new Request(new URL(request.url, "http://localhost"), {
-          method: request.method,
-          headers,
-          ...Option.match(body, { onNone: () => ({}), onSome: (text) => ({ body: text }) }),
-        }),
-      );
-      const sent = yield* Deferred.make<OperatorResponse>();
-      // The router erases its routes' error types; causeResponse maps each to its response.
-      // @effect-diagnostics-next-line anyUnknownInErrorContext:off
-      const routed = router
-        .asHttpEffect()
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.map(HttpServerError.causeResponse(cause), ([response]) => response),
-          ),
-        );
-      yield* HttpEffect.toHandled(routed, (_, response) =>
-        Effect.promise(() => HttpServerResponse.toWeb(response).text()).pipe(
-          Effect.flatMap((text) => Deferred.succeed(sent, { status: response.status, text })),
+export const routedOperatorCall = (
+  router: HttpRouter.HttpRouter,
+  credential: Readonly<Record<string, string>>,
+) =>
+  Effect.fn("Operator.routedRequest")(function* (request: OperatorRequest) {
+    yield* Effect.annotateCurrentSpan({ method: request.method, url: request.url });
+    const headers = new Headers(credential);
+    const body = yield* Effect.transposeOption(
+      Option.map(request.body, (value) => Schema.encodeEffect(JsonBody)(value)),
+    ).pipe(Effect.orDie);
+    if (Option.isSome(body)) headers.set("content-type", "application/json");
+    const inner = HttpServerRequest.fromWeb(
+      new Request(new URL(request.url, "http://localhost"), {
+        method: request.method,
+        headers,
+        ...Option.match(body, { onNone: () => ({}), onSome: (text) => ({ body: text }) }),
+      }),
+    );
+    const sent = yield* Deferred.make<OperatorResponse>();
+    // The router erases its routes' error types; causeResponse maps each to its response.
+    // @effect-diagnostics-next-line anyUnknownInErrorContext:off
+    const routed = router
+      .asHttpEffect()
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.map(HttpServerError.causeResponse(cause), ([response]) => response),
         ),
-      ).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, inner));
-      return yield* Deferred.await(sent);
-    }).pipe(Effect.withSpan("Operator.routedRequest"));
+      );
+    yield* HttpEffect.toHandled(routed, (_, response) =>
+      Effect.promise(() => HttpServerResponse.toWeb(response).text()).pipe(
+        Effect.flatMap((text) => Deferred.succeed(sent, { status: response.status, text })),
+      ),
+    ).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, inner));
+    return yield* Deferred.await(sent);
+  });
 
 /**
  * Serves the operator tools at `POST /api/mcp`. Each tool call goes through the same router as an

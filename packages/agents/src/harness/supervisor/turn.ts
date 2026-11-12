@@ -136,14 +136,16 @@ export const runSupervisorTurn = Effect.fn("Supervisor.turn")(function* <
   const runtime = yield* harnesses.runtime(brain.harness);
   const base = yield* continuationPolicy(spec, turn.message, RestartState.make({}));
   const reply = yield* Effect.gen(function* () {
-    const native = Option.isSome(turn.saved)
-      ? yield* runtime.open(
+    const native = yield* Option.match(turn.saved, {
+      onNone: () => runtime.open(spec, StartPrompt.make({ text: turn.message }), base, tools),
+      onSome: (reference) =>
+        runtime.open(
           spec,
-          StartResume.make({ reference: turn.saved.value }),
+          StartResume.make({ reference }),
           nextTurnPolicy(spec, base, turn.message),
           tools,
-        )
-      : yield* runtime.open(spec, StartPrompt.make({ text: turn.message }), base, tools);
+        ),
+    });
     const collected = yield* Effect.forkScoped(Stream.runCollect(native.running.events));
     if (resume) {
       if (native.active)
