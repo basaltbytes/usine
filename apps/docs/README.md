@@ -36,7 +36,7 @@ Diagrams retain their measured label sizes. Wide diagrams scroll inside a keyboa
 
 `node scripts/docs/check.mjs` checks every Markdown and MDX page for issue references and historical wording. The root `pnpm check` runs it, and `pnpm test` tests rejection with fixture pages. Quickstart files in `quickstart/` are imported directly by the quickstart page; edit them instead of duplicating examples. Their parser tests run in the docs build.
 
-The quickstart runs on the event-driven coordinator and shows one developer agent route per harness: Pi, Claude Code, and Codex. `src/quickstart/routes.ts` lists each route's harness and example model; the page and the bootstrap test both read it. Keep the login instructions, the routes, and the bootstrap files aligned.
+The quickstart runs on the event-driven coordinator and shows one developer agent route per harness: Pi, Claude Code, and Codex. `src/quickstart/routes.ts` lists each route's harness and example model, and `src/quickstart/bootstrap.ts` builds each route's bootstrap command. The bootstrap test runs each command and loads the folder it writes, and `test/built-quickstart.mjs` checks that each tab of the built page shows its route's harness and model. Keep the login instructions, the routes, and the bootstrap files aligned.
 
 ## OpenAPI
 

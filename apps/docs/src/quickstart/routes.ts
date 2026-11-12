@@ -1,5 +1,3 @@
-import developer from "../../quickstart/agents/developer.md?raw";
-
 /** A harness the quickstart's developer agent can run on, with an example model for it. */
 export interface QuickstartRoute {
   /** The tab label and the harness name in prose. */
@@ -16,9 +14,3 @@ export const quickstartRoutes: ReadonlyArray<QuickstartRoute> = [
   { label: "Claude Code", harness: "claude", model: "sonnet" },
   { label: "Codex", harness: "codex", model: "gpt-6-astra" },
 ];
-
-/** Returns the bootstrap `agents/developer.md` with the harness and model of `route`. */
-export const developerAgent = (route: QuickstartRoute): string =>
-  developer
-    .replace(/^harness: .*$/mu, `harness: ${route.harness}`)
-    .replace(/^model: .*$/mu, `model: ${route.model}`);

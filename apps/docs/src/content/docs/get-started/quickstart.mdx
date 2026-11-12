@@ -4,26 +4,8 @@ description: Install usine, connect a scratch repository, and approve an agent r
 ---
 
 import { Code, TabItem, Tabs } from "@astrojs/starlight/components";
-import settings from "../../../../quickstart/usine.yaml?raw";
-import loop from "../../../../quickstart/projects/scratch/loops/first-pr.md?raw";
-import { developerAgent, quickstartRoutes } from "../../../quickstart/routes.ts";
-
-export const bootstrapCommand = (route) =>
-  [
-    "mkdir -p ~/usine-instance/agents ~/usine-instance/projects/scratch/loops",
-    "cd ~/usine-instance",
-    "printf '.usine/\\n.env\\n' > .gitignore",
-    "cat > usine.yaml <<YAML",
-    settings.replaceAll("YOUR_GITHUB_LOGIN", "$GITHUB_LOGIN").trimEnd(),
-    "YAML",
-    "cat > agents/developer.md <<'AGENT'",
-    developerAgent(route).trimEnd(),
-    "AGENT",
-    "cat > projects/scratch/loops/first-pr.md <<'LOOP'",
-    loop.trimEnd(),
-    "LOOP",
-    "ls agents projects/scratch/loops",
-  ].join("\n");
+import { bootstrapCommand } from "../../../quickstart/bootstrap.ts";
+import { quickstartRoutes } from "../../../quickstart/routes.ts";
 
 This quickstart opens a pull request that adds one sentence to a scratch repository's README. It uses one local worker, one developer agent, and one loop that waits for your approval. The event-driven coordinator runs each attempt without a parent session, so the developer agent's harness credential is the only model credential the instance needs.
 
@@ -33,7 +15,7 @@ Use macOS or Linux with Node.js 22.22 or later, npm, Git, and the [GitHub CLI](h
 
 You also need one model login or API key. Choose the harness that accepts it:
 
-- **Pi**: an API key for a provider that Pi supports, such as OpenAI, Anthropic, or OpenRouter; an OpenCode Zen or OpenCode Go key; a ChatGPT subscription through Pi's `openai-codex` login; or an OpenAI-compatible or local endpoint that you add to Pi's `models.json`. Pi's other subscription logins, such as a Claude subscription, aren't supported.
+- **Pi**: an API key for a provider that Pi supports, such as OpenAI, Anthropic, or OpenRouter; an OpenCode Zen or OpenCode Go key; a ChatGPT subscription through Pi's **OpenAI Codex (legacy)** login, the `openai-codex` provider; or an OpenAI-compatible or local endpoint that you add to Pi's `models.json`. Pi's other account logins aren't supported, including its **OpenAI** ChatGPT sign-in, its OpenRouter sign-in, and a Claude subscription.
 - **Claude Code**: a Claude subscription, which works only inside Claude Code, or an Anthropic API key.
 - **Codex**: a ChatGPT subscription that includes Codex, or an OpenAI API key.
 
@@ -61,9 +43,11 @@ Expected: npm finishes installing, and `usine --version` prints the installed re
     pi
     ```
 
-    In Pi, enter `/login` and choose your provider: its API key entry, or **OpenAI (ChatGPT Plus/Pro)**, the `openai-codex` provider, for a ChatGPT subscription. For an OpenAI-compatible or local endpoint, add the provider to `~/.pi/agent/models.json` instead. Use `/model` to select the model, then ask it to reply with `ready`.
+    In Pi, enter `/login` and choose your provider's API key entry. For a ChatGPT subscription, choose **Sign in with an account**, then **OpenAI Codex (legacy)**, the `openai-codex` provider. usine refuses the other entries under **Sign in with an account**, including **OpenAI** and **OpenRouter**. For an OpenAI-compatible or local endpoint, add the provider to `~/.pi/agent/models.json` instead. Use `/model` to select the model, then ask it to reply with `ready`.
 
     Expected: Pi replies `ready`. Note the model's `provider/model` ID, such as `openrouter/openai/gpt-6-astra` or `openai-codex/gpt-6-astra`, and exit Pi with Ctrl+C twice. Pi saves the credential for this user in `~/.pi/agent` (or `PI_CODING_AGENT_DIR` if set). Pi also reads a provider's key variable, such as `OPENROUTER_API_KEY`, from the environment of `usine up`; it doesn't read the instance `.env`.
+
+    For a model from `models.json`, check its `reasoning` flag. The bootstrap agent in step 4 sets `effort: medium`, and usine refuses that effort for a model without `"reasoning": true`, even though Pi replies `ready` here. If the model supports reasoning, set `"reasoning": true` on its entry. Otherwise, set the agent's `effort` to `off` in step 4.
 
   </TabItem>
   <TabItem label="Claude Code">
@@ -104,7 +88,7 @@ Expected: `gh` prints the URL of your new `usine-scratch` repository. Use a new 
 
 ## 4. Create the bootstrap files
 
-Create a separate instance folder on persistent storage and write these files. The command substitutes the GitHub login from step 3 into `usine.yaml`. For Pi, replace the `model` value with the `provider/model` ID that you selected in step 2 before you run it.
+Create a separate instance folder on persistent storage and write these files. The command substitutes the GitHub login from step 3 into `usine.yaml`. For Pi, replace the `model` value with the `provider/model` ID that you selected in step 2 before you run it. For a `models.json` model without `"reasoning": true`, also replace `effort: medium` with `effort: off`.
 
 <Tabs syncKey="harness">
   {quickstartRoutes.map((route) => (
@@ -116,7 +100,7 @@ Create a separate instance folder on persistent storage and write these files. T
 
 Expected: `ls` lists `developer.md` under `agents` and `first-pr.md` under `projects/scratch/loops`. The `scratch` project contains your repository. Omitting `workers` selects the default local worker, which runs children on this machine as this user.
 
-The tabs differ only in the developer agent's `harness` and `model`, which select the harness from step 2. For Claude Code, `sonnet` selects the latest Sonnet model. Use another model ID that the harness accepts if you prefer.
+The tabs differ only in the developer agent's `harness` and `model`, which select the harness from step 2. The `effort` value must be a level that the model supports; `medium` works for each tab's example model. For Claude Code, `sonnet` selects the latest Sonnet model. Use another model ID that the harness accepts if you prefer.
 
 The instance setting `coordinator: events` selects the event-driven coordinator. It starts one child with the task and turns the child's report into the attempt's outcome, so the instance needs no parent model or credential. See [Coordinator](/reference/configuration/agents/#coordinator).
 

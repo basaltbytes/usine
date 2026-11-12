@@ -7,11 +7,9 @@ import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Effect, FileSystem, Layer, Option } from "effect";
-import {
-  developerAgent,
-  type QuickstartRoute,
-  quickstartRoutes,
-} from "../src/quickstart/routes.ts";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { bootstrapCommand, developerAgent } from "../src/quickstart/bootstrap.ts";
+import { type QuickstartRoute, quickstartRoutes } from "../src/quickstart/routes.ts";
 
 const bootstrap = InstanceDirectory.make(fileURLToPath(new URL("../quickstart", import.meta.url)));
 const folderLayer = ConfigurationFolder.layer.pipe(
@@ -23,7 +21,9 @@ const loadsQuickstart = (root: InstanceDirectory, route: QuickstartRoute) =>
   Effect.gen(function* () {
     const folder = yield* ConfigurationFolder;
     const instance = yield* folder.load(root);
-    expect(instance.config.projects.map(({ id }) => id)).toEqual(["scratch"]);
+    expect(instance.config.projects.map(({ id, repositories }) => ({ id, repositories }))).toEqual([
+      { id: "scratch", repositories: ["octo-quickstart/usine-scratch"] },
+    ]);
     expect(instance.config.workers.map(({ name, kind }) => ({ name, kind }))).toEqual([
       { name: "local", kind: "local" },
     ]);
@@ -63,12 +63,26 @@ it.effect("publishes the developer agent of one quickstart route", () =>
 );
 
 for (const route of quickstartRoutes) {
-  it.effect(`loads the quickstart with the ${route.label} developer agent`, () =>
+  it.effect(`loads the folder that the ${route.label} bootstrap command writes`, () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
-      yield* fs.copy(bootstrap, root);
-      yield* fs.writeFileString(`${root}/agents/developer.md`, developerAgent(route));
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const exitCode = yield* spawner.exitCode(
+        ChildProcess.make("sh", ["-c", bootstrapCommand(route)], {
+          cwd: home,
+          env: { HOME: home, GITHUB_LOGIN: "octo-quickstart" },
+          extendEnv: true,
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "inherit",
+        }),
+      );
+      expect(exitCode).toEqual(0);
+      const root = InstanceDirectory.make(`${home}/usine-instance`);
+      expect(yield* fs.readFileString(`${root}/agents/developer.md`)).toEqual(
+        developerAgent(route),
+      );
       yield* loadsQuickstart(root, route);
     }).pipe(
       Effect.scoped,
