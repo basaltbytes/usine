@@ -164,15 +164,26 @@ export class PiSdk extends Context.Service<
   }
 >()("@usine/agents/harness/pi/sdk/PiSdk") {}
 
-/** Provides Pi sessions using the installed SDK and worker-user settings. Project extensions, skills, prompt templates, and themes are disabled. Child conversations persist according to their storage policy. */
-export const piSdkLive = Layer.succeed(PiSdk)({
+/** Where Pi sessions read their model runtime and user settings. */
+export interface PiSdkSources {
+  /** Creates the model and credential runtime of one session; `signal` cancels startup. */
+  readonly modelRuntime: (signal: AbortSignal) => Promise<ModelRuntime>;
+  /** The worker user's Pi settings directory. */
+  readonly agentDir: () => string;
+}
+
+/**
+ * Starts Pi sessions from `sources`. Project extensions, skills, prompt templates, and themes are
+ * disabled. Child conversations persist according to their storage policy.
+ */
+const piSdk = (sources: PiSdkSources): PiSdk["Service"] => ({
   start: async (options) => {
-    const modelRuntime = await ModelRuntime.create({ signal: options.signal });
+    const modelRuntime = await sources.modelRuntime(options.signal);
     const parts = splitPiModel(options.model);
     if (parts === undefined) return { _tag: "UnknownModel" };
     const selected = modelRuntime.getModel(parts.provider, parts.modelId);
     if (selected === undefined) return { _tag: "UnknownModel" };
-    const agentDir = getAgentDir();
+    const agentDir = sources.agentDir();
     // The worktree is untrusted, so its `.pi/` settings, SYSTEM.md, extensions, and skills are not
     // loaded; inline extension factories, such as the pause gate, still register.
     const settingsManager = SettingsManager.create(options.cwd, agentDir, {
@@ -261,6 +272,15 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       if (!ownershipTransferred) session.dispose();
     }
   },
+});
+
+/** Provides Pi sessions that read their model runtime and user settings from `sources`. */
+export const piSdkLayer = (sources: PiSdkSources) => Layer.succeed(PiSdk)(piSdk(sources));
+
+/** Provides Pi sessions using the installed SDK and worker-user settings. */
+export const piSdkLive = piSdkLayer({
+  modelRuntime: (signal) => ModelRuntime.create({ signal }),
+  agentDir: getAgentDir,
 });
 
 export interface AcquiredPiStart {

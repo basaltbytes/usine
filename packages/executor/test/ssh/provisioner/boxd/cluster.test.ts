@@ -4,20 +4,20 @@ import { BoxdEndpoint, BoxdRegion } from "@usine/core/worker";
 import { jsonKey } from "@usine/core/json-key";
 import { Clock, Effect, Layer, Option, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
-import { BoxdApi as BoxdService } from "../../../src/ssh/provisioner/boxd/api-pb.ts";
-import { BoxdApi, type BoxdCallError } from "../../../src/ssh/provisioner/boxd/client.ts";
+import { BoxdApi as BoxdService } from "../../../../src/ssh/provisioner/boxd/api-pb.ts";
+import { BoxdApi, type BoxdCallError } from "../../../../src/ssh/provisioner/boxd/client.ts";
 import {
   BOXD_API,
   exchangeUrl,
   rawKeyAllowed,
   refusesRawKey,
-} from "../../../src/ssh/provisioner/boxd/endpoint.ts";
-import { boxdApiLayer } from "../../../src/ssh/provisioner/boxd/grpc-client.ts";
-import { machineDriversFor } from "../../../src/ssh/provisioner/drivers.ts";
-import { fakeMachine, WORKER } from "../support.ts";
-import { fakeBoxd } from "./fake-boxd.ts";
-import { boxdAddress } from "./fixtures.ts";
-import { boxdSettings, UNUSED_CLUSTER, UNUSED_EXCHANGE } from "./support.ts";
+} from "../../../../src/ssh/provisioner/boxd/endpoint.ts";
+import { boxdApiLayer } from "../../../../src/ssh/provisioner/boxd/grpc-client.ts";
+import { machineDriversFor } from "../../../../src/ssh/provisioner/drivers.ts";
+import { fakeMachine, WORKER } from "../../support.ts";
+import { fakeBoxd } from "./fake.ts";
+import { boxdAddress } from "../fixtures.ts";
+import { boxdSettings, UNUSED_CLUSTER, UNUSED_EXCHANGE } from "../support.ts";
 
 // The boxd cluster that a Worker's calls go to: its endpoints, regions, and authentication.
 

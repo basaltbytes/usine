@@ -53118,11 +53118,10 @@
               }
             ]
           },
-          "fixRunId": {
+          "fixRun": {
             "anyOf": [
               {
-                "type": "string",
-                "minLength": 1
+                "$ref": "#/components/schemas/_usine_engine_CiFixRunEncoded"
               },
               {
                 "type": "null"
@@ -53141,7 +53140,34 @@
           "runId",
           "loop",
           "failure",
-          "fixRunId"
+          "fixRun"
+        ],
+        "additionalProperties": false
+      },
+      "_usine_engine_CiFixRunEncoded": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Waiting",
+              "Queued",
+              "Running",
+              "AwaitingCi",
+              "Succeeded",
+              "HandedOff",
+              "Failed"
+            ]
+          }
+        },
+        "required": [
+          "runId",
+          "state"
         ],
         "additionalProperties": false
       },

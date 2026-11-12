@@ -12,7 +12,11 @@ import { assert, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/core/label";
 import { RepositoryName } from "@usine/core/repository";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
-import { PoolLimitNeed, PreflightFindingNeed } from "../src/operator/need.ts";
+import { LoopName } from "@usine/core/loop";
+import { RunId } from "@usine/core/run";
+import { CiFixRun } from "@usine/engine/run-reader";
+import { AgentFailureView } from "../src/operator/attempt.ts";
+import { PoolLimitNeed, PreflightFindingNeed, RunFailureNeed } from "../src/operator/need.ts";
 import { attentionKey, partitionNeeds, poolLimitNeeds } from "../src/operator/attention.ts";
 
 it("shows a changed preflight finding again and ignores acknowledgements of a different entry", () => {
@@ -43,6 +47,30 @@ it("shows a changed preflight finding again and ignores acknowledgements of a di
   const other = PreflightFindingNeed.make({ ...original, id: "another-finding" });
   assert.deepStrictEqual(partitionNeeds([other], acknowledged).needsYou, [other]);
   assert.deepStrictEqual(partitionNeeds([original], []).needsYou, [original]);
+});
+
+it("keeps a dismissed Run failure dismissed when its CI fix Run opens or changes state", () => {
+  const original = RunFailureNeed.make({
+    id: "run-failure:source:attempt-1",
+    repository: RepositoryName.make("test/project"),
+    runId: RunId.make("source"),
+    loop: LoopName.make("test/project/develop"),
+    failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
+  });
+  const acknowledged = [attentionKey(original)];
+  for (const state of ["Waiting", "Failed"] as const) {
+    const linked = RunFailureNeed.make({
+      ...original,
+      fixRun: CiFixRun.make({ runId: RunId.make("fix"), state }),
+    });
+    assert.deepStrictEqual(attentionKey(linked), attentionKey(original));
+    assert.deepStrictEqual(partitionNeeds([linked], acknowledged).dismissedNeeds, [linked]);
+  }
+  const changed = RunFailureNeed.make({
+    ...original,
+    failure: AgentFailureView.make({ message: "CI failed again." }),
+  });
+  assert.deepStrictEqual(partitionNeeds([changed], acknowledged).needsYou, [changed]);
 });
 
 it("warns at 80 percent for either window and skips expired or undated windows", () => {

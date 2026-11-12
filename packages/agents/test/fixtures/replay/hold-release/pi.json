@@ -1,0 +1,1610 @@
+{
+  "protocol": "pi-provider-stream",
+  "harnessVersion": "1.4.0",
+  "model": "openai/gpt-5.6-luna",
+  "scenario": "hold-release",
+  "environment": { "HOME": "$HOME", "PATH": "$PATH" },
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "port": "pi:1.1",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "{\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\"command"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "command",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": {},
+              "partialJson": "{\"command"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\":\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node" },
+              "partialJson": "{\"command\":\"node"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "node",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait" },
+              "partialJson": "{\"command\":\"node wait"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": " wait",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.c" },
+              "partialJson": "{\"command\":\"node wait.c"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": ".c",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.c" },
+              "partialJson": "{\"command\":\"node wait.c"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "js",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\""
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\",\"",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "timeout",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "\":",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs" },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "null",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_delta",
+        "contentIndex": 0,
+        "delta": "}",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null },
+              "partialJson": "{\"command\":\"node wait.cjs\",\"timeout\":null}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "toolcall_end",
+        "contentIndex": 0,
+        "toolCall": {
+          "type": "toolCall",
+          "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+          "name": "bash",
+          "arguments": { "command": "node wait.cjs", "timeout": null }
+        },
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.1/events",
+      "payload": {
+        "type": "done",
+        "reason": "toolUse",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+              "name": "bash",
+              "arguments": { "command": "node wait.cjs", "timeout": null }
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 1496,
+            "output": 25,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 1521,
+            "cost": {
+              "input": 0.0002992,
+              "output": 0.000029999999999999997,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0003292
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794443781319,
+          "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566",
+          "rawStopReason": "completed",
+          "durationMs": 1423
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "pi:1.2",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+                "name": "bash",
+                "arguments": { "command": "node wait.cjs", "timeout": null }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 1496,
+              "output": 25,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 1521,
+              "cost": {
+                "input": 0.0002992,
+                "output": 0.000029999999999999997,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0003292
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+            "toolName": "bash",
+            "content": [{ "type": "text", "text": "(no output)" }],
+            "isError": false
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443782795
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "thinking_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "thinking", "thinking": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "thinking_end",
+        "contentIndex": 0,
+        "content": "",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_start",
+        "contentIndex": 1,
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            },
+            { "type": "text", "text": "" }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "RE",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            },
+            { "type": "text", "text": "REPLAY" }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "PLAY",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            },
+            { "type": "text", "text": "REPLAY" }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "_GUID",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            },
+            { "type": "text", "text": "REPLAY_GUIDED" }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 1,
+        "delta": "ED",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            },
+            { "type": "text", "text": "REPLAY_GUIDED" }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "text_end",
+        "contentIndex": 1,
+        "content": "REPLAY_GUIDED",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            },
+            {
+              "type": "text",
+              "text": "REPLAY_GUIDED",
+              "textSignature": "{\"v\":1,\"id\":\"msg_06a4db7b60993b7a016af50a08438487d296b97c7c617d2d6a\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.2/events",
+      "payload": {
+        "type": "done",
+        "reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+            },
+            {
+              "type": "text",
+              "text": "REPLAY_GUIDED",
+              "textSignature": "{\"v\":1,\"id\":\"msg_06a4db7b60993b7a016af50a08438487d296b97c7c617d2d6a\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 1557,
+            "output": 19,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 9,
+            "totalTokens": 1576,
+            "cost": {
+              "input": 0.00031140000000000003,
+              "output": 0.0000228,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.00033420000000000005
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443782795,
+          "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22",
+          "rawStopReason": "completed",
+          "durationMs": 1613
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "port": "pi:1.3",
+      "payload": {
+        "method": "stream",
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": "low",
+        "systemPrompt": null,
+        "tools": [],
+        "messages": [
+          {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+              "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+              "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+              "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: $PI_PACKAGE/README.md\n- Additional docs: $PI_PACKAGE/docs\n- Examples: $PI_PACKAGE/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+              "cwd": "<cwd>\n$WORKTREE\n</cwd>"
+            },
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": { "type": "number", "description": "Maximum number of lines to read" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["command"],
+                  "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute" },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "edits"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["oldText", "newText"],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": { "type": "string", "description": "Content to write to the file" }
+                  }
+                },
+                "constrainedSampling": { "type": "json_schema", "strict": "prefer" }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run exactly `node wait.cjs` with your command tool and wait for it to finish. Then reply with exactly REPLAY_DONE. The test controls the command. Do not use any other tools."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "toolCall",
+                "id": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+                "name": "bash",
+                "arguments": { "command": "node wait.cjs", "timeout": null }
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 1496,
+              "output": 25,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 1521,
+              "cost": {
+                "input": 0.0002992,
+                "output": 0.000029999999999999997,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0003292
+              }
+            },
+            "stopReason": "toolUse",
+            "responseId": "resp_06a4db7b60993b7a016af50a05a76487d29cdb8053a57fd566",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "toolResult",
+            "toolCallId": "call_6960423052354f449efea08232e66ffe|fc_06a4db7b60993b7a016af50a066e1087d2b86b622e8982a5d5",
+            "toolName": "bash",
+            "content": [{ "type": "text", "text": "(no output)" }],
+            "isError": false
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Change the final reply to exactly REPLAY_GUIDED. Do not use any more tools."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "",
+                "thinkingSignature": "{\"type\":\"reasoning\",\"id\":\"rs_06a4db7b60993b7a016af50a07eddc87d2999fc2a4c271af2b\",\"summary\":[],\"content\":[],\"encrypted_content\":\"gAAAAABq9QoIdkWvnHT81gG8ziuE7GvP1E2IxK7HB-ZWUfHl3I3iZ2hqxuDynEhn3pHl2k1l35QFPFD0iIeD1YbVeyX9UBg_ad7AgeRqsEs9rIT518JCXbBIshQs2MHR5puOyLYWrwuBixGscrjOBTLUu2uo1--dbTe1_BEHz1VHmf8nWFXZgShX8PI9LzjjabA38IbcjHpTo8yEaI7ZLrOC4FNNEBgoUkz4R6t8t7uFVMwDwsyAueK1vF4TDeZ86Ir9Iy2HrzKULcHOYA4Xf91y9mg-JUqklnG6RGJFAT_Aa1X9zw0WWp-r1K2j_pTxKzgXl_MIhGDZqgq13NaeXdQQ1pRKt50o7dSfM5la8fLkdYFj15zzE5J08WpotCS2B-DbvcbPbNG00RulwyFQ1j2tbITFLHnA78GRcuzrGq4lZWV7uZuyxnKmpi1m1ZZ4fspv1DyVHsRI2dLfknIl2T00O9GnUQsNh0uYocvp7umOGX_OyVMPnzbeboHhHjTuPJhTr0geTOWq3Y0t5CHgn5oqALFXwOGdDCXsuqluq1wjy6JzeeQtrTPUc0-VCEEf0xyvljvIwpIx7BjULjypnnBL2MCA9EJ4KBZy1kZFQezYesJMRLSFiUj7TxRLK_hQtWznv2cVAOtKBYdQPXWlK7vK_V-ASZlPhBY2PJeRv0jf3yNAlm1Peji-adaXNj25LeJ2pN1H_ppfmMOx8Swft8S9xB_10iCqMZxIWFnPhvdwnyJSc4VIBfCpwnrPAlPRHEKxv8M-jz-IyS6w6g0BJAOL6zjKuBVF35ZBAaLa3e9ajvfaT-bqob7hl1qR04SfvxdvfHYWenckjvdEifFlT-TRUddxqF-h4MC8EBeeTrgUAgW7RlJ5fqXLYtgNc-7MN0mJgIBbm51PLt36QIExJpycZJEIjU3A1cvuN-7L5qA9t5Z3VCElNViSjDRQw6ht03rmMQ99LJcRtIn4qseSFuq79fyjIL2h28jR2keJtRMRyrWQiKvLLsIWcc7asM7GefYiM9Rh5khQN2DS3H1HJmcK_kC-Dkq4iTDicK0Pc19FBmyoG0YvtCDg4VT-_Zb1aXXgFPZanBCYVcuiCFQU7bpJ6v1lQNo0scnyXFRBzh31cEm34aXMLk4XJpkebz_oWfaVb3J-MNivGL7YK8qkkmudy_IVkvPw1lnHalKJI02rxkIM70sxiNI_jshYbFQImb3M1Zc6Ly-B8nFz2D4R2VvZVKu5A4k1YzwmqgoIcG6b8VuDsTZ5gxem-WT5fF7djmlyPbWjMEKn3UZr2VgdXDsrxz-XlyQ25TnIqDHX2X1X3FOGHoP5SNjYfj5UuNAi2tNnE4fDF3WNmNBgF8oeL_ULaBOMED-5hJ_cKY34B7H7TSdq2SJxsFwE2u4WDiIIUNdj5BCwvqkchdL7g5Cz3Zkgt4s6a91yvLCt1KMA_ouuzw34pMEMFibYFIydrGgnC-Q06NT4Kzfaru_8HTGJaly32-jaaZpFjG-GARR-jy45yuv7LdCVot2PIuc-ixWlh57Xd3rjENyWoNJ_2OEomv8pbACEcG_WAKlcgvnuY3Sajsbn5-YiyUFJyXDWtA8tA1Gc9xffj4yy1uZz1846BPI9zJbVS6QbLgJHiqqUyoZ1qsegrKWalhjzENM5kzjrqAh9my31JZK_W9Zs8RMrFUncrloah7Fp_F1rgn-ewa6MlUIdPh-9lPP6fai4eNBi4Ec1IuD3sovjfNCRUVKVT5_h9T0HKx-4U0quozxvcLrTOmbgMsk-oDwc-oxyAaXMh9oC9r7_NmQ-\"}"
+              },
+              {
+                "type": "text",
+                "text": "REPLAY_GUIDED",
+                "textSignature": "{\"v\":1,\"id\":\"msg_06a4db7b60993b7a016af50a08438487d296b97c7c617d2d6a\",\"phase\":\"final_answer\"}"
+              }
+            ],
+            "api": "openai-responses",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "usage": {
+              "input": 1557,
+              "output": 19,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 9,
+              "totalTokens": 1576,
+              "cost": {
+                "input": 0.00031140000000000003,
+                "output": 0.0000228,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.00033420000000000005
+              }
+            },
+            "stopReason": "stop",
+            "responseId": "resp_06a4db7b60993b7a016af50a075ef887d2a071db8d4d536b22",
+            "rawStopReason": "completed",
+            "thinkingLevel": "low"
+          },
+          {
+            "role": "user",
+            "content": [
+              { "type": "text", "text": "Reply with exactly REPLAY_SECOND. Do not use tools." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.3/events",
+      "payload": {
+        "type": "start",
+        "partial": {
+          "role": "assistant",
+          "content": [],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "pending",
+          "timestamp": 1794443784418
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.3/events",
+      "payload": {
+        "type": "text_start",
+        "contentIndex": 0,
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443784418,
+          "responseId": "resp_06a4db7b60993b7a016af50a08b6dc87d29d90f731053abb75"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.3/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "RE",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443784418,
+          "responseId": "resp_06a4db7b60993b7a016af50a08b6dc87d29d90f731053abb75"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.3/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "PLAY",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443784418,
+          "responseId": "resp_06a4db7b60993b7a016af50a08b6dc87d29d90f731053abb75"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.3/events",
+      "payload": {
+        "type": "text_delta",
+        "contentIndex": 0,
+        "delta": "_SECOND",
+        "partial": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "REPLAY_SECOND" }],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443784418,
+          "responseId": "resp_06a4db7b60993b7a016af50a08b6dc87d29d90f731053abb75"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.3/events",
+      "payload": {
+        "type": "text_end",
+        "contentIndex": 0,
+        "content": "REPLAY_SECOND",
+        "partial": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_SECOND",
+              "textSignature": "{\"v\":1,\"id\":\"msg_06a4db7b60993b7a016af50a093b7887d29ceda0ff17719d17\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443784418,
+          "responseId": "resp_06a4db7b60993b7a016af50a08b6dc87d29d90f731053abb75"
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "port": "pi:1.3/events",
+      "payload": {
+        "type": "done",
+        "reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "REPLAY_SECOND",
+              "textSignature": "{\"v\":1,\"id\":\"msg_06a4db7b60993b7a016af50a093b7887d29ceda0ff17719d17\",\"phase\":\"final_answer\"}"
+            }
+          ],
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input": 186,
+            "output": 7,
+            "cacheRead": 1408,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 1601,
+            "cost": {
+              "input": 0.0000372,
+              "output": 0.0000084,
+              "cacheRead": 0.00002816,
+              "cacheWrite": 0,
+              "total": 0.00007376
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1794443784418,
+          "responseId": "resp_06a4db7b60993b7a016af50a08b6dc87d29d90f731053abb75",
+          "rawStopReason": "completed",
+          "durationMs": 1251
+        }
+      }
+    }
+  ]
+}

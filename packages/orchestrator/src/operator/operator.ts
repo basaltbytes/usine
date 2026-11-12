@@ -534,7 +534,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           runId: run.id,
           loop: run.loop,
           failure: attempt.outcome.failure,
-          fixRunId: fixRuns.get(run.id) ?? null,
+          fixRun: fixRuns.get(run.id) ?? null,
         };
         // The key stays absent for other failures, so their attention revisions don't change.
         needsYou.push(

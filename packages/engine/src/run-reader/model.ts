@@ -226,3 +226,26 @@ export const ProjectionRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo
 );
 
 export type ProjectionRevision = typeof ProjectionRevision.Type;
+
+/** The states of a linked CI fix Run: a canceled fix, including a revoked one, isn't linked. */
+const LINKED_FIX_STATE_TAGS = [
+  "Pending",
+  "Waiting",
+  "Queued",
+  "Running",
+  "AwaitingCi",
+  "Succeeded",
+  "HandedOff",
+  "Failed",
+] as const satisfies ReadonlyArray<Exclude<RunState["_tag"], "Canceled">>;
+
+/** The newest CI fix Run admitted for a source Run's failed head, with the fix Run's state. */
+export class CiFixRun extends Schema.Class<
+  CiFixRun,
+  Brand.Brand<"@usine/engine/run-reader/model/CiFixRun">
+>("@usine/engine/CiFixRun")({
+  /** The fix Run that took over the source Run's work. */
+  runId: RunId,
+  /** The fix Run's current state; never `Canceled`. */
+  state: Schema.Literals(LINKED_FIX_STATE_TAGS),
+}) {}

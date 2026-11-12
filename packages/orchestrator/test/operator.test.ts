@@ -101,6 +101,7 @@ import {
 } from "@usine/engine/item-projection";
 import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
 import {
+  CiFixRun,
   ProjectionRevision,
   RunEvent,
   RunSnapshot,
@@ -486,7 +487,7 @@ const testLayer = (
   workerStatus: Layer.Layer<WorkerStatus> = WorkerStatus.idle,
   upgradeDrain: Effect.Effect<Option.Option<UpgradeDrain>> = Effect.succeedNone,
   /** The CI fix Run of each source Run that the reader reports. */
-  ciFixRuns: ReadonlyMap<RunId, RunId> = new Map(),
+  ciFixRuns: ReadonlyMap<RunId, CiFixRun> = new Map(),
 ) => {
   const acknowledged: Array<AttentionAcknowledgement> = [];
   const readTranscript = (query: TranscriptQuery) =>
@@ -1748,10 +1749,10 @@ describe("Operator", () => {
           }),
         ],
       });
-      const fixRunId = RunId.make("replayed-ci-fix");
+      const fixRun = CiFixRun.make({ runId: RunId.make("replayed-ci-fix"), state: "Running" });
       for (const [fixes, linked] of [
-        [new Map<RunId, RunId>(), null],
-        [new Map([[runId, fixRunId]]), fixRunId],
+        [new Map<RunId, CiFixRun>(), null],
+        [new Map([[runId, fixRun]]), fixRun],
       ] as const) {
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
@@ -1760,7 +1761,7 @@ describe("Operator", () => {
 
           const need = overview.needsYou.find((entry) => entry._tag === "RunFailureNeed");
           assert(need?._tag === "RunFailureNeed");
-          assert.strictEqual(need.fixRunId, linked);
+          assert.deepStrictEqual(need.fixRun, linked);
         }).pipe(
           Effect.provide(
             testLayer(

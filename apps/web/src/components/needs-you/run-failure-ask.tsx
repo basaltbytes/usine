@@ -8,7 +8,7 @@ import { useOpenRun } from "~/hooks/use-open-run";
 import { useCanOperateRepository } from "~/lib/permissions";
 import {
   applyCiLabelsDescription,
-  fixRunContinues,
+  fixRunStatus,
   needCopy,
   needOpenFixRunLabel,
 } from "~/lib/needs-you/strings";
@@ -20,16 +20,16 @@ type RunFailureAskProps = {
 };
 
 /**
- * Renders a failed Run; once a CI fix Run carries its work, names that Run and opens it. A Run whose
- * CI wait ended because CI didn't finish offers to apply its CI labels; the server refuses while CI
- * on the same head hasn't passed, and the entry shows why.
+ * Renders a failed Run; once a CI fix Run takes its work, names that Run, its progress, and opens
+ * it. A Run whose CI wait ended because CI didn't finish offers to apply its CI labels; the server
+ * refuses while CI on the same head hasn't passed, and the entry shows why.
  */
 export const RunFailureAsk = ({ need, dismiss }: RunFailureAskProps) => {
   const openRun = useOpenRun();
   const permitted = useCanOperateRepository(need.repository);
   const action = useRunAction();
   const sent = usePendingRunAction(need.runId);
-  const fixRunId = need.fixRunId;
+  const fixRun = need.fixRun;
   const attemptId = need.unfinishedCiAttemptId;
   return (
     <NeedItem
@@ -37,7 +37,7 @@ export const RunFailureAsk = ({ need, dismiss }: RunFailureAskProps) => {
       loop={need.loop}
       dismiss={dismiss}
       open={() => openRun(need.runId)}
-      description={fixRunId === null ? null : fixRunContinues(fixRunId)}
+      description={fixRun === null ? null : fixRunStatus(fixRun)}
       error={
         action.error === null || isRunOperationRejected(action.error) ? null : action.error.message
       }
@@ -61,8 +61,8 @@ export const RunFailureAsk = ({ need, dismiss }: RunFailureAskProps) => {
         ) : undefined
       }
       menu={
-        fixRunId !== null && (
-          <DropdownMenuItem onClick={() => openRun(fixRunId)}>
+        fixRun !== null && (
+          <DropdownMenuItem onClick={() => openRun(fixRun.runId)}>
             {needOpenFixRunLabel}
           </DropdownMenuItem>
         )

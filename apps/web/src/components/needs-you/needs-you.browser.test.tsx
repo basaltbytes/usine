@@ -20,6 +20,7 @@ import {
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { CiFixRun } from "@usine/engine/run-reader";
 import {
   RunSummaryView,
   AttemptSummaryView,
@@ -61,6 +62,7 @@ declare module "vitest/browser" {
     lateOverviewRequests: () => Promise<number>;
     ciLabelsResponse: (status: 200 | 409, body: string) => Promise<void>;
     recordedCiLabels: () => Promise<Array<unknown>>;
+    cycleResetResponse: (body: string) => Promise<void>;
   }
 }
 
@@ -321,14 +323,13 @@ it("shows a silent worker's last answer and opens an affected run", async () => 
 });
 
 it("names the CI fix run that continues a failed run's work and opens it", async () => {
-  const fixRunId = RunId.make("fix-run-1047");
   const need = RunFailureNeed.make({
     id: "run-failure:approval-run:attempt-1",
     repository,
     runId,
     loop,
     failure: AgentFailureView.make({ message: "CI failed. Fix loop fix: CycleBlocked." }),
-    fixRunId,
+    fixRun: CiFixRun.make({ runId: RunId.make("fix-run-1047"), state: "Running" }),
   });
   await commands.approvalResponses(
     overview([need]),
@@ -510,6 +511,42 @@ it.each([1280, 390])(
     }
   },
 );
+
+const replayNeed = CycleBudgetNeed.make({
+  id: "cycle-budget:replayed",
+  itemLabel: "approval/project#367",
+  itemUrl: "https://github.com/approval/project/issues/367",
+  ask: CycleBudgetAsk.make({
+    id: CycleBudgetAskId.make("replayed"),
+    itemKey: waiting.itemKey,
+    repository,
+    loop,
+    limit: CycleLimit.make(3),
+    counts: [
+      LoopCycleCount.make({ loop, admitted: CycleCount.make(3), completed: CycleCount.make(3) }),
+    ],
+  }).recordBlock(loop, EventId.make("blocked-ci-fix")),
+});
+
+it("reports the CI fixes that a cycle budget reset replayed in a toast", async () => {
+  await replaceNeeds([replayNeed]);
+  await commands.cycleResetResponse('{"replayedCiFixEventIds":["blocked-ci-fix"]}');
+  const row = needs.getByRole("listitem").filter({ hasText: replayNeed.itemLabel });
+  await row.getByRole("button", { name: "Reset cycle budget" }).click();
+  await expect.element(page.getByText("Replayed 1 CI fix", { exact: true })).toBeVisible();
+});
+
+it("shows no toast for a cycle budget reset that replays no CI fix", async () => {
+  await replaceNeeds([replayNeed]);
+  await commands.cycleResetResponse('{"replayedCiFixEventIds":[]}');
+  const row = needs.getByRole("listitem").filter({ hasText: replayNeed.itemLabel });
+  await row.getByRole("button", { name: "Reset cycle budget" }).click();
+  // A reset succeeds after its success handler, which adds any toast, has finished.
+  await expect
+    .poll(() => queryClient.getMutationCache().find({ status: "success" }) !== undefined)
+    .toBe(true);
+  expect(document.querySelector('[data-slot="toast"]')).toBeNull();
+});
 
 it.each([
   { width: 1280, running: 0 },

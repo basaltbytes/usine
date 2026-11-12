@@ -1,6 +1,7 @@
 import {
   admitBrain,
   AdmissionContext,
+  codingAgent,
   type HarnessCatalog,
   type HarnessCredential,
 } from "@usine/agents/harness";
@@ -41,7 +42,7 @@ export const harnessCredentialGap = (
     const harness = brain.harness;
     const admitted = admitBrain(
       catalog,
-      "coding-agent",
+      codingAgent,
       brain,
       AdmissionContext.make({
         placement: "container",
@@ -201,7 +202,7 @@ fi
 `.trim();
 
 /** Waits until the machine answers through its remote shell and runs `READY_SCRIPT`. */
-export const awaitMachineSsh = Effect.fn("SshExecutor.awaitMachineSsh")(function* (
+export const awaitMachineShell = Effect.fn("SshExecutor.awaitMachineShell")(function* (
   commands: RemoteCommands,
   interval: Effect.Effect<void>,
   machine: SshMachine,

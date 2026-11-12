@@ -1,15 +1,81 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, ModelId } from "@usine/core/agent/brain";
-import { Option, Result } from "effect";
+import { RoleName } from "@usine/core/agent/session";
+import { Array as Arr, Option, Result } from "effect";
 import {
   admitBrain,
   AdmissionContext,
+  Capability,
   CapabilityProfile,
   catalog,
+  codingAgent,
+  CredentialRoute,
   HarnessCatalog,
   HarnessDescriptor,
   Lacking,
+  Placement,
+  requirements,
+  RoleCredentials,
+  RolePlacements,
+  RoleSpec,
 } from "../src/harness/catalog.ts";
+
+const onOrchestrator = (role: string) =>
+  RolePlacements.make({
+    placements: ["orchestrator"],
+    reason: `The ${role} runs on the orchestrator host`,
+  });
+
+// The coordinator's declaration lives with the parent in `@usine/durable`, which depends on this
+// package; this one states the same needs.
+const coordinator = RoleSpec.make({
+  name: RoleName.make("coordinator"),
+  placement: onOrchestrator("coordinator"),
+  credential: Option.none(),
+  nativeTools: false,
+  hostTools: true,
+  persistence: "journaled",
+  interventions: true,
+  output: "text",
+});
+
+// The supervisor (#799) has no runtime yet, so only this test declares it.
+const supervisor = RoleSpec.make({
+  name: RoleName.make("supervisor"),
+  placement: onOrchestrator("supervisor"),
+  credential: Option.some(
+    RoleCredentials.make({
+      credentials: ["gateway", "gateway-subscription", "gateway-api-key"],
+      reason:
+        "The supervisor uses a gateway credential so subscription credentials stay on the gateway",
+    }),
+  ),
+  nativeTools: true,
+  hostTools: true,
+  persistence: "saved",
+  interventions: true,
+  output: "text",
+});
+
+// A role with no runtime, declared here to check admission against its requirements.
+const reviewer = RoleSpec.make({
+  name: RoleName.make("reviewer"),
+  placement: RolePlacements.make({
+    placements: ["local", "container"],
+    reason: "The reviewer runs beside the coding agent it checks",
+  }),
+  credential: Option.some(
+    RoleCredentials.make({
+      credentials: ["api-key", "gateway-api-key"],
+      reason: "The reviewer bills the coding agent's API key",
+    }),
+  ),
+  nativeTools: false,
+  hostTools: false,
+  persistence: "ephemeral",
+  interventions: false,
+  output: "structured",
+});
 
 const brain = (harness: string) =>
   BrainSpec.make({
@@ -18,13 +84,13 @@ const brain = (harness: string) =>
     effort: "high",
   });
 const local = AdmissionContext.make({ placement: "local", credential: "host-login" });
-const coordinator = AdmissionContext.make({ placement: "orchestrator", credential: "host-login" });
+const orchestrator = AdmissionContext.make({ placement: "orchestrator", credential: "host-login" });
 
 describe("brain admission", () => {
   it("requires durable coordination, rather than a particular harness ID", () => {
-    assert(Result.isSuccess(admitBrain(catalog, "coordinator", brain("pi"), coordinator)));
+    assert(Result.isSuccess(admitBrain(catalog, coordinator, brain("pi"), orchestrator)));
     for (const id of ["claude", "codex"]) {
-      const result = admitBrain(catalog, "coordinator", brain(id), coordinator);
+      const result = admitBrain(catalog, coordinator, brain(id), orchestrator);
       assert(Result.isFailure(result));
       assert.strictEqual(result.failure.role, "coordinator");
       assert.strictEqual(result.failure.missing[0].capability, "durable-coordination");
@@ -34,17 +100,17 @@ describe("brain admission", () => {
     assert(template !== undefined);
     const added = HarnessDescriptor.make({ ...template, id: Harness.make("journaled") });
     const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, added] });
-    assert(Result.isSuccess(admitBrain(extended, "coordinator", brain("journaled"), coordinator)));
+    assert(Result.isSuccess(admitBrain(extended, coordinator, brain("journaled"), orchestrator)));
   });
 
   it("admits coding agents on supported workers and returns adapter reasons for every remote Pi refusal", () => {
     for (const id of catalog.ids)
-      assert(Result.isSuccess(admitBrain(catalog, "coding-agent", brain(id), local)));
+      assert(Result.isSuccess(admitBrain(catalog, codingAgent, brain(id), local)));
     for (const placement of ["ssh", "container", "sandbox"] as const) {
       const context = AdmissionContext.make({ placement, credential: "api-key" });
       for (const id of ["claude", "codex"])
-        assert(Result.isSuccess(admitBrain(catalog, "coding-agent", brain(id), context)));
-      const result = admitBrain(catalog, "coding-agent", brain("pi"), context);
+        assert(Result.isSuccess(admitBrain(catalog, codingAgent, brain(id), context)));
+      const result = admitBrain(catalog, codingAgent, brain("pi"), context);
       assert(Result.isFailure(result));
       assert.strictEqual(result.failure.missing[0].capability, placement);
       assert.include(result.failure.message, "Pi runs its tools in the orchestrator process");
@@ -52,54 +118,85 @@ describe("brain admission", () => {
   });
 
   it("admits supervisors only on the orchestrator through gateway credentials", () => {
-    for (const id of ["claude", "codex"]) {
-      for (const credential of ["gateway", "gateway-subscription", "gateway-api-key"] as const) {
-        assert(
-          Result.isSuccess(
-            admitBrain(
-              catalog,
-              "supervisor",
-              brain(id),
-              AdmissionContext.make({ placement: "orchestrator", credential }),
-            ),
-          ),
+    const gateways = ["gateway", "gateway-subscription", "gateway-api-key"] as const;
+    // No adapter passes a usine tool set to a session yet, so every harness refuses the supervisor.
+    for (const id of catalog.ids)
+      for (const credential of gateways) {
+        const refused = admitBrain(
+          catalog,
+          supervisor,
+          brain(id),
+          AdmissionContext.make({ placement: "orchestrator", credential }),
         );
+        assert(Result.isFailure(refused));
+        assert.deepStrictEqual(
+          refused.failure.missing.map(({ capability }) => capability),
+          ["usine-tools"],
+        );
+        assert.include(refused.failure.message, "passes no usine tool set to a session");
       }
-      assert(Result.isFailure(admitBrain(catalog, "supervisor", brain(id), coordinator)));
+    const claude = catalog.get(Harness.make("claude"));
+    assert(Option.isSome(claude));
+    const toolful = HarnessDescriptor.make({
+      ...claude.value,
+      id: Harness.make("toolful"),
+      capabilities: Arr.map(claude.value.capabilities, (profile) =>
+        CapabilityProfile.make({
+          ...profile,
+          supported: [...profile.supported, "usine-tools"],
+          lacking: profile.lacking.filter(({ capability }) => capability !== "usine-tools"),
+        }),
+      ),
+    });
+    const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, toolful] });
+    for (const credential of gateways)
       assert(
-        Result.isFailure(
+        Result.isSuccess(
           admitBrain(
-            catalog,
-            "supervisor",
-            brain(id),
-            AdmissionContext.make({ placement: "ssh", credential: "gateway" }),
+            extended,
+            supervisor,
+            brain("toolful"),
+            AdmissionContext.make({ placement: "orchestrator", credential }),
           ),
         ),
       );
-    }
-    for (const credential of ["gateway", "gateway-subscription", "gateway-api-key"] as const) {
-      for (const role of ["coordinator", "supervisor"] as const) {
-        assert(
-          Result.isSuccess(
-            admitBrain(
-              catalog,
-              role,
-              brain("pi"),
-              AdmissionContext.make({ placement: "orchestrator", credential }),
-            ),
+    const login = admitBrain(extended, supervisor, brain("toolful"), orchestrator);
+    assert(Result.isFailure(login));
+    assert.deepStrictEqual(login.failure.missing, [
+      Lacking.make({
+        capability: "credential-route",
+        reason:
+          "The supervisor uses a gateway credential so subscription credentials stay on the gateway",
+      }),
+    ]);
+    const worker = admitBrain(
+      extended,
+      supervisor,
+      brain("toolful"),
+      AdmissionContext.make({ placement: "ssh", credential: "gateway" }),
+    );
+    assert(Result.isFailure(worker));
+    assert.strictEqual(worker.failure.missing[0].capability, "orchestrator");
+    for (const credential of gateways)
+      assert(
+        Result.isSuccess(
+          admitBrain(
+            catalog,
+            coordinator,
+            brain("pi"),
+            AdmissionContext.make({ placement: "orchestrator", credential }),
           ),
-        );
-      }
-    }
+        ),
+      );
   });
 
   it("refuses unregistered harnesses and unsupported credentials", () => {
-    const unknown = admitBrain(catalog, "coding-agent", brain("unknown"), local);
+    const unknown = admitBrain(catalog, codingAgent, brain("unknown"), local);
     assert(Result.isFailure(unknown));
     assert.strictEqual(unknown.failure.missing[0].capability, "registered-harness");
     const pi = admitBrain(
       catalog,
-      "coding-agent",
+      codingAgent,
       brain("pi"),
       AdmissionContext.make({ placement: "local", credential: "api-key" }),
     );
@@ -129,7 +226,7 @@ describe("brain admission", () => {
       ],
     });
     const extended = HarnessCatalog.make({ descriptors: [added] });
-    const result = admitBrain(extended, "coding-agent", brain("no-steering"), local);
+    const result = admitBrain(extended, codingAgent, brain("no-steering"), local);
     assert(Result.isFailure(result));
     assert.strictEqual(result.failure.missing[0].capability, "steer");
     assert.include(result.failure.message, "The transport cannot accept input during a turn");
@@ -175,5 +272,197 @@ describe("brain admission", () => {
         }),
       ),
     );
+  });
+
+  it("admits and refuses a role declared here from its requirements", () => {
+    // A short structured check that follows a coding agent on the API-key route.
+    assert.deepStrictEqual(requirements(reviewer), [
+      "closed-tools",
+      "structured-output",
+      "ephemeral",
+      "token-usage",
+    ]);
+    const container = AdmissionContext.make({ placement: "container", credential: "api-key" });
+    for (const id of ["claude", "codex"]) {
+      const refused = admitBrain(catalog, reviewer, brain(id), container);
+      assert(Result.isFailure(refused));
+      assert.strictEqual(refused.failure.role, "reviewer");
+      assert.deepStrictEqual(
+        refused.failure.missing.map(({ capability }) => capability),
+        ["closed-tools", "structured-output", "ephemeral"],
+      );
+    }
+    const claude = catalog.get(Harness.make("claude"));
+    assert(Option.isSome(claude));
+    const capable = HarnessDescriptor.make({
+      ...claude.value,
+      id: Harness.make("capable"),
+      capabilities: Arr.map(claude.value.capabilities, (profile) =>
+        CapabilityProfile.make({
+          ...profile,
+          supported: [...profile.supported, "closed-tools", "structured-output", "ephemeral"],
+          lacking: profile.lacking.filter(
+            ({ capability }) =>
+              !["closed-tools", "structured-output", "ephemeral"].includes(capability),
+          ),
+        }),
+      ),
+    });
+    const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, capable] });
+    const admitted = admitBrain(
+      extended,
+      reviewer,
+      brain("capable"),
+      AdmissionContext.make({ placement: "local", credential: "gateway-api-key" }),
+    );
+    assert(Result.isSuccess(admitted));
+    assert.strictEqual(admitted.success.role, reviewer);
+    assert.deepStrictEqual(admitted.success.pool, Option.some("apiKeys"));
+    const outside = admitBrain(
+      extended,
+      reviewer,
+      brain("capable"),
+      AdmissionContext.make({ placement: "ssh", credential: "host-login" }),
+    );
+    assert(Result.isFailure(outside));
+    assert.deepStrictEqual(outside.failure.missing, [
+      Lacking.make({
+        capability: "local",
+        reason: "The reviewer runs beside the coding agent it checks",
+      }),
+      Lacking.make({
+        capability: "credential-route",
+        reason: "The reviewer bills the coding agent's API key",
+      }),
+    ]);
+    assert.include(
+      outside.failure.message,
+      "capable cannot run as reviewer at ssh: lacks local (The reviewer runs beside the coding agent it checks); lacks credential-route (The reviewer bills the coding agent's API key)",
+    );
+    // The capable descriptor serves every gateway route at `local`, so only the role refuses these.
+    for (const credential of ["gateway", "gateway-subscription"] as const) {
+      const gateway = admitBrain(
+        extended,
+        reviewer,
+        brain("capable"),
+        AdmissionContext.make({ placement: "local", credential }),
+      );
+      assert(Result.isFailure(gateway), credential);
+      assert.deepStrictEqual(gateway.failure.missing, [
+        Lacking.make({
+          capability: "credential-route",
+          reason: "The reviewer bills the coding agent's API key",
+        }),
+      ]);
+    }
+  });
+
+  it("refuses every placement and credential route outside a role's lists with the role's reason", () => {
+    const claude = catalog.get(Harness.make("claude"));
+    assert(Option.isSome(claude));
+    // This descriptor serves every route with every capability, so only the role can refuse.
+    const unbounded = HarnessDescriptor.make({
+      ...claude.value,
+      id: Harness.make("unbounded"),
+      capabilities: [
+        CapabilityProfile.make({
+          placements: [...Placement.literals],
+          credentials: [...CredentialRoute.literals],
+          supported: [...Capability.literals],
+          lacking: [],
+        }),
+      ],
+    });
+    const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, unbounded] });
+    for (const role of [codingAgent, coordinator, supervisor, reviewer])
+      for (const placement of Placement.literals)
+        for (const credential of CredentialRoute.literals) {
+          const expected = [
+            ...(role.placement.placements.includes(placement)
+              ? []
+              : [
+                  Lacking.make({
+                    capability: role.placement.placements[0],
+                    reason: role.placement.reason,
+                  }),
+                ]),
+            ...Option.match(role.credential, {
+              onNone: () => [],
+              onSome: ({ credentials, reason }) =>
+                credentials.includes(credential)
+                  ? []
+                  : [Lacking.make({ capability: "credential-route", reason })],
+            }),
+          ];
+          const result = admitBrain(
+            extended,
+            role,
+            brain("unbounded"),
+            AdmissionContext.make({ placement, credential }),
+          );
+          const label = `${role.name} at ${placement} with ${credential}`;
+          if (expected.length === 0) assert(Result.isSuccess(result), label);
+          else {
+            assert(Result.isFailure(result), label);
+            assert.deepStrictEqual([...result.failure.missing], expected, label);
+          }
+        }
+    const worker = admitBrain(extended, codingAgent, brain("unbounded"), orchestrator);
+    assert(Result.isFailure(worker));
+    assert.include(
+      worker.failure.message,
+      "unbounded cannot run as coding-agent at orchestrator: lacks local (The coding agent runs on a worker)",
+    );
+  });
+
+  it("requires resume-session only to reopen a saved conversation", () => {
+    assert.notInclude(requirements(codingAgent), "resume-session");
+    assert.include(requirements(codingAgent, { reopens: true }), "resume-session");
+    assert.deepStrictEqual(requirements(coordinator), [
+      "durable-coordination",
+      "steer",
+      "interrupt",
+      "token-usage",
+    ]);
+  });
+
+  it("puts the pool that the credential route determines on the admitted brain", () => {
+    const pools = (id: string, role = codingAgent, placement: Placement = "local") =>
+      (
+        ["host-login", "gateway", "gateway-subscription", "gateway-api-key", "api-key"] as const
+      ).map((credential) => {
+        const admitted = admitBrain(
+          catalog,
+          role,
+          brain(id),
+          AdmissionContext.make({ placement, credential }),
+        );
+        return Result.isSuccess(admitted)
+          ? Option.getOrElse(admitted.success.pool, () => "launch")
+          : "refused";
+      });
+    // `launch`: the harness reports the pool of its own login or key when the session starts.
+    assert.deepStrictEqual(pools("claude"), [
+      "launch",
+      "launch",
+      "claudePlan",
+      "apiKeys",
+      "launch",
+    ]);
+    assert.deepStrictEqual(pools("codex"), [
+      "launch",
+      "launch",
+      "chatgptPlan",
+      "apiKeys",
+      "launch",
+    ]);
+    // Pi's descriptor names no subscription provider, so Pi reports a subscription's pool itself.
+    assert.deepStrictEqual(pools("pi", coordinator, "orchestrator"), [
+      "launch",
+      "launch",
+      "launch",
+      "apiKeys",
+      "refused",
+    ]);
   });
 });
