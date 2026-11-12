@@ -112,7 +112,7 @@ Token exchanges and gRPC calls time out after 30 seconds. A stalled token exchan
 
 A token exchange that answers HTTP 429 counts as a rate limit, and HTTP 502, 503, or 504 counts as an unreachable provider: usine retries the attempt's launch later. Any other error status fails preflight with the status.
 
-## How commands run
+## Command transport
 
 usine runs each command on a boxd machine over an `Exec` stream from the orchestrator process itself, without starting a local program. All of a worker's commands share one HTTP/2 connection to the region's API endpoint, which carries the API key; the key never reaches a child process or a command line. usine raises the HTTP/2 receive window to 8 MiB, sends standard input in chunks of at most 64 KiB, and sends HTTP/2 keepalive pings, so a dead connection fails within a minute instead of hanging. A stream that ends without an exit code, because boxd refused the key, the connection dropped, or the machine is gone, counts as an unreachable machine, never as a command result. When usine cancels a command, boxd ends its process group.
 

@@ -524,8 +524,7 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
         const conflict = boxdEgressConflict(worker, provisioner.egress.value);
         if (conflict !== undefined) return conflict;
       }
-      // A boxd worker ignores identity_file, which releases before boxd's Exec transport required,
-      // so a stored worker that still sets it loads.
+      // A boxd worker accepts and ignores identity_file.
       return undefined;
     case "boat":
       if (
