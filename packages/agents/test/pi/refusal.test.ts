@@ -90,6 +90,37 @@ it.each([
     resetsAt: Option.none(),
   },
   {
+    name: "a ChatGPT plan limit code relayed over WebSocket",
+    errorMessage: "Codex error: usage_limit_reached",
+    expected: "AgentCapacityError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "HTTP 429 Too Many Requests",
+    errorMessage: "429 Too Many Requests",
+    expected: "AgentCapacityError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "a Vertex AI rate limit",
+    errorMessage:
+      '429 {"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}',
+    expected: "AgentCapacityError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "an exhausted quota code after Too Many Requests",
+    errorMessage: "Error: 429 Too Many Requests: insufficient_quota",
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
+    name: "billing exhaustion after Too Many Requests",
+    errorMessage: "429 Too Many Requests: check your billing details",
+    expected: "AgentResultError",
+    resetsAt: Option.none(),
+  },
+  {
     name: "an overload",
     errorMessage: "HTTP 529: overloaded_error",
     expected: "AgentCapacityError",

@@ -32,6 +32,28 @@ it.effect.each([
     expected: "AgentResultError",
   },
   {
+    code: "usageLimitExceeded",
+    message: "Your workspace is out of credits. Add credits to continue.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message:
+      "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message: "You hit your spend cap set in your workspace. Increase your spend cap to continue.",
+    expected: "AgentResultError",
+  },
+  {
+    code: "usageLimitExceeded",
+    message:
+      "You hit your spend cap set by the owner of your workspace. Ask an owner to increase your spend cap to continue.",
+    expected: "AgentResultError",
+  },
+  {
     code: { httpConnectionFailed: { httpStatusCode: 529 } },
     message: "Unavailable",
     expected: "AgentCapacityError",

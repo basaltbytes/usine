@@ -165,8 +165,10 @@ const decodeHttpStatus = Schema.decodeUnknownOption(
   Schema.Struct({ httpStatusCode: Schema.NullOr(Schema.Finite) }),
 );
 
-// Codex also reports a billing quota and a plan without Codex as a usage limit; neither resets.
-const permanentLimit = /^(?:Quota exceeded\b|To use Codex with your ChatGPT plan\b)/u;
+// Codex also reports a billing quota, a plan without Codex, and a workspace that is out of
+// credits or at its spend cap as a usage limit; none resets until someone changes the account.
+const permanentLimit =
+  /^(?:Quota exceeded\b|To use Codex with your ChatGPT plan\b|Your workspace is out of credits\b|You hit your spend cap\b)/u;
 
 /**
  * Classifies the final turn error, preferring Codex's error code to message matching. A usage or
