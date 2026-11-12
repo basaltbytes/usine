@@ -5,13 +5,15 @@ import { Array as Arr, Option, Result } from "effect";
 import {
   admitBrain,
   AdmissionContext,
+  Capability,
   CapabilityProfile,
   catalog,
   codingAgent,
+  CredentialRoute,
   HarnessCatalog,
   HarnessDescriptor,
   Lacking,
-  type Placement,
+  Placement,
   requirements,
   RoleCredentials,
   RolePlacements,
@@ -53,6 +55,26 @@ const supervisor = RoleSpec.make({
   persistence: "saved",
   interventions: true,
   output: "text",
+});
+
+// A role with no runtime, declared here to check admission against its requirements.
+const reviewer = RoleSpec.make({
+  name: RoleName.make("reviewer"),
+  placement: RolePlacements.make({
+    placements: ["local", "container"],
+    reason: "The reviewer runs beside the coding agent it checks",
+  }),
+  credential: Option.some(
+    RoleCredentials.make({
+      credentials: ["api-key", "gateway-api-key"],
+      reason: "The reviewer bills the coding agent's API key",
+    }),
+  ),
+  nativeTools: false,
+  hostTools: false,
+  persistence: "ephemeral",
+  interventions: false,
+  output: "structured",
 });
 
 const brain = (harness: string) =>
@@ -254,24 +276,6 @@ describe("brain admission", () => {
 
   it("admits and refuses a role declared here from its requirements", () => {
     // A short structured check that follows a coding agent on the API-key route.
-    const reviewer = RoleSpec.make({
-      name: RoleName.make("reviewer"),
-      placement: RolePlacements.make({
-        placements: ["local", "container"],
-        reason: "The reviewer runs beside the coding agent it checks",
-      }),
-      credential: Option.some(
-        RoleCredentials.make({
-          credentials: ["api-key", "gateway-api-key"],
-          reason: "The reviewer bills the coding agent's API key",
-        }),
-      ),
-      nativeTools: false,
-      hostTools: false,
-      persistence: "ephemeral",
-      interventions: false,
-      output: "structured",
-    });
     assert.deepStrictEqual(requirements(reviewer), [
       "closed-tools",
       "structured-output",
@@ -351,6 +355,64 @@ describe("brain admission", () => {
         }),
       ]);
     }
+  });
+
+  it("refuses every placement and credential route outside a role's lists with the role's reason", () => {
+    const claude = catalog.get(Harness.make("claude"));
+    assert(Option.isSome(claude));
+    // This descriptor serves every route with every capability, so only the role can refuse.
+    const unbounded = HarnessDescriptor.make({
+      ...claude.value,
+      id: Harness.make("unbounded"),
+      capabilities: [
+        CapabilityProfile.make({
+          placements: [...Placement.literals],
+          credentials: [...CredentialRoute.literals],
+          supported: [...Capability.literals],
+          lacking: [],
+        }),
+      ],
+    });
+    const extended = HarnessCatalog.make({ descriptors: [...catalog.descriptors, unbounded] });
+    for (const role of [codingAgent, coordinator, supervisor, reviewer])
+      for (const placement of Placement.literals)
+        for (const credential of CredentialRoute.literals) {
+          const expected = [
+            ...(role.placement.placements.includes(placement)
+              ? []
+              : [
+                  Lacking.make({
+                    capability: role.placement.placements[0],
+                    reason: role.placement.reason,
+                  }),
+                ]),
+            ...Option.match(role.credential, {
+              onNone: () => [],
+              onSome: ({ credentials, reason }) =>
+                credentials.includes(credential)
+                  ? []
+                  : [Lacking.make({ capability: "credential-route", reason })],
+            }),
+          ];
+          const result = admitBrain(
+            extended,
+            role,
+            brain("unbounded"),
+            AdmissionContext.make({ placement, credential }),
+          );
+          const label = `${role.name} at ${placement} with ${credential}`;
+          if (expected.length === 0) assert(Result.isSuccess(result), label);
+          else {
+            assert(Result.isFailure(result), label);
+            assert.deepStrictEqual([...result.failure.missing], expected, label);
+          }
+        }
+    const worker = admitBrain(extended, codingAgent, brain("unbounded"), orchestrator);
+    assert(Result.isFailure(worker));
+    assert.include(
+      worker.failure.message,
+      "unbounded cannot run as coding-agent at orchestrator: lacks local (The coding agent runs on a worker)",
+    );
   });
 
   it("requires resume-session only to reopen a saved conversation", () => {
