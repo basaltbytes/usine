@@ -28,6 +28,18 @@ export const pi = HarnessDescriptor.make({
       ],
       lacking: [
         Lacking.make({
+          capability: "closed-tools",
+          reason: "The Pi adapter keeps the harness's own tools on in every session",
+        }),
+        Lacking.make({
+          capability: "structured-output",
+          reason: "The Pi adapter returns text, not a schema-checked value",
+        }),
+        Lacking.make({
+          capability: "ephemeral",
+          reason: "The Pi adapter saves every conversation",
+        }),
+        Lacking.make({
           capability: "plan-windows",
           reason: "Pi does not report subscription rate windows",
         }),
@@ -46,6 +58,18 @@ export const pi = HarnessDescriptor.make({
         "model-check",
       ],
       lacking: [
+        Lacking.make({
+          capability: "closed-tools",
+          reason: "The Pi adapter keeps the harness's own tools on in every session",
+        }),
+        Lacking.make({
+          capability: "structured-output",
+          reason: "The Pi adapter returns text, not a schema-checked value",
+        }),
+        Lacking.make({
+          capability: "ephemeral",
+          reason: "The Pi adapter saves every conversation",
+        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:

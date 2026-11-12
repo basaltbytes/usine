@@ -1,5 +1,5 @@
 import type { SshCommand } from "@usine/agents/child-host";
-import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
+import { admitBrain, AdmissionContext, catalog, codingAgent } from "@usine/agents/harness";
 import { Harnesses } from "@usine/agents/harness/node";
 import {
   ApiKeyCredential,
@@ -121,7 +121,7 @@ const brainGap = (
 ): Option.Option<WorkerCapabilityError> => {
   const admitted = admitBrain(
     catalog,
-    "coding-agent",
+    codingAgent,
     brain,
     AdmissionContext.make({ placement: "sandbox", credential: "api-key" }),
   );

@@ -1,4 +1,10 @@
-import { admitBrain, AdmissionContext, catalog } from "@usine/agents/harness";
+import {
+  admitBrain,
+  AdmissionContext,
+  catalog,
+  RolePlacements,
+  RoleSpec,
+} from "@usine/agents/harness";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import {
@@ -15,12 +21,30 @@ import {
   UnsupportedEffortError,
 } from "@usine/agents/runtime";
 import { Harness, BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, EndpointName, ParentSession } from "@usine/core/agent/session";
+import { AgentSessionId, EndpointName, ParentSession, RoleName } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
 import type { DurableHarness } from "../harness.ts";
 import type { AttemptRecord } from "./documents.ts";
+
+/**
+ * The coordinator: the parent session on the orchestrator. Its only tool is `subagent`, which the
+ * durable journal supplies.
+ */
+const coordinator = RoleSpec.make({
+  name: RoleName.make("coordinator"),
+  placement: RolePlacements.make({
+    placements: ["orchestrator"],
+    reason: "The coordinator runs on the orchestrator host",
+  }),
+  credential: Option.none(),
+  nativeTools: false,
+  hostTools: true,
+  persistence: "journaled",
+  interventions: true,
+  output: "text",
+});
 
 /** The parent model, validated against the effort and credential. */
 interface ResolvedParent {
@@ -170,7 +194,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
   yield* Effect.fromResult(
     admitBrain(
       catalog,
-      "coordinator",
+      coordinator,
       BrainSpec.make({
         harness: Harness.make("pi"),
         model,

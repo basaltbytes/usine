@@ -105,6 +105,18 @@ export const codex = HarnessDescriptor.make({
       ],
       lacking: [
         Lacking.make({
+          capability: "closed-tools",
+          reason: "The Codex adapter keeps the harness's own tools on in every session",
+        }),
+        Lacking.make({
+          capability: "structured-output",
+          reason: "The Codex adapter returns text, not a schema-checked value",
+        }),
+        Lacking.make({
+          capability: "ephemeral",
+          reason: "The Codex adapter saves every thread",
+        }),
+        Lacking.make({
           capability: "durable-coordination",
           reason:
             "Codex resumes conversations without a durable journal of usine tool intents and results",
@@ -127,6 +139,18 @@ export const codex = HarnessDescriptor.make({
         "model-check",
       ],
       lacking: [
+        Lacking.make({
+          capability: "closed-tools",
+          reason: "The Codex adapter keeps the harness's own tools on in every session",
+        }),
+        Lacking.make({
+          capability: "structured-output",
+          reason: "The Codex adapter returns text, not a schema-checked value",
+        }),
+        Lacking.make({
+          capability: "ephemeral",
+          reason: "The Codex adapter saves every thread",
+        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:

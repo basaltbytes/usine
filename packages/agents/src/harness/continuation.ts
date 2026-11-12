@@ -27,7 +27,7 @@ import {
 } from "./contract.ts";
 import { startReference } from "./adapter.ts";
 import type { HarnessCatalog } from "./harness.ts";
-import { admitChild, childAdmissionContext, childRestart, childSpec } from "./launch.ts";
+import { admitChild, childRestart, childRoute, childSpec } from "./launch.ts";
 import type { HarnessRuntime } from "./runtime.ts";
 
 export const checkContinuation = Effect.fn("HarnessContinuation.check")(function* (
@@ -249,12 +249,12 @@ export const childContinuation = (
   /** Admits `request` and returns its spec and continuation policy. */
   const prepare = Effect.fn("HarnessContinuation.prepare")(function* (request: ChildRequest) {
     const admitted = yield* admitChild(catalog, request);
-    const spec = childSpec(request, admitted.context);
+    const spec = childSpec(request, admitted);
     const policy = yield* continuationPolicy(spec, request.prompt, childRestart(request));
     return { spec, policy };
   });
   return {
-    stop: (request) => runtime.stop(childSpec(request, childAdmissionContext(catalog, request))),
+    stop: (request) => runtime.stop(childSpec(request, childRoute(catalog, request))),
     resume: Effect.fn("HarnessContinuation.resume")(function* (request, reference) {
       const { spec, policy } = yield* prepare(
         ChildRequest.make({ ...request, resume: Option.some(reference) }),

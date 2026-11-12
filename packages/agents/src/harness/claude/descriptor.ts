@@ -71,6 +71,18 @@ export const claude = HarnessDescriptor.make({
       ],
       lacking: [
         Lacking.make({
+          capability: "closed-tools",
+          reason: "The Claude Code adapter keeps the harness's own tools on in every session",
+        }),
+        Lacking.make({
+          capability: "structured-output",
+          reason: "The Claude Code adapter returns text, not a schema-checked value",
+        }),
+        Lacking.make({
+          capability: "ephemeral",
+          reason: "The Claude Code adapter saves every conversation",
+        }),
+        Lacking.make({
           capability: "durable-coordination",
           reason:
             "Claude Code resumes conversations without a durable journal of usine tool intents and results",
@@ -86,6 +98,18 @@ export const claude = HarnessDescriptor.make({
       credentials: ["gateway", "gateway-api-key", "api-key"],
       supported: ["resume-session", "usine-tools", "steer", "interrupt", "token-usage", "cost-usd"],
       lacking: [
+        Lacking.make({
+          capability: "closed-tools",
+          reason: "The Claude Code adapter keeps the harness's own tools on in every session",
+        }),
+        Lacking.make({
+          capability: "structured-output",
+          reason: "The Claude Code adapter returns text, not a schema-checked value",
+        }),
+        Lacking.make({
+          capability: "ephemeral",
+          reason: "The Claude Code adapter saves every conversation",
+        }),
         Lacking.make({
           capability: "durable-coordination",
           reason:
