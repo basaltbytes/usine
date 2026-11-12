@@ -1,0 +1,32 @@
+{
+  "protocol": "pi-sdk",
+  "harnessVersion": "1.4.0",
+  "model": "openai-codex/gpt-5.5",
+  "scenario": "usage-limit",
+  "environment": {},
+  "entries": [
+    {
+      "type": "emit_inbound",
+      "port": "pi:1/provider",
+      "payload": {
+        "role": "assistant",
+        "content": [],
+        "api": "openai-codex-responses",
+        "provider": "openai-codex",
+        "model": "gpt-5.5",
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+        },
+        "stopReason": "error",
+        "timestamp": 1794457020000,
+        "errorMessage": "You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.",
+        "durationMs": 35
+      }
+    }
+  ]
+}

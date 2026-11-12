@@ -7,7 +7,12 @@ import {
 } from "@usine/core/attempt/channel";
 import type { AgentSessionEvent } from "@usine/core/agent/session";
 import { Effect, Fiber, FileSystem, Option, Queue, Result, Schema, Stream } from "effect";
-import { ChildBackend, ChildRequest, SessionOperationError } from "../../src/runtime.ts";
+import {
+  AgentCapacityError,
+  ChildBackend,
+  ChildRequest,
+  SessionOperationError,
+} from "../../src/runtime.ts";
 import type { Scenario } from "./transcript.ts";
 
 export const waitScript = `const fs = require('node:fs');
@@ -168,5 +173,29 @@ export const runScenario = (
         );
       }
       return events;
+    }),
+  );
+
+/**
+ * Runs the usage-limit scenario: the provider refuses the first request because the plan or key
+ * reached its usage limit. Returns the capacity refusal that ends the session.
+ */
+export const runUsageLimit = (request: ChildRequest) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const running = yield* (yield* ChildBackend).launch(request);
+      const events: Array<AgentSessionEvent> = [];
+      const collected = yield* running.events.pipe(
+        Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+        Effect.result,
+        Effect.forkScoped,
+      );
+      const failure = yield* running.result.pipe(Effect.flip, Effect.timeout("30 seconds"));
+      yield* Fiber.join(collected);
+      assert(Schema.is(AgentCapacityError)(failure), `a usage limit is a capacity refusal`);
+      assert.deepStrictEqual(failure.sessionId, Option.some(request.session.id));
+      assert.strictEqual(events[0]?._tag, "SessionStarted");
+      assert(!events.some((event) => event._tag === "SessionFinished"));
+      return failure;
     }),
   );

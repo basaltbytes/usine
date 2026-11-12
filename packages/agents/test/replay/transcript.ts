@@ -16,6 +16,7 @@ export const Scenario = Schema.Literals([
   "restart",
   "credential-changed",
   "early-exit",
+  "usage-limit",
 ]);
 export type Scenario = typeof Scenario.Type;
 
@@ -40,7 +41,7 @@ type Entry = typeof Entry.Type;
 type Incoming = Exclude<Entry, typeof Outbound.Type>;
 
 export const Transcript = Schema.Struct({
-  protocol: Schema.Literals(["claude-sdk", "codex-app-server"]),
+  protocol: Schema.Literals(["claude-sdk", "codex-app-server", "pi-sdk"]),
   harnessVersion: Schema.NonEmptyString,
   model: Schema.NonEmptyString,
   scenario: Scenario,
