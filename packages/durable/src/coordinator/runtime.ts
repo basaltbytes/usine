@@ -94,6 +94,8 @@ interface CoordinatorHub {
   detached: Deferred.Deferred<void>;
   /** Completes when `cancel` stops the attached `execute` call; replaced when it detaches. */
   canceled: Deferred.Deferred<void>;
+  /** Completes when the attached call's sink fails, which ends the call; replaced when it detaches. */
+  sinkFailed: Deferred.Deferred<void>;
 }
 
 const codec = <S extends Schema.Top>(schema: S) => Schema.toCodecJson(schema);
@@ -109,7 +111,7 @@ const infra = (error: JournalError) => InfraFailure.make({ message: error.messag
 const canceledFailure = () =>
   AgentFailure.make({ message: "The attempt was canceled, and its children stopped" });
 
-/** How long a process stop waits for a child's turn to stop before its session closes. */
+/** How long a process stop waits for a live child's turn to stop before its session closes. */
 const CHILD_STOP_GRACE = Duration.seconds(10);
 
 const nonEmpty = (text: string, fallback: string) => (text.trim() === "" ? fallback : text);
@@ -217,6 +219,7 @@ const make = Effect.gen(function* () {
           attached: yield* Deferred.make<AttemptRequest>(),
           detached: yield* Deferred.make<void>(),
           canceled: yield* Deferred.make<void>(),
+          sinkFailed: yield* Deferred.make<void>(),
         };
         hubs.set(attemptId, created);
         return created;
@@ -258,10 +261,12 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Stops delegation `child` when its `execute` call is interrupted, as a process stop does. The
-   * call detaches first, so the child's harness releases its session for a later resume. A live
-   * child's delegation then aborts as on a cancel, as the Pi parent's children do when its harness
-   * closes; any other delegation is interrupted.
+   * Stops delegation `child` when its `execute` call is interrupted. After a cancel or a sink
+   * failure, nothing resumes the child, so its delegation is interrupted while the call is attached
+   * and the child's host stops it. Otherwise, as on a process stop, the call detaches first, so the
+   * child's harness releases its session for a later resume. A live child's delegation then aborts
+   * as on a cancel, as the Pi parent's children do when its harness closes; any other delegation is
+   * interrupted.
    */
   const stopDelegation = <A, E>(
     hub: CoordinatorHub,
@@ -271,6 +276,19 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const annotations = { attemptId: hub.attemptId, child };
+      const ended = (yield* Deferred.isDone(hub.canceled))
+        ? Option.some("canceled")
+        : (yield* Deferred.isDone(hub.sinkFailed))
+          ? Option.some("sink failed")
+          : Option.none<string>();
+      if (Option.isSome(ended)) {
+        yield* Effect.logInfo("The execute call ended for good; its child stops without a resume", {
+          ...annotations,
+          reason: ended.value,
+        });
+        yield* Fiber.interrupt(running);
+        return;
+      }
       yield* releaseAttachment(hub);
       if (!hub.children.has(childSessionId(hub.attemptId, child))) {
         yield* Effect.logInfo("The execute call stopped before its child ran", annotations);
@@ -543,6 +561,7 @@ const make = Effect.gen(function* () {
                 yield* releaseAttachment(hub);
                 hub.detached = yield* Deferred.make<void>();
                 hub.canceled = yield* Deferred.make<void>();
+                hub.sinkFailed = yield* Deferred.make<void>();
                 yield* Deferred.succeed(detached, undefined);
               })
             : Effect.void,
@@ -566,7 +585,13 @@ const make = Effect.gen(function* () {
           if (kept.length > 0) yield* hub.outbox.emit(kept);
         }
         const ended = yield* drive(hub).pipe(
-          Effect.raceFirst(hub.outbox.failed.pipe(Effect.flatMap(Effect.fail))),
+          Effect.raceFirst(
+            hub.outbox.failed.pipe(
+              // Signaled before the race interrupts `drive`, so its delegation sees why.
+              Effect.tap(() => Deferred.succeed(hub.sinkFailed, undefined)),
+              Effect.flatMap(Effect.fail),
+            ),
+          ),
           Effect.exit,
         );
         // A cancel settles the journal before it signals, so `drive` can find it settled first.
