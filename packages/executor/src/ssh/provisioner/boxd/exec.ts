@@ -3,7 +3,6 @@ import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-no
 import { type ExecTransport, HostUnreachable } from "@usine/agents/child-host";
 import { MachineId } from "@usine/core/worker";
 import {
-  type Brand,
   type Cause,
   Context,
   Deferred,
@@ -12,7 +11,6 @@ import {
   Layer,
   Queue,
   Redacted,
-  Schema,
   type Scope,
   Stream,
 } from "effect";
@@ -20,21 +18,6 @@ import type { ClientHttp2Stream } from "node:http2";
 import { BoxdApi as BoxdService, type ExecChunk } from "./api-pb.ts";
 import { BoxdCallError } from "./client.ts";
 import { failureCode } from "./status.ts";
-
-/** The error when the machine of an `Exec` call doesn't exist, or boxd deleted it during the call. */
-export class BoxdMachineGone extends Schema.TaggedError<
-  BoxdMachineGone,
-  Brand.Brand<"@usine/executor/boxd/BoxdMachineGone">
->()("BoxdMachineGone", {
-  machine: MachineId,
-  message: Schema.String,
-}) {}
-
-/**
- * Why an `Exec` call ended without an exit code: `BoxdMachineGone`, or a `BoxdCallError` with the
- * gRPC status, such as `UNAVAILABLE` for an unreachable endpoint or a dropped connection.
- */
-export type BoxdExecError = BoxdCallError | BoxdMachineGone;
 
 /**
  * A command that runs on a boxd machine. Read `stdout` and `stderr` at the same time: each holds a
@@ -47,9 +30,11 @@ export interface BoxdExecution {
   readonly stderr: Stream.Stream<Uint8Array>;
   /**
    * The command's exit code once the call ends: 128 plus the signal number for a command that a
-   * signal ended. Fails if the call ends without one, including when its scope closes first.
+   * signal ended. Fails with the gRPC status if the call ends without one, such as `NOT_FOUND`
+   * for an unknown machine, `UNAVAILABLE` for an unreachable endpoint, a dropped connection, or a
+   * machine that boxd deleted during the call, and `CANCELLED` when the call's scope closes first.
    */
-  readonly exitCode: Effect.Effect<number, BoxdExecError>;
+  readonly exitCode: Effect.Effect<number, BoxdCallError>;
 }
 
 /** Runs commands on boxd machines over boxd's gRPC `Exec` stream. */
@@ -71,16 +56,10 @@ export class BoxdExec extends Context.Service<
   }
 >()("@usine/executor/ssh/provisioner/boxd/exec/BoxdExec") {}
 
-/**
- * The receive window of the HTTP/2 connection and of each stream. At the default 64 KiB, output
- * runs at 1.3 MB/s per stream; at 8 MiB, at 30 to 60 MB/s (docs/research/boxd-exec-transport.md).
- */
+/** The receive window of the HTTP/2 connection and of each stream. */
 const RECEIVE_WINDOW_BYTES = 8 * 1024 * 1024;
 
-/**
- * The most stdin bytes in one `ExecChunk`. boxd closes the command's stdin at a chunk of 4 MiB or
- * more without an error, and the command exits 0.
- */
+/** The most stdin bytes in one `ExecChunk`. boxd closes the command's stdin at a chunk of 4 MiB. */
 export const STDIN_CHUNK_BYTES = 64 * 1024;
 
 /** The chunks that each output stream holds before the call stops reading from boxd. */
@@ -89,22 +68,20 @@ const OUTPUT_BUFFER_CHUNKS = 16;
 /** The message of the `UNAVAILABLE` status that ends a call when boxd deletes its machine. */
 const DESTROYED = "the machine was destroyed";
 
-interface ExecTransportOptions {
-  /**
-   * The time without a received frame after which the client sends an HTTP/2 PING. A connection
-   * with no traffic for 40 minutes was dropped without either end noticing, so a silent command
-   * fails within this time plus `pingTimeout` instead of at the next write.
-   */
-  readonly pingInterval?: number;
-  /** The time a PING has to be answered before the connection and its calls fail, in milliseconds. */
-  readonly pingTimeout?: number;
+/** The keepalive of an `Exec` connection, in milliseconds. */
+export interface ExecKeepalive {
+  /** The time without a received frame after which the client sends an HTTP/2 PING. */
+  readonly pingInterval: number;
+  /** The time a PING has to be answered before the connection and its calls fail. */
+  readonly pingTimeout: number;
 }
 
+/** The keepalive of a `boxdExecLayer` without options: a dead connection fails within 50 seconds. */
+export const DEFAULT_KEEPALIVE: ExecKeepalive = { pingInterval: 30_000, pingTimeout: 20_000 };
+
 /**
- * The connection's session manager. connect-node sets the stream window from the session settings,
- * but never raises the connection window, which limits every stream on the connection to 1.3 MB/s.
- * Each request raises it on the session that carries it; the size is absolute, so a repeat is a
- * no-op.
+ * The connection's session manager, which raises the connection's receive window on the session
+ * of each request. The size is absolute, so a repeat is a no-op.
  */
 class WindowedSessionManager extends Http2SessionManager {
   override request(
@@ -126,6 +103,13 @@ const stdinPieces = (bytes: Uint8Array): Array<Uint8Array> =>
   );
 
 /**
+ * Returns `message` with each occurrence of `secret` replaced, or `message` itself for an empty
+ * `secret`.
+ */
+const redact = (message: string, secret: string): string =>
+  secret === "" ? message : message.replaceAll(secret, "[redacted]");
+
+/**
  * Returns the `BoxdExec` that calls `endpoint`, a region's API endpoint URL, with the bearer that
  * `credential` returns at the start of each call. A call whose `credential` fails ends with that
  * error. Each layer owns one HTTP/2 connection, opened at the first call and closed with the layer.
@@ -133,7 +117,7 @@ const stdinPieces = (bytes: Uint8Array): Array<Uint8Array> =>
 export const boxdExecLayer = (
   endpoint: string,
   credential: Effect.Effect<Redacted.Redacted<string>, BoxdCallError>,
-  options: ExecTransportOptions = {},
+  keepalive: ExecKeepalive = DEFAULT_KEEPALIVE,
 ) =>
   Layer.effect(
     BoxdExec,
@@ -143,10 +127,7 @@ export const boxdExecLayer = (
           () =>
             new WindowedSessionManager(
               endpoint,
-              {
-                pingIntervalMs: options.pingInterval ?? 30_000,
-                pingTimeoutMs: options.pingTimeout ?? 20_000,
-              },
+              { pingIntervalMs: keepalive.pingInterval, pingTimeoutMs: keepalive.pingTimeout },
               { settings: { initialWindowSize: RECEIVE_WINDOW_BYTES } },
             ),
         ),
@@ -157,13 +138,14 @@ export const boxdExecLayer = (
         createGrpcTransport({ baseUrl: endpoint, sessionManager }),
       );
 
-      const failureOf = (machine: MachineId, secret: string, cause: unknown): BoxdExecError => {
+      const failureOf = (secret: string, cause: unknown) => {
         const failure = ConnectError.from(cause);
-        const code = failureCode(failure);
-        const message = failure.rawMessage.replaceAll(secret, "[redacted]");
-        return code === "NOT_FOUND" || (code === "UNAVAILABLE" && message.includes(DESTROYED))
-          ? BoxdMachineGone.make({ machine, message })
-          : BoxdCallError.make({ operation: "exec", url: endpoint, code, message });
+        return BoxdCallError.make({
+          operation: "exec",
+          url: endpoint,
+          code: failureCode(failure),
+          message: redact(failure.rawMessage, secret),
+        });
       };
 
       const exec = Effect.fn("BoxdExec.exec")(function* (
@@ -174,8 +156,8 @@ export const boxdExecLayer = (
         yield* Effect.annotateCurrentSpan({ machine });
         const stdout = yield* Queue.bounded<Uint8Array, Cause.Done>(OUTPUT_BUFFER_CHUNKS);
         const stderr = yield* Queue.bounded<Uint8Array, Cause.Done>(OUTPUT_BUFFER_CHUNKS);
-        const exitCode = yield* Deferred.make<number, BoxdExecError>();
-        const settle = (result: Exit.Exit<number, BoxdExecError>) =>
+        const exitCode = yield* Deferred.make<number, BoxdCallError>();
+        const settle = (result: Exit.Exit<number, BoxdCallError>) =>
           Effect.all([Queue.end(stdout), Queue.end(stderr), Deferred.done(exitCode, result)], {
             discard: true,
           });
@@ -201,30 +183,29 @@ export const boxdExecLayer = (
         const call = Effect.gen(function* () {
           const bearer = yield* credential;
           const secret = Redacted.value(bearer);
+          // Aborting the signal cancels a call whose scope closes before the response ends.
           const controller = yield* Effect.acquireRelease(
             Effect.sync(() => new AbortController()),
             (controller) => Effect.sync(() => controller.abort()),
           );
-          // connect-node stops pulling the requests when the response ends, but never returns the
-          // iterator, which would keep waiting for stdin.
-          const iterator = yield* Effect.acquireRelease(
-            Effect.sync(() => Stream.toAsyncIterable(requests)[Symbol.asyncIterator]()),
-            (iterator) => Effect.promise(() => Promise.resolve(iterator.return?.())),
-          );
+          // connect-node returns the requests' iterator when the call ends, through a second
+          // `[Symbol.asyncIterator]()` call, so the iterable answers the one iterator it sends.
+          const iterator = Stream.toAsyncIterable(requests)[Symbol.asyncIterator]();
           const responses = client.exec(
             { [Symbol.asyncIterator]: () => iterator },
             { signal: controller.signal, headers: { authorization: `Bearer ${secret}` } },
           );
+          // Only the last response ends the command: one without data, or one with a non-zero exit
+          // code.
           let exited: number | undefined;
-          yield* Stream.fromAsyncIterable(responses, (cause) =>
-            failureOf(machine, secret, cause),
-          ).pipe(
+          yield* Stream.fromAsyncIterable(responses, (cause) => failureOf(secret, cause)).pipe(
             Stream.runForEach((chunk) =>
-              chunk.data.length === 0
-                ? Effect.sync(() => {
-                    exited = chunk.exitCode;
-                  })
-                : Queue.offer(chunk.isStderr ? stderr : stdout, chunk.data),
+              Effect.gen(function* () {
+                exited =
+                  chunk.data.length === 0 || chunk.exitCode !== 0 ? chunk.exitCode : undefined;
+                if (chunk.data.length > 0)
+                  yield* Queue.offer(chunk.isStderr ? stderr : stdout, chunk.data);
+              }),
             ),
           );
           if (exited === undefined)
@@ -247,6 +228,10 @@ export const boxdExecLayer = (
     }),
   );
 
+/** Whether `error` ended a call because its machine doesn't exist or boxd deleted it. */
+const machineGone = (error: BoxdCallError): boolean =>
+  error.code === "NOT_FOUND" || (error.code === "UNAVAILABLE" && error.message.includes(DESTROYED));
+
 /**
  * Returns the `ExecTransport` that runs command lines on boxd machine `machine` through `exec`. A
  * call that ends without an exit code fails with `HostUnreachable`, whose message says whether boxd
@@ -262,17 +247,15 @@ export const boxdTransport = (exec: BoxdExec["Service"], machine: MachineId): Ex
           Effect.tapError((error) =>
             Effect.logDebug("A boxd exec call ended without an exit code", {
               machine,
-              error: error._tag,
-              code: error._tag === "BoxdCallError" ? error.code : "NOT_FOUND",
+              code: error.code,
             }),
           ),
           Effect.mapError((error) =>
             HostUnreachable.make({
               destination: machine,
-              message:
-                error._tag === "BoxdMachineGone"
-                  ? `boxd machine ${machine} is gone: ${error.message}`
-                  : `boxd exec on ${machine} failed: ${error.code}: ${error.message}`,
+              message: machineGone(error)
+                ? `boxd machine ${machine} is gone: ${error.message}`
+                : `boxd exec on ${machine} failed: ${error.code}: ${error.message}`,
             }),
           ),
         ),
