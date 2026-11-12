@@ -180,6 +180,7 @@ describe("durable AttemptRuntime", () => {
               Harnesses.layerFrom(activeCatalog, [
                 {
                   id,
+                  complete: () => Effect.die(new Error("The test runs no completion")),
                   // Rebuilds the admitted child's request for the stub backend.
                   open: (spec, start, { restored }) =>
                     Effect.gen(function* () {

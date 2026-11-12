@@ -43,8 +43,6 @@ import {
   isMessagePhase,
   isToolStatus,
   isTurnStatus,
-  ModelListParams,
-  ModelListResponse,
   RateLimitsUpdated,
   ThreadStartParams,
   ThreadResumeParams,
@@ -69,6 +67,8 @@ import {
   providerRetryMessage,
   turnFailure,
   toolName,
+  DIAGNOSTIC_METHODS,
+  decodeRetry,
   rateLimitWindow,
   UserMessageKindItem,
 } from "./codec.ts";
@@ -79,8 +79,6 @@ import {
   ChildSessionLifecycle,
   ChildSessionJournal,
   type RunningSession,
-  UnknownModelError,
-  UnsupportedEffortError,
 } from "../../runtime.ts";
 import { isRemoteHost } from "../../child-host/child-host.ts";
 import { ChildProcessLost } from "../../child-host/process.ts";
@@ -93,6 +91,9 @@ import {
   type CodexConnection,
   operationError,
 } from "./app-server.ts";
+import { structuredCompletion } from "../completion.ts";
+import { codexCompletion } from "./completion.ts";
+import { checkCodexModel } from "./model.ts";
 import {
   codexChildAccount,
   codexPoolUnavailable,
@@ -102,17 +103,6 @@ import {
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
-/** The server notification methods with no session event equivalent; they are only logged. */
-const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
-  "error",
-  "warning",
-  "configWarning",
-  "deprecationNotice",
-  "guardianWarning",
-  "model/rerouted",
-]);
-
-const decodeRetry = Schema.decodeUnknownOption(ErrorNotification);
 const isTurnActivity = Schema.is(TurnActivity);
 
 const resumeThread = Effect.fn("CodexRuntime.resumeThread")(function* (
@@ -198,56 +188,8 @@ const makeCodexSessions = Effect.gen(function* () {
       yield* initializeCodex(connection);
       let billing = yield* codexChildAccount(connection, spec.session.brain, spec.admitted.pool);
 
-      const models: Array<(typeof ModelListResponse.Type.data)[number]> = [];
-      let cursor: string | null = null;
-      do {
-        const params: ModelListParams = { cursor, includeHidden: true, limit: 100 };
-        const encodedModelListParams = yield* Schema.encodeEffect(
-          Schema.toCodecJson(ModelListParams),
-        )(params).pipe(Effect.orDie);
-        const response = yield* connection.request("launch", "model/list", encodedModelListParams);
-        const page = yield* decodeResponse(
-          ModelListResponse,
-          "launch",
-          client,
-          "model list",
-          response,
-        );
-        models.push(...page.data);
-        cursor = page.nextCursor ?? null;
-      } while (cursor !== null);
+      const effort = yield* checkCodexModel(connection, client, spec);
       const requestedModel = spec.session.brain.model;
-      const catalogModel = models.find(
-        (model) => model.id === requestedModel || model.model === requestedModel,
-      );
-      if (catalogModel === undefined) {
-        yield* Effect.logError("Codex child rejected an unknown model", { model: requestedModel });
-        return yield* UnknownModelError.make({
-          harness: Harness.make("codex"),
-          model: requestedModel,
-          message: `Codex has no model "${requestedModel}"`,
-        });
-      }
-      const effort = spec.session.brain.effort === "off" ? "none" : spec.session.brain.effort;
-      const supportedEfforts = catalogModel.supportedReasoningEfforts;
-      if (
-        supportedEfforts !== undefined &&
-        supportedEfforts.length > 0 &&
-        !supportedEfforts.some((option) => option.reasoningEffort === effort)
-      ) {
-        yield* Effect.logError("Codex child rejected an unsupported effort", {
-          effort: spec.session.brain.effort,
-          model: requestedModel,
-          supported: supportedEfforts.map((option) => option.reasoningEffort),
-        });
-        return yield* UnsupportedEffortError.make({
-          harness: Harness.make("codex"),
-          model: requestedModel,
-          effort: spec.session.brain.effort,
-          message: `Codex model "${requestedModel}" doesn't support effort ${effort}`,
-        });
-      }
-
       const thread = yield* Option.match(startReference(start), {
         onNone: () =>
           Effect.gen(function* () {
@@ -839,7 +781,11 @@ const makeCodexSessions = Effect.gen(function* () {
   const stop = Effect.fn("CodexRuntime.stop")((spec: SessionSpec) =>
     appServer.stop({ ...spec, sessionId: Option.some(spec.session.id) }),
   );
-  return { open, stop } satisfies Pick<HarnessRuntime, "open" | "stop">;
+  return {
+    open,
+    stop,
+    complete: structuredCompletion(codexCompletion(appServer)),
+  } satisfies Pick<HarnessRuntime, "open" | "stop" | "complete">;
 });
 
 /** Provides `ChildBackend` for local or remote children. Requires `CodexAppServer`; validates the model and authentication before starting the task. */

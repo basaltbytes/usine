@@ -2,7 +2,7 @@ import { AgentSessionId, RateLimitWindow as CoreRateLimitWindow } from "@usine/c
 import { DateTime, Effect, Option, Schema } from "effect";
 import {
   AgentMessageItem,
-  type ErrorNotification,
+  ErrorNotification,
   isCodexErrorCode,
   type RateLimitWindow,
   ToolItem,
@@ -176,3 +176,16 @@ export const turnFailure = (
     ? AgentCapacityError.make({ sessionId: Option.some(sessionId), message })
     : AgentResultError.make({ sessionId: Option.some(sessionId), message });
 };
+
+/** The server notification methods with no session event equivalent; they are only logged. */
+export const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
+  "error",
+  "warning",
+  "configWarning",
+  "deprecationNotice",
+  "guardianWarning",
+  "model/rerouted",
+]);
+
+/** Decodes a provider error notification, which reports whether Codex retries. */
+export const decodeRetry = Schema.decodeUnknownOption(ErrorNotification);

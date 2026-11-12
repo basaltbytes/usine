@@ -1,11 +1,18 @@
-import { AgentSession, HarnessSession } from "@usine/core/agent/session";
+import {
+  AgentSession,
+  AgentSessionId,
+  HarnessSession,
+  type SessionTokensUpdated,
+} from "@usine/core/agent/session";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { type Brand, type Effect, Schema } from "effect";
 import { ChildHost } from "../child-host/child-host.ts";
 import {
+  AgentCapacityError,
   type AgentSessionError,
   type InterruptedTool,
   type RunningSession,
+  SessionOperationError,
   WorkingDirectory,
 } from "../runtime.ts";
 import { AdmittedBrain } from "./admission.ts";
@@ -69,3 +76,57 @@ export interface NativeSession {
     tools: ReadonlyArray<InterruptedTool>,
   ) => Effect.Effect<void, AgentSessionError>;
 }
+
+/**
+ * The schema of a structured completion's value. Its JSON form must be an object, so that every
+ * harness can constrain the model to it; give every field a value, because OpenAI's strict mode
+ * requires every property.
+ */
+export type CompletionOutput<A> = Schema.Codec<A, unknown, never, unknown>;
+
+/**
+ * A schema-checked value from `HarnessRuntime.complete`. A completion saves no conversation, so it
+ * has no session reference.
+ */
+export interface Completion<A> {
+  readonly value: A;
+  /**
+   * The completion's tokens and cost, reported as for a session: its `session` carries the brain
+   * that the harness ran and the billing pool that paid for it.
+   */
+  readonly usage: SessionTokensUpdated;
+}
+
+/** The harness returned a value that the output schema rejects, or no value. */
+export class CompletionInvalid extends Schema.TaggedError<
+  CompletionInvalid,
+  Brand.Brand<"@usine/agents/harness/contract/CompletionInvalid">
+>("@usine/agents/CompletionInvalid")("CompletionInvalid", {
+  sessionId: AgentSessionId,
+  message: Schema.NonEmptyString,
+}) {}
+
+/**
+ * Admission, the harness, or its model refused the request: the brain can't serve the role, the
+ * model or credential isn't available, or the model declined to answer. The same request fails
+ * the same way until its brain, credential, or prompt changes.
+ */
+export class CompletionRefused extends Schema.TaggedError<
+  CompletionRefused,
+  Brand.Brand<"@usine/agents/harness/contract/CompletionRefused">
+>("@usine/agents/CompletionRefused")("CompletionRefused", {
+  sessionId: AgentSessionId,
+  message: Schema.NonEmptyString,
+}) {}
+
+/**
+ * Why a structured completion has no value. `AgentCapacityError` is a provider capacity refusal or
+ * usage limit, and `SessionOperationError` a harness process or transport failure.
+ */
+export const CompletionError = Schema.Union([
+  CompletionInvalid,
+  CompletionRefused,
+  AgentCapacityError,
+  SessionOperationError,
+]);
+export type CompletionError = typeof CompletionError.Type;

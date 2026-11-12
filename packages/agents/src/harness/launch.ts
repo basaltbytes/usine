@@ -92,7 +92,9 @@ export const admitChild = Effect.fn("HarnessAdmission.child")(function* (
 
 /**
  * Admits the brain of `spec` for its role at its placement and credential route before a session
- * opens. A `StartResume` also requires `resume-session`.
+ * opens. A `StartResume` also requires `resume-session`. An opened session saves its conversation
+ * and returns text, so a role that keeps no conversation or returns a structured value is refused:
+ * it runs as a completion.
  */
 export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
   catalog: HarnessCatalog,
@@ -107,6 +109,16 @@ export const admitSession = Effect.fn("HarnessAdmission.session")(function* (
     worker: spec.worker,
     harness: spec.session.brain.harness,
   });
+  if (role.persistence === "ephemeral" || role.output === "structured") {
+    const message = `${role.name} keeps no conversation or returns a structured value, so it runs as a completion, not a session`;
+    yield* Effect.logWarning("Harness session refused", {
+      sessionId: spec.session.id,
+      role: role.name,
+      harness: spec.session.brain.harness,
+      message,
+    });
+    return yield* AgentResultError.make({ sessionId: Option.some(spec.session.id), message });
+  }
   return yield* Effect.fromResult(
     admitBrain(catalog, role, spec.session.brain, context, { reopens: resume }),
   ).pipe(

@@ -27,6 +27,9 @@ import { probeOutput } from "../src/preflight/command.ts";
 import { CODEX_CLI_VERSION } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
 
+/** Fails a Pi completion that the test doesn't expect. */
+const noCompletion = () => Promise.reject(new Error("The test runs no completion"));
+
 const verifyHarness = (
   brain: BrainSpec,
   host: typeof local | typeof remote,
@@ -161,6 +164,7 @@ const account = (response: Effect.Effect<Schema.Json>) => {
 const unusedAccount = account(Effect.die("the probe must not inspect an account")).layer;
 
 const unusedPi = Layer.succeed(PiSdk)({
+  complete: noCompletion,
   start: async () => {
     throw new Error("Pi must not start for another harness");
   },
@@ -457,6 +461,7 @@ describe("worker harness readiness", () => {
             Layer.provideMerge(account(Effect.succeed(null)).layer),
             Layer.provideMerge(
               Layer.succeed(PiSdk)({
+                complete: noCompletion,
                 start: async (received) => {
                   options = received;
                   return started;
@@ -485,6 +490,7 @@ describe("worker harness readiness", () => {
           Layer.provideMerge(account(Effect.succeed(null)).layer),
           Layer.provideMerge(
             Layer.succeed(PiSdk)({
+              complete: noCompletion,
               start: async ({ model }) => ({
                 _tag: "UnsupportedAuthentication",
                 model,

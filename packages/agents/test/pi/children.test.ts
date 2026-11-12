@@ -55,8 +55,9 @@ const request = (harness: Harness) =>
     prompt: "Implement the focused task.",
   });
 
-const backend = (selected: Harness): Pick<HarnessRuntime, "open" | "stop"> => ({
+const backend = (selected: Harness): Pick<HarnessRuntime, "open" | "stop" | "complete"> => ({
   stop: () => Effect.void,
+  complete: () => Effect.die(new Error("The test runs no completion")),
   open: (spec) =>
     Effect.succeed({
       running: {
@@ -95,6 +96,7 @@ describe("harness runtime registration", () => {
     }> = [];
     const runtime: HarnessRuntime = {
       id: claude.id,
+      complete: backend(claude.id).complete,
       stop: (spec) =>
         Effect.sync(() => {
           seen.push({ operation: "stop", environment: spec.environment });
@@ -153,6 +155,7 @@ describe("harness runtime registration", () => {
     const opened: Array<string> = [];
     const recording = (id: Harness): HarnessRuntime => ({
       id,
+      complete: backend(id).complete,
       stop: () => Effect.void,
       preflight: checkedPreflight(() => Effect.void),
       open: (spec, start, continuation) => {

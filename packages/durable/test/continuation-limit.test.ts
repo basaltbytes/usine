@@ -52,6 +52,7 @@ it.live("refuses a fourth continuation after three durable restarts within ten m
           const prompted = yield* Queue.make<void>();
           const turn = yield* Deferred.make<void>();
           const sdk = Layer.succeed(PiSdk)({
+            complete: () => Promise.reject(new Error("The test runs no completion")),
             start: async (options) => {
               assert.strictEqual(options.storage._tag, restart === 0 ? "Create" : "Resume");
               if (options.storage._tag === "Resume")

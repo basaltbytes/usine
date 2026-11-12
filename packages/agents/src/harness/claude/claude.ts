@@ -11,6 +11,7 @@ import type { HarnessRuntime } from "../runtime.ts";
 import { type HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { Harness, ModelId } from "@usine/core/agent/brain";
 import {
+  type BillingPool,
   HarnessSession,
   ProviderRecovered,
   ProviderRetries,
@@ -53,6 +54,8 @@ import { sdkProcessSpawner } from "../../child-host/sdk.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { claudeSessionMeter, claudeTokenMeter } from "../usage.ts";
+import { type CompletionSchema, refusedLaunch, structuredCompletion } from "../completion.ts";
+import { readClaudeCompletion } from "./completion.ts";
 import { claudeRateLimits, isRateLimitEvent, rejectedUntil } from "./rate-limits.ts";
 import {
   apiRetryMessage,
@@ -104,28 +107,27 @@ const operationError = (
     cause,
   });
 
-/** Returns the SDK options; each launch supplies the shared process callback. */
-const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQueryOptions => {
+/** The options that select the brain, checkout, and environment of every Claude Code launch. */
+const brainOptions = (
+  spec: SessionSpec,
+): Pick<
+  ClaudeQueryOptions,
+  "cwd" | "effort" | "env" | "model" | "pathToClaudeCodeExecutable" | "settingSources" | "thinking"
+> => {
   const effort = spec.session.brain.effort;
-  const shared: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
-    allowDangerouslySkipPermissions: true,
+  const shared: Pick<
+    ClaudeQueryOptions,
+    "cwd" | "env" | "model" | "pathToClaudeCodeExecutable" | "settingSources"
+  > = {
     cwd: spec.cwd,
     // Replaces the subprocess environment instead of extending this process's.
     env: { ...spec.environment },
     model: spec.session.brain.model,
     // The Worker-provisioned binary that the readiness checks inspect.
     pathToClaudeCodeExecutable: "claude",
-    permissionMode: "bypassPermissions",
-    persistSession: true,
-    ...Option.match(startReference(start), {
-      onNone: () => ({ sessionId }),
-      onSome: (saved) => ({ resume: saved.id }),
-    }),
     // The worktree is untrusted, so its project and local settings (hooks, env) are not loaded into
     // a child that has the App credential; only the Worker user's settings apply.
     settingSources: ["user"],
-    // Flag settings take precedence over the Worker user's settings file.
-    settings: { attribution: { commit: "", pr: "" } },
   };
   return effort === "off"
     ? { ...shared, thinking: { type: "disabled" } }
@@ -135,6 +137,33 @@ const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQ
         thinking: { type: "adaptive" },
       };
 };
+
+/** Returns the SDK options; each launch supplies the shared process callback. */
+const optionsFor = (spec: SessionSpec, start: Start, sessionId: string): ClaudeQueryOptions => ({
+  ...brainOptions(spec),
+  allowDangerouslySkipPermissions: true,
+  permissionMode: "bypassPermissions",
+  persistSession: true,
+  ...Option.match(startReference(start), {
+    onNone: () => ({ sessionId }),
+    onSome: (saved) => ({ resume: saved.id }),
+  }),
+  // Flag settings take precedence over the Worker user's settings file.
+  settings: { attribution: { commit: "", pr: "" } },
+});
+
+/**
+ * Returns the SDK options of a structured completion: no built-in tools, no saved transcript, and
+ * `schema` as the output format. Claude Code then offers only its `StructuredOutput` tool, checks
+ * the tool's input against `schema`, and asks the model again when it doesn't match.
+ */
+const completionOptions = (spec: SessionSpec, schema: CompletionSchema): ClaudeQueryOptions => ({
+  ...brainOptions(spec),
+  tools: [],
+  outputFormat: { type: "json_schema", schema },
+  permissionMode: "dontAsk",
+  persistSession: false,
+});
 
 const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: ModelId): boolean =>
   models.some((candidate) => candidate.value === model || candidate.resolvedModel === model);
@@ -417,6 +446,18 @@ const makeClaudeSessions = Effect.gen(function* () {
     }
   });
 
+  /** A route without a gateway credential kind leaves the pool to Claude Code's own account. */
+  const billingPool = (spec: SessionSpec, query: ClaudeQuery) =>
+    Option.match(spec.admitted.pool, {
+      onSome: (pool) => Effect.succeed(pool),
+      onNone: () =>
+        Effect.tryPromise({
+          try: () => query.usesApiKey(),
+          catch: (cause) =>
+            operationError("launch", spec, "Claude account discovery failed", cause),
+        }).pipe(Effect.map((apiKey): BillingPool => (apiKey ? "apiKeys" : "claudePlan"))),
+    });
+
   const open: HarnessRuntime["open"] = Effect.fn("ClaudeRuntime.open")(
     function* (spec, start, policy) {
       yield* Effect.annotateCurrentSpan({
@@ -480,16 +521,7 @@ const makeClaudeSessions = Effect.gen(function* () {
         start._tag === "StartResume" ? "resume" : undefined,
       );
 
-      // A route without a gateway credential kind leaves the pool to Claude Code's own account.
-      const pool = Option.isSome(spec.admitted.pool)
-        ? spec.admitted.pool.value
-        : (yield* Effect.tryPromise({
-              try: () => current.query.usesApiKey(),
-              catch: (cause) =>
-                operationError("launch", spec, "Claude account discovery failed", cause),
-            }))
-          ? "apiKeys"
-          : "claudePlan";
+      const pool = yield* billingPool(spec, current.query);
       const session = resolvedSession(spec.session, {
         brain: spec.session.brain,
         pool: Option.some(pool),
@@ -870,13 +902,59 @@ const makeClaudeSessions = Effect.gen(function* () {
       };
     },
   );
+  const completeJson = Effect.fn("ClaudeRuntime.complete")(
+    function* (spec: SessionSpec, prompt: string, schema: CompletionSchema) {
+      yield* Effect.annotateCurrentSpan({
+        agent: spec.session.agent,
+        effort: spec.session.brain.effort,
+        harness: spec.session.brain.harness,
+        model: spec.session.brain.model,
+        ...parentFields(spec.session),
+        sessionId: spec.session.id,
+        worker: spec.worker,
+      });
+      yield* Effect.logInfo("Starting Claude structured completion");
+      const scope = yield* Effect.scope;
+      const launch = yield* launchWithRetries(
+        spec,
+        completionOptions(spec, schema),
+        [userMessage(prompt)],
+        scope,
+      );
+      const pool = yield* billingPool(spec, launch.query);
+      const session = resolvedSession(spec.session, {
+        brain: spec.session.brain,
+        pool: Option.some(pool),
+        endpoint: spec.session.endpoint,
+      });
+      return yield* readClaudeCompletion(spec, session, launch);
+    },
+    (effect, spec) =>
+      effect.pipe(
+        Effect.catchTag("UnknownModelError", (error) =>
+          Effect.fail(refusedLaunch(spec.session.id, error)),
+        ),
+        Effect.tapError((error) =>
+          Effect.logWarning("Claude structured completion failed", {
+            sessionId: spec.session.id,
+            errorTag: error._tag,
+            message: error.message,
+          }),
+        ),
+        Effect.scoped,
+      ),
+  );
   const stop = Effect.fn("ClaudeRuntime.stop")(function* (spec: SessionSpec) {
     if (isRemoteHost(spec.host))
       yield* stopChildProcess({ ...spec, sessionId: Option.some(spec.session.id) }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
   });
-  return { open, stop } satisfies Pick<HarnessRuntime, "open" | "stop">;
+  return {
+    open,
+    stop,
+    complete: structuredCompletion(completeJson),
+  } satisfies Pick<HarnessRuntime, "open" | "stop" | "complete">;
 });
 
 /** Provides `ChildBackend` with Claude Code for every delegated task. */
