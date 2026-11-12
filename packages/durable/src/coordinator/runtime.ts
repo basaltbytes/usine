@@ -329,16 +329,33 @@ const make = Effect.gen(function* () {
         }).pipe(Effect.as(recorded)),
       onNone: () =>
         Effect.gen(function* () {
-          const proposed = yield* wakeUp.handle(event, context);
+          const sequence = snapshot.nextEvent;
+          const proposed = yield* wakeUp
+            .handle(event, context, {
+              attemptId,
+              sequence,
+              spec: snapshot.request.spec,
+              request: Effect.suspend(() => Deferred.await(hub.attached)),
+            })
+            .pipe(
+              Effect.raceFirst(
+                Deferred.await(hub.canceled).pipe(
+                  Effect.andThen(
+                    Effect.logInfo("The cancel interrupted the event's handler", {
+                      attemptId,
+                      event: event._tag,
+                      sequence,
+                    }),
+                  ),
+                  Effect.andThen(Effect.interrupt),
+                ),
+              ),
+            );
           const decision = Option.getOrElse(proposed, () =>
             RecordedDecision.make({ decision: ruleFor(event, context), handler: "rule" }),
           );
           const encoded = yield* encodeDecision(decision).pipe(Effect.orDie);
-          return yield* journal.decide(
-            attemptId,
-            snapshot.nextEvent,
-            EncodedDecision.make(encoded),
-          );
+          return yield* journal.decide(attemptId, sequence, EncodedDecision.make(encoded));
         }),
     });
     const recorded = yield* decodeDecision(encodedDecision).pipe(Effect.orDie);
@@ -348,6 +365,15 @@ const make = Effect.gen(function* () {
       attemptId,
       event: event._tag,
       handler: recorded.handler,
+      ...Option.match(recorded.session, {
+        onNone: () => ({}),
+        onSome: ({ brain, route, pool, usage }) => ({
+          model: brain.model,
+          route,
+          pool,
+          tokens: usage.totalTokens,
+        }),
+      }),
       decision: recorded.decision._tag,
       applied: clamped._tag,
       state: next._tag,

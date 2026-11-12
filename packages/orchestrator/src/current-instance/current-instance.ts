@@ -7,6 +7,7 @@ import {
   Configuration,
   ConfigurationStore,
   commit,
+  replay,
   type ConfigurationRevisionNumber,
   type ConfigurationCommit,
   type ConfigurationRevision,
@@ -389,7 +390,8 @@ export class CurrentInstance extends Context.Service<
             Effect.gen(function* () {
               const previous = yield* Ref.get(observed);
               if (revision.number <= previous.number) return;
-              const next = yield* commit(
+              // The store accepted this revision, so replay it as stored.
+              const next = yield* replay(
                 parser,
                 previous,
                 previous.number,
