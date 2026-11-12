@@ -70,12 +70,41 @@ Before it applies completion labels or starts a fix, usine reads the latest run 
 
 Attempt tokens don't grant Actions write access, so agents can't rerun workflows. A task that finds missing or canceled CI jobs records the run IDs on the pull request as a blocker for the operator instead of attempting a rerun.
 
-The fix loop must be active, use the pull request stream, and select the repository. Its approval requirement and cycle budget at the time the fix run opens apply. A queued CI fix remains eligible while the pull request is open at the recorded head and has failed checks or a merge conflict with no checks. If GitHub temporarily reports mergeability as `UNKNOWN` with no checks during admission, the queued fix remains eligible. A GitHub read error or a five-second recheck timeout keeps the fix queued, and the next reconciliation, within three minutes, rechecks it. Accepted CI fixes close their source run as **Handed off** and link to the fix run.
+### Fix runs
 
-An exhausted cycle budget requires an operator reset in the overview. After the reset, the next poll admits the blocked CI fix when its head and CI recheck allows it, even when the previous run removed `agent-review-findings`. The fix retains its prompt, failure diagnostics, and completion actions across restarts. When its run opens, the fix takes the approval requirement, agent, models, permissions, CI policy, outcome labels, and `max_cycles` from the fix loop's current configuration. The generated CI handoff instructions also follow the current CI policy. Setting `approval: required` before the reset makes the fix wait for approval. Approval expressions use the payload saved with the CI fix event. The failed source run stays in **Needs attention** and links to the newest admitted fix run that has not been canceled or revoked.
+The fix loop must be active, use the pull request stream, and select the repository. The approval requirement and cycle budget that apply are the ones in place when the fix run opens. Accepted CI fixes close their source run as **Handed off** and link to the fix run.
 
-CI fixes bypass the fix loop's `if:` expression. On an open pull request, a trigger mismatch preserves queued CI fixes and runs that have not started an attempt only for the same head with failed checks, or with no checks and mergeability `CONFLICTING` or `UNKNOWN`. Removing a trigger label, converting the pull request to draft, or adding a label excluded by `if:` does not stop these fixes. On that poll, a newer push or checks that stop failing causes revocation. When `if:` rejects a closed or merged pull request, polling revokes all its queued events and unstarted runs; missing pull requests also revoke both. Started attempts continue.
+A queued CI fix remains eligible while the pull request is open at the recorded head and has failed checks or a merge conflict with no checks. Mergeability `UNKNOWN` with no checks also keeps it eligible. A GitHub read error or a five-second recheck timeout keeps the fix queued, and the next reconciliation, within three minutes, rechecks it.
 
-Open cycle-budget asks and operator suppressions keep queued CI fixes waiting until they are cleared. A trigger mismatch clears the loop's suppression, including one caused by an unanswered operator question, so a subsequent reconciliation can admit the saved fix. Pause the fix loop to keep queued fixes waiting regardless of labels or `if:` changes. Resuming the loop rechecks them right away. When a CI fix and a trigger match wait for the same loop and pull request, events are rechecked from newest to oldest. A CI fix that does not match is revoked on its own before the next event is rechecked. A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks. The first matching event opens the next run and supersedes older events. A missing pull request revokes the entire queued group. Loops without a CI policy require their agents to wait for checks before applying completion labels.
+### After a cycle budget reset
+
+An exhausted cycle budget requires an operator reset in the overview. When the reset replays blocked CI fixes, a notice reports how many. The next poll admits a replayed fix when the recheck of its head and CI allows it, even when the previous run removed `agent-review-findings`.
+
+The fix keeps its prompt, failure diagnostics, and completion actions across restarts. When its run opens, it takes these settings from the fix loop's current configuration:
+
+- The approval requirement. Setting `approval: required` before the reset makes the fix wait for approval.
+- The agent and its models.
+- Permissions and outcome labels.
+- The CI policy, which also sets the generated CI handoff instructions at the end of the task.
+- `max_cycles`.
+
+Approval expressions evaluate the payload saved with the CI fix event, not the pull request's current state.
+
+The failed source run stays in **Needs attention**. It links to the newest admitted fix run that hasn't been canceled or revoked, and says whether that run continues the work, finished it, handed it to another fix run, or failed too. A dismissed failure stays dismissed when its fix run opens or changes state.
+
+### Trigger changes and queued fixes
+
+CI fixes bypass the fix loop's `if:` expression. On an open pull request, a trigger mismatch preserves queued CI fixes, and runs that haven't started an attempt, only for the same head with failed checks, or with no checks and mergeability `CONFLICTING` or `UNKNOWN`. Removing a trigger label, converting the pull request to draft, or adding a label excluded by `if:` doesn't stop these fixes. On that poll, a newer push or checks that stop failing revoke them. When `if:` rejects a closed or merged pull request, polling revokes all its queued events and unstarted runs. A missing pull request revokes both too. Started attempts continue.
+
+Open cycle-budget asks and operator suppressions keep queued CI fixes waiting until they are cleared. A trigger mismatch clears the loop's suppression, including one caused by an unanswered operator question, so a later reconciliation can admit the saved fix. To keep queued fixes waiting regardless of labels or `if:` changes, pause the fix loop. Resuming the loop rechecks them right away.
+
+When a CI fix and a trigger match wait for the same loop and pull request, events are rechecked from newest to oldest:
+
+- A CI fix that doesn't match is revoked on its own before the next event is rechecked.
+- A trigger mismatch revokes the queued trigger matches together and preserves CI fixes for their own rechecks.
+- The first matching event opens the next run and supersedes older events.
+- A missing pull request revokes the entire queued group.
+
+Loops without a CI policy require their agents to wait for checks before applying completion labels.
 
 GitHub does not run pull request workflows on conflicting branches. Writer tasks must resolve the conflict and push a checked tree. A clean agent review leaves any required independent approval and merge to you.
