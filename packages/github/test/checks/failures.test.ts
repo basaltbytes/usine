@@ -607,7 +607,10 @@ it.effect("reports the Actions run and job behind each failed check run", () =>
       })),
       [
         { name: "ci", actionsJob: Option.some({ runId: 1, jobId: 2 }) },
+        { name: "pr", actionsJob: Option.some({ runId: 1, jobId: 2 }) },
         { name: "external", actionsJob: Option.none() },
+        { name: "attempt", actionsJob: Option.none() },
+        { name: "suffix", actionsJob: Option.none() },
       ],
     );
   }).pipe(
@@ -616,10 +619,25 @@ it.effect("reports the Actions run and job behind each failed check run", () =>
         url.includes("/actions/jobs/")
           ? new Response("forbidden", { status: 403 })
           : json({
-              total_count: 2,
+              total_count: 5,
               check_runs: [
                 failedCheckRun,
+                {
+                  ...failedCheckRun,
+                  name: "pr",
+                  details_url: `${failedCheckRun.details_url}?pr=1193`,
+                },
                 { ...failedCheckRun, name: "external", details_url: "https://ci.example/build/7" },
+                {
+                  ...failedCheckRun,
+                  name: "attempt",
+                  details_url: `${failedCheckRun.details_url}/attempts/1`,
+                },
+                {
+                  ...failedCheckRun,
+                  name: "suffix",
+                  details_url: `${failedCheckRun.details_url}x`,
+                },
               ],
             }),
       ),
@@ -630,9 +648,10 @@ it.effect("reports the Actions run and job behind each failed check run", () =>
 it.effect("reads failed commit statuses beside failed check runs", () =>
   Effect.gen(function* () {
     const evidence = yield* (yield* GitHubChecks).failedStatuses(repository, head);
-    assert.deepStrictEqual(evidence.jobs, ["external-ci"]);
+    assert.deepStrictEqual(evidence.jobs, ["external-ci", "deploy-preview"]);
     assert.isTrue(evidence.checks.every(({ actionsJob }) => Option.isNone(actionsJob)));
     assert.include(evidence.excerpt, "Build failed");
+    assert.include(evidence.excerpt, "Preview errored");
   }).pipe(
     Effect.provide(
       withClient((url) =>
@@ -641,7 +660,9 @@ it.effect("reads failed commit statuses beside failed check runs", () =>
           : json({
               statuses: [
                 { context: "external-ci", state: "failure", description: "Build failed" },
+                { context: "deploy-preview", state: "error", description: "Preview errored" },
                 { context: "docs", state: "success", description: null },
+                { context: "lint", state: "pending", description: null },
               ],
             }),
       ),

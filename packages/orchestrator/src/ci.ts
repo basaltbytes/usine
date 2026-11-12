@@ -192,6 +192,22 @@ const unfinishedCi = (state: HeadWorkflowRunState, timedOut: boolean) => {
   return { _tag: "Stalled", runs: running } as const;
 };
 
+/**
+ * Returns the failed checks whose job the workflow-run read listed as not completed. Such a job
+ * failed after that read, so the read can't judge whether the failure is a fix to make.
+ */
+const failuresAfterRunRead = (
+  { failed, running }: HeadWorkflowRunState,
+  checks: ReadonlyArray<FailedCheck>,
+) => {
+  const jobs = new Map([...failed, ...running].map(({ id, jobs }) => [id, jobs]));
+  return checks.filter(({ actionsJob }) =>
+    Option.exists(actionsJob, ({ runId, jobId }) =>
+      (jobs.get(runId) ?? []).some(({ id, status }) => id === jobId && status !== "completed"),
+    ),
+  );
+};
+
 const checksUrl = (repository: RepositoryName, pullRequest: number) =>
   `https://github.com/${repository}/pull/${pullRequest}/checks`;
 
@@ -419,6 +435,24 @@ export class CiMonitor extends Context.Service<
               return true;
             case "Incomplete": {
               const { incomplete, running } = unfinished;
+              if (!timedOut) {
+                // A check outside the runs that concluded can still fail, and that failure must
+                // reach the fix loop.
+                const concluded = new Set(incomplete.map(({ id }) => id));
+                const pendingChecks = (yield* checks.unfinishedChecks(wait.repository, head))
+                  .filter(
+                    ({ actionsJob }) =>
+                      !Option.exists(actionsJob, ({ runId }) => concluded.has(runId)),
+                  )
+                  .map(({ name }) => name);
+                if (pendingChecks.length > 0) {
+                  yield* Effect.logInfo(
+                    "CI ran only in part, but other checks on the head are still pending; CI is still pending",
+                    { ...fields, pendingChecks },
+                  );
+                  return true;
+                }
+              }
               // At the deadline, the pending jobs tell a stalled run apart from a slow or hung job,
               // including checks outside a workflow run that is still going.
               const pending = running.length > 0 || observed.state === "pending";
@@ -510,6 +544,17 @@ export class CiMonitor extends Context.Service<
           observed.state === "failure"
             ? yield* checks.failures(wait.repository, head).pipe(Effect.asSome)
             : Option.none<CheckFailureEvidence>();
+        const newer = Option.match(reported, {
+          onNone: () => [],
+          onSome: ({ checks }) => failuresAfterRunRead(runs, checks),
+        });
+        if (newer.length > 0) {
+          yield* Effect.logInfo(
+            "Checks failed after the workflow-run read; CI decides on the next poll",
+            { runId, head, jobs: newer.map(({ name }) => name) },
+          );
+          return;
+        }
         // A gate job that failed because the jobs it needs never ran is no failure to fix.
         const isUnfinishedRunFailure = unfinishedRunFailure(unfinishedRuns(runs));
         const unfinishedFailures = Option.match(reported, {

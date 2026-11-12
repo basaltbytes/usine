@@ -49,6 +49,7 @@ import {
   PendingCheck,
   PendingCheckReport,
   RunningWorkflowRun,
+  UnfinishedCheck,
   WorkflowJob,
 } from "@usine/github/checks";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
@@ -218,15 +219,17 @@ const scenario = Effect.fn("test.ciScenario")(function* (
   const pendingStarted = yield* Deferred.make<void>();
   const pendingStalled = yield* Ref.make(false);
   const pendingHistoryDeadline = yield* Ref.make(Option.none<DateTime.Utc>());
-  const workflowRuns = yield* Ref.make<Effect.Effect<HeadWorkflowRunState, GitHubApiError>>(
-    Effect.succeed(HeadWorkflowRunState.make({ failed: [], running: [] })),
-  );
+  const workflowRuns = yield* Ref.make<
+    Effect.Effect<HeadWorkflowRunState, GitHubApiError | GitHubRateLimitError>
+  >(Effect.succeed(HeadWorkflowRunState.make({ failed: [], running: [] })));
+  const unfinishedChecks = yield* Ref.make<ReadonlyArray<UnfinishedCheck>>([]);
   const failedChecks = yield* Ref.make<ReadonlyArray<FailedCheck>>([failedCheck("ci", gateJob)]);
   const failedStatuses = yield* Ref.make<ReadonlyArray<string>>([]);
   // Runs while `failures` reads the failed checks, such as a rerun that concludes meanwhile.
   const duringFailures = yield* Ref.make<Effect.Effect<void>>(Effect.void);
   const checks = Layer.succeed(GitHubChecks)({
     workflowRuns: () => Effect.flatten(Ref.get(workflowRuns)),
+    unfinishedChecks: () => Ref.get(unfinishedChecks),
     pendingDetails: (_repository, _head, historyDeadline) =>
       Effect.gen(function* () {
         yield* Ref.set(pendingHistoryDeadline, Option.some(historyDeadline));
@@ -391,6 +394,7 @@ const scenario = Effect.fn("test.ciScenario")(function* (
     pendingStalled,
     pendingHistoryDeadline,
     workflowRuns,
+    unfinishedChecks,
     failedChecks,
     failedStatuses,
     duringFailures,
@@ -930,6 +934,17 @@ it.live("a failed gate job with queued siblings is incomplete CI and starts no f
         assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
 
         yield* Ref.set(setup.workflowRuns, Effect.succeed(gateRun("concluded")));
+        // The queued jobs of the concluded run stay pending check runs, but they can't start.
+        yield* Ref.set(setup.unfinishedChecks, [
+          UnfinishedCheck.make({
+            name: "static",
+            actionsJob: Option.some(ActionsJobRef.make({ runId: gateRunId, jobId: 9002 })),
+          }),
+          UnfinishedCheck.make({
+            name: "test (rest)",
+            actionsJob: Option.some(ActionsJobRef.make({ runId: gateRunId, jobId: 9003 })),
+          }),
+        ]);
         yield* monitor.reconcile(fixtureInstance, Option.none());
 
         const incomplete = yield* engine.inspect(runId);
@@ -974,6 +989,11 @@ it.live("a failed gate job whose siblings stay queued past the deadline is incom
         assert.include(failure.message, `GitHub Actions didn't run CI on head ${head} in full`);
         assert.notInclude(failure.message, "did not settle within");
         assert.include(failure.message, "CI (run 43098104121, in_progress; job ci failed");
+        // The rollup is red, but the run still going lists its pending jobs.
+        assert.include(
+          failure.message,
+          "test (web) has been running for 31 min; its last successful run took 6 min.",
+        );
         assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
       }).pipe(Effect.provide(setup.runtime));
     }),
@@ -989,9 +1009,25 @@ it.live("a gate failure beside another failed job still starts the fix loop", ()
         const runId = yield* openWait(setup.timeoutSeconds);
         yield* Ref.set(setup.failedChecks, [
           failedCheck("ci", gateJob),
-          failedCheck("lint", ActionsJobRef.make({ runId: gateRunId, jobId: 9002 })),
+          failedCheck("lint", ActionsJobRef.make({ runId: gateRunId, jobId: 9005 })),
         ]);
-        yield* Ref.set(setup.workflowRuns, Effect.succeed(gateRun("concluded")));
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(
+            HeadWorkflowRunState.make({
+              failed: [
+                FailedWorkflowRun.make({
+                  id: gateRunId,
+                  workflow: "CI",
+                  conclusion: "failure",
+                  url: `https://github.com/${repository}/actions/runs/${gateRunId}`,
+                  jobs: [...gateJobs, job(9005, "lint", "completed", "failure")],
+                }),
+              ],
+              running: [],
+            }),
+          ),
+        );
         yield* Ref.set(
           setup.observed,
           CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
@@ -1135,6 +1171,96 @@ it.live("a rerun that concludes while the failed checks are read keeps the wait 
   ).pipe(Effect.provide(NodeServices.layer)),
 );
 
+// Worker image run 43099999999 concluded with one failed build beside a queued one, so its failed
+// check is exempt and the rollup is red while CI run 43098104121 goes on.
+const workerImageRunId = 43099999999;
+const workerImageRun = (status: string, jobs: ReadonlyArray<WorkflowJob> = []) =>
+  RunningWorkflowRun.make({
+    id: workerImageRunId,
+    workflow: "Worker image",
+    status,
+    url: `https://github.com/${repository}/actions/runs/${workerImageRunId}`,
+    jobs,
+  });
+const workerImageJob = ActionsJobRef.make({ runId: workerImageRunId, jobId: 8001 });
+const partialWorkerImageRun = FailedWorkflowRun.make({
+  id: workerImageRunId,
+  workflow: "Worker image",
+  conclusion: "failure",
+  url: `https://github.com/${repository}/actions/runs/${workerImageRunId}`,
+  jobs: [
+    job(workerImageJob.jobId, "build (amd64)", "completed", "failure"),
+    job(8002, "build (arm64)", "queued"),
+  ],
+});
+const gateRunWithJobs = (jobs: ReadonlyArray<WorkflowJob>) =>
+  HeadWorkflowRunState.make({
+    failed: [partialWorkerImageRun],
+    running: [
+      RunningWorkflowRun.make({
+        id: gateRunId,
+        workflow: "CI",
+        status: "in_progress",
+        url: `https://github.com/${repository}/actions/runs/${gateRunId}`,
+        jobs,
+      }),
+    ],
+  });
+
+it.live.each(["while the failed checks are read", "before the poll"] as const)(
+  "a gate job that fails %s, beside queued jobs, keeps the wait pending",
+  (when) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const monitor = yield* CiMonitor;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          const failedGate = gateRunWithJobs(gateJobs);
+          // The run read lists `ci` in progress, and `ci` fails while the failed checks are read.
+          yield* Ref.set(
+            setup.workflowRuns,
+            Effect.succeed(
+              when === "while the failed checks are read"
+                ? gateRunWithJobs([
+                    job(gateJob.jobId, "ci", "in_progress"),
+                    job(9002, "static", "queued"),
+                    job(9003, "test (rest)", "queued"),
+                    job(9004, "test (web)", "completed", "success"),
+                  ])
+                : failedGate,
+            ),
+          );
+          yield* Ref.set(
+            setup.duringFailures,
+            Ref.set(setup.workflowRuns, Effect.succeed(failedGate)),
+          );
+          yield* Ref.set(setup.failedChecks, [
+            failedCheck("build (amd64)", workerImageJob),
+            failedCheck("ci", gateJob),
+          ]);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+          );
+
+          yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+
+          // The next poll reads the failed gate beside its queued jobs and keeps waiting.
+          yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.live("a failed job named like a lone gate job in another workflow run starts the fix loop", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -1160,17 +1286,6 @@ it.live("a failed job named like a lone gate job in another workflow run starts 
     }),
   ).pipe(Effect.provide(NodeServices.layer)),
 );
-
-const workerImageRunId = 43099999999;
-const workerImageRun = (status: string, jobs: ReadonlyArray<WorkflowJob> = []) =>
-  RunningWorkflowRun.make({
-    id: workerImageRunId,
-    workflow: "Worker image",
-    status,
-    url: `https://github.com/${repository}/actions/runs/${workerImageRunId}`,
-    jobs,
-  });
-const workerImageJob = ActionsJobRef.make({ runId: workerImageRunId, jobId: 8001 });
 
 it.live("at the deadline, CI that ran only in part also names every run that didn't finish", () =>
   Effect.scoped(
@@ -1308,6 +1423,48 @@ it.live(
           const source = yield* engine.inspect(runId);
           assert(source.run.state._tag === "HandedOff");
           assert.include(source.run.state.reason, "CI failed: ci, build (amd64).");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
+        }).pipe(Effect.provide(setup.runtime));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live(
+  "a run that ran only in part waits for a pending check outside Actions, whose failure then reaches the fix loop",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureInstance = yield* instance;
+        const setup = yield* scenario(3600);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const monitor = yield* CiMonitor;
+          const runId = yield* openWait(setup.timeoutSeconds);
+          yield* Ref.set(
+            setup.observed,
+            CheckSnapshot.make({ pullRequestState: "open", head, state: "failure" }),
+          );
+          yield* Ref.set(setup.workflowRuns, Effect.succeed(gateRun("concluded")));
+          yield* Ref.set(setup.unfinishedChecks, [
+            UnfinishedCheck.make({ name: "external-ci" }),
+            UnfinishedCheck.make({
+              name: "static",
+              actionsJob: Option.some(ActionsJobRef.make({ runId: gateRunId, jobId: 9002 })),
+            }),
+          ]);
+
+          yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          assert.strictEqual((yield* engine.inspect(runId)).run.state._tag, "AwaitingCi");
+          assert.strictEqual((yield* Ref.get(setup.tasks)).length, 1);
+
+          yield* Ref.set(setup.unfinishedChecks, []);
+          yield* Ref.set(setup.failedStatuses, ["external-ci"]);
+          yield* monitor.reconcile(fixtureInstance, Option.none());
+
+          const source = yield* engine.inspect(runId);
+          assert(source.run.state._tag === "HandedOff");
+          assert.include(source.run.state.reason, "CI failed: external-ci.");
           assert.strictEqual((yield* Ref.get(setup.tasks)).length, 2);
         }).pipe(Effect.provide(setup.runtime));
       }),
@@ -1936,6 +2093,85 @@ it.live("unreadable workflow runs leave green CI to the check rollup", () =>
         assert.deepStrictEqual(result.failures, []);
         assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "Succeeded");
         assert.strictEqual((yield* Ref.get(setup.mutations)).length, 1);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a rate-limited workflow-run read defers green CI", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(3600);
+      yield* Effect.gen(function* () {
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.fail(
+            GitHubRateLimitError.make({
+              operation: "read-ci-checks",
+              message: "secondary rate limit",
+              retryAt: yield* DateTime.now,
+            }),
+          ),
+        );
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequestState: "open", head, state: "success" }),
+        );
+
+        const result = yield* (yield* CiMonitor).reconcile(fixtureInstance, Option.none());
+
+        assert.deepStrictEqual(
+          result.failures.map(({ errorTag }) => errorTag),
+          ["GitHubRateLimitError"],
+        );
+        assert.strictEqual((yield* (yield* RunEngine).inspect(runId)).run.state._tag, "AwaitingCi");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+      }).pipe(Effect.provide(setup.runtime));
+    }),
+  ).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("a rate-limited workflow-run read fails Apply CI labels without applying them", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixtureInstance = yield* instance;
+      const setup = yield* scenario(1);
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const monitor = yield* CiMonitor;
+        const runId = yield* openWait(setup.timeoutSeconds);
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.succeed(HeadWorkflowRunState.make({ failed: [], running: [queuedRun] })),
+        );
+        yield* Effect.sleep("1100 millis");
+        yield* monitor.reconcile(fixtureInstance, Option.none());
+        const { attemptId } = yield* engine.inspect(runId).pipe(Effect.map(failedAttempt));
+
+        yield* Ref.set(
+          setup.observed,
+          CheckSnapshot.make({ pullRequestState: "open", head, state: "success" }),
+        );
+        yield* Ref.set(
+          setup.workflowRuns,
+          Effect.fail(
+            GitHubRateLimitError.make({
+              operation: "read-ci-checks",
+              message: "secondary rate limit",
+              retryAt: yield* DateTime.now,
+            }),
+          ),
+        );
+        const limited = yield* Effect.flip(
+          monitor.applyLabelsAfterGreen(runId, attemptId, Option.none()),
+        );
+
+        assert.strictEqual(limited._tag, "GitHubRateLimitError");
+        assert.strictEqual((yield* Ref.get(setup.mutations)).length, 0);
+        const failed = yield* engine.inspect(runId);
+        assert.isFalse(Option.contains(failed.resolvedFailureAttemptId, attemptId));
       }).pipe(Effect.provide(setup.runtime));
     }),
   ).pipe(Effect.provide(NodeServices.layer)),

@@ -240,3 +240,37 @@ it.effect("keeps the duration history read before its deadline when a later read
 );
 
 // PR #827, Actions job 125150736388: the log retains the assertion and subsequent cleanup.
+
+it.effect("reads unfinished check runs and pending commit statuses with their Actions jobs", () =>
+  Effect.gen(function* () {
+    const checks = yield* (yield* GitHubChecks).unfinishedChecks(repository, head);
+    assert.deepStrictEqual(
+      checks.map(({ name, actionsJob }) => ({
+        name,
+        actionsJob: Option.map(actionsJob, ({ runId, jobId }) => ({ runId, jobId })),
+      })),
+      [
+        { name: "test (web)", actionsJob: Option.some({ runId: 1, jobId: 2 }) },
+        { name: "deploy", actionsJob: Option.none() },
+        { name: "external-ci", actionsJob: Option.none() },
+      ],
+    );
+  }).pipe(
+    Effect.provide(
+      withClient((url) =>
+        url.includes("check-runs")
+          ? pendingRuns([
+              runningCheck("test (web)"),
+              queuedCheck("deploy"),
+              { ...runningCheck("lint"), status: "completed" },
+            ])
+          : json({
+              statuses: [
+                { context: "external-ci", state: "pending", description: null },
+                { context: "docs", state: "success", description: null },
+              ],
+            }),
+      ),
+    ),
+  ),
+);

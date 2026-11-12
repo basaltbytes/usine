@@ -54,6 +54,16 @@ export class FailedCheck extends Schema.Class<
   actionsJob: Schema.Option(ActionsJobRef).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
 }) {}
 
+/** A check run or commit status on a head that hasn't completed. */
+export class UnfinishedCheck extends Schema.Class<
+  UnfinishedCheck,
+  Brand.Brand<"@usine/github/checks/UnfinishedCheck">
+>("UnfinishedCheck")({
+  name: Schema.NonEmptyString,
+  /** The Actions job behind a check run, or `None` for a commit status or another app's check. */
+  actionsJob: Schema.Option(ActionsJobRef).pipe(Schema.withConstructorDefault(Effect.succeedNone)),
+}) {}
+
 /** Failed checks and a bounded log excerpt for a fix attempt. */
 export class CheckFailureEvidence extends Schema.Class<
   CheckFailureEvidence,
@@ -232,6 +242,12 @@ type PendingCheckRun = (typeof PendingCheckRuns.Type)["check_runs"][number];
 
 const PENDING_CHECK_LIMIT = 10;
 const ACTIONS_JOB_URL = /\/actions\/runs\/(\d+)\/job\/(\d+)(?:\?|$)/u;
+const actionsJobRef = (detailsUrl: string | null) => {
+  const ids = detailsUrl?.match(ACTIONS_JOB_URL);
+  return ids?.[1] === undefined || ids[2] === undefined
+    ? Option.none()
+    : Option.some(ActionsJobRef.make({ runId: Number(ids[1]), jobId: Number(ids[2]) }));
+};
 const jobDuration = (job: CompletedJob) =>
   job.started_at !== null && job.completed_at !== null
     ? Option.some(
@@ -300,6 +316,14 @@ export class GitHubChecks extends Context.Service<
       head: CommitSha,
       historyDeadline: DateTime.Utc,
     ) => Effect.Effect<PendingCheckReport, GitHubAppError>;
+    /**
+     * Reads every check run on `head` that hasn't completed and every pending commit status on
+     * it, without duration history.
+     */
+    readonly unfinishedChecks: (
+      repository: RepositoryName,
+      head: CommitSha,
+    ) => Effect.Effect<ReadonlyArray<UnfinishedCheck>, GitHubAppError>;
     /**
      * Reads the latest run of each workflow and event on `head`, with the jobs of its latest
      * attempt. `failed` holds runs that concluded `failure` or `cancelled`. `running` holds runs
@@ -481,6 +505,10 @@ export class GitHubChecks extends Context.Service<
             });
           }),
         );
+      const unfinishedCheckRuns = (prefix: string, head: CommitSha) =>
+        checkRuns(prefix, head, PendingCheckRuns).pipe(
+          Effect.map((runs) => runs.filter(({ status }) => status !== "completed")),
+        );
       const pendingStatuses = (prefix: string, head: CommitSha) =>
         commitStatuses(prefix, head).pipe(
           Effect.map((statuses) =>
@@ -552,6 +580,25 @@ export class GitHubChecks extends Context.Service<
           });
           return HeadWorkflowRunState.make({ failed, running });
         }),
+        unfinishedChecks: Effect.fn("GitHubChecks.unfinishedChecks")(function* (
+          repository: RepositoryName,
+          head: CommitSha,
+        ) {
+          yield* Effect.annotateCurrentSpan({ repository, head });
+          const { owner, name } = splitRepositoryName(repository);
+          const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+          const runs = yield* unfinishedCheckRuns(prefix, head);
+          const statuses = yield* pendingStatuses(prefix, head);
+          yield* Effect.logInfo("Read unfinished CI checks", {
+            repository,
+            head,
+            checkRuns: runs.length,
+            statuses: statuses.length,
+          });
+          return [...runs, ...statuses].map(({ name, details_url }) =>
+            UnfinishedCheck.make({ name, actionsJob: actionsJobRef(details_url) }),
+          );
+        }),
         pendingDetails: Effect.fn("GitHubChecks.pendingDetails")(function* (
           repository: RepositoryName,
           head: CommitSha,
@@ -560,9 +607,7 @@ export class GitHubChecks extends Context.Service<
           yield* Effect.annotateCurrentSpan({ repository, head });
           const { owner, name } = splitRepositoryName(repository);
           const prefix = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-          const runs = (yield* checkRuns(prefix, head, PendingCheckRuns)).filter(
-            ({ status }) => status !== "completed",
-          );
+          const runs = yield* unfinishedCheckRuns(prefix, head);
           const pending: ReadonlyArray<PendingCheckRun> =
             runs.length > 0 ? runs : yield* pendingStatuses(prefix, head);
           const shown = [
@@ -733,18 +778,9 @@ export class GitHubChecks extends Context.Service<
             jobs: failed.map(({ name }) => name),
           });
           return CheckFailureEvidence.make({
-            checks: failed.map(({ name, details_url }) => {
-              const ids = details_url?.match(ACTIONS_JOB_URL);
-              return FailedCheck.make({
-                name,
-                actionsJob:
-                  ids?.[1] === undefined || ids[2] === undefined
-                    ? Option.none()
-                    : Option.some(
-                        ActionsJobRef.make({ runId: Number(ids[1]), jobId: Number(ids[2]) }),
-                      ),
-              });
-            }),
+            checks: failed.map(({ name, details_url }) =>
+              FailedCheck.make({ name, actionsJob: actionsJobRef(details_url) }),
+            ),
             excerpt: excerpts.join("\n\n").slice(-12000),
           });
         }),
